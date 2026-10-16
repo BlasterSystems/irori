@@ -15,7 +15,7 @@
   </a>
   <nav class="nav" aria-label="Primary">
     <a href="overview.html">Overview</a>
-    <a href="node-head.html" class="is-active" aria-current="page">Nodes</a>
+    <a href="nodes.html" class="is-active" aria-current="page">Nodes</a>
     <a href="models.html">Models</a>
     <a href="serve.html">Serve</a>
     <a href="analytics.html">Analytics</a>
@@ -66,8 +66,7 @@
           <dt>model</dt><dd>GLM-5.3-Flash-EXL3</dd>
           <dt>kv cache</dt><dd>78% · 99.2 GB pool</dd>
           <dt>mtp accept</dt><dd>71%</dd>
-          <dt>direct</dt><dd>10.0.30.11:8000/v1</dd>
-          <dt>proxy</dt><dd>irori.local/llm/spark1/8000/v1</dd>
+          <dt>endpoint</dt><dd>10.0.30.11:8000/v1</dd>
         </dl>
       </div>
     </article>
@@ -95,7 +94,7 @@
     <article class="card">
       <div class="card__head"><h3>Clocks</h3><span class="chip chip--ok">desired applied</span></div>
       <div class="card__body" style="padding-top: 12px;">
-        <div class="barrow"><span>GPU</span><div class="bar"><div class="bar__fill bar__fill--thread" style="width:73%"></div></div><span class="val">locked 2,200 MHz · default 2,418</span></div>
+        <div class="barrow"><span>GPU</span><div class="bar"><div class="bar__fill" style="width:73%"></div></div><span class="val">locked 2,200 MHz · default 2,418</span></div>
         <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:65%"></div></div><span class="val">capped 2,600 MHz · max 4,000</span></div>
         <p class="stat__sub" style="margin-top: 10px;">Re-applied on every reconnect — last: today 09:12 (agent link). Reset restores <span class="mono">-rgc</span> / <span class="mono">cpuinfo_max_freq</span>.</p>
       </div>
@@ -117,11 +116,11 @@
       <div class="card__head"><h3>Memory · unified</h3><span class="chip">GB10 · LPDDR5X</span></div>
       <div class="card__body" style="padding-top: 12px;">
         <div class="bar bar--lg" style="display: flex;">
-          <div class="bar__fill" style="width:32%; border-radius: 0;"></div>
-          <div style="position:absolute; left:32%; width:12%; top:0; bottom:0; background: var(--ink-2);"></div>
+          <div class="bar__fill" style="width:64%; border-radius: 0;"></div>
+          <div style="position:absolute; left:64%; width:12%; top:0; bottom:0; background: var(--ink-2);"></div>
         </div>
         <div class="row row--between" style="margin-top: 8px;">
-          <span class="stat__sub">GPU 41 GB</span><span class="stat__sub">CPU 15 GB</span><span class="stat__sub">free 31 GB</span>
+          <span class="stat__sub">GPU 81 GB</span><span class="stat__sub">CPU 15 GB</span><span class="stat__sub">free 31 GB</span>
         </div>
         <p class="stat__sub" style="margin-top: 8px;">127 GB pool · ~273 GB/s · bandwidth 182 GB/s (67%)</p>
       </div>

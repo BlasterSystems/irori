@@ -62,6 +62,14 @@ from agreed ground truth.
   dark (headless Chromium); zero console errors; visual defects found and
   fixed (stat-sub collisions, value wrap, hero stretch, ANSI artifact, chart
   fill tone).
+- Expert review (UX designer + PM, 2026-10-16): both reviews applied —
+  added Nodes screen (registry, add-node wizard, first-run state), Jobs strip
+  (progress/ETA/cancel), removed deferred gateway endpoints, sync-from-NAS
+  remediation, thread-budget fixes (single filled button per screen, no
+  thread fills, ghost row-level danger), halt dot for terminal states,
+  contrast ramps for chart series, legend/y-axis fidelity, tablist ARIA,
+  hover/disabled states, 1080px reflow, unified-memory data contradiction,
+  running/waiting vocabulary.
 - Docs-check: run after skills + README land (see M0 completion).
 
 ## Review

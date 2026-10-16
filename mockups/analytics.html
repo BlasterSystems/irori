@@ -15,7 +15,7 @@
   </a>
   <nav class="nav" aria-label="Primary">
     <a href="overview.html">Overview</a>
-    <a href="node-head.html">Nodes</a>
+    <a href="nodes.html">Nodes</a>
     <a href="models.html">Models</a>
     <a href="serve.html">Serve</a>
     <a href="analytics.html" class="is-active" aria-current="page">Analytics</a>
@@ -42,10 +42,10 @@
   </div>
 
   <div class="tabs" style="margin-bottom: 12px;" role="tablist" aria-label="Lens">
-    <button>Memory</button>
+    <button role="tab" aria-selected="false">Memory</button>
     <button class="is-active" role="tab" aria-selected="true">Decode</button>
-    <button>Power</button>
-    <button>Tokens</button>
+    <button role="tab" aria-selected="false">Power</button>
+    <button role="tab" aria-selected="false">Tokens</button>
   </div>
 
   <section class="card" style="margin-bottom: 12px;">
@@ -53,11 +53,14 @@
       <div class="row"><h3>Decode throughput</h3><span class="chip">tok/s</span></div>
       <div class="row row--wrap">
         <span class="chip chip--ok"><span style="display:inline-block;width:12px;border-top:2px solid var(--thread);"></span>&nbsp;GLM cluster</span>
-        <span class="chip"><span style="display:inline-block;width:12px;border-top:2px solid var(--ink-2);"></span>&nbsp;spark2</span>
-        <span class="chip"><span style="display:inline-block;width:12px;border-top:2px solid var(--rule-2);"></span>&nbsp;spark3</span>
+        <span class="chip"><span style="display:inline-block;width:12px;border-top:2px dashed var(--ink-2);"></span>&nbsp;spark2</span>
+        <span class="chip"><span style="display:inline-block;width:12px;border-top:2px solid var(--ink-3);"></span>&nbsp;spark3</span>
       </div>
     </div>
     <div class="card__body">
+      <div class="row row--between" style="margin-bottom: 4px;">
+        <span class="label">170 tok/s</span><span class="label">0</span>
+      </div>
       <svg viewBox="0 0 640 170" preserveAspectRatio="none" style="display:block; width:100%; height:170px;" role="img" aria-label="Decode tok/s over 24 hours">
         <g stroke="var(--grid)" stroke-width="1">
           <line x1="0" y1="40" x2="640" y2="40"/><line x1="0" y1="80" x2="640" y2="80"/>
@@ -66,7 +69,7 @@
         <path fill="var(--grid)" stroke="none" d="M0,150 C60,142 90,128 140,120 C200,110 240,116 300,96 C360,80 400,92 460,70 C520,52 580,58 640,44 L640,170 L0,170 Z"/>
         <path fill="none" stroke="var(--thread)" stroke-width="1.5" d="M0,150 C60,142 90,128 140,120 C200,110 240,116 300,96 C360,80 400,92 460,70 C520,52 580,58 640,44"/>
         <path fill="none" stroke="var(--ink-2)" stroke-width="1.5" stroke-dasharray="4 3" d="M0,152 C80,150 160,144 240,138 C320,132 400,128 480,122 C540,118 600,116 640,114"/>
-        <path fill="none" stroke="var(--rule-2)" stroke-width="1.5" d="M0,156 C80,155 160,152 240,150 C320,147 400,144 480,141 C540,139 600,137 640,136"/>
+        <path fill="none" stroke="var(--ink-3)" stroke-width="1.5" d="M0,156 C80,155 160,152 240,150 C320,147 400,144 480,141 C540,139 600,137 640,136"/>
       </svg>
       <div class="row row--between" style="margin-top: 6px;">
         <span class="label">00:00</span><span class="label">06:00</span><span class="label">12:00</span><span class="label">18:00</span><span class="label">now</span>
@@ -83,21 +86,26 @@
       <div class="card__body">
         <svg viewBox="0 0 600 120" preserveAspectRatio="none" style="display:block; width:100%; height:120px;" role="img" aria-label="Token buckets">
           <g>
-            <rect x="10"  y="70" width="18" height="50" fill="var(--ink)"/><rect x="10"  y="52" width="18" height="18" fill="var(--rule-2)"/><rect x="10"  y="40" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="60"  y="60" width="18" height="60" fill="var(--ink)"/><rect x="60"  y="44" width="18" height="16" fill="var(--rule-2)"/><rect x="60"  y="30" width="18" height="14" fill="var(--ink-3)"/>
-            <rect x="110" y="66" width="18" height="54" fill="var(--ink)"/><rect x="110" y="50" width="18" height="16" fill="var(--rule-2)"/><rect x="110" y="36" width="18" height="14" fill="var(--ink-3)"/>
-            <rect x="160" y="50" width="18" height="70" fill="var(--ink)"/><rect x="160" y="36" width="18" height="14" fill="var(--rule-2)"/><rect x="160" y="22" width="18" height="14" fill="var(--ink-3)"/>
-            <rect x="210" y="42" width="18" height="78" fill="var(--ink)"/><rect x="210" y="30" width="18" height="12" fill="var(--rule-2)"/><rect x="210" y="18" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="260" y="34" width="18" height="86" fill="var(--ink)"/><rect x="260" y="24" width="18" height="10" fill="var(--rule-2)"/><rect x="260" y="12" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="310" y="38" width="18" height="82" fill="var(--ink)"/><rect x="310" y="26" width="18" height="12" fill="var(--rule-2)"/><rect x="310" y="14" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="360" y="46" width="18" height="74" fill="var(--ink)"/><rect x="360" y="32" width="18" height="14" fill="var(--rule-2)"/><rect x="360" y="20" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="410" y="40" width="18" height="80" fill="var(--ink)"/><rect x="410" y="28" width="18" height="12" fill="var(--rule-2)"/><rect x="410" y="16" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="460" y="30" width="18" height="90" fill="var(--ink)"/><rect x="460" y="20" width="18" height="10" fill="var(--rule-2)"/><rect x="460" y="8"  width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="510" y="36" width="18" height="84" fill="var(--ink)"/><rect x="510" y="24" width="18" height="12" fill="var(--rule-2)"/><rect x="510" y="12" width="18" height="12" fill="var(--ink-3)"/>
-            <rect x="560" y="44" width="18" height="76" fill="var(--ink)"/><rect x="560" y="30" width="18" height="14" fill="var(--rule-2)"/><rect x="560" y="18" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="10"  y="70" width="18" height="50" fill="var(--ink)"/><rect x="10"  y="52" width="18" height="18" fill="var(--ink-2)"/><rect x="10"  y="40" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="60"  y="60" width="18" height="60" fill="var(--ink)"/><rect x="60"  y="44" width="18" height="16" fill="var(--ink-2)"/><rect x="60"  y="30" width="18" height="14" fill="var(--ink-3)"/>
+            <rect x="110" y="66" width="18" height="54" fill="var(--ink)"/><rect x="110" y="50" width="18" height="16" fill="var(--ink-2)"/><rect x="110" y="36" width="18" height="14" fill="var(--ink-3)"/>
+            <rect x="160" y="50" width="18" height="70" fill="var(--ink)"/><rect x="160" y="36" width="18" height="14" fill="var(--ink-2)"/><rect x="160" y="22" width="18" height="14" fill="var(--ink-3)"/>
+            <rect x="210" y="42" width="18" height="78" fill="var(--ink)"/><rect x="210" y="30" width="18" height="12" fill="var(--ink-2)"/><rect x="210" y="18" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="260" y="34" width="18" height="86" fill="var(--ink)"/><rect x="260" y="24" width="18" height="10" fill="var(--ink-2)"/><rect x="260" y="12" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="310" y="38" width="18" height="82" fill="var(--ink)"/><rect x="310" y="26" width="18" height="12" fill="var(--ink-2)"/><rect x="310" y="14" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="360" y="46" width="18" height="74" fill="var(--ink)"/><rect x="360" y="32" width="18" height="14" fill="var(--ink-2)"/><rect x="360" y="20" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="410" y="40" width="18" height="80" fill="var(--ink)"/><rect x="410" y="28" width="18" height="12" fill="var(--ink-2)"/><rect x="410" y="16" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="460" y="30" width="18" height="90" fill="var(--ink)"/><rect x="460" y="20" width="18" height="10" fill="var(--ink-2)"/><rect x="460" y="8"  width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="510" y="36" width="18" height="84" fill="var(--ink)"/><rect x="510" y="24" width="18" height="12" fill="var(--ink-2)"/><rect x="510" y="12" width="18" height="12" fill="var(--ink-3)"/>
+            <rect x="560" y="44" width="18" height="76" fill="var(--ink)"/><rect x="560" y="30" width="18" height="14" fill="var(--ink-2)"/><rect x="560" y="18" width="18" height="12" fill="var(--ink-3)"/>
           </g>
         </svg>
-        <div class="row row--between" style="margin-top: 8px;">
+        <div class="row row--wrap" style="margin-top: 8px;">
+          <span class="stat__sub"><span style="display:inline-block;width:9px;height:9px;background:var(--ink);vertical-align:-1px"></span> generated</span>
+          <span class="stat__sub"><span style="display:inline-block;width:9px;height:9px;background:var(--ink-2);vertical-align:-1px"></span> cached</span>
+          <span class="stat__sub"><span style="display:inline-block;width:9px;height:9px;background:var(--ink-3);vertical-align:-1px"></span> prefill</span>
+        </div>
+        <div class="row row--between" style="margin-top: 6px;">
           <span class="stat__sub">generated 2.41M</span><span class="stat__sub">cache hit 61%</span><span class="stat__sub">prefill 812k</span>
         </div>
       </div>
@@ -127,7 +135,7 @@
         <path fill="none" stroke="var(--ink)" stroke-width="1.5" d="M0,30 C80,32 160,28 240,30 C320,33 400,30 480,26 C540,24 580,25 600,24"/>
       </svg>
       <div class="row row--between" style="margin-top: 8px;">
-        <span class="stat__sub">spark1 now 96 GB (GPU 41 · CPU 15) · peak 104 GB</span><span class="stat__sub">spark2 96 · spark3 88 GB</span>
+        <span class="stat__sub">spark1 now 96 GB (GPU 81 · CPU 15) · peak 104 GB</span><span class="stat__sub">spark2 96 · spark3 88 GB</span>
       </div>
     </div>
   </section>

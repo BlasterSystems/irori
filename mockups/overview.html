@@ -15,7 +15,7 @@
   </a>
   <nav class="nav" aria-label="Primary">
     <a href="overview.html" class="is-active" aria-current="page">Overview</a>
-    <a href="node-head.html">Nodes</a>
+    <a href="nodes.html">Nodes</a>
     <a href="models.html">Models</a>
     <a href="serve.html">Serve</a>
     <a href="analytics.html">Analytics</a>
@@ -63,7 +63,7 @@
         <div class="statgrid statgrid--6">
           <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">142.3 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 168</span></div>
           <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">3,214 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 64%</span></div>
-          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">3 <span class="stat__sub" style="display:inline">run</span> · 12 <span class="stat__sub" style="display:inline">wait</span></span><span class="stat__sub">oldest 4s</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">3 · 12</span><span class="stat__sub">running · waiting · oldest 4s</span></div>
           <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">78%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:78%"></div></div></div>
           <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">84 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">E2E 1.24s</span></div>
           <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">60m window</span></div>
@@ -128,9 +128,9 @@
       <div class="card__head"><div class="row"><h3>Telemetry</h3><span class="chip">streaming</span></div><span class="mono faint">2s cadence</span></div>
       <div class="card__body card__body--flush">
         <div class="log" style="border:0; border-radius: 0 0 var(--radius) var(--radius); min-height: 148px; max-height: 168px;">
-          <div><span class="dim">09:41:22</span> spark1 · decode 142.3 tok/s · queue 3 run / 12 wait</div>
+          <div><span class="dim">09:41:22</span> spark1 · decode 142.3 tok/s · queue 3 running / 12 waiting</div>
           <div><span class="dim">09:41:14</span> <span class="ok">run-042</span> decode bench completed · 142.3 tok/s</div>
-          <div><span class="dim">09:38:51</span> spark1 · clocks re-applied on reconnect (gpu 2200 MHz, cpu 2600 MHz)</div>
+          <div><span class="dim">09:38:51</span> spark1 · clocks re-applied on reconnect (gpu 2,200 MHz, cpu 2,600 MHz)</div>
           <div><span class="dim">09:31:07</span> glm-serve · engine log: AVG decode 141.8 tok/s</div>
           <div><span class="dim">09:28:44</span> <span class="ok">push</span> GLM-5.3-Flash-EXL3 spark2 → spark3 · 68.2 GB · 6m 12s · 184 MB/s</div>
           <div><span class="dim">09:12:02</span> <span class="err">spark3</span> · GPU hw thermal slowdown cleared</div>
