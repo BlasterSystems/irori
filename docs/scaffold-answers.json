@@ -1,0 +1,18 @@
+{
+  "project": {
+    "name": "irori",
+    "description": "AI fleet platform for DGX Spark homelabs: inference management, first-class telemetry, benchmarks, and a NAS-backed model supply chain",
+    "build_command": "pnpm build",
+    "test_command": "pnpm test",
+    "run_command": "pnpm dev",
+    "ticket_prefix": "IRI"
+  },
+  "features": {
+    "platforms": "all",
+    "mcp": false,
+    "agents": true,
+    "github": true,
+    "scheduled_audit": false,
+    "hooks": false
+  }
+}
