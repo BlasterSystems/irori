@@ -43,7 +43,8 @@ fragility (uptime-monitoring deliberately chose SSE for the same reasons).
 
 ### Option 3: Store everything raw, aggregate on read
 
-Simplest writer, but analytics over days of 2 s snapshots is DOA in SQLite.
+Simplest writer, but analytics over days of 2 s snapshots is unusable without
+precomputed buckets regardless of engine.
 
 ## Decision
 

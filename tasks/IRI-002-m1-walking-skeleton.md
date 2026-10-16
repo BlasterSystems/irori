@@ -5,8 +5,9 @@ Epic: Irori v1 ([docs/PLAN.md](../docs/PLAN.md) M1)
 ## Objective
 
 A runnable end-to-end slice: pnpm workspace (TS strict) with
-`apps/server` (Express 5: `/healthz`, node registry CRUD, SSE hub, SQLite via
-Drizzle/WAL), `apps/web` (Vue 3 + BlasterSystems DS shell + brand lockup +
+`apps/server` (Express 5: `/healthz`, node registry CRUD, SSE hub, PostgreSQL
+on the Proxmox pgsql server via Drizzle — `DATABASE_URL`, migrations on boot),
+`apps/web` (Vue 3 + BlasterSystems DS shell + brand lockup +
 theme machinery, empty Overview), `apps/agent` (outbound WS hello + token auth
 + one hardware snapshot), `packages/core` (snapshot contract), `packages/db`
 (nodes, snapshots, settings, secrets). Multi-stage Dockerfile with server/agent
@@ -15,6 +16,9 @@ roles + compose.
 ## Acceptance criteria
 
 - [ ] `docker compose up` boots the server; `/healthz` ok; SPA served.
+- [ ] Server connects to the Proxmox PostgreSQL via `DATABASE_URL`; Drizzle
+      migrations apply on boot (idempotent); DB loss degrades gracefully
+      (in-memory rings, buffered ingest, reconnect).
 - [ ] Agent installed on one machine connects out, authenticates with its
       token, and its node appears live in the UI with a hardware snapshot.
 - [ ] Snapshot contract shared via `packages/core` (zod-validated on ingest).

@@ -62,7 +62,7 @@ irori/                            (one repository — pnpm workspaces)
 │   └── agent/         Node agent — outbound WS to server; runs on Sparks + NAS
 ├── packages/
 │   ├── core/          Shared contracts: snapshot shapes, config schemas, store layout
-│   └── db/            Drizzle schema + migrations (SQLite, WAL)
+│   └── db/            Drizzle schema + migrations (PostgreSQL on the Proxmox pgsql server)
 ├── docker/            Dockerfile (server + agent roles), compose
 └── docs/             SPEC, PLAN, ADRs, research briefs
 ```
@@ -73,7 +73,7 @@ flowchart LR
         API["REST /api/v1"]
         SSE["SSE /api/v1/events"]
         HUB["Agent hub /agent-ws"]
-        DB[("SQLite /data (WAL)")]
+        DB[("PostgreSQL (Proxmox pgsql)")]
     end
     subgraph spark["DGX Spark — head / workers"]
         AG1["irori-agent (root systemd service)"]
@@ -133,9 +133,10 @@ flowchart LR
 - **Stream**: agent pushes snapshots on a server-configured cadence (default
   2 s) over the WS link; server keeps per-node ring buffers, broadcasts to SSE;
   browsers attach/detach without affecting collection. Poll loops run headless.
-- **Store**: SQLite WAL — raw snapshots ring (recent), minute buckets →
-  hourly/daily rollups (Drizzle migrations), serving/bench/job event records.
-  Retention config, prune job.
+- **Store**: PostgreSQL (Proxmox pgsql server, `DATABASE_URL`) — raw snapshots
+  ring (recent), minute buckets → hourly/daily rollups (Drizzle migrations),
+  serving/bench/job event records. Retention config, prune job. In-memory
+  rings keep the live view while the DB is unreachable (ADR-0002).
 - **Versioned contracts**: every snapshot carries `schemaVersion` +
   `agentVersion`; old agents and new servers negotiate via the hello handshake.
 
