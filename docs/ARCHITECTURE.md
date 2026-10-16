@@ -19,11 +19,11 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 | `apps/web` | Vue 3 + Vite SPA; BlasterSystems DS token port, brand lockup, Overview/Node/Models/Serve/Benchmarks/Analytics views |
 | `apps/agent` | Node daemon (esbuild bundle): collectors, LLM probes, clock control, modelctl job execution, serving supervision; root systemd unit |
 | `packages/core` | Cross-process contracts: snapshot/job/serving schemas (zod), store-layout constants, catalog reader, placement planner |
-| `packages/db` | Drizzle schema + migrations (SQLite WAL): nodes, snapshots, rollups, models, recipes, runs, jobs, benchmarks, token/energy ledgers, secrets |
+| `packages/db` | Drizzle schema + migrations (PostgreSQL on the Proxmox pgsql server): nodes, snapshots, rollups, models, recipes, runs, jobs, benchmarks, token/energy ledgers, secrets |
 
 ## Data and State
 
-- Authoritative store: SQLite at `/data/irori.db` (WAL). Bounded raw snapshot ring + minute/hour/day rollups + prune job (ADR-0006).
+- Authoritative store: **PostgreSQL on the Proxmox pgsql server** (`DATABASE_URL`), schema via Drizzle, migrations applied on boot under an advisory lock. Bounded raw snapshot ring + minute/hour/day rollups + prune job (ADR-0002, ADR-0006). The server degrades gracefully (in-memory rings, bounded ingest buffer) while the DB is unreachable.
 - The NAS store is **external state owned by modelctl** (ADR-0004); Irori reads `catalog.json` and mutates only through modelctl commands.
 - Secrets table: SSH credentials + agent tokens encrypted AES-256-GCM under `ENCRYPTION_KEY`.
 - Desired clock state per node; re-applied on node online transitions (ADR-0003).

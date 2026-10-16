@@ -28,7 +28,8 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 ## M1 — Walking skeleton (≈1 week)
 
 - pnpm workspace (TS strict, vitest, eslint+prettier): `apps/server`
-  (Express 5, `/healthz`, `/api/v1/nodes` CRUD, SQLite via Drizzle/WAL),
+  (Express 5, `/healthz`, `/api/v1/nodes` CRUD, PostgreSQL on the Proxmox
+  pgsql server via Drizzle — `DATABASE_URL`, migrations on boot),
   `apps/web` (Vue 3 + Vite, BlasterSystems DS token port + fonts + brand
   lockup + theme machinery, empty Overview), `apps/agent` (outbound WS hello +
   token auth + one hardware snapshot), `packages/core` (snapshot contract),
