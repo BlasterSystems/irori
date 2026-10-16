@@ -19,6 +19,9 @@ from agreed ground truth.
 - [x] ADR-0001…0006 drafted from the template and indexed.
 - [x] `docs/DEVELOPMENT_PROCESS.md` adapted; `implement` + `research` skills created.
 - [x] README with project overview and status.
+- [x] Screen mockups for approval: `mockups/` (index, overview, node-head,
+      models, serve, analytics, benchmarks) — BlasterSystems DS token port +
+      fonts from uptime-monitoring recipes; browser-verified light/dark.
 - [ ] ADRs accepted by the owner (status flip + commit).
 - [ ] Brand assets: `apps/web/public/favicon.svg` + lockup tokens defined (M1 lands
       the files; this task fixes the recipe: canonical mark 30×10 header size,
@@ -55,6 +58,10 @@ from agreed ground truth.
 - Scaffold: `init --dry-run` → 30 CREATE, 0 conflicts; apply → "Bootstrap
   applied successfully. Post-apply validation passed."; `.agentic/bin/validate`
   exit 0 "Configuration validation passed".
+- Mockups: served locally, full-page screenshots of every screen in light and
+  dark (headless Chromium); zero console errors; visual defects found and
+  fixed (stat-sub collisions, value wrap, hero stretch, ANSI artifact, chart
+  fill tone).
 - Docs-check: run after skills + README land (see M0 completion).
 
 ## Review

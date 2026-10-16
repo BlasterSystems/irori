@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spark1 · Irori</title>
+<link rel="stylesheet" href="irori.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+</head>
+<body>
+<header class="topbar"><div class="topbar__in">
+  <a class="brand" href="index.html" aria-label="Irori home">
+    <span class="brand-mark" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+    <span class="brand-text"><span class="brand-name">Irori</span><span class="brand-endorsement">A BlasterSystems product</span></span>
+  </a>
+  <nav class="nav" aria-label="Primary">
+    <a href="overview.html">Overview</a>
+    <a href="node-head.html" class="is-active" aria-current="page">Nodes</a>
+    <a href="models.html">Models</a>
+    <a href="serve.html">Serve</a>
+    <a href="analytics.html">Analytics</a>
+    <a href="benchmarks.html">Benchmarks</a>
+  </nav>
+  <span class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live · 2s</span>
+  <button class="iconbtn" id="themeToggle" aria-label="Toggle theme"></button>
+</div></header>
+
+<main class="container page">
+  <div class="pagehead">
+    <div>
+      <p class="label" style="margin:0 0 4px;">Nodes / spark1</p>
+      <div class="row">
+        <h1>spark1</h1>
+        <span class="chip chip--accent">head</span>
+        <span class="chip">GB10 · DGX Spark</span>
+        <span class="chip chip--ok">Agent v0.1.0 · connected</span>
+        <span class="chip">10.50.50.11</span>
+      </div>
+      <p>uptime 6d 4h · DGX OS 7.2 · <span class="mono">GLM cluster head</span></p>
+    </div>
+    <div class="row">
+      <button class="btn btn--secondary">Clocks…</button>
+      <button class="btn btn--danger">Shutdown…</button>
+    </div>
+  </div>
+
+  <h2 style="margin-bottom: 10px;">Inference</h2>
+  <section class="cols cols-2" style="margin-bottom: 12px;">
+    <article class="card">
+      <div class="card__head">
+        <div class="row"><h3>:8000</h3><span class="chip chip--ok">EXL3</span><span class="chip chip--accent">primary</span></div>
+        <span class="mono faint">serving · 2h 14m</span>
+      </div>
+      <div class="card__body">
+        <div class="statgrid statgrid--3" style="margin-bottom: 12px;">
+          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">142.3</span><span class="stat__sub">tok/s · peak 168</span></div>
+          <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">3,214</span><span class="stat__sub">tok/s · cached 64%</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">3 · 12</span><span class="stat__sub">running · waiting</span></div>
+        </div>
+        <div class="statgrid statgrid--3">
+          <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value stat__value--sm">84 ms</span></div>
+          <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value stat__value--sm">18.4 ms</span></div>
+          <div class="stat"><span class="stat__label">E2E p95</span><span class="stat__value stat__value--sm">1.24 s</span></div>
+        </div>
+        <dl class="kv" style="margin-top: 14px;">
+          <dt>model</dt><dd>GLM-5.3-Flash-EXL3</dd>
+          <dt>kv cache</dt><dd>78% · 99.2 GB pool</dd>
+          <dt>mtp accept</dt><dd>71%</dd>
+          <dt>direct</dt><dd>10.50.50.11:8000/v1</dd>
+          <dt>proxy</dt><dd>irori.local/llm/spark1/8000/v1</dd>
+        </dl>
+      </div>
+    </article>
+    <article class="card">
+      <div class="card__head">
+        <div class="row"><h3>:8001</h3><span class="chip">llama.cpp</span></div>
+        <span class="mono faint">idle · last traffic 3d ago</span>
+      </div>
+      <div class="card__body">
+        <div class="statgrid statgrid--3">
+          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">—</span></div>
+          <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">—</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">0 · 0</span></div>
+        </div>
+        <dl class="kv" style="margin-top: 14px;">
+          <dt>last model</dt><dd>qwen3-8b-q4</dd>
+          <dt>endpoint</dt><dd>10.50.50.11:8001/v1</dd>
+        </dl>
+        <p class="stat__sub" style="margin-top: 12px;">Probes continue on idle ports · detection every 10 s when the node is a worker.</p>
+      </div>
+    </article>
+  </section>
+
+  <section class="cols cols-2" style="margin-bottom: 12px;">
+    <article class="card">
+      <div class="card__head"><h3>Clocks</h3><span class="chip chip--ok">desired applied</span></div>
+      <div class="card__body" style="padding-top: 12px;">
+        <div class="barrow"><span>GPU</span><div class="bar"><div class="bar__fill bar__fill--thread" style="width:73%"></div></div><span class="val">locked 2,200 MHz · default 2,418</span></div>
+        <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:65%"></div></div><span class="val">capped 2,600 MHz · max 4,000</span></div>
+        <p class="stat__sub" style="margin-top: 10px;">Re-applied on every reconnect — last: today 09:12 (agent link). Reset restores <span class="mono">-rgc</span> / <span class="mono">cpuinfo_max_freq</span>.</p>
+      </div>
+    </article>
+    <article class="card">
+      <div class="card__head"><h3>GPU · GB10</h3><span class="chip chip--ok">no throttle</span></div>
+      <div class="card__body" style="padding-top: 12px;">
+        <div class="barrow"><span>UTIL</span><div class="bar"><div class="bar__fill" style="width:67%"></div></div><span class="val">67%</span></div>
+        <div class="barrow"><span>TEMP</span><div class="bar"><div class="bar__fill" style="width:52%"></div></div><span class="val">62°C</span></div>
+        <div class="barrow"><span>PWR</span><div class="bar"><div class="bar__fill" style="width:72%"></div></div><span class="val">87 / 120 W</span></div>
+        <div class="barrow"><span>SM</span><div class="bar"><div class="bar__fill" style="width:73%"></div></div><span class="val">2,190 / 3,003 MHz</span></div>
+        <p class="stat__sub" style="margin-top: 10px;">top process: <span class="mono">vllm · 38.2 GB</span></p>
+      </div>
+    </article>
+  </section>
+
+  <section class="cols cols-2">
+    <article class="card">
+      <div class="card__head"><h3>Memory · unified</h3><span class="chip">GB10 · LPDDR5X</span></div>
+      <div class="card__body" style="padding-top: 12px;">
+        <div class="bar bar--lg" style="display: flex;">
+          <div class="bar__fill" style="width:32%; border-radius: 0;"></div>
+          <div style="position:absolute; left:32%; width:12%; top:0; bottom:0; background: var(--ink-2);"></div>
+        </div>
+        <div class="row row--between" style="margin-top: 8px;">
+          <span class="stat__sub">GPU 41 GB</span><span class="stat__sub">CPU 15 GB</span><span class="stat__sub">free 31 GB</span>
+        </div>
+        <p class="stat__sub" style="margin-top: 8px;">127 GB pool · ~273 GB/s · bandwidth 182 GB/s (67%)</p>
+      </div>
+    </article>
+    <article class="card">
+      <div class="card__head"><h3>Network · storage</h3></div>
+      <div class="card__body" style="padding-top: 12px;">
+        <div class="row row--wrap">
+          <span class="chip chip--ok">cx70 · 400 Gb/s · up</span>
+          <span class="chip chip--ok">cx71 · 400 Gb/s · up</span>
+          <span class="chip">eno1 · 1 Gb/s</span>
+        </div>
+        <dl class="kv" style="margin-top: 14px;">
+          <dt>cx70 24h</dt><dd>↑ 412 GB · ↓ 388 GB · 0 drops</dd>
+          <dt>root fs</dt><dd>3.1 / 3.9 TB · 79%</dd>
+          <dt>nvme0n1p2</dt><dd>1.2 / 1.9 TB · 63%</dd>
+        </dl>
+      </div>
+    </article>
+  </section>
+</main>
+
+<span class="mock-note">Static mockup · data illustrative</span>
+<script>
+  var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+  var SUN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  var btn = document.getElementById("themeToggle");
+  function paint(){ btn.innerHTML = document.documentElement.dataset.theme === "dark" ? SUN : MOON; }
+  btn.onclick = function(){ var d = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = d ? "light" : "dark";
+    try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} paint(); };
+  paint();
+</script>
+</body>
+</html>
