@@ -15,7 +15,7 @@
   </a>
   <nav class="nav" aria-label="Primary">
     <a href="overview.html">Overview</a>
-    <a href="node-head.html">Nodes</a>
+    <a href="nodes.html">Nodes</a>
     <a href="models.html">Models</a>
     <a href="serve.html" class="is-active" aria-current="page">Serve</a>
     <a href="analytics.html">Analytics</a>
@@ -62,9 +62,9 @@
             <td class="mono">spark1</td>
             <td class="mono">8000</td>
             <td><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>healthy</span></td>
-            <td class="mono">:8000 · <span class="faint">/llm/cluster/glm-5.3-flash/v1</span></td>
+            <td class="mono">:8000 · direct</td>
             <td class="mono faint">2s ago</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--danger btn--sm">Stop…</button></td>
+            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--ghost btn--sm">Stop…</button></td>
           </tr>
           <tr>
             <td><strong>glm-serve-worker</strong><div class="mono faint">NNODES=2 · WORKER_IP=10.50.50.12</div></td>
@@ -73,13 +73,13 @@
             <td><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>healthy</span></td>
             <td class="mono">:8001 · <span class="faint">via head</span></td>
             <td class="mono faint">4s ago</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--danger btn--sm">Stop…</button></td>
+            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--ghost btn--sm">Stop…</button></td>
           </tr>
           <tr>
             <td><strong>qwen-single</strong><div class="mono faint">~/recipes/qwen-single</div></td>
             <td class="mono">spark3</td>
             <td class="mono">9000</td>
-            <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>stopped</span></td>
+            <td><span class="chip"><span class="dot dot--halt" aria-hidden="true"></span>stopped</span></td>
             <td class="mono faint">—</td>
             <td class="mono faint">3d ago</td>
             <td style="text-align:right"><button class="btn btn--secondary btn--sm">Start</button><button class="btn btn--ghost btn--sm">Logs</button></td>
@@ -91,7 +91,7 @@
             <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>starting</span></td>
             <td class="mono">:8200</td>
             <td class="mono faint">just now</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--danger btn--sm">Stop…</button></td>
+            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--ghost btn--sm">Stop…</button></td>
           </tr>
           <tr>
             <td><strong>embed-eval</strong><div class="mono faint">~/recipes/embed-eval</div></td>
@@ -120,7 +120,7 @@
         <div><span class="dim">09:12:04</span> engine: init exl3 kernels · 24 layers · qp 6 bits</div>
         <div><span class="dim">09:12:09</span> engine: KV cache 99.2 GB pool allocated</div>
         <div><span class="dim">09:12:11</span> <span class="ok">engine: Uvicorn listening on 0.0.0.0:8000</span></div>
-        <div><span class="dim">09:41:02</span> engine: AVG decode 142.3 tok/s · queue 3 run / 12 wait</div>
+        <div><span class="dim">09:41:02</span> engine: AVG decode 142.3 tok/s · queue 3 running / 12 waiting</div>
         <div><span class="dim">09:41:18</span> <span class="dim">engine: POST /v1/chat/completions 200 · ttft 71ms · 412 out tok</span></div>
         <div><span class="dim">09:41:19</span> <span class="err">engine: WARN preemption · seq 88 recovered from MTP draft</span></div>
       </div>

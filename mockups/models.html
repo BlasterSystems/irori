@@ -15,7 +15,7 @@
   </a>
   <nav class="nav" aria-label="Primary">
     <a href="overview.html">Overview</a>
-    <a href="node-head.html">Nodes</a>
+    <a href="nodes.html">Nodes</a>
     <a href="models.html" class="is-active" aria-current="page">Models</a>
     <a href="serve.html">Serve</a>
     <a href="analytics.html">Analytics</a>
@@ -56,10 +56,46 @@
       <div class="mono muted" style="margin-top: 4px;">plan: push from spark2 (peer holds it) · 68.2 GB over cx70 → ~6 min at 184 MB/s · capacity ok (free 1.2 TB · needs 68.2 − 50 reserve)</div>
     </div>
     <div class="row" style="flex: none;">
-      <button class="btn btn--secondary btn--sm">Push now</button>
+      <button class="btn btn--secondary btn--sm">Push from spark2</button>
+      <button class="btn btn--secondary btn--sm">Sync from NAS</button>
       <button class="btn btn--ghost btn--sm">Pull from HF anyway</button>
     </div>
   </div>
+
+  <section class="card" style="margin-bottom: 12px;">
+    <div class="card__head"><h3>Jobs</h3><span class="mono faint">one active per node · live output · cancel</span></div>
+    <div class="card__body card__body--flush">
+      <table class="table">
+        <thead><tr><th>Job</th><th>Node</th><th>Progress</th><th>Rate / ETA</th><th>State</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono">j-218 · push GLM-5.3-Flash-EXL3<br><span class="faint">spark2 → spark3 · cx70+cx71 · 4 streams</span></td>
+            <td class="mono">spark3</td>
+            <td><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><span class="stat__sub">25.2 / 68.2 GB</span></td>
+            <td class="mono">184 MB/s · ~6m left</td>
+            <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>running</span></td>
+            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--danger btn--sm">Cancel…</button></td>
+          </tr>
+          <tr>
+            <td class="mono">j-217 · queue download (2 entries)<br><span class="faint">nas → /mnt/nas/llm-models · HF</span></td>
+            <td class="mono">nas</td>
+            <td><div class="bar bar--lg"><div class="bar__fill" style="width:12%"></div></div><span class="stat__sub">10.6 / 88.0 GB</span></td>
+            <td class="mono">96 MB/s · ~14m left</td>
+            <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>running</span></td>
+            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--danger btn--sm">Cancel…</button></td>
+          </tr>
+          <tr>
+            <td class="mono">j-215 · catalog refresh<br><span class="faint">nas</span></td>
+            <td class="mono">nas</td>
+            <td><div class="bar bar--lg"><div class="bar__fill" style="width:100%"></div></div><span class="stat__sub">seq 42</span></td>
+            <td class="mono">done 5m ago</td>
+            <td><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>completed</span></td>
+            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Output</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
   <section class="card" style="margin-bottom: 12px;">
     <div class="card__head"><h3>NAS catalog</h3><span class="mono faint">reads catalog.json · stale → live scan</span></div>
@@ -135,7 +171,7 @@
         </div>
         <div class="row row--between">
           <span class="stat__sub">2 entries · ~88.0 GB · resumable staging · validates symlinks first</span>
-          <div class="row"><button class="btn btn--secondary btn--sm">+ Row</button><button class="btn btn--primary btn--sm">Queue download</button></div>
+          <div class="row"><button class="btn btn--secondary btn--sm">+ Row</button><button class="btn btn--secondary btn--sm">Queue download</button></div>
         </div>
       </div>
     </article>
