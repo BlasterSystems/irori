@@ -1,0 +1,163 @@
+{
+  "schema": "agentic-bootstrap-manifest/v1",
+  "generator_version": "0.1.0",
+  "platforms": [
+    "claude",
+    "codex",
+    "pi",
+    "opencode"
+  ],
+  "updated_at": "2026-10-16T17:15:20+00:00",
+  "files": {
+    ".agentic/bin/docs-check": {
+      "sha256": "bb84a835599d8b9052231ffe59fae3b1ee29ea9d22345632143f9be03be16e9e",
+      "executable": true,
+      "mutable": false
+    },
+    ".agentic/bin/validate": {
+      "sha256": "1a42e3bb7c0d24343fd606d47489c188ec45bb42e08ee283b667727b8295d256",
+      "executable": true,
+      "mutable": false
+    },
+    ".agentic/config.json": {
+      "sha256": "9635b87015aa42acbc02e837b773008aed2a5cca2ac3db7d9c4a4844302ff9bf",
+      "executable": false,
+      "mutable": false
+    },
+    ".agents/skills/agentic-bootstrap/SKILL.md": {
+      "sha256": "34c051e3bbdb73a46e6646d2e27c49061f8cbc9caf52dad4a656fe6fa838dd52",
+      "executable": false,
+      "mutable": false
+    },
+    ".agents/skills/architecture-decision/SKILL.md": {
+      "sha256": "5900634095efa33248ec470b7edb8d3cc1bfd9fa9c70fdf93297eaf898d472f6",
+      "executable": false,
+      "mutable": false
+    },
+    ".agents/skills/docs-check/SKILL.md": {
+      "sha256": "5ee4f597f7c892832bb8b6144040e2b37d8dc4c50b0261a8f34b6a9971687235",
+      "executable": false,
+      "mutable": false
+    },
+    ".agents/skills/semantic-versioning/SKILL.md": {
+      "sha256": "6e45cb6f4cced3a19c3f1ba2765491643c0e4d53ebe18ae81a0a90ea5cddb67b",
+      "executable": false,
+      "mutable": false
+    },
+    ".claude/agents/architecture-reviewer.md": {
+      "sha256": "606c211ced5bca36810d3d23196489ce8dafdbfb90575a3a483545af5fe450a0",
+      "executable": false,
+      "mutable": false
+    },
+    ".claude/skills/agentic-bootstrap/SKILL.md": {
+      "sha256": "34c051e3bbdb73a46e6646d2e27c49061f8cbc9caf52dad4a656fe6fa838dd52",
+      "executable": false,
+      "mutable": false
+    },
+    ".claude/skills/architecture-decision/SKILL.md": {
+      "sha256": "5900634095efa33248ec470b7edb8d3cc1bfd9fa9c70fdf93297eaf898d472f6",
+      "executable": false,
+      "mutable": false
+    },
+    ".claude/skills/docs-check/SKILL.md": {
+      "sha256": "5ee4f597f7c892832bb8b6144040e2b37d8dc4c50b0261a8f34b6a9971687235",
+      "executable": false,
+      "mutable": false
+    },
+    ".claude/skills/semantic-versioning/SKILL.md": {
+      "sha256": "6e45cb6f4cced3a19c3f1ba2765491643c0e4d53ebe18ae81a0a90ea5cddb67b",
+      "executable": false,
+      "mutable": false
+    },
+    ".codex/agents/architecture-reviewer.toml": {
+      "sha256": "89e86813846d92c4082f2da0b824cb55aac979f858cb5b5c8a7fcc6ca6a49838",
+      "executable": false,
+      "mutable": false
+    },
+    ".codex/config.toml": {
+      "sha256": "d4c670da3c2404921a1ab177f4e5405449bc8321d713cc0b42b8046201fd33cc",
+      "executable": false,
+      "mutable": false
+    },
+    ".github/workflows/docs-check.yml": {
+      "sha256": "b2b61146ac997d683eef7315a264f83308a51c517ad3860c95b69b802115d364",
+      "executable": false,
+      "mutable": false
+    },
+    ".opencode/agents/architecture-reviewer.md": {
+      "sha256": "179074fdc69ba4ad772971640c89ad1ddf3f5be312fd274fc1d6ecd9d44b387e",
+      "executable": false,
+      "mutable": false
+    },
+    ".opencode/commands/adr-new.md": {
+      "sha256": "ed62a494012e9942e5e170c8b2b5c5adb121e347ca66e961d3bb50e02adb787d",
+      "executable": false,
+      "mutable": false
+    },
+    ".opencode/commands/docs-check.md": {
+      "sha256": "01b9c8d39d087ba559b89f08ca2fa7094b7664fad1c082ed719586521a13d7a8",
+      "executable": false,
+      "mutable": false
+    },
+    "AGENTS.md": {
+      "sha256": "1fcdf88e06fd323f4d895133296250eb71924f7128ea9223bc0149f6eae79392",
+      "executable": false,
+      "mutable": true
+    },
+    "CLAUDE.md": {
+      "sha256": "e8e81f6d799757ab9cf23736906fbf493ef2e70ae4b41f74ecb296465eae48ec",
+      "executable": false,
+      "mutable": false
+    },
+    "docs/AGENT_GUIDED.md": {
+      "sha256": "126b9c980a22b6aacfaa892b09134202edc6e47be5b2b910501ae7ba0d95be21",
+      "executable": false,
+      "mutable": true
+    },
+    "docs/ARCHITECTURE.md": {
+      "sha256": "991eec7e7c1e89c4a8322cf9897749bd2e8709e0015839cfd09566fe6d76ad33",
+      "executable": false,
+      "mutable": true
+    },
+    "docs/DEVELOPMENT_PROCESS.md": {
+      "sha256": "94410aaea8f030c7ae1aa63e880c433cc252b156ad3ebf16f4c6b1a1f8b138c2",
+      "executable": false,
+      "mutable": true
+    },
+    "docs/PLATFORM_SUPPORT.md": {
+      "sha256": "24bd853bd0393c8ac470ecdcaa4d1b82814603efb3ce71d5fda96ccdd287e58a",
+      "executable": false,
+      "mutable": false
+    },
+    "docs/README.md": {
+      "sha256": "77ba02ca03f198b61cac4f6960d22dd48a059e2297fcbbef164b77eabca76081",
+      "executable": false,
+      "mutable": true
+    },
+    "docs/RELEASING.md": {
+      "sha256": "e43012e3a80fc492960eab8828aaab1502f779bccd4e42a11cdf32d0e5af6e8a",
+      "executable": false,
+      "mutable": true
+    },
+    "docs/adr/README.md": {
+      "sha256": "c2f34f20977eee5b10a5a4e402d8f786f6e05cfb34a8646b27033c1e831e1dce",
+      "executable": false,
+      "mutable": true
+    },
+    "docs/adr/template.md": {
+      "sha256": "7590bd3618a846e6d023b9c8c06d7870ae53a9d0bed9066c4e7032e34ac93985",
+      "executable": false,
+      "mutable": true
+    },
+    "opencode.json": {
+      "sha256": "ada72858930ec55a496af7fc987e84dd5543262719b9d122e506b0fb96eeb28a",
+      "executable": false,
+      "mutable": false
+    },
+    "tasks/task-template.md": {
+      "sha256": "21354702cba1d186de1ebaf5304af7955ec027cc83dbc84de6e7a76b34678430",
+      "executable": false,
+      "mutable": true
+    }
+  }
+}
