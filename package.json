@@ -5,7 +5,9 @@
   "description": "Irori — AI fleet platform for DGX Spark homelabs",
   "packageManager": "pnpm@10.33.2",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   },
   "engines": {
     "node": ">=24"
@@ -13,7 +15,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r build && pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
     "dev": "pnpm --filter @irori/web dev & pnpm --filter @irori/server dev"

@@ -20,13 +20,13 @@
   },
   "dependencies": {
     "@irori/core": "workspace:*",
-    "drizzle-orm": "^0.44.5",
+    "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "drizzle-kit": "^0.31.4",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   }
 }
