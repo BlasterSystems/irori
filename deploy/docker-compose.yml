@@ -1,0 +1,22 @@
+# Deploy compose for the dev docker VM (LXC 110, /opt/irori).
+# The server container reads its env from deploy/.env (gitignored via
+# `git clean -e deploy/.env` in cd-dev.yml). Copy .env.example to .env once:
+#   cp deploy/.env.example deploy/.env  (then fill values)
+# The DB lives on the Proxmox pgsql server (ADR-0002) — nothing is persisted
+# on the VM itself.
+
+services:
+  irori:
+    image: irori-dev:latest
+    container_name: irori-dev
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: server
+    ports:
+      - "3947:3947"
+    env_file:
+      - .env
+    environment:
+      PORT: "3947"
+    restart: unless-stopped

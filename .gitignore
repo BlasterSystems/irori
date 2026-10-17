@@ -15,3 +15,6 @@ config/secrets*
 
 # Local agent tooling (not committed)
 .mcp.json
+
+# VM deploy secrets
+deploy/.env
