@@ -21,6 +21,7 @@ RUN pnpm --filter @irori/core --filter @irori/db --filter @irori/server --filter
 # --- server role -----------------------------------------------------------
 FROM node:24-alpine AS server
 ENV NODE_ENV=production
+ENV IRORI_STATIC_DIR=/srv/irori-web
 WORKDIR /app
 # Deploy resolves workspace:* into real prod deps for @irori/server.
 RUN corepack enable
@@ -28,6 +29,8 @@ COPY --from=build /src /build
 RUN cd /build && pnpm --filter @irori/server deploy --prod --legacy /app
 # Boot migrations read the SQL folder at runtime — ship it.
 COPY --from=build /src/packages/db/drizzle /app/packages/db/drizzle
+# SPA bundle served by the server (IRORI_STATIC_DIR).
+COPY --from=build /src/apps/web/dist /srv/irori-web
 EXPOSE 3947
 CMD ["node", "dist/index.js"]
 
