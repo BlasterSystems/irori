@@ -16,6 +16,7 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 | M5 | [IRI-006](../tasks/IRI-006-m5-serving-orchestration.md) | Setup wizard, script pairs, staged transfers | Serve cluster via wizard; logs in telemetry |
 | M6 | [IRI-007](../tasks/IRI-007-m6-benchmarks.md) | Decode/prefill/quality/tooleval | Four benches run + persist against live engine |
 | M7 | [IRI-008](../tasks/IRI-008-m7-analytics-packaging.md) | Analytics lenses, disk hygiene, multi-arch release | Analytics views; cleanup verified; arm64 agent deployed |
+| M8 | [IRI-009](../tasks/IRI-009-m8-usage-capture-telemetry.md) | LLM usage capture proxy + telemetry (in-agent, 90 d retention) | Usage pages populated from live proxy traffic; replay + retention verified |
 
 Tracking lives on Jira (project [IR — Irori](https://blastersystems.atlassian.net/browse/IR)):
 each milestone is an epic sliced into deliverable-sized tickets. The CI/CD
@@ -33,6 +34,8 @@ deploy → 60×2s health gate → auto-rollback).
 | M5 Serving orchestration | [IR-29](https://blastersystems.atlassian.net/browse/IR-29) |
 | M6 Benchmarks | [IR-33](https://blastersystems.atlassian.net/browse/IR-33) |
 | M7 Analytics, hygiene & packaging | [IR-37](https://blastersystems.atlassian.net/browse/IR-37) |
+| M8 LLM usage capture & telemetry | [IR-42](https://blastersystems.atlassian.net/browse/IR-42) |
+| Usage phase 2 — attribution & reconstruction (deferred) | [IR-51](https://blastersystems.atlassian.net/browse/IR-51) |
 
 ## M0 — Governance & foundations ✅ (this task)
 
@@ -134,6 +137,32 @@ deploy → 60×2s health gate → auto-rollback).
   unit, CI build/test/docs-check, semver release per RELEASING.md.
 - **Exit**: analytics populated from rollups; agent deployed on a Spark from
   the release image; CI green.
+
+## M8 — LLM usage capture & telemetry (≈1 week)
+
+- **Capture proxy** (`packages/proxy`, in-agent, extractable): opt-in
+  pass-through for OpenAI-compatible engines; per-request tokens (incl.
+  cached/reasoning), TTFT, tok/s, finish reasons, errors, engine metrics
+  (TensorFold prefill/decode/spec-decode), payload sizes — native wire
+  capture working for every client (OMP, codex, benches). Rescopes the
+  SPEC §14 deferred "inference gateway" to capture-only (research:
+  `docs/research/IRI-009-research-brief.md`).
+- **Data path**: in-memory ring (live) + SQLite WAL buffer on node →
+  batched WS upload → Postgres `llm_requests` + hourly/daily rollups;
+  exactly-once replay (UUID); **retention 90 d raw / 1 y rollups**;
+  pgsql load = batched multi-row inserts per minute.
+- **Setup opt-in** (M5 hook): flagged setups bind the engine to loopback
+  and expose the LAN port via the agent proxy; health checks probe through
+  it; un-proxied setups unchanged.
+- **Usage UI**: Overview (KPIs/sparklines, activity chart, token mix),
+  Requests (filters + detail drawer), Errors (signature groups), Models
+  (TTFT/tok/s series); range selector + live SSE. No costs / providers
+  (owner scope).
+- **Deferred (phase 2, IR-51)**: body retention + chats reconstruction,
+  tool attribution, client identity (`X-Irori-*` / per-client keys),
+  retry lineage.
+- **Exit**: live traffic through a flagged setup populates all four Usage
+  pages; WS-outage + restart replay loses nothing; retention prune verified.
 
 ## Risks & mitigations
 
