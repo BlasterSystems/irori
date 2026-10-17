@@ -187,16 +187,19 @@ flowchart LR
 ## 7. Serving orchestration
 
 - **Setup** = one serving configuration: model, nodes (single or cluster,
-  ≤ 8 — most fleets are 1 head + 1 worker), start/stop script paths per
-  role, and a port. Created through a **wizard**: type → model (NAS catalog
+  ≤ 8 — most fleets are 1 head + 1 worker), and **one start/stop script pair
+  on the head node** — the scripts orchestrate workers and define ports and
+  engine config. Created through a **wizard**: type → model (NAS catalog
   search, or HF download chained) → per-node existence check → script paths
-  **validated on each target node** (`test -x` at create time, re-checked at
-  every start) → placement plan → launch. Irori never edits the scripts.
-- **Env contract**: Irori exports `MODEL_NAME`, `PORT`, `EXTRA_ARGS`, and
-  `MODEL_PATH` (`modelctl path --local`) to the scripts; self-contained
-  scripts ignore them. A **stop script is required** — armed stop is a core
-  promise (fallback: kill the recorded process group).
-- **Health**: state = the port answers `/v1/models` with the model id;
+  **validated on the head** (`test -x` at create time, re-checked at every
+  start) → placement plan → launch. Irori never edits the scripts.
+- **Optional env**: Irori exports `MODEL_NAME`, `PORT`, `EXTRA_ARGS`, and
+  `MODEL_PATH` (`modelctl path --local`) for scripts that want them — scripts
+  may define their own ports/config and ignore it. A **stop script is
+  required** — armed stop is a core promise (fallback: kill the recorded
+  process group).
+- **Health**: state = the node's LLM probe sees the engine (on its
+  script-defined port) answering `/v1/models` with the model id;
   startup timeout surfaces "starting → healthy / failed" with the engine-log
   tail streamed into telemetry (ring buffer + persisted run log); detached
   drivers survive server restarts.
