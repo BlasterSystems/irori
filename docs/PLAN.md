@@ -44,7 +44,12 @@ Effort is indicative (single developer with LLM assistance). Task files live in
   processes) via `nvidia-smi`, CPU (usage/temp/**package power**/clock) via
   sysfs/proc/rapl, memory (GB10 unified split / RAM+VRAM), storage, network.
 - Server: snapshot ingestion + versioning, ring buffers, minute→hour→day
-  rollups, retention prune, SSE fan-out.
+  rollups, retention prune, SSE fan-out. **Temperature minute buckets
+  (min/avg/max per sensor) retained 7 d** — the Analytics Temps lens reads
+  them (SPEC §9).
+- **Mobile-first CSS** (390px verified): two-row scrollable topbar, stacked
+  pageheads, single-column grids, full-bleed drawers/sheets, 44px targets,
+  table scroll with sticky first column — no horizontal page overflow.
 - Web: live Overview (worker card = memory/CPU/GPU/temp/package power; head
   card reserved until M3), node detail with sparklines, history ranges.
 - **Exit**: two nodes streaming concurrently; charts live; rollups survive

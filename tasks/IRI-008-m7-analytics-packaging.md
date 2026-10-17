@@ -27,6 +27,9 @@ opt-in prevention, SPEC §11.6).
 - [ ] Analytics: four lenses over rollups — memory, decode, power, tokens
       (generated/cache/prefill); groupable by cluster and individual node;
       time ranges from hourly/daily buckets.
+- [ ] **Temps lens**: fleet strip (latest GPU/CPU per node, shape-tiered
+      ≥85/≥90), GPU/CPU charts with 85/90 guides + throttle/crossing event
+      markers, cluster = fleet-max aggregates; reads 7d minute buckets.
 - [ ] Token ledger: generated/cached/prefill per model, hourly + daily.
 - [ ] Power: estimated watts (GPU board + CPU model + base overhead, clamped
       to GB10 envelope), explicit coverage fields, monthly archive, Wh/token;

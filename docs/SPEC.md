@@ -135,8 +135,9 @@ flowchart LR
   browsers attach/detach without affecting collection. Poll loops run headless.
 - **Store**: PostgreSQL (Proxmox pgsql server, `DATABASE_URL`) — raw snapshots
   ring (recent), minute buckets → hourly/daily rollups (Drizzle migrations),
-  serving/bench/job event records. Retention config, prune job. In-memory
-  rings keep the live view while the DB is unreachable (ADR-0002).
+  serving/bench/job event records. **Temperature minute buckets (min/avg/max
+  per sensor) kept 7 d**, then hourly 90 d. Retention config, prune job.
+  In-memory rings keep the live view while the DB is unreachable (ADR-0002).
 - **Versioned contracts**: every snapshot carries `schemaVersion` +
   `agentVersion`; old agents and new servers negotiate via the hello handshake.
 
@@ -224,9 +225,9 @@ history and comparison views. No VulnHunter/REA.
 
 ## 9. Analytics
 
-One section, four lenses — **memory, decode, power, tokens** (generated /
-cache / prefill) — each groupable **by cluster and by individual node**,
-with time ranges backed by rollups:
+One section, five lenses — **memory, decode, power, temps, tokens**
+(generated / cache / prefill) — each groupable **by cluster and by individual
+node**, with time ranges backed by rollups:
 
 - Decode/prefill rates over time (per engine port, per node, per cluster).
 - Tokens: generated / cached / prefill, hourly + daily (ledger per model).
@@ -234,6 +235,14 @@ with time ranges backed by rollups:
   the GB10 envelope), explicit coverage fields; monthly archive; Wh/token.
   Labeled *estimated, not wall-metered*.
 - Memory: unified-memory pressure (GB10) / RAM+VRAM (discrete), trends.
+- Temperatures: fleet strip (latest GPU/CPU per node, hottest first, no
+  color-only tiers — ◇ warn ≥ 85 °C, ▫ critical ≥ 90 °C, shapes carry the
+  tier), per-node GPU (solid) / CPU pkg (dashed) charts with 85/90 °C guide
+  lines, **cluster view = fleet-max aggregates** (thermals don't add; 8-node
+  per-node lines would be soup), and throttle/crossing **event markers**
+  joined from the event log + `clocks_throttle_reasons` (no rules engine).
+  Minute buckets (min/avg/**max** — max preserves spikes) kept 7 d; 7d views
+  decimate via min/max pairs, never plain averages.
 
 ## 10. Clock control (CPU & GPU underclocking)
 
