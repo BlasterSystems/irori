@@ -173,8 +173,10 @@ flowchart LR
     `--host` per link, round-robin). Head pulls once, fans out to workers.
   - **doctor / repair / catalog refresh** surfaced with two-click armed apply.
 - **Placement planning**: for model × node → `present / sync / push / unavailable`,
-  offered as one-click remediations wherever a model is needed (serving start,
-  recipes). Capacity math shown (`free X GB · needs Y GB` minus reserve).
+  offered as one-click remediations wherever a model is needed (serving
+  start, setups). Capacity math shown (`free X GB · needs Y GB` minus
+  reserve); a failed check offers **"Clean up disk — est. +N GB"** from the
+  agent's disk audit (§11.6).
 - **Catalog UX contract**: the Models page is one searchable table — search
   (name/repo/quantization), filters (runtime, placement), sort (**recently
   added** default — via Irori-side `first_seen_at`, since `catalog.json`
@@ -255,6 +257,29 @@ bootstrap and when the agent is off.
    fan-out (§6).
 5. **Monitor realtime inference** — LLM port probing, engine metrics, serving
    supervision with log streaming (§5, §7).
+6. **Disk hygiene** — nodes accumulate heavy clutter (docker build cache and
+   old engine images, HF `.incomplete` blobs and unreferenced snapshots,
+   non-resumable modelctl staging, compiler caches in
+   `~/.cache/{vllm,torch,triton}` + `~/.nv`, pip/uv/apt caches, journal,
+   stale `/tmp`, core dumps). The agent provides:
+   - **Audit** (read-only job): per-category reclaimable report with a
+     one-line safety rationale each; cached ~5 min; surfaced on the node card
+     when usage crosses 80/90 % (`Disk 91% · 212 GB reclaimable`).
+   - **Clean** (armed, per category, streamed job output — never one opaque
+     button): docker build-cache/dangling-image/stopped-container prunes,
+     old-image policy (keep last 2 per repo, exclude in-use), HF incomplete/
+     unreferenced-blob cleanup, modelctl `cleanup-staging` (non-resumable
+     only), compiler/pkg cache wipes, journal vacuum, apt clean + autoremove,
+     `/tmp` > 7d, core dumps, old snap revisions.
+   - **Protected set (enforced)**: modelctl active objects and registered
+     HF-cache entries (`modelctl list --local`), images of running
+     containers, files open by engines (`/proc` check), anything modified
+     < 24 h outside caches, the NAS store.
+   - **Prevent (opt-in)**: one-time docker `daemon.json` log rotation
+     (`max-size 10m, max-file 3`); weekly scheduled pass over the
+     always-safe set only (build cache, compiler/pkg caches, tmp, journal).
+   - **Placement tie-in**: a failed capacity check offers
+     "Clean up disk — est. +N GB" linking to the audit.
 
 Bootstrap: server UI generates an install one-liner (or SSH-pushes the bundle
 using stored credentials): bundle + config (server URL, token) + root systemd
@@ -283,6 +308,7 @@ reported in every snapshot; upgrade = re-run install.
 | Models | `GET /api/v1/models?scope=nas\|node:id&q=&sort=&page=`, `POST /api/v1/models/download`, `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
 | Serving | `GET/POST /api/v1/setups`, `PATCH/DELETE /api/v1/setups/:id`, `POST /api/v1/setups/:id/start\|stop`, `GET /api/v1/setups/:id/log` (stream) |
 | Jobs | `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel` |
+| Cleanup | `GET /api/v1/nodes/:id/cleanup/audit`, `POST /api/v1/nodes/:id/cleanup` (dry_run default) |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
 | Meta | `GET /healthz`, `GET /api/v1/settings`, `PUT /api/v1/settings`, WS `/agent-ws` |
