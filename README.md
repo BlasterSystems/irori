@@ -109,6 +109,26 @@ as every BlasterSystems product:
 | [docs/DEVELOPMENT_PROCESS.md](docs/DEVELOPMENT_PROCESS.md) | Workflow + skills |
 | [mockups/index.html](mockups/index.html) | Approved screen mockups |
 
+## Inspiration & credits
+
+Irori's codebase is fully ours (Apache-2.0) — no code is taken from the
+projects below — but its product ideas were proven by their work:
+
+- **[sparkDash](https://github.com/MiaAI-Lab/sparkDash)** —
+  [MiaAI-Lab](https://github.com/MiaAI-Lab), Mia's AI Lab — the multi-unit
+  DGX Spark monitoring dashboard that started this line of work. Irori's
+  fleet information architecture, benchmark suite, and LLM probing approach
+  descend from it.
+- **C. Michael Gibbs** — [MikeGibbsOnyx](https://github.com/MikeGibbsOnyx) —
+  and **Nyx Voss** (Onyx AI Labs) — the macOS (darwin) SSH collectors in
+  sparkDash, whose unit-collector pattern Irori's agent generalizes.
+
+Irori replaces and absorbs the maintainer's own predecessor projects
+([sparkControl](https://github.com/piresbruno/sparkControl),
+[modelctl](https://github.com/piresbruno/modelctl),
+[sparkLimiter](https://github.com/piresbruno/sparkLimiter)) and builds on the
+BlasterSystems design system and [uptime-monitoring](https://github.com/BlasterSystems/uptime-monitoring).
+
 ## Validation
 
 ```bash
