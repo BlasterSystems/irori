@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New setup · Irori</title>
+<link rel="stylesheet" href="irori.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  body { background: var(--paper); }
+  .backdrop { position: fixed; inset: 0; display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; overflow: auto; }
+  .wizard { width: 760px; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .steps { display: flex; gap: var(--space-2); padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; }
+  .step-dot { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .step-dot i { width: 8px; height: 8px; border: 1.5px solid var(--rule-2); border-radius: 50%; display: inline-block; }
+  .step-dot.is-done i { background: var(--ink); border-color: var(--ink); }
+  .step-dot.is-cur { color: var(--fg); } .step-dot.is-cur i { border-color: var(--ink); }
+  .step-dot + .step-dot::before { content: "—"; color: var(--rule-2); margin: 0 6px; }
+  .step { display: none; }
+  .step.is-cur { display: block; }
+  .pick { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 12px 14px; cursor: pointer; display: block; }
+  .pick.is-on { border-color: var(--ink); background: var(--surface-2); }
+  .pick input { accent-color: var(--ink); margin-right: 8px; }
+  .stage { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .stage + .stage { margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="backdrop">
+  <div class="wizard" role="dialog" aria-modal="true" aria-label="New setup wizard">
+    <div class="card__head">
+      <div class="row"><h3>New setup</h3><span class="mono faint">from Serve or Models · nothing runs until you launch</span></div>
+      <a class="btn btn--ghost btn--sm" href="serve.html">✕ Close</a>
+    </div>
+    <div class="steps" aria-label="Wizard progress">
+      <span class="step-dot is-done"><i></i>Type</span>
+      <span class="step-dot is-done"><i></i>Model</span>
+      <span class="step-dot is-cur"><i></i>Scripts &amp; port</span>
+      <span class="step-dot"><i></i>Placement</span>
+      <span class="step-dot"><i></i>Review</span>
+    </div>
+
+    <!-- Step 1 · Type -->
+    <section class="step card__body" data-step="1">
+      <div class="stack">
+        <div class="cols cols-2">
+          <label class="pick"><input type="radio" name="type"> <strong>Single node</strong><div class="stat__sub" style="margin-top:4px">one spark serves; the usual case</div></label>
+          <label class="pick is-on"><input type="radio" name="type" checked> <strong>Cluster (head + workers)</strong><div class="stat__sub" style="margin-top:4px">sharded / multi-node serving · up to 8 nodes</div></label>
+        </div>
+        <div class="cols cols-2">
+          <div class="field"><label>Head node</label><select class="select"><option>spark1 · GB10</option><option>spark3 · GB10</option></select></div>
+          <div class="field"><label>Workers</label><select class="select"><option>spark2 · GB10</option><option>spark2 + spark3</option></select></div>
+        </div>
+        <p class="stat__sub">Workers appear only for clusters. Every node runs the privileged agent — placement and validation use it.</p>
+      </div>
+    </section>
+
+    <!-- Step 2 · Model -->
+    <section class="step card__body" data-step="2">
+      <div class="stack">
+        <input class="input mono" type="search" placeholder="Search the NAS catalog…" value="glm">
+        <div class="stack">
+          <label class="pick is-on"><input type="radio" name="model" checked> <strong>GLM-5.3-Flash-EXL3</strong> <span class="chip">vllm</span> <span class="chip">68.2 GB</span><div class="stat__sub" style="margin-top:4px">on nas ✓ · head ✓ · spark2 ✓ · spark3 absent</div></label>
+          <label class="pick"><input type="radio" name="model"> <strong>glm-5.3-flash-dflash2</strong> <span class="chip">vllm</span> <span class="chip">8.1 GB</span><div class="stat__sub" style="margin-top:4px">draft model · nas ✓ · head ✓</div></label>
+          <label class="pick"><input type="radio" name="model"> <strong>DeepSeek-V4-Flash</strong> <span class="chip">vllm</span> <span class="chip">41.5 GB</span><div class="stat__sub" style="margin-top:4px">nas only — transfer will be staged</div></label>
+        </div>
+        <button class="btn btn--ghost btn--sm" style="align-self:start;">Not on the NAS? Download from Hugging Face first…</button>
+      </div>
+    </section>
+
+    <!-- Step 3 · Scripts & port -->
+    <section class="step is-cur card__body" data-step="3">
+      <div class="stack">
+        <div class="cols cols-2">
+          <div class="field"><label>Start script — path on spark1</label><input class="input mono" value="/home/me/glm/start.sh"></div>
+          <div class="field"><label>Stop script — path on spark1</label><input class="input mono" value="/home/me/glm/stop.sh"></div>
+        </div>
+        <div class="row row--between">
+          <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>both exist &amp; executable on spark1 (test -x)</span>
+          <button class="btn btn--secondary btn--sm">Re-validate</button>
+        </div>
+        <div class="cols cols-2">
+          <div class="field"><label>Worker start script — path on spark2</label><input class="input mono" value="/home/me/glm/start-worker.sh"></div>
+          <div class="field"><label>Worker stop script</label><input class="input mono" value="/home/me/glm/stop-worker.sh"></div>
+        </div>
+        <div class="row row--between">
+          <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>validated on spark2</span>
+          <span class="stat__sub">re-checked at every start — paths drift, validation doesn't</span>
+        </div>
+        <div class="cols cols-2">
+          <div class="field"><label>Port (head)</label><input class="input mono" value="8000"></div>
+          <div class="field"><label>Port (worker)</label><input class="input mono" value="8001"></div>
+        </div>
+        <p class="stat__sub">8000 free on spark1 · 8001 free on spark2 (agent-checked)</p>
+        <div class="banner">
+          <span class="stat__sub"><strong>Env exported to your scripts:</strong> MODEL_NAME=GLM-5.3-Flash-EXL3 · PORT=8000 (worker 8001) · EXTRA_ARGS="" · MODEL_PATH=$(modelctl path GLM-5.3-Flash-EXL3 --local)</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 4 · Placement -->
+    <section class="step card__body" data-step="4">
+      <div class="stack">
+        <div class="row row--between"><span class="label">Placement check</span><span class="stat__sub">free − needs − reserve · spark3 store</span></div>
+        <dl class="kv">
+          <dt>spark1 · head</dt><dd>present ✓</dd>
+          <dt>spark2 · worker</dt><dd>present ✓</dd>
+          <dt>spark3 · worker</dt><dd>absent — 68.2 GB needed · free 1.2 TB − 50 reserve ✓</dd>
+        </dl>
+        <div class="row row--between">
+          <span class="stat__sub">spark3 is missing the model — transfer plan below (NAS first, then CX7):</span>
+          <div class="row">
+            <button class="btn btn--secondary btn--sm">Transfer now</button>
+            <button class="btn btn--ghost btn--sm">Pull from HF anyway</button>
+          </div>
+        </div>
+        <div>
+          <span class="label">Staged transfer · running</span>
+          <div style="margin-top: 8px;">
+            <div class="stage">
+              <span>1/2 · NAS → spark3 (sync)</span>
+              <div class="bar"><div class="bar__fill" style="width:100%"></div></div>
+              <span class="val">done · 3m 12s · 96 MB/s</span>
+            </div>
+            <div class="stage">
+              <span>2/2 · validate + activate</span>
+              <div class="bar"><div class="bar__fill" style="width:64%"></div></div>
+              <span class="val">64% · 168 MB/s · ~4m left</span>
+            </div>
+          </div>
+          <p class="stat__sub" style="margin-top: 8px;">Start runs automatically after activation. <button class="btn btn--ghost btn--sm" style="min-height:20px;padding:0 6px;">Cancel transfer</button></p>
+        </div>
+        <p class="stat__sub">If the NAS lacked the model: stage 0 = download from HF to NAS (same progress surface).</p>
+      </div>
+    </section>
+
+    <!-- Step 5 · Review -->
+    <section class="step card__body" data-step="5">
+      <dl class="kv">
+        <dt>type</dt><dd>cluster — spark1 (head) + spark2 (worker)</dd>
+        <dt>model</dt><dd>GLM-5.3-Flash-EXL3 · vllm · 68.2 GB</dd>
+        <dt>ports</dt><dd>head 8000 · worker 8001</dd>
+        <dt>start / stop</dt><dd>/home/me/glm/start.sh · /home/me/glm/stop.sh <span class="faint">(✓ validated)</span></dd>
+        <dt>worker scripts</dt><dd>start-worker.sh · stop-worker.sh <span class="faint">(✓ validated on spark2)</span></dd>
+        <dt>env</dt><dd>MODEL_NAME · PORT · EXTRA_ARGS · MODEL_PATH</dd>
+        <dt>placement</dt><dd>all present — nothing to transfer</dd>
+        <dt>after launch</dt><dd>health = /v1/models answers with model id · timeout 15m · engine log streamed</dd>
+      </dl>
+    </section>
+
+    <div class="card__head" style="border-top: 1px solid var(--border); border-bottom: 0;">
+      <span class="stat__sub">step <span id="cur">3</span> of 5</span>
+      <div class="row">
+        <button class="btn btn--secondary btn--sm" id="prev">Back</button>
+        <button class="btn btn--primary btn--sm" id="next">Next · Placement</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<span class="mock-note">Static mockup · data illustrative</span>
+<script>
+  var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+  var SUN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  var btn = document.getElementById("themeToggle") || { innerHTML:"", onclick:null };
+  function paint(){ if (btn.innerHTML !== undefined) btn.innerHTML = document.documentElement.dataset.theme === "dark" ? SUN : MOON; }
+  paint();
+
+  var cur = 3, TOTAL = 5;
+  var labels = ["", "", "", "Next · Placement", "Next · Review", "Create & start"];
+  function show() {
+    document.querySelectorAll(".step").forEach(function(s){ s.classList.toggle("is-cur", +s.dataset.step === cur); });
+    var dots = document.querySelectorAll(".step-dot");
+    dots.forEach(function(d, i){
+      d.classList.toggle("is-cur", i === cur - 1);
+      d.classList.toggle("is-done", i < cur - 1);
+    });
+    document.getElementById("cur").textContent = cur;
+    document.getElementById("prev").disabled = cur === 1;
+    document.getElementById("next").textContent = labels[cur];
+  }
+  document.getElementById("prev").addEventListener("click", function(){ if (cur > 1) { cur--; show(); } });
+  document.getElementById("next").addEventListener("click", function(){ if (cur < TOTAL) { cur++; show(); } });
+  show();
+</script>
+</body>
+</html>

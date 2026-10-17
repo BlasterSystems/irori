@@ -171,25 +171,39 @@ flowchart LR
 - **Placement planning**: for model × node → `present / sync / push / unavailable`,
   offered as one-click remediations wherever a model is needed (serving start,
   recipes). Capacity math shown (`free X GB · needs Y GB` minus reserve).
+- **Catalog UX contract**: the Models page is one searchable table — search
+  (name/repo/quantization), filters (runtime, placement), sort (**recently
+  added** default — via Irori-side `first_seen_at`, since `catalog.json`
+  carries no timestamp — plus name, size), pagination 25/page. Row click
+  opens a **detail drawer** (HF metadata, files, companions, per-node
+  placement + remediations, serve-command copy, armed delete). The download
+  queue is a **modal**; store hygiene (doctor/gc) a **popover** off the
+  status strip. No inline form walls.
 
 ## 7. Serving orchestration
 
-- **Recipe** = a folder the user owns on a node (`start.sh` + `.env`; often a
-  git repo). Irori registers it by `(node, path)`, probes entry/verbs/`PORT`/
-  `MODEL`/containers and `.env` **presence only** — values never leave the node.
-  Irori never edits recipes. Cluster scripts (start/stop the whole cluster) are
-  just recipes/scripts the user configures manually on the head — Irori
-  supervises and streams them.
-- **Runs**: script-class (library scripts with env contract `MODEL_NAME`,
-  `PORT`, `EXTRA_ARGS`, and run-by-path) and recipe dispatch
-  (`start.sh start|stop|status|logs`). Start/stop/status/logs execute via the
-  agent; detached drivers survive server restarts; logs stream into telemetry
-  (ring buffer + persisted run log).
-- **Start prechecks**: MODEL against node inventory (absent ⇒ 409 + placement
-  remediations + force option; unknown ⇒ warning only), capacity math,
-  transfer-contention warning. Warnings never block.
-- Multi-node recipes refuse to start when the declared worker isn't the
-  configured cluster worker (exact-delta dialog).
+- **Setup** = one serving configuration: model, nodes (single or cluster,
+  ≤ 8 — most fleets are 1 head + 1 worker), start/stop script paths per
+  role, and a port. Created through a **wizard**: type → model (NAS catalog
+  search, or HF download chained) → per-node existence check → script paths
+  **validated on each target node** (`test -x` at create time, re-checked at
+  every start) → placement plan → launch. Irori never edits the scripts.
+- **Env contract**: Irori exports `MODEL_NAME`, `PORT`, `EXTRA_ARGS`, and
+  `MODEL_PATH` (`modelctl path --local`) to the scripts; self-contained
+  scripts ignore them. A **stop script is required** — armed stop is a core
+  promise (fallback: kill the recorded process group).
+- **Health**: state = the port answers `/v1/models` with the model id;
+  startup timeout surfaces "starting → healthy / failed" with the engine-log
+  tail streamed into telemetry (ring buffer + persisted run log); detached
+  drivers survive server restarts.
+- **Placement in the wizard**: per-node present/sync/push/unavailable with
+  capacity math (`free − needs − reserve`); missing models transfer in
+  **staged progress** (HF→NAS download → NAS→head `sync-local` → head→worker
+  `push` over CX7), each stage showing %, rate, ETA, cancel; busy-node
+  warning; "pull from HF anyway" stays a ghost option; warnings never block.
+- **UI scale**: setups render as **cards** (never an enterprise table),
+  with a detail drawer: streamed engine log, per-node placement history,
+  endpoints (direct), edit/duplicate/remove.
 
 ## 8. Benchmarks
 
@@ -259,8 +273,8 @@ reported in every snapshot; upgrade = re-run install.
 | Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/test`, `/:id/install-agent`, `/:id/agent-token/rotate` |
 | Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE) |
 | Inference | `GET /api/v1/nodes/:id/llm`, `PUT /:id/llm-ports`, `GET /api/v1/clusters/:id` |
-| Models | `GET /api/v1/models?scope=nas|node:id`, `POST /api/v1/models/download`, `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
-| Serving | `GET/POST /api/v1/recipes`, `POST /api/v1/runs/:id/start|stop`, `GET /api/v1/runs/:id/log` (stream) |
+| Models | `GET /api/v1/models?scope=nas\|node:id&q=&sort=&page=`, `POST /api/v1/models/download`, `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
+| Serving | `GET/POST /api/v1/setups`, `PATCH/DELETE /api/v1/setups/:id`, `POST /api/v1/setups/:id/start\|stop`, `GET /api/v1/setups/:id/log` (stream) |
 | Jobs | `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel` |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
@@ -270,7 +284,9 @@ reported in every snapshot; upgrade = re-run install.
 
 - **Deferred (not in v1):** inference gateway + request analysis (sparkControl's
   proxy/trace store), alert notifications, Prometheus export, PWA/mobile,
-  health-findings rules engine, prompt showcase, auto-discovery of Sparks.
+  health-findings rules engine, prompt showcase, auto-discovery of Sparks,
+  recipe git-drift tracking (setups re-validate script existence at start
+  instead).
   All are additive; the data model keeps event/history tables extensible.
 - **Dropped:** ComfyUI/Hermes/Tailscale monitoring, VulnHunter, REA, Glance.
 - **modelctl** remains a separate upstream project (Python); Irori requires it

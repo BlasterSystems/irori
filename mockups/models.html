@@ -6,6 +6,29 @@
 <title>Models · Irori</title>
 <link rel="stylesheet" href="irori.css">
 <script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; max-width: 92vw; background: var(--surface);
+    border-left: 1px solid var(--border); box-shadow: none; transform: translateX(100%); transition: transform .18s ease; z-index: 40;
+    display: flex; flex-direction: column; }
+  .drawer.is-open { transform: translateX(0); }
+  .scrim { position: fixed; inset: 0; background: var(--overlay); opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 30; }
+  .scrim.is-open { opacity: 1; pointer-events: auto; }
+  .drawer .kv dd { overflow-wrap: anywhere; }
+  .modal { position: fixed; inset: 0; z-index: 50; display: none; align-items: flex-start; justify-content: center; padding: 8vh 16px; }
+  .modal.is-open { display: flex; }
+  .modal__panel { width: 720px; max-width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .popover { position: absolute; top: calc(100% + 6px); right: 0; width: 380px; background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); padding: var(--space-4); display: none; z-index: 45; }
+  .popover.is-open { display: block; }
+  .toolbar { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  .toolbar .input { min-height: 34px; }
+  .fchip { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: none; padding: 4px 10px;
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); cursor: pointer; }
+  .fchip.is-on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .sortsel { min-height: 34px; }
+  .pagerow { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; }
+  tr.is-hidden { display: none; }
+</style>
 </head>
 <body>
 <header class="topbar"><div class="topbar__in">
@@ -32,168 +55,214 @@
       <p>NAS store · <span class="mono">nas → /mnt/nas/llm-models</span> · modelctl layout, unchanged</p>
     </div>
     <div class="row">
-      <button class="btn btn--secondary">Refresh catalog</button>
-      <button class="btn btn--primary">Download from HF…</button>
+      <button class="btn btn--primary" id="dlOpen">Download from HF…</button>
     </div>
   </div>
 
+  <!-- Status strip: store health at a glance -->
   <section class="card" style="margin-bottom: 12px;">
-    <div class="card__body">
-      <div class="statgrid" style="grid-template-columns: repeat(5, 1fr);">
-        <div class="stat"><span class="stat__label">Models</span><span class="stat__value">14</span></div>
-        <div class="stat"><span class="stat__label">Capacity</span><span class="stat__value stat__value--sm">2.4 / 8.0 TB</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:30%"></div></div></div>
-        <div class="stat"><span class="stat__label">Catalog</span><span class="stat__value stat__value--sm">seq 42</span><span class="stat__sub">synced 5m ago</span></div>
-        <div class="stat"><span class="stat__label">modelctl</span><span class="stat__value stat__value--sm">v0.13.0</span><span class="stat__sub">doctor ok · 0 repairs</span></div>
-        <div class="stat"><span class="stat__label">Jobs</span><span class="stat__value stat__value--sm">1 active</span><span class="stat__sub">push · spark2 → spark3</span></div>
+    <div class="card__body row row--between" style="padding-top: 10px; padding-bottom: 10px;">
+      <div class="row" style="gap: 16px;">
+        <div class="barrow" style="grid-template-columns: 52px 140px auto;"><span>store</span><div class="bar"><div class="bar__fill" style="width:30%"></div></div><span class="val">2.4 / 8.0 TB</span></div>
+        <span class="stat__sub">catalog seq 42 · synced 5m ago</span>
+        <span class="stat__sub">modelctl v0.13.0 · doctor ok</span>
+      </div>
+      <div class="row" style="position: relative;">
+        <button class="btn btn--secondary btn--sm" id="hygOpen">Store health</button>
+        <div class="popover" id="hygPop" role="dialog" aria-label="Store health">
+          <dl class="kv">
+            <dt>staging</dt><dd>1 resumable · 0 orphaned</dd>
+            <dt>objects</dt><dd>14 active · 2 unreferenced</dd>
+            <dt>active refs</dt><dd>14 valid · 0 repairable</dd>
+            <dt>quarantine</dt><dd>empty</dd>
+          </dl>
+          <div class="row" style="margin-top: 12px;">
+            <button class="btn btn--secondary btn--sm">doctor --json</button>
+            <button class="btn btn--secondary btn--sm">gc-objects (dry-run)</button>
+          </div>
+          <p class="stat__sub" style="margin-top: 10px;">All mutations dry-run first, then armed. NAS never written outside modelctl.</p>
+        </div>
       </div>
     </div>
   </section>
 
-  <div class="banner banner--warn" style="margin-bottom: 12px;">
-    <span class="dot dot--warn" style="color: var(--thread); margin-top: 4px;" aria-hidden="true"></span>
-    <div class="grow">
-      <strong>Placement — spark3 · GLM-5.3-Flash-EXL3 is absent.</strong>
-      <div class="mono muted" style="margin-top: 4px;">plan: push from spark2 (peer holds it) · 68.2 GB over cx70 → ~6 min at 184 MB/s · capacity ok (free 1.2 TB · needs 68.2 − 50 reserve)</div>
-    </div>
-    <div class="row" style="flex: none;">
-      <button class="btn btn--secondary btn--sm">Push from spark2</button>
-      <button class="btn btn--secondary btn--sm">Sync from NAS</button>
-      <button class="btn btn--ghost btn--sm">Pull from HF anyway</button>
-    </div>
-  </div>
-
+  <!-- Jobs strip: transfers -->
   <section class="card" style="margin-bottom: 12px;">
-    <div class="card__head"><h3>Jobs</h3><span class="mono faint">one active per node · live output · cancel</span></div>
+    <div class="card__head"><h3>Jobs</h3><div class="row"><span class="mono faint">2 running · 1 done today</span><button class="btn btn--ghost btn--sm">All jobs</button></div></div>
     <div class="card__body card__body--flush">
       <table class="table">
-        <thead><tr><th>Job</th><th>Node</th><th>Progress</th><th>Rate / ETA</th><th>State</th><th></th></tr></thead>
         <tbody>
           <tr>
-            <td class="mono">j-218 · push GLM-5.3-Flash-EXL3<br><span class="faint">spark2 → spark3 · cx70+cx71 · 4 streams</span></td>
-            <td class="mono">spark3</td>
-            <td><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><span class="stat__sub">25.2 / 68.2 GB</span></td>
-            <td class="mono">184 MB/s · ~6m left</td>
+            <td class="mono" style="width: 38%;">j-218 · push GLM-5.3-Flash-EXL3<br><span class="faint">spark2 → spark3 · cx70+cx71 · 4 streams</span></td>
+            <td style="width: 24%;"><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><span class="stat__sub">25.2 / 68.2 GB</span></td>
+            <td class="mono" style="width: 18%;">184 MB/s · ~6m left</td>
             <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>running</span></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--danger btn--sm">Cancel…</button></td>
+            <td style="text-align:right; width: 14%;"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--danger btn--sm">Cancel…</button></td>
           </tr>
           <tr>
             <td class="mono">j-217 · queue download (2 entries)<br><span class="faint">nas → /mnt/nas/llm-models · HF</span></td>
-            <td class="mono">nas</td>
             <td><div class="bar bar--lg"><div class="bar__fill" style="width:12%"></div></div><span class="stat__sub">10.6 / 88.0 GB</span></td>
             <td class="mono">96 MB/s · ~14m left</td>
             <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>running</span></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--danger btn--sm">Cancel…</button></td>
-          </tr>
-          <tr>
-            <td class="mono">j-215 · catalog refresh<br><span class="faint">nas</span></td>
-            <td class="mono">nas</td>
-            <td><div class="bar bar--lg"><div class="bar__fill" style="width:100%"></div></div><span class="stat__sub">seq 42</span></td>
-            <td class="mono">done 5m ago</td>
-            <td><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>completed</span></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Output</button></td>
+            <td style="text-align:right;"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--danger btn--sm">Cancel…</button></td>
           </tr>
         </tbody>
       </table>
     </div>
   </section>
 
-  <section class="card" style="margin-bottom: 12px;">
-    <div class="card__head"><h3>NAS catalog</h3><span class="mono faint">reads catalog.json · stale → live scan</span></div>
+  <!-- Catalog: toolbar + table + pagination -->
+  <section class="card">
+    <div class="card__body" style="padding-bottom: 10px;">
+      <div class="toolbar">
+        <input class="input mono" id="q" type="search" placeholder="Search name, repo, quantization…   ⌘K" style="max-width: 320px;" aria-label="Search models">
+        <span class="fchip is-on" data-filter="runtime" data-value="vllm">vLLM</span>
+        <span class="fchip is-on" data-filter="runtime" data-value="llama.cpp">llama.cpp</span>
+        <span class="label" style="margin: 0 4px;">placement</span>
+        <span class="fchip is-on" data-filter="pl" data-value="head">on head</span>
+        <span class="fchip is-on" data-filter="pl" data-value="any">on any node</span>
+        <span class="fchip is-on" data-filter="pl" data-value="missing">not synced</span>
+        <span class="grow"></span>
+        <select class="select sortsel" id="sort" aria-label="Sort" style="max-width: 190px;">
+          <option value="added">Recently added</option>
+          <option value="name">Name A–Z</option>
+          <option value="size">Size</option>
+        </select>
+      </div>
+    </div>
     <div class="card__body card__body--flush">
-      <table class="table">
+      <table class="table" id="cat">
         <thead><tr>
-          <th>Name</th><th>Runtime</th><th>Repository @ rev</th><th>Files</th><th>Size</th><th>Placement</th><th></th>
+          <th>Model</th><th>Runtime</th><th class="th-sort" data-sort="size">Size</th><th class="th-sort" data-sort="added">Added</th><th>Placement</th><th></th>
         </tr></thead>
         <tbody>
-          <tr>
-            <td><strong>GLM-5.3-Flash-EXL3</strong><div class="mono faint">mtp · DGX/GLM-5.3-Flash-DFlash2</div></td>
-            <td class="mono">vllm</td>
-            <td class="mono">DGX/GLM-5.3-Flash-EXL3 @ <span class="faint">main</span></td>
-            <td class="mono">12</td>
-            <td class="mono">68.2 GB</td>
+          <tr data-name="deepseek-v4-flash unsloth/deepseek-v4-flash-0731" data-runtime="vllm" data-pl="missing" data-size="41.5" data-added="2026-10-15">
+            <td><strong>DeepSeek-V4-Flash</strong><div class="mono faint">unsloth/DeepSeek-V4-Flash-0731 · rev 0731</div></td>
+            <td class="mono">vllm</td><td class="mono">41.5 GB</td><td class="mono">Oct 15</td>
+            <td><span class="chip chip--warn">all nodes push</span></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
+          </tr>
+          <tr data-name="qwen3-8b-q4 qwen/qwen3-8b-gguf q4_k_m mmproj" data-runtime="llama.cpp" data-pl="head" data-size="5.1" data-added="2026-10-14">
+            <td><strong>qwen3-8b-q4</strong><div class="mono faint">Qwen/Qwen3-8B-GGUF · Q4_K_M · mmproj</div></td>
+            <td class="mono">llama.cpp</td><td class="mono">5.1 GB</td><td class="mono">Oct 14</td>
+            <td><span class="chip chip--ok">all present</span></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
+          </tr>
+          <tr data-name="gemma-4-31b-it-q4 unsloth/gemma-4-31b-it-gguf ud-q4_k_xl" data-runtime="llama.cpp" data-pl="head" data-size="19.8" data-added="2026-10-13">
+            <td><strong>gemma-4-31b-it-q4</strong><div class="mono faint">unsloth/gemma-4-31B-it-GGUF · UD-Q4_K_XL</div></td>
+            <td class="mono">llama.cpp</td><td class="mono">19.8 GB</td><td class="mono">Oct 13</td>
+            <td><div class="row row--wrap"><span class="chip chip--ok">head ✓</span><span class="chip chip--muted">spark2 sync</span></div></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
+          </tr>
+          <tr data-name="glm-5.3-flash-exl3 dgx/glm-5.3-flash-exl3 mtp" data-runtime="vllm" data-pl="head" data-size="68.2" data-added="2026-10-12">
+            <td><strong>GLM-5.3-Flash-EXL3</strong><div class="mono faint">DGX/GLM-5.3-Flash-EXL3 · main · mtp</div></td>
+            <td class="mono">vllm</td><td class="mono">68.2 GB</td><td class="mono">Oct 12</td>
             <td><div class="row row--wrap"><span class="chip chip--ok">head ✓</span><span class="chip chip--ok">spark2 ✓</span><span class="chip chip--warn">spark3 push</span></div></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Serve</button><button class="btn btn--ghost btn--sm">Delete…</button></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
           </tr>
-          <tr>
-            <td><strong>qwen3-8b-q4</strong><div class="mono faint">mmproj · Qwen/Qwen3-8B-GGUF</div></td>
-            <td class="mono">llama.cpp</td>
-            <td class="mono">Qwen/Qwen3-8B-GGUF @ <span class="faint">Q4_K_M</span></td>
-            <td class="mono">3</td>
-            <td class="mono">5.1 GB</td>
+          <tr data-name="glm-5.3-flash-dflash2 dgx/glm-5.3-flash-dflash2 mtp draft" data-runtime="vllm" data-pl="head" data-size="8.1" data-added="2026-10-12">
+            <td><strong>glm-5.3-flash-dflash2</strong><div class="mono faint">DGX/GLM-5.3-Flash-DFlash2 · draft</div></td>
+            <td class="mono">vllm</td><td class="mono">8.1 GB</td><td class="mono">Oct 12</td>
+            <td><div class="row row--wrap"><span class="chip chip--ok">nas ✓</span><span class="chip chip--ok">head ✓</span></div></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
+          </tr>
+          <tr data-name="phi-4-mini microsoft/phi-4-mini-gguf q8_0" data-runtime="llama.cpp" data-pl="head" data-size="2.7" data-added="2026-10-08">
+            <td><strong>phi-4-mini</strong><div class="mono faint">microsoft/phi-4-mini-GGUF · Q8_0</div></td>
+            <td class="mono">llama.cpp</td><td class="mono">2.7 GB</td><td class="mono">Oct 8</td>
             <td><span class="chip chip--ok">all present</span></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Serve</button><button class="btn btn--ghost btn--sm">Delete…</button></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
           </tr>
-          <tr>
-            <td><strong>gemma-4-31b-it-q4</strong></td>
-            <td class="mono">llama.cpp</td>
-            <td class="mono">unsloth/gemma-4-31B-it-GGUF @ <span class="faint">UD-Q4_K_XL</span></td>
-            <td class="mono">4</td>
-            <td class="mono">19.8 GB</td>
-            <td><div class="row row--wrap"><span class="chip chip--ok">head ✓</span><span class="chip chip--muted">spark2 sync</span><span class="chip chip--muted">spark3 sync</span></div></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Serve</button><button class="btn btn--ghost btn--sm">Delete…</button></td>
+          <tr data-name="llama-4-scout-q4 meta-llama/llama-4-scout gguf" data-runtime="llama.cpp" data-pl="head" data-size="24.3" data-added="2026-10-05">
+            <td><strong>llama-4-scout-q4</strong><div class="mono faint">meta-llama/Llama-4-Scout-GGUF · Q4_K_M</div></td>
+            <td class="mono">llama.cpp</td><td class="mono">24.3 GB</td><td class="mono">Oct 5</td>
+            <td><div class="row row--wrap"><span class="chip chip--ok">head ✓</span><span class="chip chip--ok">spark2 ✓</span></div></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
           </tr>
-          <tr>
-            <td><strong>DeepSeek-V4-Flash</strong></td>
-            <td class="mono">vllm</td>
-            <td class="mono">unsloth/DeepSeek-V4-Flash-0731 @ <span class="faint">0731</span></td>
-            <td class="mono">9</td>
-            <td class="mono">41.5 GB</td>
-            <td><div class="row row--wrap"><span class="chip chip--ok">nas ✓</span><span class="chip chip--warn">all nodes push</span></div></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Serve</button><button class="btn btn--ghost btn--sm">Delete…</button></td>
-          </tr>
-          <tr>
-            <td><strong>phi-4-mini</strong></td>
-            <td class="mono">llama.cpp</td>
-            <td class="mono">microsoft/phi-4-mini-GGUF @ <span class="faint">Q8_0</span></td>
-            <td class="mono">2</td>
-            <td class="mono">2.7 GB</td>
-            <td><span class="chip chip--ok">all present</span></td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Serve</button><button class="btn btn--ghost btn--sm">Delete…</button></td>
+          <tr data-name="mistral-small-3.2-q5 mistralai/mistral-small-3.2 q5_k_m" data-runtime="llama.cpp" data-pl="missing" data-size="8.9" data-added="2026-09-30">
+            <td><strong>mistral-small-3.2-q5</strong><div class="mono faint">mistralai/Mistral-Small-3.2 · Q5_K_M</div></td>
+            <td class="mono">llama.cpp</td><td class="mono">8.9 GB</td><td class="mono">Sep 30</td>
+            <td><span class="chip chip--muted">nas only</span></td>
+            <td style="text-align:right; white-space:nowrap;"><button class="btn btn--secondary btn--sm">Serve</button><button class="btn btn--ghost btn--sm row-open">Details</button></td>
           </tr>
         </tbody>
       </table>
+      <div class="pagerow">
+        <span class="stat__sub" id="count">8 of 14 models · page 1 / 2</span>
+        <div class="seg" role="group" aria-label="Pagination">
+          <button disabled aria-label="Previous page">‹</button>
+          <button class="is-active">1</button>
+          <button>2</button>
+          <button aria-label="Next page">›</button>
+        </div>
+      </div>
     </div>
   </section>
-
-  <section class="cols cols-2">
-    <article class="card">
-      <div class="card__head"><h3>Download queue</h3><span class="mono faint">server-built YAML · full preflight</span></div>
-      <div class="card__body stack">
-        <div class="cols" style="grid-template-columns: 1.6fr 1fr 1fr;">
-          <div class="field"><label>Source (HF id or URL)</label><input class="input mono" value="DGX/GLM-5.3-Flash-DFlash2" readonly></div>
-          <div class="field"><label>Local name</label><input class="input mono" value="glm-5.3-flash-dflash2" readonly></div>
-          <div class="field"><label>Runtime</label><input class="input" value="auto → vllm" readonly></div>
-        </div>
-        <div class="cols" style="grid-template-columns: 1.6fr 1fr 1fr;">
-          <div class="field"><label>Source</label><input class="input mono" value="unsloth/gemma-4-12B-it-GGUF" readonly></div>
-          <div class="field"><label>Quantization</label><input class="input mono" value="UD-Q4_K_XL" readonly></div>
-          <div class="field"><label>mmproj</label><input class="input mono" value="mmproj-F16.gguf" readonly></div>
-        </div>
-        <div class="row row--between">
-          <span class="stat__sub">2 entries · ~88.0 GB · resumable staging · validates symlinks first</span>
-          <div class="row"><button class="btn btn--secondary btn--sm">+ Row</button><button class="btn btn--secondary btn--sm">Queue download</button></div>
-        </div>
-      </div>
-    </article>
-    <article class="card">
-      <div class="card__head"><h3>Store hygiene</h3><span class="mono faint">dry-run → armed apply</span></div>
-      <div class="card__body">
-        <dl class="kv">
-          <dt>staging</dt><dd>1 resumable · 0 orphaned</dd>
-          <dt>objects</dt><dd>14 active · 2 unreferenced</dd>
-          <dt>active refs</dt><dd>14 valid · 0 repairable</dd>
-          <dt>quarantine</dt><dd>empty</dd>
-        </dl>
-        <div class="row" style="margin-top: 12px;">
-          <button class="btn btn--secondary btn--sm">doctor --json</button>
-          <button class="btn btn--secondary btn--sm">gc-objects (dry-run)</button>
-          <button class="btn btn--danger btn--sm">Delete GLM-5.3-Flash-EXL3…</button>
-        </div>
-        <p class="stat__sub" style="margin-top: 10px;">Delete states the managed store target and requires an armed <span class="mono">--apply --yes</span> confirmation.</p>
-      </div>
-    </article>
-  </section>
 </main>
+
+<!-- Detail drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-label="Model details">
+  <div class="card__head">
+    <div class="row"><h3 style="font-size:17px;">GLM-5.3-Flash-EXL3</h3><span class="chip chip--ok">vllm</span></div>
+    <button class="iconbtn" id="drawerClose" aria-label="Close details">✕</button>
+  </div>
+  <div class="card__body stack" style="overflow:auto;">
+    <dl class="kv">
+      <dt>repo @ rev</dt><dd>DGX/GLM-5.3-Flash-EXL3 @ main</dd>
+      <dt>object</dt><dd>models/DGX/GLM-5.3-Flash-EXL3/COMMIT--SELECTION</dd>
+      <dt>size</dt><dd>68.2 GB · 12 files</dd>
+      <dt>added</dt><dd>Oct 12, 2026</dd>
+      <dt>companions</dt><dd>mtp · DGX/GLM-5.3-Flash-DFlash2</dd>
+      <dt>serve-command</dt><dd class="mono" style="text-align:right">vllm serve {path} …</dd>
+    </dl>
+    <div>
+      <span class="label">Placement</span>
+      <div class="stack" style="margin-top: 8px;">
+        <div class="row row--between"><span class="mono">head</span><span class="chip chip--ok">present</span><button class="btn btn--ghost btn--sm">Serve</button></div>
+        <div class="row row--between"><span class="mono">spark2</span><span class="chip chip--ok">present</span><span class="stat__sub">—</span></div>
+        <div class="row row--between"><span class="mono">spark3</span><span class="chip chip--warn">absent</span><button class="btn btn--secondary btn--sm">Push from spark2</button></div>
+      </div>
+      <p class="stat__sub" style="margin-top: 8px;">spark3 capacity ok — free 1.2 TB · needs 68.2 − 50 reserve</p>
+    </div>
+    <div>
+      <span class="label">Model card</span>
+      <p class="muted" style="font-size: 13px; margin: 6px 0 0;">GLM-5.3-Flash — 355B-A32B MoE with MTP drafting, EXL3 6-bit quantized. Context 262,144. Recommended temp 0.6 / top-p 0.95… <span class="faint">(RUN.md · README.md)</span></p>
+    </div>
+    <div class="row">
+      <button class="btn btn--danger btn--sm">Delete from NAS…</button>
+      <span class="stat__sub">dry-run plan first · armed --apply --yes</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Download modal -->
+<div class="modal" id="dlModal" role="dialog" aria-modal="true" aria-label="Download from Hugging Face">
+  <div class="modal__panel">
+    <div class="card__head">
+      <div class="row"><h3>Download from Hugging Face</h3><span class="mono faint">server-built YAML · full preflight</span></div>
+      <button class="iconbtn" id="dlClose" aria-label="Close">✕</button>
+    </div>
+    <div class="card__body stack">
+      <div class="cols" style="grid-template-columns: 1.6fr 1fr 1fr;">
+        <div class="field"><label>Source (HF id or URL)</label><input class="input mono" value="DGX/GLM-5.3-Flash-DFlash2"></div>
+        <div class="field"><label>Local name</label><input class="input mono" value="glm-5.3-flash-dflash2"></div>
+        <div class="field"><label>Runtime</label><input class="input" value="auto → vllm"></div>
+      </div>
+      <div class="cols" style="grid-template-columns: 1.6fr 1fr 1fr;">
+        <div class="field"><label>Source</label><input class="input mono" value="unsloth/gemma-4-12B-it-GGUF"></div>
+        <div class="field"><label>Quantization</label><input class="input mono" value="UD-Q4_K_XL"></div>
+        <div class="field"><label>mmproj</label><input class="input mono" value="mmproj-F16.gguf"></div>
+      </div>
+      <div class="banner">
+        <span class="stat__sub">preflight: 2 entries · ~88.0 GB · capacity ok (2.4 used · 5.6 free − 0.5 reserve) · symlinks verified · resumable staging</span>
+      </div>
+      <div class="row row--between">
+        <button class="btn btn--ghost btn--sm">+ Add row</button>
+        <div class="row"><button class="btn btn--secondary btn--sm" id="dlCancel">Cancel</button><button class="btn btn--primary btn--sm">Queue download</button></div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <span class="mock-note">Static mockup · data illustrative</span>
 <script>
@@ -205,6 +274,56 @@
     document.documentElement.dataset.theme = d ? "light" : "dark";
     try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} paint(); };
   paint();
+
+  // Search + filters + sort (mock-level, real contract)
+  var rows = Array.prototype.slice.call(document.querySelectorAll("#cat tbody tr"));
+  var filters = { runtime: { "vllm": true, "llama.cpp": true }, pl: { head: true, any: true, missing: true } };
+  var sortMode = "added";
+  function apply() {
+    var q = document.getElementById("q").value.trim().toLowerCase(), n = 0;
+    rows.forEach(function(r){
+      var okQ = !q || (r.dataset.name + " " + r.textContent.toLowerCase()).indexOf(q) !== -1;
+      var okR = filters.runtime[r.dataset.runtime];
+      var okP = filters.pl[r.dataset.pl] || (r.dataset.pl === "head" && filters.pl.any && r.textContent.indexOf("✓") !== -1);
+      var show = okQ && okR && okP;
+      r.classList.toggle("is-hidden", !show); if (show) n++;
+    });
+    var body = document.querySelector("#cat tbody");
+    rows.sort(function(a,b){
+      if (sortMode === "name") return a.dataset.name.localeCompare(b.dataset.name);
+      if (sortMode === "size") return b.dataset.size - a.dataset.size;
+      return b.dataset.added.localeCompare(a.dataset.added);
+    }).forEach(function(r){ body.appendChild(r); });
+    document.getElementById("count").textContent = n + " of 14 models · page 1 / " + (n > 25 ? Math.ceil(n / 25) : 1);
+  }
+  document.getElementById("q").addEventListener("input", apply);
+  document.getElementById("sort").addEventListener("change", function(e){ sortMode = e.target.value; apply(); });
+  document.querySelectorAll(".fchip").forEach(function(c){
+    c.addEventListener("click", function(){
+      var k = c.dataset.filter, v = c.dataset.value;
+      filters[k][v] = !filters[k][v]; c.classList.toggle("is-on", filters[k][v]); apply();
+    });
+  });
+  apply();
+
+  // Drawer
+  var drawer = document.getElementById("drawer"), scrim = document.getElementById("scrim");
+  function openDrawer(){ drawer.classList.add("is-open"); scrim.classList.add("is-open"); }
+  function closeDrawer(){ drawer.classList.remove("is-open"); scrim.classList.remove("is-open"); }
+  document.querySelectorAll(".row-open").forEach(function(b){ b.addEventListener("click", openDrawer); });
+  document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+  scrim.addEventListener("click", closeDrawer);
+
+  // Download modal
+  var dl = document.getElementById("dlModal");
+  document.getElementById("dlOpen").addEventListener("click", function(){ dl.classList.add("is-open"); });
+  document.getElementById("dlClose").addEventListener("click", function(){ dl.classList.remove("is-open"); });
+  document.getElementById("dlCancel").addEventListener("click", function(){ dl.classList.remove("is-open"); });
+
+  // Hygiene popover
+  var pop = document.getElementById("hygPop");
+  document.getElementById("hygOpen").addEventListener("click", function(e){ e.stopPropagation(); pop.classList.toggle("is-open"); });
+  document.addEventListener("click", function(e){ if (!pop.contains(e.target)) pop.classList.remove("is-open"); });
 </script>
 </body>
 </html>
