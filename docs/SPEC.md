@@ -159,6 +159,10 @@ flowchart LR
   joins **HF metadata** (repo, revision, quantization, companions, cards) so
   users can find models and create recipes without leaving the app.
 - Operations (all as supervised jobs with live output, one active per node):
+  - **modelctl provisioning**: agent checks `uv` + `modelctl --version`
+    against the pinned minimum and installs/upgrades from the pinned GitHub
+    release (`uv tool install --force`); the release wheel ships inside the
+    agent bundle as the offline fallback. Runs before any model op on a node.
   - **Search/download** on the NAS: HF id/URL → manifest generation → staged
     resumable download → validate → atomic publish → activate. GGUF
     quantization selection; mmproj/MTP companions detected. Queue YAML built

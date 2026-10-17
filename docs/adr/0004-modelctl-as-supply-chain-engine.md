@@ -32,7 +32,13 @@ must "sync models from NAS" and "sync models between DGXs".
 ### Option 1: Agent shells out to modelctl (chosen)
 
 The agent requires `modelctl` on model-ops nodes (NAS + Sparks), pinned to a
-minimum version, with an install/upgrade job (`uv tool install`). All mutations
+minimum version, with an install/upgrade job. **Provisioning** (supervised
+job, streamed output): check `uv` (install via the standalone installer if
+missing) → `uv tool install --force` from the pinned **GitHub release tag**
+(`piresbruno/modelctl`) → verify `modelctl --version` ≥ pin. Offline /
+private-repo fallback: the release wheel ships **inside the agent bundle**
+and installs from local file. `uv tool list`-style upgrades re-run the same
+job with a new pin. All mutations
 run as supervised jobs with streamed output: `download`, `queue`, `sync-local`,
 `push`, `delete`, `doctor`, `repair-active`, `catalog refresh`. Reads prefer
 `catalog.json` (schema 3) with a live-scan fallback implemented natively in
