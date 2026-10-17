@@ -17,6 +17,23 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 | M6 | [IRI-007](../tasks/IRI-007-m6-benchmarks.md) | Decode/prefill/quality/tooleval | Four benches run + persist against live engine |
 | M7 | [IRI-008](../tasks/IRI-008-m7-analytics-packaging.md) | Analytics lenses, disk hygiene, multi-arch release | Analytics views; cleanup verified; arm64 agent deployed |
 
+Tracking lives on Jira (project [IR — Irori](https://blastersystems.atlassian.net/browse/IR)):
+each milestone is an epic sliced into deliverable-sized tickets. The CI/CD
+epic deploys the server container to the Proxmox docker VM following
+uptime-monitoring's `cd-dev.yml` pattern (`dev-*` tag → test gate → git-bundle
+deploy → 60×2s health gate → auto-rollback).
+
+| Milestone | Epic |
+|---|---|
+| M1 Walking skeleton | [IR-1](https://blastersystems.atlassian.net/browse/IR-1) |
+| CI/CD — GitHub Actions → Proxmox docker VM | [IR-10](https://blastersystems.atlassian.net/browse/IR-10) |
+| M2 Telemetry core | [IR-14](https://blastersystems.atlassian.net/browse/IR-14) |
+| M3 Inference monitoring | [IR-21](https://blastersystems.atlassian.net/browse/IR-21) |
+| M4 Model supply chain | [IR-24](https://blastersystems.atlassian.net/browse/IR-24) |
+| M5 Serving orchestration | [IR-29](https://blastersystems.atlassian.net/browse/IR-29) |
+| M6 Benchmarks | [IR-33](https://blastersystems.atlassian.net/browse/IR-33) |
+| M7 Analytics, hygiene & packaging | [IR-37](https://blastersystems.atlassian.net/browse/IR-37) |
+
 ## M0 — Governance & foundations ✅ (this task)
 
 - agentic-bootstrap scaffold (`--platform all`) — done 2026-10-16, validate green.
