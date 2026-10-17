@@ -24,6 +24,9 @@ roles + compose.
 - [ ] Snapshot contract shared via `packages/core` (zod-validated on ingest).
 - [ ] DS: tokens (light/dark), fonts, `.brand-mark` lockup ("Irori" +
       endorsement), favicon, theme persist — visually verified light/dark.
+- [ ] Mobile 390px: no horizontal page overflow on any screen; topbar two-row
+      with scrollable nav; drawers/wizard full-bleed sheets; tables scroll
+      with sticky first column; touch targets ≥ 44px.
 - [ ] `pnpm test`, `pnpm build`, `.agentic/bin/validate`, docs-check green.
 
 ## Scope

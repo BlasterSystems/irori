@@ -208,6 +208,10 @@ button { font: inherit; color: inherit; }
 .spark { display: block; width: 100%; }
 .spark line, .spark path, .spark polyline { vector-effect: non-scaling-stroke; }
 
+/* ── Shared chart rules ────────────────────────────────────────────── */
+svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-effect: non-scaling-stroke; }
+.chart { display: block; width: 100%; }
+
 /* ── Mockup-only helpers ───────────────────────────────────────────── */
 @media (max-width: 1080px) {
   .topbar__in { gap: var(--space-3); }
@@ -219,3 +223,67 @@ button { font: inherit; color: inherit; }
 .ghost-grid { border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--faint);
   font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
   display: flex; align-items: center; justify-content: center; min-height: 64px; }
+
+/* ── Mobile tiers (must stay after the 1080 block to cascade) ─────── */
+/* ≤720 compact reflow; ≤480 phone fine-tuning. Page-local classes are
+   overridden with body-prefixed specificity (they live in per-page <style>). */
+@media (max-width: 720px) {
+  .topbar { height: auto; }
+  .topbar__in { flex-wrap: wrap; height: auto; padding: 0 16px; gap: var(--space-2); }
+  .brand { margin-right: auto; min-width: 0; padding: 10px 0 8px; }
+  .topbar .chip, .topbar .iconbtn { flex: none; }
+  .nav { order: 3; flex: 1 0 100%; margin: 0 -16px; padding: 0 8px; overflow-x: auto;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 28px), transparent); }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { flex: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; }
+  .container { padding: 0 16px; }
+  .pagehead { flex-direction: column; align-items: flex-start; gap: var(--space-3); }
+  .pagehead > .row { flex-wrap: wrap; width: 100%; }
+  .row { flex-wrap: wrap; }
+  .card__head .row { flex-wrap: wrap; }
+  .toolbar { flex-wrap: wrap; }
+  .cols-2, .cols-3, .cols-4 { grid-template-columns: 1fr; }
+  .statgrid, .statgrid--3, .statgrid--6 { grid-template-columns: repeat(2, 1fr); }
+  .stat__value { font-size: 17px; }
+  .statgrid .stat__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg button { flex: none; min-height: 38px; }
+  .tabs { overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .btn, .btn--sm, .input, .select { min-height: 44px; }
+  .iconbtn { width: 44px; height: 44px; }
+  input[type="checkbox"] { width: 22px; height: 22px; }
+  body .drawer, body .modal__panel, body .wizard { width: 100%; max-width: 100%; min-width: 0; }
+  body .drawer { border-left: 0; visibility: hidden; }
+  body .drawer.is-open { visibility: visible; }
+  body .modal__panel { min-height: 100dvh; border-radius: 0; display: flex; flex-direction: column; }
+  body .backdrop { padding: 0; align-items: stretch; }
+  body .wizard { min-height: 100dvh; border: 0; border-radius: 0; display: flex; flex-direction: column; }
+  body .wizard .row { flex-wrap: wrap; }
+  body .steps { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  body .wizard > .card__head:last-child { position: sticky; bottom: 0; margin-top: auto; background: var(--surface);
+    border-top: 1px solid var(--border); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .drawer__body { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .card__body--flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .card__body--flush .table { min-width: 640px; }
+  .card__body--flush th:first-child, .card__body--flush td:first-child { position: sticky; left: 0; background: var(--surface); }
+  .card__body--flush thead th:first-child { background: var(--surface-2); z-index: 1; }
+  .table .btn--sm { min-height: 44px; }
+  body .hyrow { grid-template-columns: 22px 1fr auto; grid-template-areas: "box name size" "box bar bar" "box items items";
+    padding: 10px 16px; }
+  body .hyrow > input[type="checkbox"] { grid-area: box; }
+  body .hyrow__name { grid-area: name; } body .hyrow__bar { grid-area: bar; }
+  body .hyrow__items { grid-area: items; } body .hyrow__size { grid-area: size; }
+  body .stage { grid-template-columns: 1fr auto; }
+  body .stage > :first-child { grid-column: 1 / -1; }
+  body .setup__head { flex-wrap: wrap; row-gap: 6px; }
+  body .hyhist { grid-template-columns: 1fr auto; }
+  body .hyhist > :first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 480px) {
+  .chart { height: 140px; }
+  .mock-note { display: none; }
+  .log { font-size: 11.5px; }
+}

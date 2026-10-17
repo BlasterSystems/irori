@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Analytics · Irori</title>
 <link rel="stylesheet" href="irori.css">
 <script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
@@ -29,7 +29,7 @@
   <div class="pagehead">
     <div>
       <h1>Analytics</h1>
-      <p>From rollups — memory, decode, power, tokens. <span class="mono faint">hourly buckets · 90d retention</span></p>
+      <p>From rollups — memory, decode, power, temps, tokens. <span class="mono faint">temps minute buckets · 7d · hourly · 90d</span></p>
     </div>
     <div class="row">
       <div class="seg" role="group" aria-label="Group by">
@@ -45,6 +45,7 @@
     <button role="tab" aria-selected="false">Memory</button>
     <button class="is-active" role="tab" aria-selected="true">Decode</button>
     <button role="tab" aria-selected="false">Power</button>
+    <button role="tab" aria-selected="false">Temps</button>
     <button role="tab" aria-selected="false">Tokens</button>
   </div>
 
@@ -76,6 +77,82 @@
       </div>
       <div class="row" style="margin-top: 10px;">
         <span class="stat__sub">peak 168.4 tok/s (spark1 · 09:40) · cluster avg 121.7 · workers idle-lane ≈ 0</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Temps lens -->
+  <section class="card" style="margin-bottom: 12px;">
+    <div class="card__head"><h3>Fleet temperatures</h3><span class="mono faint">latest snapshot · hottest first</span></div>
+    <div class="card__body">
+      <div class="cols cols-4">
+        <div class="subcard" style="padding: 10px 12px;">
+          <div class="row row--between"><span class="mono">spark1</span><span class="stat__sub">peak 24h 86.2°</span></div>
+          <div class="row row--wrap" style="margin-top: 6px;"><span class="chip">GPU 62°C</span><span class="chip">CPU 57°C</span></div>
+        </div>
+        <div class="subcard" style="padding: 10px 12px;">
+          <div class="row row--between"><span class="mono">spark2</span><span class="stat__sub">peak 24h 63.8°</span></div>
+          <div class="row row--wrap" style="margin-top: 6px;"><span class="chip">GPU 61°C</span><span class="chip">CPU 62°C</span></div>
+        </div>
+        <div class="subcard" style="padding: 10px 12px;">
+          <div class="row row--between"><span class="mono">spark3</span><span class="stat__sub">peak 24h 66.2°</span></div>
+          <div class="row row--wrap" style="margin-top: 6px;"><span class="chip">GPU 58°C</span><span class="chip">CPU 57°C</span></div>
+        </div>
+        <div class="subcard" style="padding: 10px 12px;">
+          <div class="row row--between"><span class="mono">nas</span><span class="stat__sub">peak 24h 44.0°</span></div>
+          <div class="row row--wrap" style="margin-top: 6px;"><span class="chip chip--muted">GPU —</span><span class="chip">CPU 41°C</span></div>
+        </div>
+      </div>
+      <p class="stat__sub" style="margin-top: 10px;">≥85 warn ◇ · ≥90 critical ▫ · GPU guides apply to the GPU series · nas reports CPU only</p>
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom: 12px;">
+    <div class="card__head">
+      <div class="row"><h3>GPU · °C</h3><span class="chip">guides 85 · 90</span></div>
+      <div class="row row--wrap">
+        <span class="chip chip--ok">GPU · max of 3</span>
+        <span class="chip chip--warn"><span style="display:inline-block;width:12px;border-top:2px dashed var(--thread);"></span>&nbsp;throttle events</span>
+      </div>
+    </div>
+    <div class="card__body">
+      <div class="row row--between" style="margin-bottom: 4px;">
+        <span class="label">100 °C</span><span class="label">guides (GPU) 85 · 90</span>
+      </div>
+      <svg class="chart" viewBox="0 0 640 170" preserveAspectRatio="none" role="img" aria-label="Fleet GPU temperature max, 24 hours">
+        <g stroke="var(--grid)" stroke-width="1">
+          <line x1="0" y1="42" x2="640" y2="42"/><line x1="0" y1="84" x2="640" y2="84"/>
+          <line x1="0" y1="126" x2="640" y2="126"/>
+        </g>
+        <line x1="0" y1="25.5" x2="640" y2="25.5" stroke="var(--rule-2)" stroke-width="1" stroke-dasharray="2 4"/>
+        <line x1="0" y1="17" x2="640" y2="17" stroke="var(--thread)" stroke-width="1" stroke-dasharray="2 4"/>
+        <line x1="258" y1="0" x2="258" y2="170" stroke="var(--thread)" stroke-width="1" stroke-dasharray="1 3"/>
+        <path fill="none" stroke="var(--ink)" stroke-width="1.5" d="M0,93.5 C60,95 120,95 180,90 C220,87 235,74 250,40 C256,26 262,24 268,36 C300,48 400,58 640,64.6"/>
+      </svg>
+      <div class="row row--between" style="margin-top: 6px;">
+        <span class="label">00:00</span><span class="label">06:00</span><span class="label">12:00</span><span class="label">18:00</span><span class="label">now</span>
+      </div>
+      <div class="row" style="margin-top: 10px;">
+        <span class="stat__sub">peak GPU 86.2° (spark1 · 09:40, during run-042) · fleet max now 62° · margin to throttle 23°</span>
+      </div>
+      <div class="row" style="margin-top: 4px;">
+        <span class="stat__sub">09:40 · spark1 GPU crossed 85° for 4m · no throttle flag · 09:12 · spark3 hw thermal slowdown cleared · 41 min</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-bottom: 12px;">
+    <div class="card__head">
+      <div class="row"><h3>CPU (pkg) · °C</h3></div>
+      <div class="row row--wrap"><span class="chip">CPU · max of 3</span></div>
+    </div>
+    <div class="card__body">
+      <svg class="chart" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Fleet CPU package temperature max, 24 hours">
+        <g stroke="var(--grid)" stroke-width="1"><line x1="0" y1="30" x2="600" y2="30"/><line x1="0" y1="60" x2="600" y2="60"/><line x1="0" y1="90" x2="600" y2="90"/></g>
+        <path fill="none" stroke="var(--ink-2)" stroke-width="1.5" stroke-dasharray="4 3" d="M0,69.6 C80,71 160,70 240,68 C300,66 340,60 380,46 C420,50 500,46 600,45.6"/>
+      </svg>
+      <div class="row row--between" style="margin-top: 8px;">
+        <span class="stat__sub">peak CPU 62.0° (spark2 · 09:41) · fleet max now 62° · spark1 57 · spark3 57 · nas 41</span>
       </div>
     </div>
   </section>

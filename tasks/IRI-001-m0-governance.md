@@ -83,6 +83,14 @@ from agreed ground truth.
   threshold chips + DISK barrows on overview, Disk hygiene… + 91% kv on
   node-head, placement tie-ins in models drawer + cleanup result. SPEC §11.6
   UI contract; IRI-008 acceptance extended.
+- Round 4 (2026-10-17, PM CurlyGull + UX SoreRooster, mobile 390px captures):
+  mobile tiers 720/480 in irori.css (two-row scrollable topbar, stacked
+  pageheads, 1-col grids, full-bleed drawers/sheets + sticky wizard footer,
+  44px targets, .card__body--flush table scroll w/ sticky first column,
+  hyrow/stage/hyhist regrids, chart vector-effect + .chart class, viewport-
+  fit metas) + Analytics **Temps lens** (fleet strip shape-tiered ◇/▫,
+  fleet-max GPU/CPU charts with 85/90 guides + throttle/crossing markers,
+  7d minute buckets). SPEC §4/§9; PLAN M2; IRI-002/IRI-008.
 - Docs-check: run after skills + README land (see M0 completion).
 
 ## Review
