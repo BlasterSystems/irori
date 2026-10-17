@@ -128,6 +128,12 @@ nevertheless, it is built on top of ideas and products from:
 - **C. Michael Gibbs** — [MikeGibbsOnyx](https://github.com/MikeGibbsOnyx) —
   and **Nyx Voss** (Onyx AI Labs) — the macOS (darwin) SSH collectors in
   sparkDash, whose unit-collector pattern Irori's agent generalizes.
+- **[agentic-bootstrap](https://github.com/piresbruno/agentic-bootstrap)** —
+  the provider-neutral project bootstrap tool that generated this
+  repository's scaffold (workspace layout, agent instructions, validation
+  gates) via `agentic-bootstrap init --platform all`; the generated
+  configuration is maintained per
+  [docs/AGENT_GUIDED.md](docs/AGENT_GUIDED.md).
 
 Irori replaces and absorbs the maintainer's own predecessor projects — see
 **Dependencies** below for the one that lives on.
