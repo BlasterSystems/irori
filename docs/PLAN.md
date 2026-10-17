@@ -78,13 +78,15 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 ## M5 — Serving orchestration (≈1 week)
 
 - **Setup wizard**: type (single/cluster ≤ 8 nodes) → model (NAS search or
-  chained HF download) → per-node existence check → start/stop script paths
-  validated per node (`test -x`, re-checked at every start) → staged
-  placement transfers (HF→NAS→head→workers, %/rate/ETA/cancel, capacity
-  math, busy-node warning) → launch.
+  chained HF download) → per-node existence check → **one start/stop script
+  pair on the head** (scripts own ports/config and orchestrate workers),
+  validated per start (`test -x`; stop required, fallback: recorded process
+  group) → staged placement transfers (HF→NAS→head→workers, %/rate/ETA/
+  cancel, capacity math, busy-node warning) → launch. Optional env exports
+  (MODEL_NAME/PORT/EXTRA_ARGS/MODEL_PATH) for scripts that want them.
 - **Setup cards UI** (homelab scale) + detail drawer: streamed engine logs,
   placement history, edit/duplicate/remove; armed stop required (fallback:
-  recorded process group); env contract MODEL_NAME/PORT/EXTRA_ARGS/MODEL_PATH.
+  recorded process group).
 - **Exit**: serve GLM-5.3-flash cluster via the wizard: model staged
   NAS→head→worker, scripts validated, cluster started, logs streamed in UI.
 
