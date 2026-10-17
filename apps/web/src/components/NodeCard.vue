@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import type { HardwareSnapshot, NodeInfo } from "@irori/core";
 import { computeCardData } from "../card-data";
+import { nodeHash } from "../router";
 
 const props = defineProps<{
   node: NodeInfo;
@@ -12,7 +13,7 @@ const card = computed(() => computeCardData(props.node, props.snapshot));
 </script>
 
 <template>
-  <article class="card">
+  <a class="card card--link" :href="nodeHash(node.id)" :aria-label="`Open ${card.name} detail`">
     <div class="card__head">
       <div class="row">
         <h3>{{ card.name }}</h3>
@@ -36,5 +37,11 @@ const card = computed(() => computeCardData(props.node, props.snapshot));
       </template>
       <p v-else class="muted">waiting for first snapshot</p>
     </div>
-  </article>
+  </a>
 </template>
+
+<style scoped>
+.card--link {
+  display: block;
+}
+</style>

@@ -2,8 +2,22 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "./live";
 import NodeCard from "./components/NodeCard.vue";
+import NodeDetail from "./components/NodeDetail.vue";
+import { parseHash, type Route } from "./router";
 
 const { sortedNodes, connected, lastEventAgeMs } = live;
+
+const route = ref<Route>(
+  parseHash(typeof location === "undefined" ? "" : location.hash),
+);
+
+function onHashChange(): void {
+  route.value = parseHash(location.hash);
+}
+
+const detailNodeId = computed(() =>
+  route.value.view === "node" ? route.value.id : null,
+);
 
 const totalCount = computed(() => sortedNodes.value.length);
 const onlineCount = computed(
@@ -32,21 +46,25 @@ function toggleTheme(): void {
 }
 
 onMounted(() => {
+  window.addEventListener("hashchange", onHashChange);
   void live.init().catch(() => {});
 });
-onUnmounted(() => live.stop());
+onUnmounted(() => {
+  window.removeEventListener("hashchange", onHashChange);
+  live.stop();
+});
 </script>
 
 <template>
   <header class="topbar">
     <div class="topbar__in">
-      <a class="brand" href="/" aria-label="Irori home">
+      <a class="brand" href="#/" aria-label="Irori home">
         <span class="brand-mark" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
         <span class="brand-text"><span class="brand-name">Irori</span><span class="brand-endorsement">A BlasterSystems product</span></span>
       </a>
       <nav class="nav" aria-label="Primary">
-        <a href="/" class="is-active" aria-current="page">Overview</a>
-        <a>Nodes</a>
+        <a href="#/" :class="{ 'is-active': route.view === 'overview' }" :aria-current="route.view === 'overview' ? 'page' : undefined">Overview</a>
+        <a :class="{ 'is-active': route.view === 'node' }" :aria-current="route.view === 'node' ? 'page' : undefined">Nodes</a>
         <a>Models</a>
         <a>Serve</a>
         <a>Analytics</a>
@@ -62,23 +80,26 @@ onUnmounted(() => live.stop());
   </header>
 
   <main class="container page">
-    <div class="pagehead">
-      <div>
-        <h1>Fleet</h1>
-        <p><span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online<template v-if="ageText"> · last event {{ ageText }} ago</template></span></p>
+    <NodeDetail v-if="detailNodeId !== null" :node-id="detailNodeId" />
+    <template v-else>
+      <div class="pagehead">
+        <div>
+          <h1>Fleet</h1>
+          <p><span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online<template v-if="ageText"> · last event {{ ageText }} ago</template></span></p>
+        </div>
       </div>
-    </div>
 
-    <section v-if="totalCount > 0" class="cols cols-3">
-      <NodeCard
-        v-for="node in sortedNodes"
-        :key="node.id"
-        :node="node"
-        :snapshot="live.snapshots.get(node.id) ?? null"
-      />
-    </section>
-    <div v-else class="banner">
-      <span class="muted">No nodes registered. Add a node in the server config / API.</span>
-    </div>
+      <section v-if="totalCount > 0" class="cols cols-3">
+        <NodeCard
+          v-for="node in sortedNodes"
+          :key="node.id"
+          :node="node"
+          :snapshot="live.snapshots.get(node.id) ?? null"
+        />
+      </section>
+      <div v-else class="banner">
+        <span class="muted">No nodes registered. Add a node in the server config / API.</span>
+      </div>
+    </template>
   </main>
 </template>

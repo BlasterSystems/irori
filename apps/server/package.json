@@ -13,6 +13,7 @@
   "dependencies": {
     "@irori/core": "workspace:*",
     "@irori/db": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "express": "^5.1.0",
     "ws": "^8.18.3"
   },

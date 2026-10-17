@@ -2,11 +2,13 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   bigserial,
+  doublePrecision,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  real,
   text,
   timestamp,
   uniqueIndex,
@@ -63,6 +65,42 @@ export const settings = pgTable("settings", {
   value: jsonb("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Pre-aggregated snapshot buckets (ADR-0006). Watermark-guarded, idempotent:
+ * recompute always covers buckets >= the stored watermark. Temps keep
+ * min/avg/max (SPEC §4); other metrics average. `samples` counts merged rows.
+ */
+export const bucketGranularity = pgEnum("bucket_granularity", ["minute", "hour", "day"]);
+
+export const snapshotBuckets = pgTable(
+  "snapshot_buckets",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    granularity: bucketGranularity("granularity").notNull(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    samples: integer("samples").notNull().default(0),
+    cpuUsagePct: real("cpu_usage_pct"),
+    cpuTempC: real("cpu_temp_c"),
+    cpuTempMinC: real("cpu_temp_min_c"),
+    cpuTempMaxC: real("cpu_temp_max_c"),
+    packagePowerW: real("package_power_w"),
+    memUsedBytes: doublePrecision("mem_used_bytes"),
+    memTotalBytes: doublePrecision("mem_total_bytes"),
+    gpuUsagePct: real("gpu_usage_pct"),
+    gpuTempC: real("gpu_temp_c"),
+    gpuTempMinC: real("gpu_temp_min_c"),
+    gpuTempMaxC: real("gpu_temp_max_c"),
+    gpuPowerW: real("gpu_power_w"),
+    gpuMemUsedBytes: doublePrecision("gpu_mem_used_bytes"),
+    netRxBps: doublePrecision("net_rx_bps"),
+    netTxBps: doublePrecision("net_tx_bps"),
+  },
+  (t) => [uniqueIndex("snapshot_buckets_uq").on(t.nodeId, t.granularity, t.bucketStart)],
+);
 
 /** Generic secret store (SSH credentials, future per-node material). */
 export const secrets = pgTable(

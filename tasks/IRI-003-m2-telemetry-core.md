@@ -48,7 +48,31 @@ live UI (worker/head card split per SPEC §5).
 
 ## Validation evidence
 
-- (pending)
+- 2026-10-17: full build green; tests: core 9/9, agent 34/34 (GPU query-set
+  parse fixtures incl. `[N/A]`/throttle-mask variants, hwmon/rapl/cpufreq
+  fixture trees, unified-memory rule, mount/net filters), server 47/47
+  **db-backed** (bucket boundaries, GPU/net folds, idempotent recompute,
+  watermark advance, open-bucket skip, clock-jump via server-time-only
+  bucketing, retention, history API), web 61/61 (sparkline math, history
+  parse, detail data, router, DS markup guards). Research brief:
+  `docs/research/IRI-003-research-brief.md` (query set + GB10 semantics from
+  sparkControl production code; dgx1 SSH unreachable from here — real-Spark
+  verify deferred to LAN soak).
+- Two-node soak (this Mac + irori:agent-amd64 container on the docker VM
+  10.0.10.9), server against the real Proxmox dev DB (10.0.10.136): both
+  nodes `online:true` concurrently; VM agent streamed v2 fields live
+  (cpuTemp 44 °C via hwmon, per-core clocks, swap, storage, network; gpu []
+  tolerated on a GPU-less host); rollups advanced on the 60 s loop and
+  `GET /api/v1/nodes/:id/history?range=1h` served minute buckets
+  (29 samples/bucket). Headless (no browser attached).
+- v1-agent backward compat found & fixed mid-slice: `uuid`/`powerLimitW`/
+  `smClockMHz`/`smClockMaxMHz` are `.nullable().default(null)` so M1 agents'
+  snapshots still parse at ingest.
+- SSH fallback: snapshot shapes are transport-independent by construction
+  (`packages/core`; `transport: "ws" | "ssh"`); SSH exec wiring itself is
+  out of M2 scope per the task file.
+- `.agentic/bin/validate` + `.agentic/bin/docs-check` green; CI green on
+  push.
 
 ## Review
 
