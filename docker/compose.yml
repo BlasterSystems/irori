@@ -1,0 +1,51 @@
+# M1 bring-up: docker compose --profile dev up
+# Production: point DATABASE_URL at the Proxmox pgsql server (ADR-0002);
+# omit the dev profile and no local postgres is started.
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: server
+    image: irori:latest
+    ports:
+      - "3947:3947"
+    environment:
+      PORT: "3947"
+      DATABASE_URL: ${DATABASE_URL:-postgres://iroiri:iroiri@postgres:5432/iroiri}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY (openssl rand -hex 32)}
+    depends_on:
+      dev-postgres:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  agent:
+    image: irori:latest
+    # Container agent is for testing; primary install is bare-metal (SPEC §2).
+    profiles: ["agent"]
+    command: ["agent"]
+    environment:
+      IRORI_SERVER_URL: ws://server:3947/agent-ws
+      IRORI_NODE_TOKEN: ${IRORI_NODE_TOKEN:?set IRORI_NODE_TOKEN}
+
+  dev-postgres:
+    image: postgres:16-alpine
+    profiles: ["dev"]
+    environment:
+      POSTGRES_USER: iroiri
+      POSTGRES_PASSWORD: iroiri
+      POSTGRES_DB: iroiri
+    ports:
+      - "5432:5432"
+    volumes:
+      - dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iroiri"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  dev-pgdata:

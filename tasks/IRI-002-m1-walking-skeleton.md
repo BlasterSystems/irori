@@ -60,7 +60,26 @@ roles + compose.
 
 ## Validation evidence
 
-- (pending)
+- 2026-10-17: `pnpm build` green (all 5 packages); tests: core 9/9, server 32/32,
+  agent 10/10, web 16/16; db 4/4 **against a real Postgres 16 container**
+  (`IRORI_TEST_DATABASE_URL`, migrations + token encrypt/verify/rotate +
+  prune; CI will run this via service container).
+- Live smoke (this Mac as the agent machine): dockerized Postgres 16 →
+  `apps/server/dist/index.js` (boot log: listening / database migrated / hub
+  ready) → POST /api/v1/nodes (token returned once) → agent bundle
+  `apps/agent/dist/irori-agent.mjs` handshake → hello-ok → snapshots at 1 s.
+  Verified: `online:true`, `GET /api/v1/nodes/:id/snapshot` live payload,
+  SSE frames on `/api/v1/events` (snapshot + heartbeat), 30+ rows in
+  `snapshots` table; restart of the stack re-handshakes cleanly.
+- UI (browser): Overview renders the live spark1 card (CPU/MEM barrows,
+  HEAD/SPARK/ONLINE chips, Agent 0.1.0), LIVE·1s chip pulsing via SSE; theme
+  toggle verified dark + light; 390 px viewport → no horizontal overflow
+  (scrollWidth == clientWidth).
+- Docker: multi-stage build; server-role image boots, migrates against
+  remote Postgres, `/healthz` → `{"ok":true,"db":true}`; agent role bundles
+  `dist/irori-agent.mjs`. Compose in `docker/compose.yml` (dev postgres
+  profile).
+- `.agentic/bin/validate` + `.agentic/bin/docs-check` green.
 
 ## Review
 
