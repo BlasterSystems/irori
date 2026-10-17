@@ -3,6 +3,7 @@ import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { nodeCreateSchema, nodeInfoSchema, nodePatchSchema, type NodeInfo } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
+import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import type { AgentHub } from "./hub.js";
@@ -10,9 +11,14 @@ import type { AgentHub } from "./hub.js";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
 
+/** Builds a history response; null while degraded (no DB wired yet). */
+export type HistoryBuilder = (nodeId: string, range: HistoryRange) => Promise<HistoryResponse>;
+
 export interface AppDeps {
   /** Null while degraded (no/migrating DB): store-backed routes answer 503. */
   getStore: () => NodeStore | null;
+  /** Null while degraded: the history route answers 503. */
+  getHistory: () => HistoryBuilder | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   sse: SseHub;
@@ -116,6 +122,21 @@ export function createApp(deps: AppDeps): Express {
     const snapshot = deps.rings.latest(id);
     if (snapshot === undefined) return res.status(404).json({ error: "no snapshot available" });
     res.json(snapshot);
+  });
+
+  app.get("/api/v1/nodes/:id/history", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const range = req.query.range;
+    if (typeof range !== "string" || !isHistoryRange(range)) {
+      return res.status(400).json({ error: "unknown range" });
+    }
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const build = deps.getHistory();
+    if (build === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await build(id, range));
   });
 
   // Unknown API paths answer JSON, not the SPA.

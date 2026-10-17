@@ -29,19 +29,32 @@ const SNAPSHOT: HardwareSnapshot = {
   transport: "ws",
   timestampMs: 1_760_000_000_000,
   cpu: { model: "GB10", cores: 20, usagePct: 18, tempC: 62, packagePowerW: 41 },
-  memory: { totalBytes: 127 * GIB, usedBytes: 96 * GIB },
+  memory: {
+    totalBytes: 127 * GIB,
+    usedBytes: 96 * GIB,
+    swapTotalBytes: null,
+    swapUsedBytes: null,
+  },
+  unifiedMemory: null,
   gpus: [
     {
       index: 0,
       name: "NVIDIA GB10",
+      uuid: null,
       usagePct: 34,
       tempC: 61,
       memUsedBytes: Math.round(42.1 * GIB),
       memTotalBytes: 127 * GIB,
       powerW: 74,
+      powerLimitW: null,
+      smClockMHz: null,
+      smClockMaxMHz: null,
       throttleReasons: [],
+      processes: [],
     },
   ],
+  storage: [],
+  network: [],
 };
 
 describe("computeCardData", () => {
@@ -72,7 +85,7 @@ describe("computeCardData", () => {
       ...SNAPSHOT,
       cpu: { model: "GB10", cores: 20, usagePct: null, tempC: 62, packagePowerW: null },
       gpus: [
-        { index: 0, name: "NVIDIA GB10", usagePct: null, tempC: null, memUsedBytes: null, memTotalBytes: null, powerW: null, throttleReasons: [] },
+        { index: 0, name: "NVIDIA GB10", uuid: null, usagePct: null, tempC: null, memUsedBytes: null, memTotalBytes: null, powerW: null, powerLimitW: null, smClockMHz: null, smClockMaxMHz: null, throttleReasons: [], processes: [] },
       ],
     };
     const card = computeCardData(nodeFixture(), partial);

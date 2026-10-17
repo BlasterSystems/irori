@@ -8,12 +8,19 @@ export interface Config {
   port: number;
   /** Snapshots older than this are pruned from the DB (ADR-0006). */
   snapshotRetentionHours: number;
+  /** Bucket retention: minute buckets older than this are pruned. */
+  minuteKeepDays: number;
+  hourKeepDays: number;
+  dayKeepDays: number;
   /** Snapshot cadence handed to agents in hello-ok (core contract default). */
   cadenceMs: number;
 }
 
 const DEFAULT_PORT = 3947;
 const DEFAULT_RETENTION_HOURS = 24;
+const DEFAULT_MINUTE_KEEP_DAYS = 7;
+const DEFAULT_HOUR_KEEP_DAYS = 90;
+const DEFAULT_DAY_KEEP_DAYS = 365;
 const DEFAULT_CADENCE_MS = 2000;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -29,6 +36,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     encryptionKey,
     port: parsePositiveInt(env.PORT, DEFAULT_PORT),
     snapshotRetentionHours: parsePositiveInt(env.SNAPSHOT_RETENTION_HOURS, DEFAULT_RETENTION_HOURS),
+    minuteKeepDays: parsePositiveInt(env.MINUTE_KEEP_DAYS, DEFAULT_MINUTE_KEEP_DAYS),
+    hourKeepDays: parsePositiveInt(env.HOUR_KEEP_DAYS, DEFAULT_HOUR_KEEP_DAYS),
+    dayKeepDays: parsePositiveInt(env.DAY_KEEP_DAYS, DEFAULT_DAY_KEEP_DAYS),
     cadenceMs: DEFAULT_CADENCE_MS,
   };
 }

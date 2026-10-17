@@ -87,8 +87,22 @@ function fakeSnapshotAt(seq: number): HardwareSnapshot {
     hostname: "test-host",
     transport: "ws",
     timestampMs: BASE_TS + seq,
-    cpu: { model: "Test CPU", cores: 4, usagePct: 42, tempC: null, packagePowerW: null },
-    memory: { totalBytes: 8 * 1024 ** 3, usedBytes: 4 * 1024 ** 3 },
+    cpu: {
+      model: "Test CPU",
+      cores: 4,
+      usagePct: 42,
+      tempC: null,
+      packagePowerW: null,
+    },
+    memory: {
+      totalBytes: 8 * 1024 ** 3,
+      usedBytes: 4 * 1024 ** 3,
+      swapTotalBytes: null,
+      swapUsedBytes: null,
+    },
+    unifiedMemory: null,
+    storage: [],
+    network: [],
     gpus: [],
   };
 }

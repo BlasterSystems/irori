@@ -32,12 +32,17 @@ const SNAPSHOT_FIXTURE = {
     {
       index: 0,
       name: "NVIDIA GB10",
+      uuid: null,
       usagePct: 34,
       tempC: 61,
       memUsedBytes: 42 * 2 ** 30,
       memTotalBytes: 127 * 2 ** 30,
       powerW: 74,
+      powerLimitW: null,
+      smClockMHz: null,
+      smClockMaxMHz: null,
       throttleReasons: [],
+      processes: [],
     },
   ],
 };
