@@ -14,7 +14,8 @@ import { buildHistory } from "./history.js";
 import { createApp, type HistoryBuilder } from "./app.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const WEB_DIST = resolve(here, "../../web/dist");
+/** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
+const WEB_DIST = process.env.IRORI_STATIC_DIR ?? resolve(here, "../../web/dist");
 const PRUNE_INTERVAL_MS = 5 * 60_000;
 const ROLLUP_INTERVAL_MS = 60_000;
 const BOOT_RETRY_MIN_MS = 2_000;
