@@ -13,9 +13,9 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 | M2 | [IRI-003](../tasks/IRI-003-m2-telemetry-core.md) | Telemetry first-class: collectors, rings, rollups, SSE | Two nodes streaming; history survives restart |
 | M3 | [IRI-004](../tasks/IRI-004-m3-inference-monitoring.md) | LLM probes + cluster view | Head card: model, decode/prefill, queue |
 | M4 | [IRI-005](../tasks/IRI-005-m4-model-supply-chain.md) | NAS + modelctl integration | NAS→head→worker transfer from UI |
-| M5 | [IRI-006](../tasks/IRI-006-m5-serving-orchestration.md) | Recipes, supervised scripts, cluster start | Serve cluster from recipe; logs in telemetry |
+| M5 | [IRI-006](../tasks/IRI-006-m5-serving-orchestration.md) | Setup wizard, script pairs, staged transfers | Serve cluster via wizard; logs in telemetry |
 | M6 | [IRI-007](../tasks/IRI-007-m6-benchmarks.md) | Decode/prefill/quality/tooleval | Four benches run + persist against live engine |
-| M7 | [IRI-008](../tasks/IRI-008-m7-analytics-packaging.md) | Analytics lenses, energy, multi-arch release | Analytics views; arm64 agent deployed |
+| M7 | [IRI-008](../tasks/IRI-008-m7-analytics-packaging.md) | Analytics lenses, disk hygiene, multi-arch release | Analytics views; cleanup verified; arm64 agent deployed |
 
 ## M0 — Governance & foundations ✅ (this task)
 
@@ -97,8 +97,14 @@ Effort is indicative (single developer with LLM assistance). Task files live in
   comparison views (quality paired compare; tool-eval side-by-side).
 - **Exit**: all four benches complete against one engine; results queryable.
 
-## M7 — Analytics & packaging (≈1.5 weeks)
+## M7 — Analytics, hygiene & packaging (≈1.5 weeks)
 
+- **Disk hygiene (agent)**: audit job (per-category reclaimable: docker
+  build cache/images/containers, HF orphans, modelctl staging, compiler/pkg
+  caches, journal/tmp/cores/snaps), armed per-category clean with enforced
+  protected set (modelctl registrations, running-container images, open
+  files, <24 h files), opt-in docker log rotation + weekly always-safe pass;
+  Cleanup drawer on Nodes; placement "Clean up disk — est. +N GB" remediation.
 - Analytics section: memory / decode / power / tokens lenses, grouped and
   separated, per cluster + per node; token ledger (generated/cache/prefill);
   estimated power + monthly archive + Wh/token; temps.

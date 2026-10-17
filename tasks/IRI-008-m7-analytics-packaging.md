@@ -6,10 +6,20 @@ Epic: Irori v1 ([docs/PLAN.md](../docs/PLAN.md) M7)
 
 The analytics section (memory/decode/power/tokens lenses, grouped/separated,
 per cluster and per node) and the release engineering: multi-arch images,
-agent install story, CI.
+agent install story, CI — plus **agent disk hygiene** (audit + armed clean +
+opt-in prevention, SPEC §11.6).
 
 ## Acceptance criteria
 
+- [ ] Disk hygiene: `cleanup-audit` job reports per-category reclaimable
+      (docker build cache/images/containers, HF orphans, modelctl staging,
+      compiler/pkg caches, journal/tmp/cores/snaps) with safety rationale;
+      node card shows reclaimable at 80/90 % usage.
+- [ ] Armed per-category clean via jobs with streamed output; protected set
+      enforced (modelctl registrations, running-container images, open
+      files via /proc, <24 h files outside caches); cleanup history.
+- [ ] Opt-in: docker daemon.json log rotation; weekly always-safe pass.
+- [ ] Placement capacity failure offers "Clean up disk — est. +N GB".
 - [ ] Analytics: four lenses over rollups — memory, decode, power, tokens
       (generated/cache/prefill); groupable by cluster and individual node;
       time ranges from hourly/daily buckets.
