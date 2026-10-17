@@ -111,14 +111,20 @@ as every BlasterSystems product:
 
 ## Inspiration & credits
 
-Irori's codebase is fully ours (Apache-2.0) — no code is taken from the
-projects below — but its product ideas were proven by their work:
+Irori is built from scratch and does not copy or fork any codebase —
+nevertheless, it is built on top of ideas and products from:
 
 - **[sparkDash](https://github.com/MiaAI-Lab/sparkDash)** —
   [MiaAI-Lab](https://github.com/MiaAI-Lab), Mia's AI Lab — the multi-unit
   DGX Spark monitoring dashboard that started this line of work. Irori's
   fleet information architecture, benchmark suite, and LLM probing approach
   descend from it.
+- **[sparkLimiter](https://github.com/MiaAI-Lab/sparkLimiter)** —
+  [MiaAI-Lab](https://github.com/MiaAI-Lab) — GPU clock capping with
+  boot-time persistence. Irori reimplements the logic natively in its
+  privileged agent (adding CPU caps; persistence via reconnect-reconcile
+  instead of a systemd unit) and uses no code from it. Discovery
+  hardening by [@danielkuykendall23-boop](https://github.com/danielkuykendall23-boop).
 - **C. Michael Gibbs** — [MikeGibbsOnyx](https://github.com/MikeGibbsOnyx) —
   and **Nyx Voss** (Onyx AI Labs) — the macOS (darwin) SSH collectors in
   sparkDash, whose unit-collector pattern Irori's agent generalizes.
