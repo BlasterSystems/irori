@@ -6,6 +6,18 @@
 <title>Serve · Irori</title>
 <link rel="stylesheet" href="irori.css">
 <script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 520px; max-width: 92vw; background: var(--surface);
+    border-left: 1px solid var(--border); transform: translateX(100%); transition: transform .18s ease; z-index: 40;
+    display: flex; flex-direction: column; }
+  .drawer.is-open { transform: translateX(0); }
+  .scrim { position: fixed; inset: 0; background: var(--overlay); opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 30; }
+  .scrim.is-open { opacity: 1; pointer-events: auto; }
+  .setup { display: flex; flex-direction: column; }
+  .setup__head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 0; }
+  .stage { display: grid; grid-template-columns: 110px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+  .stage + .stage { margin-top: 6px; }
+</style>
 </head>
 <body>
 <header class="topbar"><div class="topbar__in">
@@ -29,106 +41,149 @@
   <div class="pagehead">
     <div>
       <h1>Serve</h1>
-      <p>Cluster serving from user-owned recipes and scripts — Irori supervises, never edits.</p>
+      <p>Setups: model + nodes + your scripts. Irori validates, transfers, supervises — never edits your scripts.</p>
     </div>
     <div class="row">
-      <button class="btn btn--secondary">Run script…</button>
-      <button class="btn btn--primary">Register recipe…</button>
+      <span class="chip">Jobs (2)</span>
+      <button class="btn btn--primary" id="wizOpen">New setup…</button>
     </div>
   </div>
 
-  <div class="banner banner--warn" style="margin-bottom: 12px;">
-    <span class="dot dot--warn" style="color: var(--thread); margin-top: 4px;" aria-hidden="true"></span>
-    <div class="grow">
-      <strong>Start blocked — spark3 is missing GLM-5.3-Flash-EXL3 (recipe glm-serve, MODEL).</strong>
-      <div class="mono muted" style="margin-top: 4px;">remediation: push from spark2 (queued as job j-218) · capacity ok (free 1.2 TB · needs 68.2 − 50 reserve) · transfer contention: none</div>
-    </div>
-    <div class="row" style="flex: none;">
-      <button class="btn btn--secondary btn--sm">Open placement</button>
-      <button class="btn btn--ghost btn--sm">Force start anyway</button>
-    </div>
-  </div>
+  <!-- Setup cards: homelab scale (1–8 nodes) -->
+  <section class="stack">
 
-  <section class="card" style="margin-bottom: 12px;">
-    <div class="card__head"><h3>Deployments</h3><span class="mono faint">server probe join · 5s poll · drivers survive restarts</span></div>
-    <div class="card__body card__body--flush">
-      <table class="table">
-        <thead><tr>
-          <th>Recipe / run</th><th>Node</th><th>Port</th><th>State</th><th>Endpoints</th><th>Last log</th><th></th>
-        </tr></thead>
-        <tbody>
-          <tr>
-            <td><strong>glm-serve</strong><div class="mono faint">~/recipes/glm-serve · git a41f2c9</div></td>
-            <td class="mono">spark1</td>
-            <td class="mono">8000</td>
-            <td><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>healthy</span></td>
-            <td class="mono">:8000 · direct</td>
-            <td class="mono faint">2s ago</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--ghost btn--sm">Stop…</button></td>
-          </tr>
-          <tr>
-            <td><strong>glm-serve-worker</strong><div class="mono faint">NNODES=2 · WORKER_IP=10.50.50.12</div></td>
-            <td class="mono">spark2</td>
-            <td class="mono">8001</td>
-            <td><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>healthy</span></td>
-            <td class="mono">:8001 · <span class="faint">via head</span></td>
-            <td class="mono faint">4s ago</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--ghost btn--sm">Stop…</button></td>
-          </tr>
-          <tr>
-            <td><strong>qwen-single</strong><div class="mono faint">~/recipes/qwen-single</div></td>
-            <td class="mono">spark3</td>
-            <td class="mono">9000</td>
-            <td><span class="chip"><span class="dot dot--halt" aria-hidden="true"></span>stopped</span></td>
-            <td class="mono faint">—</td>
-            <td class="mono faint">3d ago</td>
-            <td style="text-align:right"><button class="btn btn--secondary btn--sm">Start</button><button class="btn btn--ghost btn--sm">Logs</button></td>
-          </tr>
-          <tr>
-            <td><strong>bench-runner</strong><div class="mono faint">script · /home/me/bench-serve.sh</div></td>
-            <td class="mono">spark3</td>
-            <td class="mono">8200</td>
-            <td><span class="chip"><span class="dot dot--run" aria-hidden="true"></span>starting</span></td>
-            <td class="mono">:8200</td>
-            <td class="mono faint">just now</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Logs</button><button class="btn btn--ghost btn--sm">Stop…</button></td>
-          </tr>
-          <tr>
-            <td><strong>embed-eval</strong><div class="mono faint">~/recipes/embed-eval</div></td>
-            <td class="mono">spark1</td>
-            <td class="mono">8100</td>
-            <td><span class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span>foreign</span></td>
-            <td class="mono faint">—</td>
-            <td class="mono faint">—</td>
-            <td style="text-align:right"><button class="btn btn--ghost btn--sm">Inspect</button></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card__head">
-      <div class="row"><h3>glm-serve · logs</h3><span class="chip">driver</span><span class="chip">engine</span></div>
-      <div class="row"><span class="stat__sub">streams into telemetry · retained 7d</span><button class="btn btn--ghost btn--sm">Copy</button></div>
-    </div>
-    <div class="card__body card__body--flush">
-      <div class="log" style="border:0; border-radius: 0 0 var(--radius) var(--radius); max-height: 260px;">
-        <div><span class="dim">09:12:00</span> driver: start.sh start (recipe glm-serve on spark1) · pid 41218</div>
-        <div><span class="dim">09:12:01</span> driver: env MODEL_NAME=GLM-5.3-Flash-EXL3 PORT=8000</div>
-        <div><span class="dim">09:12:02</span> <span class="ok">driver: dispatch verb start → exit 0</span></div>
-        <div><span class="dim">09:12:04</span> engine: init exl3 kernels · 24 layers · qp 6 bits</div>
-        <div><span class="dim">09:12:09</span> engine: KV cache 99.2 GB pool allocated</div>
-        <div><span class="dim">09:12:11</span> <span class="ok">engine: Uvicorn listening on 0.0.0.0:8000</span></div>
-        <div><span class="dim">09:41:02</span> engine: AVG decode 142.3 tok/s · queue 3 running / 12 waiting</div>
-        <div><span class="dim">09:41:18</span> <span class="dim">engine: POST /v1/chat/completions 200 · ttft 71ms · 412 out tok</span></div>
-        <div><span class="dim">09:41:19</span> <span class="err">engine: WARN preemption · seq 88 recovered from MTP draft</span></div>
+    <article class="card setup" data-open="drawer">
+      <div class="setup__head">
+        <span class="stat__value" style="font-size: 16px;">GLM-5.3-Flash-EXL3</span>
+        <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>healthy</span>
+        <span class="chip">cluster · 8000</span>
+        <span class="grow"></span>
+        <div class="row">
+          <button class="btn btn--ghost btn--sm" data-open="drawer">Logs</button>
+          <button class="btn btn--ghost btn--sm">Restart</button>
+          <button class="btn btn--ghost btn--sm">Stop…</button>
+          <button class="btn btn--ghost btn--sm" aria-label="More">⋯</button>
+        </div>
       </div>
-    </div>
+      <div class="card__body" style="padding-top: 10px;">
+        <div class="row row--wrap" style="gap: 8px;">
+          <span class="chip chip--ok">spark1 · head · :8000 · <span class="dot dot--ok" aria-hidden="true"></span> 142.3 tok/s</span>
+          <span class="chip chip--ok">spark2 · worker · :8001 · <span class="dot dot--ok" aria-hidden="true"></span> joined</span>
+          <span class="stat__sub">direct · 10.50.50.11:8000/v1</span>
+        </div>
+        <div class="log" style="margin-top: 10px; max-height: 88px;">
+          <div><span class="dim">09:41:19</span> engine: AVG decode 142.3 tok/s · queue 3 running / 12 waiting</div>
+          <div><span class="dim">09:41:18</span> <span class="dim">engine: POST /v1/chat/completions 200 · ttft 71ms · 412 out tok</span></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="card setup" data-open="drawer">
+      <div class="setup__head">
+        <span class="stat__value" style="font-size: 16px;">DeepSeek-V4-Flash</span>
+        <span class="chip"><span class="dot dot--run" aria-hidden="true"></span>starting · transferring</span>
+        <span class="chip">single · spark3 · 9000</span>
+        <span class="grow"></span>
+        <div class="row">
+          <button class="btn btn--ghost btn--sm" data-open="drawer">Logs</button>
+          <button class="btn btn--ghost btn--sm" aria-label="More">⋯</button>
+        </div>
+      </div>
+      <div class="card__body" style="padding-top: 10px;">
+        <span class="label">Model transfer — staged</span>
+        <div style="margin-top: 8px;">
+          <div class="stage">
+            <span>1/2 · NAS → spark3</span>
+            <div class="bar"><div class="bar__fill" style="width:100%"></div></div>
+            <span class="val">done · 3m 12s · 96 MB/s</span>
+          </div>
+          <div class="stage">
+            <span>2/2 · validate + activate</span>
+            <div class="bar"><div class="bar__fill" style="width:64%"></div></div>
+            <span class="val">64% · 168 MB/s · ~4m left</span>
+          </div>
+        </div>
+        <p class="stat__sub" style="margin-top: 8px;">start.sh runs after activation · <button class="btn btn--ghost btn--sm" style="min-height:20px; padding:0 6px;">Cancel transfer</button></p>
+      </div>
+    </article>
+
+    <article class="card setup" data-open="drawer">
+      <div class="setup__head">
+        <span class="stat__value" style="font-size: 16px;">qwen3-8b-q4</span>
+        <span class="chip"><span class="dot dot--halt" aria-hidden="true"></span>stopped</span>
+        <span class="chip">single · spark1 · 8001</span>
+        <span class="grow"></span>
+        <div class="row">
+          <button class="btn btn--secondary btn--sm">Start</button>
+          <button class="btn btn--ghost btn--sm" data-open="drawer">Logs</button>
+          <button class="btn btn--ghost btn--sm" aria-label="More">⋯</button>
+        </div>
+      </div>
+      <div class="card__body" style="padding-top: 10px;">
+        <p class="stat__sub">stopped 3d ago · scripts re-validated at last start (ok) · model present on spark1</p>
+      </div>
+    </article>
+
+    <article class="card setup">
+      <div class="setup__head">
+        <span class="stat__value" style="font-size: 16px;">embed-eval</span>
+        <span class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span>foreign</span>
+        <span class="chip">single · spark1 · 8100</span>
+        <span class="grow"></span>
+        <div class="row"><button class="btn btn--ghost btn--sm">Inspect</button><button class="btn btn--ghost btn--sm" aria-label="More">⋯</button></div>
+      </div>
+      <div class="card__body" style="padding-top: 10px;">
+        <p class="stat__sub">port 8100 answers a different engine — another process took the port. Nothing was stopped.</p>
+      </div>
+    </article>
+
   </section>
 </main>
 
-<span class="mock-note">Static mockup · data illustrative</span>
+<!-- Setup detail drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-label="Setup details">
+  <div class="card__head">
+    <div class="row"><h3 style="font-size:17px;">GLM-5.3-Flash-EXL3</h3><span class="chip chip--ok">healthy</span><span class="chip">cluster</span></div>
+    <button class="iconbtn" id="drawerClose" aria-label="Close details">✕</button>
+  </div>
+  <div class="card__body stack" style="overflow:auto;">
+    <dl class="kv">
+      <dt>nodes</dt><dd>spark1 (head) · spark2 (worker)</dd>
+      <dt>port</dt><dd>8000 / 8001</dd>
+      <dt>endpoint</dt><dd>10.50.50.11:8000/v1</dd>
+      <dt>start</dt><dd>/home/me/glm/start.sh <span class="faint">✓ validated 2d ago</span></dd>
+      <dt>stop</dt><dd>/home/me/glm/stop.sh <span class="faint">✓ validated 2d ago</span></dd>
+      <dt>env exported</dt><dd>MODEL_NAME · PORT · EXTRA_ARGS · MODEL_PATH</dd>
+      <dt>uptime</dt><dd>2h 14m · 0 restarts</dd>
+    </dl>
+    <div>
+      <span class="label">Engine log · streaming into telemetry</span>
+      <div class="log" style="margin-top: 8px; max-height: 220px;">
+        <div><span class="dim">09:41:19</span> engine: AVG decode 142.3 tok/s · queue 3 running / 12 waiting</div>
+        <div><span class="dim">09:41:18</span> engine: POST /v1/chat/completions 200 · ttft 71ms · 412 out tok</div>
+        <div><span class="dim">09:41:02</span> engine: prefill 3,214 tok/s · cache hit 64%</div>
+        <div><span class="dim">09:12:11</span> <span class="ok">engine: Uvicorn listening on 0.0.0.0:8000</span></div>
+        <div><span class="dim">09:12:09</span> engine: KV cache 99.2 GB pool allocated</div>
+        <div><span class="dim">09:12:02</span> <span class="ok">driver: dispatch start → exit 0</span></div>
+      </div>
+    </div>
+    <div>
+      <span class="label">Placement</span>
+      <div class="stack" style="margin-top: 8px;">
+        <div class="row row--between"><span class="mono">spark1 · head</span><span class="chip chip--ok">present · 68.2 GB</span></div>
+        <div class="row row--between"><span class="mono">spark2 · worker</span><span class="chip chip--ok">present · pushed 2d ago · 3m 41s</span></div>
+      </div>
+    </div>
+    <div class="row">
+      <button class="btn btn--secondary btn--sm">Edit…</button>
+      <button class="btn btn--secondary btn--sm">Duplicate…</button>
+      <button class="btn btn--danger btn--sm">Remove…</button>
+    </div>
+  </div>
+</aside>
+
+<span class="mock-note">Wizard preview: setup-wizard.html</span>
 <script>
   var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
   var SUN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
@@ -138,6 +193,14 @@
     document.documentElement.dataset.theme = d ? "light" : "dark";
     try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} paint(); };
   paint();
+  var drawer = document.getElementById("drawer"), scrim = document.getElementById("scrim");
+  function openDrawer(){ drawer.classList.add("is-open"); scrim.classList.add("is-open"); }
+  function closeDrawer(){ drawer.classList.remove("is-open"); scrim.classList.remove("is-open"); }
+  document.querySelectorAll("[data-open='drawer']").forEach(function(el){ el.addEventListener("click", openDrawer); });
+  document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+  scrim.addEventListener("click", closeDrawer);
+  var w = document.getElementById("wizOpen");
+  if (w) w.addEventListener("click", function(){ location.href = "setup-wizard.html"; });
 </script>
 </body>
 </html>

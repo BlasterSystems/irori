@@ -70,6 +70,13 @@ from agreed ground truth.
   contrast ramps for chart series, legend/y-axis fidelity, tablist ARIA,
   hover/disabled states, 1080px reflow, unified-memory data contradiction,
   running/waiting vocabulary.
+- Round 2 (2026-10-17, per mockups/PLAN.md): Models v2 (search/filters/
+  sort incl. recently-added via `first_seen_at`, pagination, detail drawer,
+  download modal, hygiene popover — no inline form walls) + Serve v2 (setup
+  cards for 1–8 node fleets, staged transfer progress, detail drawer) +
+  `setup-wizard.html` (5 steps, cluster variant, staged progress, validation
+  states). SPEC §6/§7/§13 + PLAN M4/M5 amended; serving model simplified to
+  "setups" (recipe folders/git-drift dropped from v1 UI).
 - Docs-check: run after skills + README land (see M0 completion).
 
 ## Review

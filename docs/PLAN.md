@@ -67,6 +67,9 @@ Effort is indicative (single developer with LLM assistance). Task files live in
   HF metadata join for search/recipe creation, download/queue (preflight,
   resumable, GGUF quant + companions), delete (dry-run → armed), doctor/
   repair/catalog-refresh with armed applies, cards.
+- **Models page v2**: searchable/filterable/sortable table (25/page,
+  recently-added default via Irori-side `first_seen_at` — catalog.json has no
+  timestamp), detail drawer, download modal, hygiene popover.
 - sync-local (NAS→node), push (node→node, CX7 parallel streams, `--host`
   round-robin), placement planning + capacity math.
 - **Exit**: download a model on the NAS, sync to head, push to a worker over
@@ -74,14 +77,16 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 
 ## M5 — Serving orchestration (≈1 week)
 
-- Recipe register/probe (`.env` presence only), script-class runs (env contract
-  `MODEL_NAME`/`PORT`/`EXTRA_ARGS`, run-by-path), agent-supervised
-  start/stop/status/logs, detached drivers surviving server restarts, logs →
-  telemetry (ring + persisted run log).
-- Cluster start/stop with placement prechecks (409 + remediations, capacity
-  math, force option), multi-node recipe guard.
-- **Exit**: serve GLM-5.3-flash cluster: recipe on head, model synced NAS→head,
-  pushed head→worker, cluster started, logs streamed in UI.
+- **Setup wizard**: type (single/cluster ≤ 8 nodes) → model (NAS search or
+  chained HF download) → per-node existence check → start/stop script paths
+  validated per node (`test -x`, re-checked at every start) → staged
+  placement transfers (HF→NAS→head→workers, %/rate/ETA/cancel, capacity
+  math, busy-node warning) → launch.
+- **Setup cards UI** (homelab scale) + detail drawer: streamed engine logs,
+  placement history, edit/duplicate/remove; armed stop required (fallback:
+  recorded process group); env contract MODEL_NAME/PORT/EXTRA_ARGS/MODEL_PATH.
+- **Exit**: serve GLM-5.3-flash cluster via the wizard: model staged
+  NAS→head→worker, scripts validated, cluster started, logs streamed in UI.
 
 ## M6 — Benchmarks (≈1 week)
 
