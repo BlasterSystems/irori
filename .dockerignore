@@ -1,0 +1,17 @@
+node_modules
+**/dist
+**/node_modules
+.git
+.github
+.agentic
+.agents
+.claude
+.codex
+.opencode
+.vscode
+docs
+mockups
+tasks
+*.log
+.env
+.env.*

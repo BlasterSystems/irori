@@ -1,0 +1,81 @@
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  bigserial,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+export const nodeKind = pgEnum("node_kind", ["spark", "gpu-host", "nas"]);
+export const nodeRole = pgEnum("node_role", ["head", "worker", "standalone"]);
+
+export const nodes = pgTable(
+  "nodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    kind: nodeKind("kind").notNull(),
+    role: nodeRole("role").notNull(),
+    host: text("host").notNull(),
+    enabled: boolean("enabled").notNull().default(true),
+    /** SHA-256 hex of the current agent token — O(1) lookup on hello. */
+    agentTokenHash: text("agent_token_hash").notNull(),
+    /** AES-256-GCM ciphertext of the current agent token (ADR-0002). */
+    agentTokenEnc: text("agent_token_enc").notNull(),
+    agentVersion: text("agent_version"),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("nodes_name_uq").on(t.name),
+    index("nodes_agent_token_hash_idx").on(t.agentTokenHash),
+  ],
+);
+
+/**
+ * Raw snapshot ring (ADR-0006). The in-memory ring is the live view; this is
+ * the history source. Prune job bounds growth (M2 adds rollups).
+ */
+export const snapshots = pgTable(
+  "snapshots",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    serverTime: timestamp("server_time", { withTimezone: true }).notNull().defaultNow(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => [index("snapshots_node_time_idx").on(t.nodeId, t.serverTime)],
+);
+
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Generic secret store (SSH credentials, future per-node material). */
+export const secrets = pgTable(
+  "secrets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    valueEnc: text("value_enc").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("secrets_name_uq").on(t.name)],
+);
+
+/** Advisory-lock key shared by every boot migration run. */
+export const MIGRATE_LOCK_KEY = sql`hashtext('irori-migrate')`;

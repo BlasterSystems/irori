@@ -1,0 +1,27 @@
+{
+  "name": "@irori/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dev": "node --watch-path=src --watch-preserve-output src/index.ts"
+  },
+  "dependencies": {
+    "@irori/core": "workspace:*",
+    "@irori/db": "workspace:*",
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/ws": "^8.18.1",
+    "supertest": "^7.1.4",
+    "@types/supertest": "^6.0.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

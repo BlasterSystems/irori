@@ -1,0 +1,14 @@
+[Unit]
+Description=Irori agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env node /opt/irori/irori-agent.mjs
+EnvironmentFile=-/etc/irori/agent.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
