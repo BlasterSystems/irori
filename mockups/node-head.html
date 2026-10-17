@@ -35,6 +35,7 @@
         <span class="chip">GB10 · DGX Spark</span>
         <span class="chip chip--ok">Agent v0.1.0 · connected</span>
         <span class="chip">10.0.30.11</span>
+        <a class="chip chip--warn" href="cleanup.html" aria-label="Disk 91% — 212.0 GB reclaimable. Open disk hygiene."><span class="dot dot--warn" aria-hidden="true"></span>disk 91% · 212.0 GB reclaimable</a>
       </div>
       <p>uptime 6d 4h · DGX OS 7.2 · <span class="mono">GLM cluster head</span></p>
     </div>
@@ -136,8 +137,12 @@
         <dl class="kv" style="margin-top: 14px;">
           <dt>cx70 24h</dt><dd>↑ 412 GB · ↓ 388 GB · 0 drops</dd>
           <dt>root fs</dt><dd>3.1 / 3.9 TB · 79%</dd>
-          <dt>nvme0n1p2</dt><dd>1.2 / 1.9 TB · 63%</dd>
+          <dt>nvme0n1p2</dt><dd>1.73 / 1.9 TB · 91% · 212.0 GB reclaimable</dd>
         </dl>
+        <div class="row" style="margin-top: 10px;">
+          <a class="btn btn--secondary btn--sm" href="cleanup.html">Disk hygiene…</a>
+          <span class="stat__sub">audit cached 2m ago · agent j-222</span>
+        </div>
       </div>
     </article>
   </section>

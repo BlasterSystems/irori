@@ -280,6 +280,19 @@ bootstrap and when the agent is off.
      always-safe set only (build cache, compiler/pkg caches, tmp, journal).
    - **Placement tie-in**: a failed capacity check offers
      "Clean up disk — est. +N GB" linking to the audit.
+   - **UI contract**: per-node **Cleanup drawer** (Audit | History tabs,
+     models/serve drawer chrome). Audit = an 8-category `.hyrow` checklist —
+     checkbox · name + safety rationale · scaled bar · item count · size —
+     with **safe categories pre-checked and needs-care rows opt-in**
+     (diamond `care` chip; docker old images, HF cache, modelctl staging),
+     zero rows disabled. Flow: **dry-run plan → typed node-name confirm →
+     staged streamed run** (`.stage` rows per category; a failing category
+     flips to held/failed and the rest continue). Two-tier threshold chips:
+     plain ≤ 89 %, `chip--warn` ≥ 90 %, none under 80 %; completion lands in
+     the drawer result, History (last 20 · 90 d; output kept 30 d), the fleet
+     event log, and re-derives the chips. Prevention lives per-node at the
+     drawer bottom (weekly safe-set `.pick` + one-time log-rotation state
+     chip). Safety copy uses `--muted`, never `--faint`.
 
 Bootstrap: server UI generates an install one-liner (or SSH-pushes the bundle
 using stored credentials): bundle + config (server URL, token) + root systemd
