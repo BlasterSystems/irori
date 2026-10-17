@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Disk hygiene · spark1 · Irori</title>
+<link rel="stylesheet" href="irori.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  body { background: var(--paper); min-height: 100vh; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 560px; max-width: 96vw; background: var(--surface);
+    border-left: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }
+  .drawer__body { overflow: auto; flex: 1; }
+  .view { display: none; } .view.is-cur { display: block; }
+  .hyrow { display: grid; grid-template-columns: 16px minmax(200px, 1.1fr) 1fr 72px 84px; gap: 10px; align-items: center;
+    padding: 9px 16px; border-top: 1px solid var(--border); cursor: pointer; min-height: 36px; }
+  .hyrow:first-child { border-top: 0; }
+  .hyrow:hover { background: var(--surface-2); }
+  .hyrow.is-off { opacity: .55; cursor: default; }
+  .hyrow input { accent-color: var(--ink); }
+  .hyrow__name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .hyrow__bar { display: flex; align-items: center; }
+  .hyrow .bar { width: 100%; }
+  .hyrow__items, .hyrow__size { text-align: right; white-space: nowrap; }
+  .hyhist { display: grid; grid-template-columns: 110px 1fr auto; gap: 10px; padding: 8px 16px; border-top: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 11.5px; align-items: center; }
+  .stage.is-failed .val, .stage.is-held .val { color: var(--thread-ink); }
+  .arm input { margin-top: 6px; }
+  .drawer .kv dd { overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<aside class="drawer" role="dialog" aria-modal="true" aria-label="Disk hygiene — spark1">
+  <div class="card__head">
+    <div class="row">
+      <h3 style="font-size:17px;" tabindex="-1">Disk hygiene</h3>
+      <span class="chip chip--muted">scanned 2m ago</span>
+    </div>
+    <a class="btn btn--ghost btn--sm" href="node-head.html">✕ Close</a>
+  </div>
+  <div class="card__body" style="padding-top: 12px; padding-bottom: 10px;">
+    <div class="barrow" style="grid-template-columns: 92px 1fr auto;">
+      <span>nvme0n1p2</span><div class="bar"><div class="bar__fill" style="width:91%"></div></div>
+      <span class="val">1.73 / 1.9 TB · 91%</span>
+    </div>
+    <div class="row row--between" style="margin-top: 6px;">
+      <span class="stat__sub">audited 2m ago · j-222</span>
+      <button class="btn btn--ghost btn--sm">Re-audit</button>
+    </div>
+  </div>
+  <div class="tabs" style="padding: 0 16px;">
+    <button class="is-active" id="tabAudit" role="tab" aria-selected="true">Audit</button>
+    <button id="tabHist" role="tab" aria-selected="false">History (3)</button>
+  </div>
+
+  <!-- ── Audit tab ─────────────────────────────────────────────── -->
+  <div class="drawer__body" id="view-audit">
+    <div class="view is-cur" id="st-audit">
+      <div>
+        <label class="hyrow">
+          <input type="checkbox" checked>
+          <span class="hyrow__name"><span class="row"><span class="mono">docker build cache</span>
+            <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>safe</span></span>
+            <span class="stat__sub">builder cache + dangling layers — rebuilds re-download, nothing referenced</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:42%"></span></span></span>
+          <span class="mono hyrow__items">1,204</span><span class="mono hyrow__size">88.4 GB</span>
+        </label>
+        <label class="hyrow">
+          <input type="checkbox">
+          <span class="hyrow__name"><span class="row"><span class="mono">docker old images</span>
+            <span class="chip"><span class="dot dot--warn" aria-hidden="true"></span>care</span></span>
+            <span class="stat__sub">keep last 2 per repo · images of any container excluded — plan lists per-repo counts</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:7%"></span></span></span>
+          <span class="mono hyrow__items">7 tags</span><span class="mono hyrow__size">14.6 GB</span>
+        </label>
+        <label class="hyrow">
+          <input type="checkbox">
+          <span class="hyrow__name"><span class="row"><span class="mono">hf cache</span>
+            <span class="chip"><span class="dot dot--warn" aria-hidden="true"></span>care</span></span>
+            <span class="stat__sub">incomplete blobs + unreferenced snapshots · registered entries protected</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:13%"></span></span></span>
+          <span class="mono hyrow__items">312</span><span class="mono hyrow__size">27.0 GB</span>
+        </label>
+        <label class="hyrow is-off">
+          <input type="checkbox" disabled>
+          <span class="hyrow__name"><span class="row"><span class="mono">modelctl staging</span>
+            <span class="chip chip--muted">n/a</span></span>
+            <span class="stat__sub">non-resumable staging only — resumable staging kept</span></span>
+          <span class="hyrow__bar"><span class="bar"></span></span>
+          <span class="mono hyrow__items">0</span><span class="mono hyrow__size">0 B</span>
+        </label>
+        <label class="hyrow">
+          <input type="checkbox" checked>
+          <span class="hyrow__name"><span class="row"><span class="mono">compiler caches</span>
+            <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>safe</span></span>
+            <span class="stat__sub">~/.cache/{vllm,torch,triton} · ~/.nv — recompiled on next engine start</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:29%"></span></span></span>
+          <span class="mono hyrow__items">8,912</span><span class="mono hyrow__size">61.3 GB</span>
+        </label>
+        <label class="hyrow">
+          <input type="checkbox" checked>
+          <span class="hyrow__name"><span class="row"><span class="mono">pkg caches</span>
+            <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>safe</span></span>
+            <span class="stat__sub">pip/uv caches · apt clean + autoremove orphans</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:4%"></span></span></span>
+          <span class="mono hyrow__items">2,381</span><span class="mono hyrow__size">9.4 GB</span>
+        </label>
+        <label class="hyrow">
+          <input type="checkbox" checked>
+          <span class="hyrow__name"><span class="row"><span class="mono">journal · tmp · cores</span>
+            <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>safe</span></span>
+            <span class="stat__sub">journal vacuum · /tmp &gt; 7 d · core dumps</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:4%"></span></span></span>
+          <span class="mono hyrow__items">96</span><span class="mono hyrow__size">8.1 GB</span>
+        </label>
+        <label class="hyrow">
+          <input type="checkbox" checked>
+          <span class="hyrow__name"><span class="row"><span class="mono">snap revisions</span>
+            <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>safe</span></span>
+            <span class="stat__sub">keeps current + previous revision per snap</span></span>
+          <span class="hyrow__bar"><span class="bar"><span class="bar__fill" style="width:2%"></span></span></span>
+          <span class="mono hyrow__items">9</span><span class="mono hyrow__size">3.2 GB</span>
+        </label>
+      </div>
+      <div class="row row--between" style="padding: 10px 16px; border-top: 1px solid var(--border);">
+        <span class="stat__sub" id="sel">5 of 8 selected · est. 170.4 GB</span>
+        <span class="row">
+          <button class="btn btn--ghost btn--sm">Select all</button>
+          <button class="btn btn--ghost btn--sm">Safe only</button>
+          <button class="btn btn--primary btn--sm" id="planBtn">Plan clean 170.4 GB…</button>
+        </span>
+      </div>
+      <div class="card__body stack" style="padding-top: 0; border-top: 1px solid var(--border);">
+        <span class="label" style="margin-top: 12px;">Prevention</span>
+        <label class="pick row" style="align-items: flex-start;">
+          <input type="checkbox" checked>
+          <span><strong style="font-weight: 500;">Weekly safe-set pass</strong>
+          <span class="stat__sub" style="display: block;">Sundays 03:00 · build cache, compiler/pkg caches, /tmp, journal only · never models, HF cache, docker images/containers, staging · last run Oct 12 · freed 41.3 GB</span></span>
+        </label>
+        <div class="row row--between">
+          <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>log rotation · applied Oct 12</span>
+          <button class="btn btn--ghost btn--sm">View diff</button>
+        </div>
+        <p class="stat__sub">Protected set enforced · dry-run plan → typed confirm → streamed clean · no undo</p>
+      </div>
+    </div>
+
+    <!-- Plan -->
+    <div class="view" id="st-plan">
+      <div class="stack" style="padding: 16px;">
+        <div class="banner"><span class="stat__sub">plan j-223 · 5 categories · est. 170.4 GB · protected set enforced · nothing outside these categories is touched</span></div>
+        <dl class="kv">
+          <dt>docker build cache</dt><dd>~88.4 GB · 1,204 items</dd>
+          <dt>compiler caches</dt><dd>~61.3 GB · 8,912 items</dd>
+          <dt>pkg caches</dt><dd>~9.4 GB · 2,381 items</dd>
+          <dt>journal · tmp · cores</dt><dd>~8.1 GB · 96 items</dd>
+          <dt>snap revisions</dt><dd>~3.2 GB · 9 items</dd>
+        </dl>
+        <div class="field arm"><label>Type <strong>spark1</strong> to arm</label>
+          <input class="input mono" id="armInput" placeholder="spark1" autocomplete="off" spellcheck="false"></div>
+        <p class="stat__sub">Runs as a streamed agent job — each category appears as it completes.</p>
+        <div class="row row--between">
+          <button class="btn btn--ghost btn--sm" data-back="1">Back</button>
+          <button class="btn btn--danger btn--sm" id="armBtn" disabled>Clean 170.4 GB on spark1</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Run -->
+    <div class="view" id="st-run">
+      <div class="stack" style="padding: 16px;">
+        <div class="stage"><span>1/5 · docker build cache</span><div class="bar"><div class="bar__fill" style="width:100%"></div></div><span class="val">done · 88.4 GB · 41s</span></div>
+        <div class="stage"><span>2/5 · compiler caches</span><div class="bar"><div class="bar__fill" style="width:100%"></div></div><span class="val">done · 61.3 GB · 1m 22s</span></div>
+        <div class="stage"><span>3/5 · pkg caches</span><div class="bar"><div class="bar__fill" style="width:100%"></div></div><span class="val">done · 9.4 GB · 12s</span></div>
+        <div class="stage"><span>4/5 · journal · tmp · cores</span><div class="bar"><div class="bar__fill" style="width:100%"></div></div><span class="val">done · 8.1 GB · 4s</span></div>
+        <div class="stage"><span>5/5 · snap revisions</span><div class="bar"><div class="bar__fill" style="width:64%"></div></div><span class="val">64% · ~30s left</span></div>
+        <div class="row row--between">
+          <span class="stat__sub" aria-live="polite">j-223 · 4/5 done · 170.4 GB total</span>
+          <div class="row"><button class="btn btn--ghost btn--sm">Output</button><button class="btn btn--ghost btn--sm">Cancel</button></div>
+        </div>
+        <div class="log">
+          <div><span class="dim">09:41:02</span> docker builder prune -af → reclaimed 88.4 GB</div>
+          <div><span class="dim">09:41:44</span> rm -rf ~/.cache/vllm ~/.cache/triton ~/.nv → 61.3 GB</div>
+          <div><span class="dim">09:42:06</span> <span class="ok">apt clean + autoremove → 9.4 GB</span></div>
+          <div><span class="dim">09:42:10</span> journalctl --vacuum-size=200M → 8.1 GB</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div class="view" id="st-result">
+      <div class="stack" style="padding: 16px;">
+        <div class="banner" role="status"><span class="stat__sub">reclaimed 170.4 GB · 5 categories · 2m 19s · j-223</span></div>
+        <div class="barrow" style="grid-template-columns: 92px 1fr auto;">
+          <span>nvme0n1p2</span><div class="bar"><div class="bar__fill" style="width:82%"></div></div>
+          <span class="val">1.56 / 1.9 TB · 82%</span>
+        </div>
+        <p class="stat__sub">usage re-measured after clean · threshold chip re-derived (below 90% → informational tier)</p>
+        <div class="row">
+          <button class="btn btn--secondary btn--sm">Re-check placement</button>
+          <span class="stat__sub">setup-wizard capacity check re-validates on return</span>
+        </div>
+        <p class="stat__sub">Landed in History and the fleet event log.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── History tab ───────────────────────────────────────────── -->
+  <div class="drawer__body" id="view-hist" style="display: none;">
+    <div class="row row--between" style="padding: 10px 16px 2px;">
+      <span class="mono faint">last 20 · retained 90 days</span><span class="stat__sub">output kept 30 d</span>
+    </div>
+    <div class="hyhist"><span class="mono faint">Oct 17 · 09:41</span><span class="mono">170.4 GB · 5 categories</span><span class="chip">by hand</span></div>
+    <div class="hyhist"><span class="mono faint">Oct 12 · 03:00</span><span class="mono">41.3 GB · 4 categories</span><span class="chip chip--ok">scheduled</span></div>
+    <div class="hyhist"><span class="mono faint">Oct 10 · 14:22</span><span class="mono">88.4 GB · 1 category</span><span class="chip">by hand</span></div>
+    <div class="hyhist"><span class="mono faint">Oct 5 · 09:00</span><span class="mono">12.7 GB · 3 categories</span><span class="chip chip--ok">scheduled</span></div>
+    <div class="card__body"><p class="stat__sub">Rows mirror the fleet event log · click a row for its streamed output.</p></div>
+  </div>
+</aside>
+
+<span class="mock-note">Static mockup · data illustrative</span>
+<script>
+  var cur = 3, TOTAL = 5;
+  var labels = ["", "", "", "Next · Review", "Create & start"];
+  var theme = document.documentElement.dataset.theme;
+  function setView(id) {
+    ["st-audit","st-plan","st-run","st-result"].forEach(function(v){
+      document.getElementById(v).classList.toggle("is-cur", v === id);
+    });
+  }
+  document.querySelectorAll("[data-back]").forEach(function(b){
+    b.addEventListener("click", function(){ setView("st-audit"); });
+  });
+  var arm = document.getElementById("armInput"), armBtn = document.getElementById("armBtn");
+  arm.addEventListener("input", function(){ armBtn.disabled = arm.value !== "spark1"; });
+  document.getElementById("planBtn").addEventListener("click", function(){ setView("st-plan"); });
+  armBtn.addEventListener("click", function(){ setView("st-run"); setTimeout(function(){ setView("st-result"); }, 1200); });
+  document.getElementById("tabAudit").addEventListener("click", function(){
+    document.getElementById("view-audit").style.display = "block";
+    document.getElementById("view-hist").style.display = "none";
+    this.classList.add("is-active"); document.getElementById("tabHist").classList.remove("is-active");
+    this.setAttribute("aria-selected","true"); document.getElementById("tabHist").setAttribute("aria-selected","false");
+  });
+  document.getElementById("tabHist").addEventListener("click", function(){
+    document.getElementById("view-hist").style.display = "block";
+    document.getElementById("view-audit").style.display = "none";
+    this.classList.add("is-active"); document.getElementById("tabAudit").classList.remove("is-active");
+    this.setAttribute("aria-selected","true"); document.getElementById("tabAudit").setAttribute("aria-selected","false");
+  });
+  // selection footer
+  var boxes = Array.prototype.slice.call(document.querySelectorAll(".hyrow input:not([disabled])"));
+  function recount(){
+    var n = 0, gb = 0, sizes = [88.4, 14.6, 27.0, 0, 61.3, 9.4, 8.1, 3.2];
+    boxes.forEach(function(b, i){ if (b.checked) { n++; gb += sizes[i]; } });
+    document.getElementById("sel").textContent = n + " of 8 selected · est. " + gb.toFixed(1) + " GB";
+    document.getElementById("planBtn").textContent = "Plan clean " + gb.toFixed(1) + " GB…";
+    document.getElementById("armBtn").textContent = "Clean " + gb.toFixed(1) + " GB on spark1";
+  }
+  boxes.forEach(function(b){ b.addEventListener("change", recount); });
+</script>
+</body>
+</html>

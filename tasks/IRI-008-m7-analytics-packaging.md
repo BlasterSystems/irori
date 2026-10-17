@@ -20,6 +20,10 @@ opt-in prevention, SPEC §11.6).
       files via /proc, <24 h files outside caches); cleanup history.
 - [ ] Opt-in: docker daemon.json log rotation; weekly always-safe pass.
 - [ ] Placement capacity failure offers "Clean up disk — est. +N GB".
+- [ ] Cleanup drawer UI per SPEC §11.6: Audit | History tabs, 8-category
+      checklist (safe pre-checked, care opt-in), dry-run plan → typed
+      node-name arm → staged streamed run with per-category failure handling;
+      two-tier threshold chips on cards; history last 20 / 90 d.
 - [ ] Analytics: four lenses over rollups — memory, decode, power, tokens
       (generated/cache/prefill); groupable by cluster and individual node;
       time ranges from hourly/daily buckets.

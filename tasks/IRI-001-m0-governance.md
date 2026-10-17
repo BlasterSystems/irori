@@ -77,6 +77,12 @@ from agreed ground truth.
   `setup-wizard.html` (5 steps, cluster variant, staged progress, validation
   states). SPEC §6/§7/§13 + PLAN M4/M5 amended; serving model simplified to
   "setups" (recipe folders/git-drift dropped from v1 UI).
+- Round 3 (2026-10-17, PM LiteraryWoodpecker + UX InvolvedRabbit): disk
+  hygiene UI designed and mocked — `cleanup.html` drawer (audit checklist →
+  plan → typed arm → staged run → result, history tab, prevention per node),
+  threshold chips + DISK barrows on overview, Disk hygiene… + 91% kv on
+  node-head, placement tie-ins in models drawer + cleanup result. SPEC §11.6
+  UI contract; IRI-008 acceptance extended.
 - Docs-check: run after skills + README land (see M0 completion).
 
 ## Review
