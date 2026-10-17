@@ -123,11 +123,22 @@ projects below — but its product ideas were proven by their work:
   and **Nyx Voss** (Onyx AI Labs) — the macOS (darwin) SSH collectors in
   sparkDash, whose unit-collector pattern Irori's agent generalizes.
 
-Irori replaces and absorbs the maintainer's own predecessor projects
-([sparkControl](https://github.com/piresbruno/sparkControl),
-[modelctl](https://github.com/piresbruno/modelctl),
-[sparkLimiter](https://github.com/piresbruno/sparkLimiter)) and builds on the
-BlasterSystems design system and [uptime-monitoring](https://github.com/BlasterSystems/uptime-monitoring).
+Irori replaces and absorbs the maintainer's own predecessor projects — see
+**Dependencies** below for the one that lives on.
+
+## Dependencies
+
+The notable runtime dependencies (everything else is standard: Node 24 +
+pnpm, Docker, rsync):
+
+- **[modelctl](https://github.com/piresbruno/modelctl)** — the model supply
+  chain engine. The agent provisions it per node (pinned GitHub release via
+  `uv tool install`, wheel fallback bundled offline) and drives every NAS
+  store mutation through it; catalog reads use the `catalog.json` contract
+  and never require it
+  ([ADR-0004](docs/adr/0004-modelctl-as-supply-chain-engine.md)).
+- **PostgreSQL 16+** on your own infrastructure (default target: a Proxmox
+  host) via `DATABASE_URL` — [ADR-0002](docs/adr/0002-postgresql-on-proxmox-storage.md).
 
 ## Validation
 
