@@ -36,6 +36,8 @@ export const nodes = pgTable(
     sortOrder: integer("sort_order").notNull().default(0),
     /** LLM ports this node serves (agent probes them; M3). */
     llmPorts: jsonb("llm_ports").notNull().default(sql`'[]'::jsonb`),
+    /** NAS store root for model-ops nodes (M4); null otherwise. */
+    nasRoot: text("nas_root"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -139,6 +141,52 @@ export const llmBuckets = pgTable(
   },
   (t) => [uniqueIndex("llm_buckets_uq").on(t.nodeId, t.port, t.granularity, t.bucketStart)],
 );
+
+/** Jobs subsystem: one active job per node (409 otherwise), M4. */
+export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "succeeded", "failed", "canceled"]);
+
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    params: jsonb("params").notNull().default(sql`'{}'::jsonb`),
+    exitCode: integer("exit_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("jobs_node_idx").on(t.nodeId, t.createdAt)],
+);
+
+/** Job output ring (last N lines, streamed to the UI). */
+export const jobOutput = pgTable(
+  "job_output",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    jobId: uuid("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    line: text("line").notNull(),
+  },
+  (t) => [index("job_output_job_seq_idx").on(t.jobId, t.seq)],
+);
+
+/** Model metadata cache (HF join + cards), keyed by model name. */
+export const modelMeta = pgTable("model_meta", {
+  name: text("name").primaryKey(),
+  repository: text("repository").notNull(),
+  runtime: text("runtime").notNull(),
+  bytes: doublePrecision("bytes").notNull().default(0),
+  /** HF revision, quantization, companions, card summary — agent-supplied JSON. */
+  meta: jsonb("meta").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Generic secret store (SSH credentials, future per-node material). */
 export const secrets = pgTable(

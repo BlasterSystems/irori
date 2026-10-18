@@ -4,3 +4,7 @@ export * from "./snapshot.js";
 export * from "./agent-messages.js";
 export * from "./events.js";
 export * from "./llm.js";
+export * from "./catalog.js";
+export * from "./jobs.js";
+export * from "./job-messages.js";
+export * from "./model-api.js";

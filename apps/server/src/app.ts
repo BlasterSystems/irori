@@ -7,6 +7,8 @@ import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./histo
 import { type LlmHistoryResponse } from "./llm-history.js";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
+import { JobBusyError, JobDispatchError, type JobsService } from "./jobs-service.js";
+import { planPlacement } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import type { AgentHub } from "./hub.js";
@@ -15,6 +17,47 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
 /** Upper bound on probe assignments accepted per node. */
 const MAX_LLM_PORTS = 32;
+/** Models-page page size (M1 Models v2 spec: 25/page). */
+const MODELS_PAGE_SIZE = 25;
+/** Placement reserve: keep this much disk free beyond the model itself. */
+const DEFAULT_RESERVE_BYTES = 20 * 1024 ** 3;
+
+/** Largest free space across the node's real mounts (the store disk wins). */
+function maxDiskFree(snapshot: unknown): number | null {
+  const storage = (snapshot as { storage?: Array<{ totalBytes: number; usedBytes: number }> } | null | undefined)?.storage;
+  if (!Array.isArray(storage) || storage.length === 0) return null;
+  let max = 0;
+  for (const s of storage) {
+    if (typeof s?.totalBytes !== "number" || typeof s?.usedBytes !== "number") continue;
+    const free = s.totalBytes - s.usedBytes;
+    if (free > max) max = free;
+  }
+  return max > 0 ? max : null;
+}
+
+function serializeJob(job: {
+  id: string;
+  nodeId: string;
+  kind: string;
+  status: string;
+  params: unknown;
+  exitCode: number | null;
+  createdAt: Date;
+  startedAt: Date | null;
+  finishedAt: Date | null;
+}) {
+  return {
+    id: job.id,
+    nodeId: job.nodeId,
+    kind: job.kind,
+    status: job.status,
+    params: job.params,
+    exitCode: job.exitCode,
+    createdAt: job.createdAt.toISOString(),
+    startedAt: job.startedAt?.toISOString() ?? null,
+    finishedAt: job.finishedAt?.toISOString() ?? null,
+  };
+}
 
 /** Builds a history response; null while degraded (no DB wired yet). */
 export type HistoryBuilder = (nodeId: string, range: HistoryRange) => Promise<HistoryResponse>;
@@ -30,10 +73,12 @@ export interface AppDeps {
   /** Null while degraded: the history routes answer 503. */
   getHistory: () => HistoryBuilder | null;
   getLlmHistory: () => LlmHistoryBuilder | null;
+  /** Null while degraded: jobs routes answer 503. */
+  getJobs: () => JobsService | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   sse: SseHub;
-  getHub: () => Pick<AgentHub, "online"> | null;
+  getHub: () => Pick<AgentHub, "online" | "sendToNode"> | null;
   version: string;
   /** apps/web/dist when it exists, else null. */
   staticDir: string | null;
@@ -99,8 +144,12 @@ export function createApp(deps: AppDeps): Express {
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const body = nodePatchSchema.safeParse(req.body);
     if (!body.success) return sendZodError(res, body.error);
+    // Defaults (llmPorts: []) must not wipe stored values when the key is
+    // absent from the request — apply only the keys the client sent.
+    const requested = typeof req.body === "object" && req.body !== null ? Object.keys(req.body) : [];
+    const patch = Object.fromEntries(Object.entries(body.data).filter(([k]) => requested.includes(k)));
     if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
-    await store.patch(id, body.data);
+    await store.patch(id, patch);
     const row = await store.get(id);
     if (row === null) return res.status(404).json({ error: "node not found" });
     res.json({ node: toNodeDto(row, onlineSet().has(id)) });
@@ -200,6 +249,108 @@ export function createApp(deps: AppDeps): Express {
     res.json({ llmPorts: nodeLlmAssignments(row) });
   });
 
+  // ---- M4: jobs, models, placement ----
+
+  // Enqueue + dispatch a job to the node's agent (one active per node).
+  app.post("/api/v1/nodes/:id/jobs", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const body = req.body as { kind?: unknown; params?: unknown };
+    if (typeof body?.kind !== "string") return res.status(400).json({ error: "kind is required" });
+    const params = (body.params ?? {}) as Record<string, unknown>;
+    try {
+      const job = await jobs.create(id, body.kind, params);
+      res.status(202).json({ job: serializeJob(job) });
+    } catch (err) {
+      if (err instanceof JobBusyError) return res.status(409).json({ error: err.message });
+      if (err instanceof JobDispatchError) return res.status(409).json({ error: err.message });
+      if (err instanceof Error && err.name === "ZodError") return res.status(400).json({ error: "unknown job kind" });
+      throw err;
+    }
+  });
+
+  app.get("/api/v1/jobs/:id", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid job id" });
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const job = await jobs.get(id);
+    if (job === null) return res.status(404).json({ error: "job not found" });
+    res.json({ job: serializeJob(job), output: job.output });
+  });
+
+  app.post("/api/v1/jobs/:id/cancel", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid job id" });
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const ok = await jobs.cancel(id);
+    if (!ok) return res.status(409).json({ error: "job not cancelable" });
+    res.status(204).end();
+  });
+
+  // NAS catalog listing from the model_meta cache (refreshed by catalog frames).
+  app.get("/api/v1/models", async (req, res) => {
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
+    const page = Math.max(1, Number.parseInt(typeof req.query.page === "string" ? req.query.page : "1", 10) || 1);
+    const rows = await jobs.listModels();
+    const filtered = q.length === 0 ? rows : rows.filter((m) => m.name.toLowerCase().includes(q) || m.repository.toLowerCase().includes(q));
+    const total = filtered.length;
+    const models = filtered.slice((page - 1) * MODELS_PAGE_SIZE, page * MODELS_PAGE_SIZE);
+    res.json({ page, pageSize: MODELS_PAGE_SIZE, total, models });
+  });
+
+  // Ask model-ops agents to re-report their store catalog.
+  app.post("/api/v1/models/refresh", async (_req, res) => {
+    const hub = deps.getHub();
+    const sent = hub === null ? 0 : [...hub.online()].filter((nodeId) => hub.sendToNode(nodeId, { type: "catalog-request" })).length;
+    res.status(202).json({ requested: sent });
+  });
+
+  // Placement: model × every node → present|sync|push|unavailable.
+  app.get("/api/v1/placement", async (req, res) => {
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const model = typeof req.query.model === "string" ? req.query.model : "";
+    if (model.length === 0) return res.status(400).json({ error: "model is required" });
+    const entry = await jobs.findModel(model);
+    if (entry === null) return res.status(404).json({ error: "unknown model" });
+    const store = requireStore(res);
+    if (!store) return;
+    const rows = await store.list();
+    const online = deps.getHub()?.online() ?? NO_NODES_ONLINE;
+    const placements = [];
+    for (const row of rows) {
+      const snapshot = deps.rings.latest(row.id);
+      const diskFreeBytes = maxDiskFree(snapshot);
+      const target = {
+        id: row.id,
+        name: row.name,
+        kind: row.kind,
+        role: row.role,
+        hasNasRoot: row.nasRoot !== null,
+        pushCapable: online.has(row.id) && row.enabled,
+        diskFreeBytes,
+      };
+      placements.push({
+        node: { id: row.id, name: row.name, kind: row.kind, role: row.role, online: online.has(row.id) },
+        placement: planPlacement({
+          availableOn: [{ nodeId: "nas", bytes: entry.bytes }],
+          target,
+          reserveBytes: DEFAULT_RESERVE_BYTES,
+        }),
+      });
+    }
+    res.json({ model: { name: entry.name, bytes: entry.bytes }, placements });
+  });
+
   // Unknown API paths answer JSON, not the SPA.
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not found" });
@@ -240,9 +391,22 @@ function toNodeDto(row: NodeRecord, online: boolean): NodeInfo {
     online,
     lastSeenAt: toIso(row.lastSeenAt),
     sortOrder: row.sortOrder,
+    llmPorts: normalizeLlmPorts(row.llmPorts),
+    nasRoot: row.nasRoot,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   });
+}
+
+/** Tolerant jsonb→ports normalization: entries are numbers or {port, host}. */
+function normalizeLlmPorts(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const ports: number[] = [];
+  for (const entry of value) {
+    if (typeof entry === "number" && Number.isInteger(entry) && entry > 0) ports.push(entry);
+    else if (typeof entry === "object" && entry !== null && "port" in entry && typeof entry.port === "number") ports.push(entry.port);
+  }
+  return [...new Set(ports)].sort((a, b) => a - b);
 }
 
 const toIso = (d: Date | null): string | null => (d === null ? null : d.toISOString());

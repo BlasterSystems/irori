@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, HardwareSnapshot, LlmPortSnapshot, ServerMsg } from "@irori/core";
+import type { AgentMsg, AgentServerMsg, HardwareSnapshot, LlmPortSnapshot, ServerMsg } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -44,6 +44,11 @@ export interface AgentTransportOptions {
   onLlmConfig?: (config: LlmRuntimeConfig) => LlmRuntimeConfig | void;
   /** LLM probe config seeded before the first config-update (env). */
   llm?: LlmRuntimeConfig;
+  /** Server asks the agent to run one job (one active per node). */
+  onJobRequest?: (jobId: string, kind: string, params: Record<string, unknown>) => void;
+  onJobCancel?: (jobId: string) => void;
+  /** Server asks the agent to read + report the NAS store catalog. */
+  onCatalogRequest?: () => void;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -63,6 +68,9 @@ export class AgentTransport {
   private readonly collect: () => Promise<HardwareSnapshot>;
   private readonly collectLlm?: (detectOnly: boolean) => Promise<LlmPortSnapshot[]>;
   private readonly onLlmConfig?: (config: LlmRuntimeConfig) => LlmRuntimeConfig | void;
+  private readonly onJobRequest?: (jobId: string, kind: string, params: Record<string, unknown>) => void;
+  private readonly onJobCancel?: (jobId: string) => void;
+  private readonly onCatalogRequest?: () => void;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -84,6 +92,7 @@ export class AgentTransport {
   private llm: LlmRuntimeConfig;
   private llmTimer: NodeJS.Timeout | undefined;
   private llmProbing = false;
+  private nasRoot: string | null = null;
 
   constructor(options: AgentTransportOptions) {
     this.token = options.token;
@@ -95,6 +104,9 @@ export class AgentTransport {
     this.llm = options.llm ?? { llmPorts: [], llmCadenceMs: 0, llmDetectOnly: false };
     this.onLlmConfig = options.onLlmConfig;
     this.collectLlm = options.collectLlm;
+    this.onJobRequest = options.onJobRequest;
+    this.onJobCancel = options.onJobCancel;
+    this.onCatalogRequest = options.onCatalogRequest;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -119,6 +131,11 @@ export class AgentTransport {
   /** Effective LLM probe config (server values merged with env overrides). */
   getLlmConfig(): LlmRuntimeConfig {
     return this.llm;
+  }
+
+  /** NAS store root from the last config-update (model-ops nodes). */
+  getNasRoot(): string | null {
+    return this.nasRoot;
   }
 
   /** Snapshots currently buffered for the next connection. */
@@ -242,9 +259,19 @@ export class AgentTransport {
         break;
       case "pong":
         break;
+      case "job":
+        this.onJobRequest?.(parsed.data.jobId, parsed.data.kind, parsed.data.params);
+        break;
+      case "job-cancel":
+        this.onJobCancel?.(parsed.data.jobId);
+        break;
+      case "catalog-request":
+        this.onCatalogRequest?.();
+        break;
       case "error":
-        this.log(`server error: ${parsed.data.message} — closing`);
-        this.ws?.close();
+        // Harmless frame-reject (e.g. our job frames on an older server) or a
+        // real refusal — log it; closing here would drop in-flight job output.
+        this.log(`server error: ${parsed.data.message}`);
         break;
     }
   }
@@ -261,6 +288,7 @@ export class AgentTransport {
 
   private handleConfigUpdate(msg: Extract<ServerMsg, { type: "config-update" }>): void {
     this.cadenceMs = msg.cadenceMs;
+    this.nasRoot = msg.nasRoot ?? null;
     this.log(`cadence updated to ${msg.cadenceMs} ms`);
     if (this.ready) this.startSnapshotTimer();
 
@@ -351,6 +379,24 @@ export class AgentTransport {
     }
   }
 
+  /**
+   * Send a job-output / job-done / catalog frame. Dropped while offline —
+   * job output is streamed live and job completion is reported to the server
+   * directly (the server-side record drives the UI).
+   */
+  sendAgentServer(msg: AgentServerMsg): void {
+    if (!this.ready) {
+      this.log(`agentServer frame DROPPED (not ready): ${msg.type}`);
+      return;
+    }
+    try {
+      this.sendRaw(msg);
+      if (msg.type !== "job-output") this.log(`agentServer frame sent: ${msg.type}`);
+    } catch (err) {
+      this.log(`agentServer frame send failed: ${msg.type} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+
   private async tick(): Promise<void> {
     if (this.collecting || !this.ready) return;
     this.collecting = true;
@@ -375,7 +421,7 @@ export class AgentTransport {
     }
   }
 
-  private sendRaw(msg: AgentMsg): void {
+  private sendRaw(msg: AgentMsg | AgentServerMsg): void {
     const ws = this.ws;
     if (ws === null || ws.readyState !== WebSocket.OPEN) {
       throw new Error("socket is not open");

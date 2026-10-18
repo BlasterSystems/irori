@@ -12,6 +12,8 @@ const VALID_NODE = {
   online: true,
   lastSeenAt: "2026-10-17T12:00:00.000Z",
   sortOrder: 1,
+  llmPorts: [],
+  nasRoot: null,
   createdAt: "2026-10-16T09:00:00.000Z",
   updatedAt: "2026-10-17T12:00:00.000Z",
 };

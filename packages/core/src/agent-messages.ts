@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmMsgSchema } from "./llm.js";
+import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema } from "./job-messages.js";
 
 /**
  * Agent → server messages. First frame on a connection MUST be hello;
@@ -57,6 +58,8 @@ export const configUpdateMsgSchema = z.object({
   llmCadenceMs: z.number().int().nonnegative().default(0),
   /** Workers send detection-only probes (backend/model, no rate windows). */
   llmDetectOnly: z.boolean().default(false),
+  /** NAS store root for model-ops nodes (M4); null otherwise. */
+  nasRoot: z.string().nullable().default(null),
 });
 
 export const serverErrorMsgSchema = z.object({
@@ -71,6 +74,9 @@ export const serverMsgSchema = z.discriminatedUnion("type", [
   configUpdateMsgSchema,
   serverErrorMsgSchema,
   serverPongMsgSchema,
+  jobRequestMsgSchema,
+  jobCancelMsgSchema,
+  catalogRequestMsgSchema,
 ]);
 
 export type HelloOkMsg = z.infer<typeof helloOkMsgSchema>;

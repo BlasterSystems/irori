@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "./live";
 import NodeCard from "./components/NodeCard.vue";
 import NodeDetail from "./components/NodeDetail.vue";
+import ModelsView from "./components/ModelsView.vue";
 import { groupNodes } from "./llm-data";
 import { parseHash, type Route } from "./router";
 
@@ -72,7 +73,7 @@ onUnmounted(() => {
       <nav class="nav" aria-label="Primary">
         <a href="#/" :class="{ 'is-active': route.view === 'overview' }" :aria-current="route.view === 'overview' ? 'page' : undefined">Overview</a>
         <a :class="{ 'is-active': route.view === 'node' }" :aria-current="route.view === 'node' ? 'page' : undefined">Nodes</a>
-        <a>Models</a>
+        <a href="#/models" :class="{ 'is-active': route.view === 'models' }" :aria-current="route.view === 'models' ? 'page' : undefined">Models</a>
         <a>Serve</a>
         <a>Analytics</a>
         <a>Benchmarks</a>
@@ -87,7 +88,8 @@ onUnmounted(() => {
   </header>
 
   <main class="container page">
-    <NodeDetail v-if="detailNodeId !== null" :node-id="detailNodeId" />
+    <ModelsView v-if="route.view === 'models'" />
+    <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />
     <template v-else>
       <div class="pagehead">
         <div>

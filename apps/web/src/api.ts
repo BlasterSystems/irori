@@ -34,8 +34,12 @@ export async function fetchNodes(signal?: AbortSignal): Promise<NodeInfo[]> {
     throw new Error("GET /api/v1/nodes: expected a JSON array of nodes");
   }
   return body.map((item) => {
-    const node = nodeInfoSchema.parse(item);
-    return { ...node, llmPorts: extractLlmPorts(item) };
+    const parsed = nodeInfoSchema.safeParse(item);
+    if (parsed.success) return parsed.data;
+    // One malformed node must not kill the whole registry view: parse the
+    // identity strictly and sanitize the probe ports from the raw payload.
+    const lenient = nodeInfoSchema.omit({ llmPorts: true }).parse(item);
+    return { ...lenient, llmPorts: extractLlmPorts(item) };
   });
 }
 

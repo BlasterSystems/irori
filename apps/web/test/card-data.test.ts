@@ -16,6 +16,8 @@ function nodeFixture(overrides: Partial<NodeInfo> = {}): NodeInfo {
     online: true,
     lastSeenAt: null,
     sortOrder: 1,
+    llmPorts: [],
+    nasRoot: null,
     createdAt: "2026-10-16T09:00:00.000Z",
     updatedAt: "2026-10-17T12:00:00.000Z",
     ...overrides,
