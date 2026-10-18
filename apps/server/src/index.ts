@@ -9,9 +9,12 @@ import { createRings } from "./rings.js";
 import { createSseHub } from "./sse.js";
 import { createAgentHub, type AgentHub } from "./hub.js";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
-import { runRetention } from "./retention.js";
+import { createLlmRollupEngine } from "./llm-rollups.js";
+import { createLlmStore, type LlmStore } from "./llm-store.js";
+import { runRetention, runLlmRetention } from "./retention.js";
 import { buildHistory } from "./history.js";
-import { createApp, type HistoryBuilder } from "./app.js";
+import { buildLlmHistory } from "./llm-history.js";
+import { createApp, type HistoryBuilder, type LlmHistoryBuilder } from "./app.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -27,12 +30,16 @@ const state: {
   dbHealthy: () => Promise<boolean>;
   hub: AgentHub | null;
   store: NodeStore | null;
+  llmStore: LlmStore | null;
   history: HistoryBuilder | null;
+  llmHistory: LlmHistoryBuilder | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
   store: null,
+  llmStore: null,
   history: null,
+  llmHistory: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -43,7 +50,9 @@ const sse = createSseHub();
 
 const app = createApp({
   getStore: () => state.store,
+  getLlmStore: () => state.llmStore,
   getHistory: () => state.history,
+  getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
   rings,
   sse,
@@ -73,25 +82,36 @@ async function boot(): Promise<void> {
   state.store = store;
   state.dbHealthy = dbHandle.isHealthy;
 
-  const hub = createAgentHub({ store, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version });
+  const llmStore = createLlmStore(dbHandle.db);
+  state.llmStore = llmStore;
+
+  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version });
   hub.attach(server);
   state.hub = hub;
 
   state.history = (nodeId, range) => buildHistory(dbHandle!.db, nodeId, range);
+  state.llmHistory = (nodeId, range) => buildLlmHistory(dbHandle!.db, nodeId, range);
 
   // Roll up BEFORE the first prune pass so raw data is never deleted
-  // un-aggregated, then keep buckets fresh every 60s.
+  // un-aggregated, then keep buckets fresh every 60s. Hardware and llm
+  // pipelines share the schedule but advance their watermarks separately.
   const engine = createRollupEngine(dbHandle.db);
-  try {
-    await engine.runOnce();
-    console.log("[irori-server] initial rollup pass complete");
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[irori-server] initial rollup failed (${message}) — retrying every ${ROLLUP_INTERVAL_MS / 1000}s`);
+  const llmEngine = createLlmRollupEngine(dbHandle.db);
+  for (const [name, rollupEngine] of [
+    ["rollup", engine],
+    ["llm rollup", llmEngine],
+  ] as const) {
+    try {
+      await rollupEngine.runOnce();
+      console.log(`[irori-server] initial ${name} pass complete`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[irori-server] initial ${name} failed (${message}) — retrying every ${ROLLUP_INTERVAL_MS / 1000}s`);
+    }
   }
-  startRollupLoop(engine, dbHandle.isHealthy);
+  startRollupLoop([engine, llmEngine], dbHandle.isHealthy);
 
-  startPruneLoop(store, dbHandle.db, config);
+  startPruneLoop(store, llmStore, dbHandle.db, config);
   console.log(`[irori-server] agent hub ready on /agent-ws (cadence ${config.cadenceMs} ms)`);
 }
 
@@ -112,7 +132,7 @@ async function migrateWithBackoff(migrate: () => Promise<void>): Promise<void> {
   }
 }
 
-function startPruneLoop(store: NodeStore, db: Db, config: Config): void {
+function startPruneLoop(store: NodeStore, llmStore: LlmStore, db: Db, config: Config): void {
   const prune = async (): Promise<void> => {
     try {
       const result = await runRetention(store, db, {
@@ -121,12 +141,26 @@ function startPruneLoop(store: NodeStore, db: Db, config: Config): void {
         hourKeepDays: config.hourKeepDays,
         dayKeepDays: config.dayKeepDays,
       });
+      const llm = await runLlmRetention(llmStore, {
+        rawHours: config.snapshotRetentionHours,
+        minuteKeepDays: config.minuteKeepDays,
+        hourKeepDays: config.hourKeepDays,
+        dayKeepDays: config.dayKeepDays,
+      });
       if (result.raw > 0) {
         console.log(`[irori-server] pruned ${result.raw} snapshots (retention ${config.snapshotRetentionHours} h)`);
+      }
+      if (llm.raw > 0) {
+        console.log(`[irori-server] pruned ${llm.raw} llm snapshots (retention ${config.snapshotRetentionHours} h)`);
       }
       if (result.minute + result.hour + result.day > 0) {
         console.log(
           `[irori-server] pruned buckets: ${result.minute} minute / ${result.hour} hour / ${result.day} day`,
+        );
+      }
+      if (llm.minute + llm.hour + llm.day > 0) {
+        console.log(
+          `[irori-server] pruned llm buckets: ${llm.minute} minute / ${llm.hour} hour / ${llm.day} day`,
         );
       }
     } catch {
@@ -138,13 +172,16 @@ function startPruneLoop(store: NodeStore, db: Db, config: Config): void {
   timer.unref();
 }
 
-function startRollupLoop(engine: RollupEngine, isHealthy: () => Promise<boolean>): void {
+function startRollupLoop(engines: RollupEngine[], isHealthy: () => Promise<boolean>): void {
   const tick = async (): Promise<void> => {
-    try {
-      if (await isHealthy()) await engine.runOnce();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[irori-server] rollup pass failed (${message})`);
+    if (!(await isHealthy())) return;
+    for (const engine of engines) {
+      try {
+        await engine.runOnce();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[irori-server] rollup pass failed (${message})`);
+      }
     }
   };
   const timer = setInterval(() => void tick(), ROLLUP_INTERVAL_MS);

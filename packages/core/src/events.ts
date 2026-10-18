@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
+import { llmEventSchema, type LlmEvent } from "./llm.js";
+
+export type { LlmEvent };
 
 /**
  * Server → browser event hub (SSE, GET /api/v1/events). All events carry a
@@ -28,6 +31,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   snapshotEventSchema,
   nodeStatusEventSchema,
   heartbeatEventSchema,
+  llmEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;

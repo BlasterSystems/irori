@@ -15,6 +15,13 @@
       "when": 1792263511220,
       "tag": "0001_flowery_marvel_zombies",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792304753656,
+      "tag": "0002_perpetual_plazm",
+      "breakpoints": true
     }
   ]
 }

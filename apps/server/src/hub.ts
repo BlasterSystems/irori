@@ -6,21 +6,28 @@ import {
   type HardwareSnapshot,
 } from "@irori/core";
 import type { NodeStore } from "@irori/db";
-import type { Rings } from "./rings.js";
+import type { LlmStore } from "./llm-store.js";
+import { nodeLlmAssignments } from "./llm-store.js";
+import type { LlmRingEntry, Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 
-const MAX_PENDING_SNAPSHOTS = 1000;
-const DEFAULT_SNAPSHOT_FLUSH_MS = 5_000;
+/** Drop-oldest cap for buffered DB writes (snapshots + llm probe passes). */
+const MAX_PENDING_WRITES = 1000;
+const DEFAULT_WRITE_FLUSH_MS = 5_000;
 const DEFAULT_MARK_SEEN_THROTTLE_MS = 30_000;
+/** Probe cadence handed to agents: heads/standalone probe, workers detect-only. */
+const LLM_PROBE_CADENCE_MS = 2_000;
+const LLM_DETECT_CADENCE_MS = 10_000;
 
 export interface AgentHubDeps {
-  store: Pick<NodeStore, "verifyToken" | "markSeen" | "insertSnapshot">;
+  store: Pick<NodeStore, "get" | "verifyToken" | "markSeen" | "insertSnapshot">;
+  llmStore: Pick<LlmStore, "insertLlmSnapshot">;
   rings: Rings;
   sse: Pick<SseHub, "send">;
   cadenceMs: number;
   serverVersion: string;
   /** Injectables for tests. */
-  snapshotFlushMs?: number;
+  writeFlushMs?: number;
   markSeenThrottleMs?: number;
 }
 
@@ -34,19 +41,21 @@ export interface AgentHub {
 
 /**
  * Agent WebSocket hub. First frame must be a hello; the token is verified via
- * the store, unsupported agent versions are refused, and snapshots fan out to
- * the rings + SSE while being persisted fire-and-forget. DB failures buffer
- * up to MAX_PENDING_SNAPSHOTS (drop-oldest) and flush while the DB is back.
+ * the store, unsupported agent versions are refused, and snapshots/llm probe
+ * passes fan out to the rings + SSE while being persisted fire-and-forget.
+ * DB failures buffer up to MAX_PENDING_WRITES (drop-oldest) and flush while
+ * the DB is back. Every hello-ok is followed by a config-update carrying the
+ * node's probe assignments and role-derived llm cadence.
  */
 export function createAgentHub(deps: AgentHubDeps): AgentHub {
   const wss = new WebSocketServer({ noServer: true });
   const onlineNodes = new Set<string>();
   const lastMarkedAt = new Map<string, number>();
-  const pending: Array<{ nodeId: string; payload: unknown }> = [];
+  const pending: Array<{ nodeId: string; kind: "snapshot" | "llm"; payload: unknown }> = [];
   const throttleMs = deps.markSeenThrottleMs ?? DEFAULT_MARK_SEEN_THROTTLE_MS;
 
   let flushing = false;
-  const flushTimer = setInterval(() => void flushPending(), deps.snapshotFlushMs ?? DEFAULT_SNAPSHOT_FLUSH_MS);
+  const flushTimer = setInterval(() => void flushPending(), deps.writeFlushMs ?? DEFAULT_WRITE_FLUSH_MS);
   flushTimer.unref();
 
   async function flushPending(): Promise<void> {
@@ -56,7 +65,8 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       while (pending.length > 0) {
         const next = pending[0]!;
         try {
-          await deps.store.insertSnapshot(next.nodeId, next.payload);
+          if (next.kind === "snapshot") await deps.store.insertSnapshot(next.nodeId, next.payload);
+          else await deps.llmStore.insertLlmSnapshot(next.nodeId, next.payload);
           pending.shift();
         } catch {
           break; // DB still unhealthy; retry on the next tick
@@ -67,9 +77,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     }
   }
 
-  function enqueuePending(nodeId: string, payload: unknown): void {
-    pending.push({ nodeId, payload });
-    while (pending.length > MAX_PENDING_SNAPSHOTS) pending.shift(); // drop oldest
+  function enqueuePending(nodeId: string, kind: "snapshot" | "llm", payload: unknown): void {
+    pending.push({ nodeId, kind, payload });
+    while (pending.length > MAX_PENDING_WRITES) pending.shift(); // drop oldest
   }
 
   wss.on("connection", (ws: WebSocket) => {
@@ -137,6 +147,16 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         deps.sse.send({ type: "node-online", serverTimeMs: Date.now(), nodeId: id, agentVersion });
         void markSeen(id, msg.agentVersion);
         sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.cadenceMs, serverVersion: deps.serverVersion });
+        // Probe assignments + role-derived cadence. A worker's role may change
+        // without a reconnect only via a later config-update; hello covers boot.
+        const row = await deps.store.get(id);
+        sendMsg({
+          type: "config-update",
+          cadenceMs: deps.cadenceMs,
+          llmPorts: nodeLlmAssignments(row),
+          llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
+          llmDetectOnly: row?.role === "worker",
+        });
         return;
       }
 
@@ -148,7 +168,20 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         try {
           await deps.store.insertSnapshot(currentId, snapshot);
         } catch {
-          enqueuePending(currentId, snapshot);
+          enqueuePending(currentId, "snapshot", snapshot);
+        }
+        return;
+      }
+
+      if (msg.type === "llm") {
+        const entry: LlmRingEntry = { serverTimeMs: Date.now(), ports: msg.ports };
+        deps.rings.pushLlm(currentId, entry);
+        deps.sse.send({ type: "llm", serverTimeMs: entry.serverTimeMs, nodeId: currentId, ports: msg.ports });
+        const payload = { schemaVersion: msg.schemaVersion, agentVersion: msg.agentVersion, ports: msg.ports };
+        try {
+          await deps.llmStore.insertLlmSnapshot(currentId, payload);
+        } catch {
+          enqueuePending(currentId, "llm", payload);
         }
         return;
       }

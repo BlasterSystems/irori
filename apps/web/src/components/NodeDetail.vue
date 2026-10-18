@@ -3,12 +3,18 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { live } from "../live";
 import {
   fetchHistory,
+  fetchLlmHistory,
+  fetchNodeLlm,
   HISTORY_RANGES,
   type HistoryRange,
   type HistoryResponse,
+  type LlmHistoryResponse,
+  type LlmSnapshot,
 } from "../api";
 import { computeCardData } from "../card-data";
 import { computeDetailData } from "../detail-data";
+import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
+import LlmPanel from "./LlmPanel.vue";
 import Sparkline from "./Sparkline.vue";
 
 const props = defineProps<{ nodeId: string }>();
@@ -50,15 +56,77 @@ watch(
   () => props.nodeId,
   () => {
     void load();
+    void loadLlm();
   },
 );
 watch(range, () => {
   void load();
+  void loadLlm();
 });
 onMounted(() => {
   void load();
+  void loadLlm();
 });
-onUnmounted(() => controller?.abort());
+onUnmounted(() => {
+  controller?.abort();
+  llmController?.abort();
+});
+
+/* ── Inference (M3) ─────────────────────────────────────────────────────── */
+
+const llmRest = ref<LlmSnapshot | null>(null);
+const llmHistory = ref<LlmHistoryResponse | null>(null);
+const llmState = ref<"loading" | "ready" | "error">("loading");
+let llmController: AbortController | null = null;
+
+/** REST seed for the port panels + per-range history; SSE keeps them live. */
+async function loadLlm(): Promise<void> {
+  llmController?.abort();
+  llmController = new AbortController();
+  const { signal } = llmController;
+  llmState.value = "loading";
+  // Older servers may not ship either endpoint yet; degrade independently.
+  const [snapRes, histRes] = await Promise.allSettled([
+    fetchNodeLlm(props.nodeId, signal),
+    fetchLlmHistory(props.nodeId, range.value, signal),
+  ]);
+  if (signal.aborted) return;
+  if (snapRes.status === "fulfilled") llmRest.value = snapRes.value;
+  if (histRes.status === "fulfilled") llmHistory.value = histRes.value;
+  llmState.value =
+    snapRes.status === "rejected" && histRes.status === "rejected"
+      ? "error"
+      : "ready";
+}
+
+interface LlmPanelVm {
+  view: LlmPortView;
+  decode: Array<number | null> | null;
+  prefill: Array<number | null> | null;
+}
+
+const llmPanels = computed<LlmPanelVm[]>(() => {
+  const entry = live.getLlm(props.nodeId) ?? llmRest.value;
+  const configured = node.value ? nodeLlmPorts(node.value) : [];
+  const detectOnly = node.value?.role === "worker";
+
+  // Displayed ports: configured list first, then any hot-added probe ports.
+  const ports: number[] = [];
+  for (const p of [...configured, ...(entry?.ports ?? []).map((s) => s.port)]) {
+    if (!ports.includes(p)) ports.push(p);
+  }
+  ports.sort((a, b) => a - b);
+
+  return ports.map((port) => {
+    const snap = entry?.ports.find((s) => s.port === port) ?? null;
+    const points = llmHistory.value?.series.find((s) => s.port === port)?.points ?? null;
+    return {
+      view: shapeLlmPort(snap, port, { detectOnly }),
+      decode: points ? points.map((p) => p.decodeTps) : null,
+      prefill: points ? points.map((p) => p.prefillTps) : null,
+    };
+  });
+});
 
 const detail = computed(() =>
   computeDetailData(snapshot.value, history.value, range.value),
@@ -120,6 +188,24 @@ const statusChipClass = computed(() =>
         </div>
       </article>
     </section>
+
+    <h2 style="margin-bottom: 10px;">Inference</h2>
+    <p v-if="llmPanels.length === 0" class="muted" style="margin: 0 0 12px;">no LLM ports configured</p>
+    <section v-else class="cols cols-2" style="margin-bottom: 12px;">
+      <LlmPanel
+        v-for="panel in llmPanels"
+        :key="panel.view.port"
+        :port="panel.view"
+        :decode="panel.decode"
+        :prefill="panel.prefill"
+        :range="range"
+      />
+    </section>
+    <p
+      v-if="llmState === 'error' && llmPanels.length > 0"
+      class="stat__sub"
+      style="margin: -2px 0 12px;"
+    >inference history unavailable — showing live probes only</p>
 
     <h2 style="margin-bottom: 10px;">History</h2>
     <div class="row row--between detail-range" style="margin-bottom: 12px;">

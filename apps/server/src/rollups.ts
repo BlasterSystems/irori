@@ -86,7 +86,7 @@ export interface RollupEngine {
 export function createRollupEngine(db: Db): RollupEngine {
   return {
     async runOnce(now = new Date()) {
-      const watermark = await readWatermark(db);
+      const watermark = await readWatermark(db, ROLLUP_WATERMARK_KEY);
       let dirty = false;
       for (const granularity of GRANULARITIES) {
         // Buckets starting before `floor(now)` are complete; the bucket that
@@ -103,13 +103,13 @@ export function createRollupEngine(db: Db): RollupEngine {
         watermark[granularity] = to;
         dirty = true;
       }
-      if (dirty) await writeWatermark(db, watermark);
+      if (dirty) await writeWatermark(db, ROLLUP_WATERMARK_KEY, watermark);
     },
   };
 }
 
 /** Floor `t` to the start of its bucket (UTC). */
-function floorTo(t: Date, granularity: Granularity): Date {
+export function floorTo(t: Date, granularity: Granularity): Date {
   return new Date(Math.floor(t.getTime() / GRANULARITY_MS[granularity]) * GRANULARITY_MS[granularity]);
 }
 
@@ -125,7 +125,7 @@ export function bucketStartExpr(granularity: Granularity): SQL {
 }
 
 /** Closed-union granularity as a SQL literal (params break postgres.js serialization). */
-function granularityLiteral(granularity: Granularity): SQL {
+export function granularityLiteral(granularity: Granularity): SQL {
   return sql.raw(`'${granularity}'::bucket_granularity`);
 }
 
@@ -192,11 +192,12 @@ interface WatermarkValue {
   day: string | null;
 }
 
-async function readWatermark(db: Db): Promise<Record<Granularity, Date | null>> {
+/** Reads the {minute, hour, day} watermark stored under `key`. */
+export async function readWatermark(db: Db, key: string): Promise<Record<Granularity, Date | null>> {
   const [row] = await db
     .select({ value: settings.value })
     .from(settings)
-    .where(eq(settings.key, ROLLUP_WATERMARK_KEY));
+    .where(eq(settings.key, key));
   const value = row?.value as Partial<WatermarkValue> | undefined;
   const parse = (raw: unknown): Date | null => {
     if (typeof raw !== "string") return null;
@@ -210,7 +211,8 @@ async function readWatermark(db: Db): Promise<Record<Granularity, Date | null>> 
   };
 }
 
-async function writeWatermark(db: Db, watermark: Record<Granularity, Date | null>): Promise<void> {
+/** Writes the {minute, hour, day} watermark under `key` (upsert). */
+export async function writeWatermark(db: Db, key: string, watermark: Record<Granularity, Date | null>): Promise<void> {
   const value: WatermarkValue = {
     minute: watermark.minute?.toISOString() ?? null,
     hour: watermark.hour?.toISOString() ?? null,
@@ -218,6 +220,6 @@ async function writeWatermark(db: Db, watermark: Record<Granularity, Date | null
   };
   await db
     .insert(settings)
-    .values({ key: ROLLUP_WATERMARK_KEY, value })
+    .values({ key, value })
     .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } });
 }

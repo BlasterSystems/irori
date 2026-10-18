@@ -38,6 +38,7 @@ const nodeRecordColumns = {
   agentVersion: nodes.agentVersion,
   lastSeenAt: nodes.lastSeenAt,
   sortOrder: nodes.sortOrder,
+  llmPorts: nodes.llmPorts,
   createdAt: nodes.createdAt,
   updatedAt: nodes.updatedAt,
 } satisfies Record<keyof NodeRecord, unknown>;

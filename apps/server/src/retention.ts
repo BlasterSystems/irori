@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Db, NodeStore } from "@irori/db";
 import type { Granularity } from "./rollups.js";
+import type { LlmStore } from "./llm-store.js";
 
 export interface RetentionPolicy {
   /** Raw snapshots older than this are deleted. */
@@ -11,6 +12,13 @@ export interface RetentionPolicy {
 }
 
 export interface RetentionResult {
+  raw: number;
+  minute: number;
+  hour: number;
+  day: number;
+}
+
+export interface LlmRetentionResult {
   raw: number;
   minute: number;
   hour: number;
@@ -48,5 +56,22 @@ export async function runRetention(
   const minute = await pruneBuckets(db, "minute", policy.minuteKeepDays);
   const hour = await pruneBuckets(db, "hour", policy.hourKeepDays);
   const day = await pruneBuckets(db, "day", policy.dayKeepDays);
+  return { raw, minute, hour, day };
+}
+
+/**
+ * One llm retention pass: prune raw llm_snapshots first, then llm_buckets
+ * per granularity (same knobs as the hardware retention). Raw pruning runs
+ * first so nothing is deleted before the llm rollup engine had its chance
+ * (boot runs llm rollups before the first pass).
+ */
+export async function runLlmRetention(
+  llmStore: Pick<LlmStore, "pruneLlmSnapshots" | "pruneLlmBuckets">,
+  policy: RetentionPolicy,
+): Promise<LlmRetentionResult> {
+  const raw = await llmStore.pruneLlmSnapshots(new Date(Date.now() - policy.rawHours * 3_600_000));
+  const minute = await llmStore.pruneLlmBuckets("minute", policy.minuteKeepDays);
+  const hour = await llmStore.pruneLlmBuckets("hour", policy.hourKeepDays);
+  const day = await llmStore.pruneLlmBuckets("day", policy.dayKeepDays);
   return { raw, minute, hour, day };
 }

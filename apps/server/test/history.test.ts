@@ -28,7 +28,9 @@ describe("history route", () => {
   function makeHistoryApp(opts: { store: AppDeps["getStore"]; history: HistoryBuilder | null }) {
     return createApp({
       getStore: opts.store,
+      getLlmStore: () => null,
       getHistory: () => opts.history,
+      getLlmHistory: () => null,
       dbHealthy: async () => true,
       rings: createRings(),
       sse: createSseHub({ heartbeatMs: 0 }),

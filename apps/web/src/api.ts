@@ -1,4 +1,21 @@
-import { nodeInfoSchema, type NodeInfo } from "@irori/core";
+import {
+  LLM_BACKENDS,
+  nodeInfoSchema,
+  type LlmBackend,
+  type LlmPortSnapshot,
+  type NodeInfo,
+} from "@irori/core";
+
+/** Registry entries carry the node's configured probe ports (M3); older
+ *  server payloads omit the field, so it is re-attached from the raw body. */
+function extractLlmPorts(raw: unknown): number[] {
+  if (typeof raw !== "object" || raw === null || !("llmPorts" in raw)) return [];
+  const ports: unknown = raw.llmPorts;
+  if (!Array.isArray(ports)) return [];
+  return ports.filter(
+    (p): p is number => typeof p === "number" && Number.isInteger(p) && p > 0,
+  );
+}
 
 /**
  * Fetch the node registry. Tolerates extra fields: nodeInfoSchema strips
@@ -16,7 +33,10 @@ export async function fetchNodes(signal?: AbortSignal): Promise<NodeInfo[]> {
   if (!Array.isArray(body)) {
     throw new Error("GET /api/v1/nodes: expected a JSON array of nodes");
   }
-  return body.map((item) => nodeInfoSchema.parse(item));
+  return body.map((item) => {
+    const node = nodeInfoSchema.parse(item);
+    return { ...node, llmPorts: extractLlmPorts(item) };
+  });
 }
 
 /* ── Node history ─────────────────────────────────────────────────────── */
@@ -152,4 +172,214 @@ export async function fetchHistory(
   }
   const body: unknown = await res.json();
   return parseHistoryResponse(body);
+}
+
+/* ── Node LLM inference ───────────────────────────────────────────────── */
+
+export interface LlmSnapshot {
+  ports: LlmPortSnapshot[];
+  /** Server receive time of the last probe (ISO), empty when absent. */
+  updatedAt: string;
+}
+
+function nullableString(o: Record<string, unknown>, key: string): string | null {
+  const v = o[key];
+  if (v === null || v === undefined) return null;
+  if (typeof v !== "string") {
+    throw new Error(`llm: port.${key} must be a string or null`);
+  }
+  return v;
+}
+
+function nullableNumber(o: Record<string, unknown>, key: string): number | null {
+  const v = o[key];
+  if (v === null || v === undefined) return null;
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new Error(`llm: port.${key} must be a number or null`);
+  }
+  return v;
+}
+
+/** One port snapshot with the schema's defaults applied to absent fields. */
+function parseLlmPort(raw: unknown): LlmPortSnapshot {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error("llm: port must be an object");
+  }
+  const o = raw as Record<string, unknown>;
+  if (typeof o.port !== "number" || !Number.isInteger(o.port) || o.port <= 0) {
+    throw new Error("llm: port.port must be a positive integer");
+  }
+  if (typeof o.backend !== "string" || !(LLM_BACKENDS as readonly string[]).includes(o.backend)) {
+    throw new Error("llm: port.backend must be a known backend");
+  }
+  if (typeof o.detected !== "boolean") {
+    throw new Error("llm: port.detected must be a boolean");
+  }
+  if (
+    o.probedAtMs !== undefined &&
+    (typeof o.probedAtMs !== "number" || o.probedAtMs < 0)
+  ) {
+    throw new Error("llm: port.probedAtMs must be a non-negative number");
+  }
+  let engineMeta: Record<string, unknown> | null = null;
+  if (o.engineMeta !== null && o.engineMeta !== undefined) {
+    if (typeof o.engineMeta !== "object" || Array.isArray(o.engineMeta)) {
+      throw new Error("llm: port.engineMeta must be an object or null");
+    }
+    engineMeta = o.engineMeta as Record<string, unknown>;
+  }
+  return {
+    port: o.port,
+    host: nullableString(o, "host") ?? "127.0.0.1",
+    backend: o.backend as LlmBackend,
+    detected: o.detected,
+    model: nullableString(o, "model"),
+    decodeTps: nullableNumber(o, "decodeTps"),
+    prefillTps: nullableNumber(o, "prefillTps"),
+    queueRunning: nullableNumber(o, "queueRunning"),
+    queueWaiting: nullableNumber(o, "queueWaiting"),
+    kvCachePct: nullableNumber(o, "kvCachePct"),
+    ttftP95Ms: nullableNumber(o, "ttftP95Ms"),
+    e2eP95Ms: nullableNumber(o, "e2eP95Ms"),
+    itlP95Ms: nullableNumber(o, "itlP95Ms"),
+    engineMeta,
+    probedAtMs: typeof o.probedAtMs === "number" ? o.probedAtMs : 0,
+  };
+}
+
+/**
+ * Validate a GET /nodes/:id/llm payload. Hand-rolled (zod is not a web
+ * dependency), strict on identity fields, tolerant of absent optionals.
+ */
+export function parseLlmSnapshot(body: unknown): LlmSnapshot {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("llm: expected a JSON object");
+  }
+  const o = body as Record<string, unknown>;
+  if (!Array.isArray(o.ports)) {
+    throw new Error("llm: ports must be an array");
+  }
+  return {
+    ports: o.ports.map(parseLlmPort),
+    updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : "",
+  };
+}
+
+export async function fetchNodeLlm(
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<LlmSnapshot> {
+  const res = await fetch(
+    `/api/v1/nodes/${encodeURIComponent(nodeId)}/llm`,
+    { headers: { accept: "application/json" }, signal },
+  );
+  if (!res.ok) {
+    throw new Error(`GET /api/v1/nodes/${nodeId}/llm failed: HTTP ${res.status}`);
+  }
+  const body: unknown = await res.json();
+  return parseLlmSnapshot(body);
+}
+
+/** One server-side per-port LLM history bucket, ascending by `t`. */
+export interface LlmHistoryPoint {
+  t: number;
+  decodeTps: number | null;
+  prefillTps: number | null;
+  queueRunning: number | null;
+  queueWaiting: number | null;
+  kvCachePct: number | null;
+  ttftP95Ms: number | null;
+  samples: number | null;
+}
+
+export interface LlmHistorySeries {
+  port: number;
+  points: LlmHistoryPoint[];
+}
+
+export interface LlmHistoryResponse {
+  /** Server bucket size, verbatim DB enum: "minute" | "hour" | "day". */
+  granularity: string;
+  series: LlmHistorySeries[];
+}
+
+/**
+ * Validate a GET /nodes/:id/llm/history payload. Hand-rolled like
+ * parseHistoryResponse: strict on shape, tolerant of unknown keys.
+ */
+export function parseLlmHistoryResponse(body: unknown): LlmHistoryResponse {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("llm history: expected a JSON object");
+  }
+  const o = body as Record<string, unknown>;
+  if (typeof o.granularity !== "string" || o.granularity.length === 0) {
+    throw new Error("llm history: granularity must be a string");
+  }
+  if (!Array.isArray(o.series)) {
+    throw new Error("llm history: series must be an array");
+  }
+  const series = o.series.map((raw): LlmHistorySeries => {
+    if (typeof raw !== "object" || raw === null) {
+      throw new Error("llm history: series must be an object");
+    }
+    const s = raw as Record<string, unknown>;
+    if (typeof s.port !== "number" || !Number.isInteger(s.port) || s.port <= 0) {
+      throw new Error("llm history: series.port must be a positive integer");
+    }
+    if (!Array.isArray(s.points)) {
+      throw new Error("llm history: series.points must be an array");
+    }
+    const points = s.points.map((rawPoint): LlmHistoryPoint => {
+      if (typeof rawPoint !== "object" || rawPoint === null) {
+        throw new Error("llm history: point must be an object");
+      }
+      const p = rawPoint as Record<string, unknown>;
+      if (typeof p.t !== "number") {
+        throw new Error("llm history: point.t must be a number");
+      }
+      for (const k of [
+        "decodeTps",
+        "prefillTps",
+        "queueRunning",
+        "queueWaiting",
+        "kvCachePct",
+        "ttftP95Ms",
+        "samples",
+      ] as const) {
+        if (!isNumOrNull(p[k])) {
+          throw new Error(`llm history: point.${k} must be a number or null`);
+        }
+      }
+      return {
+        t: p.t,
+        decodeTps: p.decodeTps as number | null,
+        prefillTps: p.prefillTps as number | null,
+        queueRunning: p.queueRunning as number | null,
+        queueWaiting: p.queueWaiting as number | null,
+        kvCachePct: p.kvCachePct as number | null,
+        ttftP95Ms: p.ttftP95Ms as number | null,
+        samples: p.samples as number | null,
+      };
+    });
+    return { port: s.port, points };
+  });
+  return { granularity: o.granularity, series };
+}
+
+export async function fetchLlmHistory(
+  nodeId: string,
+  range: HistoryRange,
+  signal?: AbortSignal,
+): Promise<LlmHistoryResponse> {
+  const res = await fetch(
+    `/api/v1/nodes/${encodeURIComponent(nodeId)}/llm/history?range=${range}`,
+    { headers: { accept: "application/json" }, signal },
+  );
+  if (!res.ok) {
+    throw new Error(
+      `GET /api/v1/nodes/${nodeId}/llm/history failed: HTTP ${res.status}`,
+    );
+  }
+  const body: unknown = await res.json();
+  return parseLlmHistoryResponse(body);
 }
