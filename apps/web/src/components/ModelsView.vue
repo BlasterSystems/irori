@@ -81,6 +81,23 @@ onMounted(() => {
   void load();
 });
 
+/** Maintenance verbs for the hygiene popover: kind → label; destructive ones ghosted. */
+const HYGIENE_VERBS: Array<{ kind: string; label: string; destructive: boolean; perModel: boolean }> = [
+  { kind: "doctor", label: "Doctor", destructive: false, perModel: false },
+  { kind: "staging-audit", label: "Staging audit", destructive: false, perModel: false },
+  { kind: "objects-audit", label: "Objects audit", destructive: false, perModel: false },
+  { kind: "catalog-refresh", label: "Refresh catalog", destructive: false, perModel: false },
+  { kind: "sync-cards", label: "Sync cards", destructive: false, perModel: false },
+  { kind: "repair-active", label: "Repair check", destructive: false, perModel: true },
+  { kind: "repair-active-apply", label: "Repair (APPLY)", destructive: true, perModel: true },
+];
+
+function runHygiene(kind: string, perModel: boolean): void {
+  const nodeId = storeNode.value;
+  if (nodeId === null) return;
+  void runJob(nodeId, kind, perModel ? { name: selected.value ?? undefined } : {});
+}
+
 async function submitDownload(): Promise<void> {
   const nodeId = storeNode.value;
   const source = downloadSource.value.trim();
@@ -288,6 +305,20 @@ onBeforeUnmount(() => {
           <p class="stat__sub faint">
             Sync/push jobs stream output below · destructive deletes are armed via a second apply job
           </p>
+          <details class="hygiene">
+            <summary class="stat__sub">Store maintenance…</summary>
+            <div class="row row--wrap" style="gap: 6px; margin-top: 8px">
+              <template v-for="v in HYGIENE_VERBS" :key="v.kind">
+                <button
+                  v-if="storeNode !== null"
+                  class="btn btn--sm"
+                  :class="v.destructive ? 'btn--ghost' : 'btn--secondary'"
+                  @click="runHygiene(v.kind, v.perModel)"
+                >{{ v.label }}</button>
+              </template>
+              <span class="stat__sub faint">doctor and audits cover the whole store; repair targets this model</span>
+            </div>
+          </details>
         </template>
       </section>
     </div>
