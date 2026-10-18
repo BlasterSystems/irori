@@ -1,6 +1,8 @@
 import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
 import { collect } from "./collector.js";
+import { readStore } from "./catalog-read.js";
+import { JobManager } from "./jobs.js";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
 import { LlmPortProbe } from "./llm-probe.js";
 import { AgentTransport, type LlmRuntimeConfig } from "./transport.js";
@@ -62,6 +64,17 @@ async function run(): Promise<void> {
     };
   }
 
+  const jobs = new JobManager(
+    () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath }),
+    {
+      onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
+      onDone: (jobId, status, exitCode) => {
+        log(`job ${jobId} done: ${status} (exit ${exitCode})`);
+        transport.sendAgentServer({ type: "job-done", jobId, status, exitCode });
+      },
+    },
+  );
+
   const transport = new AgentTransport({
     token: config.token,
     hostname: os.hostname(),
@@ -72,6 +85,33 @@ async function run(): Promise<void> {
     collectLlm: async (detectOnly) =>
       Promise.all([...probes.values()].map((probe) => probe.probe(detectOnly))),
     onLlmConfig: mergeLlmConfig,
+    onJobRequest: (jobId, kind, params) => {
+      if (!jobs.start(jobId, kind, params)) {
+        transport.sendAgentServer({
+          type: "job-output",
+          jobId,
+          seq: 0,
+          line: "error: another job is active on this node",
+        });
+        transport.sendAgentServer({ type: "job-done", jobId, status: "failed", exitCode: null });
+      }
+    },
+    onJobCancel: (jobId) => jobs.cancel(jobId),
+    onCatalogRequest: () => {
+      const root = transport.getNasRoot();
+      if (!root) {
+        log("catalog-request ignored: node has no nasRoot");
+        return;
+      }
+      try {
+        const read = readStore(root);
+        transport.sendAgentServer({ type: "catalog", source: read.source, entries: read.entries });
+        if (read.warning) log(`catalog: ${read.warning}`);
+        log(`catalog: ${read.entries.length} models (${read.source})`);
+      } catch (err) {
+        log(`catalog read failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
     llm: {
       llmPorts: config.llmTargets.map((t) => ({ port: t.port, host: t.host })),
       llmCadenceMs: config.llmTargets.length > 0 ? DEFAULT_LLM_CADENCE_MS : 0,

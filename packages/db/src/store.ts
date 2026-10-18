@@ -39,6 +39,7 @@ const nodeRecordColumns = {
   lastSeenAt: nodes.lastSeenAt,
   sortOrder: nodes.sortOrder,
   llmPorts: nodes.llmPorts,
+  nasRoot: nodes.nasRoot,
   createdAt: nodes.createdAt,
   updatedAt: nodes.updatedAt,
 } satisfies Record<keyof NodeRecord, unknown>;

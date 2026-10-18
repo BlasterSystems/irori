@@ -16,6 +16,10 @@ export interface AgentConfig {
   llmTargets: LlmTarget[];
   /** IRORI_LLM_DETECT_ONLY — force detection-only probes (backend/model, no rates). */
   llmDetectOnly: boolean;
+  /** IRORI_MODELCTL_PIN — minimum modelctl version for the install job. */
+  modelctlPin: string;
+  /** IRORI_MODELCTL_PATH — explicit modelctl binary (uv's ~/.local/bin is off PATH). */
+  modelctlPath: string;
 }
 
 export const DEFAULT_SERVER_URL = "ws://127.0.0.1:3947/agent-ws";
@@ -58,7 +62,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
 
   const llmDetectOnly = parseDetectOnly(env.IRORI_LLM_DETECT_ONLY?.trim() ?? "");
 
-  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly };
+  const modelctlPin = env.IRORI_MODELCTL_PIN?.trim() || "0.20.1";
+  const modelctlPath = env.IRORI_MODELCTL_PATH?.trim() || "/root/.local/bin/modelctl";
+
+  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath };
 }
 
 /** Parse "host:port,host:port" (a bare "port" probes 127.0.0.1). */

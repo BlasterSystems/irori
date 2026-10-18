@@ -2,6 +2,7 @@ import type { Server } from "node:http";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import {
   agentMsgSchema,
+  agentServerMsgSchema,
   isAgentSupported,
   type HardwareSnapshot,
 } from "@irori/core";
@@ -26,6 +27,12 @@ export interface AgentHubDeps {
   sse: Pick<SseHub, "send">;
   cadenceMs: number;
   serverVersion: string;
+  /** Agent frame routing for the jobs subsystem + catalog cache (M4). */
+  jobEvents: {
+    onOutput: (nodeId: string, jobId: string, seq: number, line: string) => Promise<void>;
+    onDone: (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => Promise<void>;
+    onCatalog: (nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>) => Promise<void>;
+  };
   /** Injectables for tests. */
   writeFlushMs?: number;
   markSeenThrottleMs?: number;
@@ -36,6 +43,8 @@ export interface AgentHub {
   attach(server: Server): void;
   /** Ids of nodes with a live, authenticated agent connection. */
   online(): ReadonlySet<string>;
+  /** Sends a raw frame to a connected node's agent; false when offline. */
+  sendToNode(nodeId: string, msg: unknown): boolean;
   stop(): void;
 }
 
@@ -50,6 +59,7 @@ export interface AgentHub {
 export function createAgentHub(deps: AgentHubDeps): AgentHub {
   const wss = new WebSocketServer({ noServer: true });
   const onlineNodes = new Set<string>();
+  const nodeSockets = new Map<string, WebSocket>();
   const lastMarkedAt = new Map<string, number>();
   const pending: Array<{ nodeId: string; kind: "snapshot" | "llm"; payload: unknown }> = [];
   const throttleMs = deps.markSeenThrottleMs ?? DEFAULT_MARK_SEEN_THROTTLE_MS;
@@ -127,6 +137,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       }
       const parsed = agentMsgSchema.safeParse(data);
       if (!parsed.success) {
+        // Job/catalog frames are AgentServerMsg, not AgentMsg — the second
+        // handler owns them; never send an error frame for those.
+        if (agentServerMsgSchema.safeParse(data).success) return;
         if (nodeId === null) return reject("invalid message frame");
         sendMsg({ type: "error", message: "invalid message frame" });
         return;
@@ -144,6 +157,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         nodeId = id;
         agentVersion = msg.agentVersion;
         onlineNodes.add(id);
+        nodeSockets.set(id, ws);
         deps.sse.send({ type: "node-online", serverTimeMs: Date.now(), nodeId: id, agentVersion });
         void markSeen(id, msg.agentVersion);
         sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.cadenceMs, serverVersion: deps.serverVersion });
@@ -156,6 +170,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
           llmPorts: nodeLlmAssignments(row),
           llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
           llmDetectOnly: row?.role === "worker",
+          nasRoot: row?.nasRoot ?? null,
         });
         return;
       }
@@ -190,9 +205,42 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       // A repeated hello on an authenticated connection is ignored.
     }
 
+    // Agent→server frames (jobs + catalog) ride the same socket; route them
+    // through the deps so persistence stays outside the hub.
+    ws.on("message", (raw: RawData) => {
+      if (nodeId === null) return;
+      const text = Buffer.isBuffer(raw)
+        ? raw.toString()
+        : Array.isArray(raw)
+          ? Buffer.concat(raw).toString()
+          : Buffer.from(new Uint8Array(raw)).toString();
+      let data: unknown;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return;
+      }
+      const parsed = agentServerMsgSchema.safeParse(data);
+      if (!parsed.success) {
+        console.error(`[irori-server] agentServerFrame parse failed: ${text.slice(0, 120)}`);
+        return;
+      }
+      console.error(`[irori-server] agentServerFrame ${parsed.data.type} from ${nodeId}`);
+      const currentId: string = nodeId;
+      const frame = parsed.data;
+      if (frame.type === "job-output") {
+        void deps.jobEvents.onOutput(currentId, frame.jobId, frame.seq, frame.line).catch(() => {});
+      } else if (frame.type === "job-done") {
+        void deps.jobEvents.onDone(currentId, frame.jobId, frame.status, frame.exitCode).catch(() => {});
+      } else if (frame.type === "catalog") {
+        void deps.jobEvents.onCatalog(currentId, frame.source, frame.entries).catch(() => {});
+      }
+    });
+
     ws.on("close", () => {
       if (nodeId === null) return;
       onlineNodes.delete(nodeId);
+      nodeSockets.delete(nodeId);
       lastMarkedAt.delete(nodeId);
       deps.sse.send({ type: "node-offline", serverTimeMs: Date.now(), nodeId, agentVersion });
     });
@@ -210,6 +258,12 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       });
     },
     online: () => onlineNodes,
+    sendToNode(nodeId, msg) {
+      const ws = nodeSockets.get(nodeId);
+      if (ws === undefined || ws.readyState !== WebSocket.OPEN) return false;
+      ws.send(JSON.stringify(msg));
+      return true;
+    },
     stop() {
       clearInterval(flushTimer);
       for (const ws of wss.clients) ws.close(1001, "server shutting down");

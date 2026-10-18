@@ -21,6 +21,10 @@ export const nodeInfoSchema = z.object({
   online: z.boolean(),
   lastSeenAt: z.string().datetime({ offset: true }).nullable(),
   sortOrder: z.number().int(),
+  /** LLM ports the agent probes on this node (M3). */
+  llmPorts: z.array(z.number().int().positive()).default([]),
+  /** NAS store root for model-ops nodes, e.g. /mnt/nas (M4); null otherwise. */
+  nasRoot: z.string().nullable().default(null),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });
@@ -29,12 +33,12 @@ export type NodeInfo = z.infer<typeof nodeInfoSchema>;
 
 /** Payload for POST /api/v1/nodes. */
 export const nodeCreateSchema = nodeInfoSchema
-  .pick({ name: true, kind: true, role: true, host: true })
+  .pick({ name: true, kind: true, role: true, host: true, llmPorts: true, nasRoot: true })
   .extend({ enabled: z.boolean().optional() });
 
 /** Payload for PATCH /api/v1/nodes/:id. */
 export const nodePatchSchema = nodeInfoSchema
-  .pick({ name: true, kind: true, role: true, host: true, enabled: true, sortOrder: true })
+  .pick({ name: true, kind: true, role: true, host: true, enabled: true, sortOrder: true, llmPorts: true, nasRoot: true })
   .partial();
 
 export type NodeCreateInput = z.infer<typeof nodeCreateSchema>;

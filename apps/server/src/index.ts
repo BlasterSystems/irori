@@ -8,6 +8,7 @@ import { loadConfig, type Config } from "./config.js";
 import { createRings } from "./rings.js";
 import { createSseHub } from "./sse.js";
 import { createAgentHub, type AgentHub } from "./hub.js";
+import { createJobsService, type JobsService } from "./jobs-service.js";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
@@ -31,6 +32,7 @@ const state: {
   hub: AgentHub | null;
   store: NodeStore | null;
   llmStore: LlmStore | null;
+  jobs: JobsService | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
 } = {
@@ -38,6 +40,7 @@ const state: {
   hub: null,
   store: null,
   llmStore: null,
+  jobs: null,
   history: null,
   llmHistory: null,
 };
@@ -51,6 +54,7 @@ const sse = createSseHub();
 const app = createApp({
   getStore: () => state.store,
   getLlmStore: () => state.llmStore,
+  getJobs: () => state.jobs,
   getHistory: () => state.history,
   getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
@@ -85,9 +89,12 @@ async function boot(): Promise<void> {
   const llmStore = createLlmStore(dbHandle.db);
   state.llmStore = llmStore;
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version });
+  const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg));
+
+  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, jobEvents: jobsService });
   hub.attach(server);
   state.hub = hub;
+  state.jobs = jobsService;
 
   state.history = (nodeId, range) => buildHistory(dbHandle!.db, nodeId, range);
   state.llmHistory = (nodeId, range) => buildLlmHistory(dbHandle!.db, nodeId, range);
@@ -110,6 +117,16 @@ async function boot(): Promise<void> {
     }
   }
   startRollupLoop([engine, llmEngine], dbHandle.isHealthy);
+
+  // Jobs die with their agent: any running job whose node is offline is
+  // failed immediately (container-agent model — the process dies with it).
+  const jobReaper = setInterval(() => {
+    if (dbHandle === null || !dbHandle.isHealthy()) return;
+    void jobsService.reapOffline(hub.online()).catch((err) => {
+      console.error(`[irori-server] job reaper failed (${err instanceof Error ? err.message : String(err)})`);
+    });
+  }, 60_000);
+  jobReaper.unref();
 
   startPruneLoop(store, llmStore, dbHandle.db, config);
   console.log(`[irori-server] agent hub ready on /agent-ws (cadence ${config.cadenceMs} ms)`);

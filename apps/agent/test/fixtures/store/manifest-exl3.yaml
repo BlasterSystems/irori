@@ -1,0 +1,12 @@
+name: DeepSeek-V4-Flash-0731-EXL3-3.0bpw
+repo: 0xSero/DeepSeek-V4-Flash-0731-EXL3-3.0bpw
+revision: main
+model_card: README.md
+format: safetensors
+include:
+- '*.json'
+- '*.safetensors'
+- README.md
+runtime:
+  type: vllm
+  executable: vllm

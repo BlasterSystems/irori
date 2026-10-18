@@ -1,0 +1,772 @@
+{
+  "schema": 3,
+  "generation": 10,
+  "generated_at": "2026-10-03T00:22:18.832255+00:00",
+  "active_fingerprint": "a20f4d375499c1a43c74c7af560c4e81e7f3550d46c7f3dfbc04d48c90cbb5af",
+  "content_sha256": "aaed9474a8d867e0288c5780db830abe727bb64c9e29a2dd31be8be0adac22b2",
+  "seq": 5,
+  "models": [
+    {
+      "name": "DeepSeek-OCR-2",
+      "runtime": "vllm",
+      "repository": "unsloth/DeepSeek-OCR-2",
+      "bytes": 6789275648
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731",
+      "runtime": "vllm",
+      "repository": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "bytes": 166899302400
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731-EXL3-3.0bpw",
+      "runtime": "vllm",
+      "repository": "0xSero/DeepSeek-V4-Flash-0731-EXL3-3.0bpw",
+      "bytes": 124921917440
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731-FP8-DSpark",
+      "runtime": "vllm",
+      "repository": "AtlasCloud/DeepSeek-V4-Flash-0731-FP8-DSpark",
+      "bytes": 307431280640
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731-GGUF-Unsloth-UD-Q4_K_XL",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/DeepSeek-V4-Flash-0731-GGUF",
+      "bytes": 155095420928
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731-GGUF-Unsloth-UD-Q8_K_XL",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/DeepSeek-V4-Flash-0731-GGUF",
+      "bytes": 161869799424
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731-NVFP4-utarn",
+      "runtime": "vllm",
+      "repository": "utarn/DeepSeek-V4-Flash-0731-NVFP4",
+      "bytes": 175569436672
+    },
+    {
+      "name": "DeepSeek-V4-Flash-0731-Unsloth",
+      "runtime": "vllm",
+      "repository": "unsloth/DeepSeek-V4-Flash-0731",
+      "bytes": 166903300096
+    },
+    {
+      "name": "DeepSeekV4Flash-Vision-EXP-ablit",
+      "runtime": "vllm",
+      "repository": "drowzeys/keys-DeepSeekV4Flash-Vision-EXP-ablit",
+      "bytes": 167832309760
+    },
+    {
+      "name": "GLM-5.3-Flash-EXL3-4bpw",
+      "runtime": "vllm",
+      "repository": "brandonmusic/GLM-5.3-Flash-EXL3-4bpw",
+      "bytes": 175782326272
+    },
+    {
+      "name": "GLM-5.3-Flash-Uncensored-EXL3-4bpw",
+      "runtime": "vllm",
+      "repository": "neko-legends/GLM-5.3-Flash-Uncensored-EXL3",
+      "bytes": 175717023744
+    },
+    {
+      "name": "Inkling-Small-GGUF-UD-IQ4_XS",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Inkling-Small-GGUF",
+      "bytes": 127406432256
+    },
+    {
+      "name": "Inkling-Small-GGUF-UD-Q4_K_XL",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Inkling-Small-GGUF",
+      "bytes": 163274240000
+    },
+    {
+      "name": "Inkling-Small-NVFP4",
+      "runtime": "vllm",
+      "repository": "thinkingmachines/Inkling-Small-NVFP4",
+      "bytes": 170765201408
+    },
+    {
+      "name": "LFM2.5-2.6B",
+      "runtime": "vllm",
+      "repository": "LiquidAI/LFM2.5-2.6B",
+      "bytes": 5412458496
+    },
+    {
+      "name": "Laguna-S-2.1-DFlash-NVFP4",
+      "runtime": "vllm",
+      "repository": "poolside/Laguna-S-2.1-DFlash-NVFP4",
+      "bytes": 2230022144
+    },
+    {
+      "name": "Laguna-S-2.1-NVFP4",
+      "runtime": "vllm",
+      "repository": "poolside/Laguna-S-2.1-NVFP4",
+      "bytes": 71938891776
+    },
+    {
+      "name": "Ling-3.0-flash",
+      "runtime": "vllm",
+      "repository": "inclusionAI/Ling-3.0-flash",
+      "bytes": 264479666176
+    },
+    {
+      "name": "Mage-Flow",
+      "runtime": "vllm",
+      "repository": "microsoft/Mage-Flow",
+      "bytes": 17464078336
+    },
+    {
+      "name": "Mage-Flow-Edit",
+      "runtime": "vllm",
+      "repository": "microsoft/Mage-Flow-Edit",
+      "bytes": 17464078336
+    },
+    {
+      "name": "Mage-Flow-Edit-Turbo",
+      "runtime": "vllm",
+      "repository": "microsoft/Mage-Flow-Edit-Turbo",
+      "bytes": 17464082432
+    },
+    {
+      "name": "Mage-Flow-Turbo",
+      "runtime": "vllm",
+      "repository": "microsoft/Mage-Flow-Turbo",
+      "bytes": 17464082432
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603",
+      "runtime": "vllm",
+      "repository": "unsloth/Mistral-Small-4-119B-2603",
+      "bytes": 120956772352
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603-GGUF-Q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Mistral-Small-4-119B-2603-GGUF",
+      "bytes": 127330254848
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603-GGUF-ud-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Mistral-Small-4-119B-2603-GGUF",
+      "bytes": 58984005632
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603-GGUF-ud-q4-k-m",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Mistral-Small-4-119B-2603-GGUF",
+      "bytes": 74620383232
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603-NVFP4",
+      "runtime": "vllm",
+      "repository": "mistralai/Mistral-Small-4-119B-2603-NVFP4",
+      "bytes": 70846730240
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603-eagle",
+      "runtime": "vllm",
+      "repository": "mistralai/Mistral-Small-4-119B-2603-eagle",
+      "bytes": 408051712
+    },
+    {
+      "name": "Mistral-Small-4-119B-2603.dflash",
+      "runtime": "vllm",
+      "repository": "RedHatAI/Mistral-Small-4-119B-2603.dflash",
+      "bytes": 4429357056
+    },
+    {
+      "name": "Muse-Glimmer-30B",
+      "runtime": "vllm",
+      "repository": "meta-models/Muse-Glimmer-30B",
+      "bytes": 64755347456
+    },
+    {
+      "name": "Muse-Glimmer-30B-GGUF-draft",
+      "runtime": "llama.cpp",
+      "repository": "meta-models/Muse-Glimmer-30B-GGUF",
+      "bytes": 3031605248
+    },
+    {
+      "name": "Muse-Glimmer-30B-GGUF-kquant",
+      "runtime": "llama.cpp",
+      "repository": "meta-models/Muse-Glimmer-30B-GGUF",
+      "bytes": 34913779712
+    },
+    {
+      "name": "Muse-Glimmer-30B-GGUF-kquant-dynamic",
+      "runtime": "llama.cpp",
+      "repository": "meta-models/Muse-Glimmer-30B-GGUF",
+      "bytes": 40708329472
+    },
+    {
+      "name": "NVIDIA-NemotronLabs-VoiceChat-11B",
+      "runtime": "vllm",
+      "repository": "nvidia/NVIDIA-NemotronLabs-VoiceChat-11B",
+      "bytes": 44383137792
+    },
+    {
+      "name": "Nanbeige4.2-3B",
+      "runtime": "vllm",
+      "repository": "Nanbeige/Nanbeige4.2-3B",
+      "bytes": 8361168896
+    },
+    {
+      "name": "Qwen3.5-122B-A10B-MTP-GGUF-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.5-122B-A10B-MTP-GGUF",
+      "bytes": 133463089152
+    },
+    {
+      "name": "Qwen3.5-122B-A10B-MTP-GGUF-ud-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.5-122B-A10B-MTP-GGUF",
+      "bytes": 62836715520
+    },
+    {
+      "name": "Qwen3.5-122B-A10B-MTP-GGUF-ud-q4-k-m",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.5-122B-A10B-MTP-GGUF",
+      "bytes": 79169339392
+    },
+    {
+      "name": "Qwen3.5-122B-A10B-NVFP4",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.5-122B-A10B-NVFP4",
+      "bytes": 79076163584
+    },
+    {
+      "name": "Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+      "runtime": "vllm",
+      "repository": "Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled",
+      "bytes": 55583330304
+    },
+    {
+      "name": "Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP",
+      "runtime": "vllm",
+      "repository": "AEON-7/Qwen3.6-27B-AEON-Ultimate-Uncensored-Multimodal-NVFP4-MTP",
+      "bytes": 28563009536
+    },
+    {
+      "name": "Qwen3.6-27B-DFlash",
+      "runtime": "vllm",
+      "repository": "z-lab/Qwen3.6-27B-DFlash",
+      "bytes": 3460476928
+    },
+    {
+      "name": "Qwen3.6-27B-FP8",
+      "runtime": "vllm",
+      "repository": "Qwen/Qwen3.6-27B-FP8",
+      "bytes": 30890864640
+    },
+    {
+      "name": "Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF-IQ4-XS",
+      "runtime": "llama.cpp",
+      "repository": "DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF",
+      "bytes": 17961537536
+    },
+    {
+      "name": "Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF-Q4-K-M",
+      "runtime": "llama.cpp",
+      "repository": "DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF",
+      "bytes": 19426430976
+    },
+    {
+      "name": "Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF-Q8-0",
+      "runtime": "llama.cpp",
+      "repository": "DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF",
+      "bytes": 31166881792
+    },
+    {
+      "name": "Qwen3.6-27B-MTP-GGUF-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.6-27B-MTP-GGUF",
+      "bytes": 16633548800
+    },
+    {
+      "name": "Qwen3.6-27B-MTP-GGUF-q4-k-m",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.6-27B-MTP-GGUF",
+      "bytes": 18034462720
+    },
+    {
+      "name": "Qwen3.6-27B-MTP-GGUF-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.6-27B-MTP-GGUF",
+      "bytes": 29974773760
+    },
+    {
+      "name": "Qwen3.6-27B-NVFP4",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.6-27B-NVFP4",
+      "bytes": 23443189760
+    },
+    {
+      "name": "Qwen3.6-27B-NVFP4-NVIDIA",
+      "runtime": "vllm",
+      "repository": "nvidia/Qwen3.6-27B-NVFP4",
+      "bytes": 21941764096
+    },
+    {
+      "name": "Qwen3.6-27B-NVFP4-UNSLOTH",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.6-27B-NVFP4",
+      "bytes": 23443275776
+    },
+    {
+      "name": "Qwen3.6-27B-PrismaAURA-5.5bit-vllm",
+      "runtime": "vllm",
+      "repository": "rdtand/Qwen3.6-27B-PrismaAURA-5.5bit-vllm",
+      "bytes": 23628541952
+    },
+    {
+      "name": "Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm",
+      "runtime": "vllm",
+      "repository": "rdtand/Qwen3.6-27B-PrismaSCOUT-Blackwell-NVFP4-BF16-vllm",
+      "bytes": 20194881536
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-DFlash",
+      "runtime": "vllm",
+      "repository": "z-lab/Qwen3.6-35B-A3B-DFlash",
+      "bytes": 771866624
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-FP8",
+      "runtime": "vllm",
+      "repository": "Qwen/Qwen3.6-35B-A3B-FP8",
+      "bytes": 37493567488
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-MTP-GGUF-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "bytes": 38700523520
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-MTP-GGUF-ud-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "bytes": 19108446208
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-MTP-GGUF-ud-q4-k-m",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "bytes": 23562797056
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-NVFP4",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.6-35B-A3B-NVFP4",
+      "bytes": 26529218560
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-NVFP4-Fast",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.6-35B-A3B-NVFP4-Fast",
+      "bytes": 23690256384
+    },
+    {
+      "name": "Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm",
+      "runtime": "vllm",
+      "repository": "rdtand/Qwen3.6-35B-A3B-PrismaQuant-4.75bit-vllm",
+      "bytes": 22920372224
+    },
+    {
+      "name": "Qwen3.8-27B-FP8",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.8-27B-FP8",
+      "bytes": 30890811392
+    },
+    {
+      "name": "Qwen3.8-27B-GGUF-IQ4-XS",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "bytes": 16633524224
+    },
+    {
+      "name": "Qwen3.8-27B-GGUF-Q4-K-M",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Qwen3.8-27B-GGUF",
+      "bytes": 18034438144
+    },
+    {
+      "name": "Qwen3.8-27B-NVFP4",
+      "runtime": "vllm",
+      "repository": "unsloth/Qwen3.8-27B-NVFP4",
+      "bytes": 23444623360
+    },
+    {
+      "name": "Qwen3.8-27B-NVFP4-RadixArk",
+      "runtime": "vllm",
+      "repository": "RadixArk/Qwen3.8-27B-NVFP4",
+      "bytes": 21945442304
+    },
+    {
+      "name": "Qwen3.8-Flash-Next-FP8",
+      "runtime": "vllm",
+      "repository": "Qwen/Qwen3.8-Flash-Next-FP8",
+      "bytes": 189086810112
+    },
+    {
+      "name": "Qwen3.8-Flash-Next-NVFP4-Inferact",
+      "runtime": "vllm",
+      "repository": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+      "bytes": 182838415360
+    },
+    {
+      "name": "Qwen3.8-Flash-Next-NVFP4-NVIDIA",
+      "runtime": "vllm",
+      "repository": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+      "bytes": 132734754816
+    },
+    {
+      "name": "Qwen3.8-Flash-Next-NVFP4-RadixArk",
+      "runtime": "vllm",
+      "repository": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
+      "bytes": 135257309184
+    },
+    {
+      "name": "Qwen3.8-Flash-Next-NVFP4-TP1",
+      "runtime": "vllm",
+      "repository": "Mia-AiLab/Qwen3.8-Flash-Next-NVFP4",
+      "bytes": 105936211968
+    },
+    {
+      "name": "Unlimited-OCR",
+      "runtime": "vllm",
+      "repository": "baidu/Unlimited-OCR",
+      "bytes": 6683271168
+    },
+    {
+      "name": "VibeThinker-3B",
+      "runtime": "vllm",
+      "repository": "WeiboAI/VibeThinker-3B",
+      "bytes": 6187954176
+    },
+    {
+      "name": "VibeThinker-3B-GGUF",
+      "runtime": "llama.cpp",
+      "repository": "prithivMLmods/VibeThinker-3B-GGUF",
+      "bytes": 3285520384
+    },
+    {
+      "name": "VibeThinker-3B-GGUF-Q4-K-M",
+      "runtime": "llama.cpp",
+      "repository": "prithivMLmods/VibeThinker-3B-GGUF",
+      "bytes": 1929945088
+    },
+    {
+      "name": "deepseek-v4-flash-0731-nvfp4",
+      "runtime": "vllm",
+      "repository": "nvidia/DeepSeek-V4-Flash-0731-NVFP4",
+      "bytes": 175569436672
+    },
+    {
+      "name": "deepseek-v4-flash-0731-reap-pruned-3.0-bpw-EXL3",
+      "runtime": "vllm",
+      "repository": "0xSero/deepseek-v4-flash-0731-spark",
+      "bytes": 113965260800
+    },
+    {
+      "name": "deepseek-v4-flash-vision-exp",
+      "runtime": "vllm",
+      "repository": "deepseek-ai/DeepSeek-V4-Flash-Vision-Exp",
+      "bytes": 167832297472
+    },
+    {
+      "name": "deepseek-v4-flash-vision-uncensored",
+      "runtime": "vllm",
+      "repository": "orcarouter/DeepSeek-V4-Flash-Vision-Uncensored",
+      "bytes": 167832309760
+    },
+    {
+      "name": "diffusiongemma-26B-A4B-it-FP8-dynamic",
+      "runtime": "vllm",
+      "repository": "RedHatAI/diffusiongemma-26B-A4B-it-FP8-dynamic",
+      "bytes": 27235164160
+    },
+    {
+      "name": "diffusiongemma-26B-A4B-it-NVFP4",
+      "runtime": "vllm",
+      "repository": "nvidia/diffusiongemma-26B-A4B-it-NVFP4",
+      "bytes": 18864529408
+    },
+    {
+      "name": "diffusiongemma-26b-a4b-it-q4-k-m",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "bytes": 16806871040
+    },
+    {
+      "name": "diffusiongemma-26b-a4b-it-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "bytes": 26878894080
+    },
+    {
+      "name": "gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF-Q4_K_M",
+      "runtime": "llama.cpp",
+      "repository": "yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF",
+      "bytes": 7846555648
+    },
+    {
+      "name": "gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF-Q8_0",
+      "runtime": "llama.cpp",
+      "repository": "yuxinlu1/gemma-4-12B-agentic-fable5-composer2.5-v2-3.5x-tau2-GGUF",
+      "bytes": 13134819328
+    },
+    {
+      "name": "gemma-4-12b-it-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-12b-it-GGUF",
+      "bytes": 7016050688
+    },
+    {
+      "name": "gemma-4-12b-it-mtp-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-12b-it-GGUF",
+      "bytes": 465158144
+    },
+    {
+      "name": "gemma-4-12b-it-ud-q8-k-xl",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-12b-it-GGUF",
+      "bytes": 14277648384
+    },
+    {
+      "name": "gemma-4-26b-a4b-it-dflash",
+      "runtime": "vllm",
+      "repository": "z-lab/gemma-4-26B-A4B-it-DFlash",
+      "bytes": 859430912
+    },
+    {
+      "name": "gemma-4-26b-a4b-it-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "bytes": 15252094976
+    },
+    {
+      "name": "gemma-4-26b-a4b-it-mtp-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "bytes": 461815808
+    },
+    {
+      "name": "gemma-4-26b-a4b-it-ud-q8-k-xl",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "bytes": 29291163648
+    },
+    {
+      "name": "gemma-4-31B-it-qat-GGUF-unsloth",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-31B-it-qat-GGUF",
+      "bytes": 19003187200
+    },
+    {
+      "name": "gemma-4-31B-it-qat-q4_0-gguf",
+      "runtime": "llama.cpp",
+      "repository": "google/gemma-4-31B-it-qat-q4_0-gguf",
+      "bytes": 18851803136
+    },
+    {
+      "name": "gemma-4-31b-it-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-31B-it-GGUF",
+      "bytes": 18086203392
+    },
+    {
+      "name": "gemma-4-31b-it-mtp-q8-0",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-31B-it-GGUF",
+      "bytes": 514723840
+    },
+    {
+      "name": "gemma-4-31b-it-ud-q8-k-xl",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/gemma-4-31B-it-GGUF",
+      "bytes": 36733784064
+    },
+    {
+      "name": "glm-5.3-flash-dflash2",
+      "runtime": "vllm",
+      "repository": "incoai/GLM-5.3-Flash-DFlash2",
+      "bytes": 2342215680
+    },
+    {
+      "name": "glm-5.3-flash-exl3-4bpw-tensorfold",
+      "runtime": "vllm",
+      "repository": "Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold",
+      "bytes": 175716732928
+    },
+    {
+      "name": "glm-5.3-flash-exl3-q4",
+      "runtime": "vllm",
+      "repository": "0xSero/GLM-5.3-Flash-EXL3-Q4",
+      "bytes": 187611885568
+    },
+    {
+      "name": "glm-5.3-flash-nvfp4",
+      "runtime": "vllm",
+      "repository": "RedHatAI/GLM-5.3-Flash-NVFP4",
+      "bytes": 197881446400
+    },
+    {
+      "name": "glm-5.3-flash-tr3-4bpw",
+      "runtime": "vllm",
+      "repository": "brandonmusic/GLM-5.3-Flash-tr3-4bpw",
+      "bytes": 175793831936
+    },
+    {
+      "name": "glm-5.3-flash-uncensored-nvfp4",
+      "runtime": "vllm",
+      "repository": "orcarouter/GLM-5.3-Flash-Uncensored-NVFP4",
+      "bytes": 190246043648
+    },
+    {
+      "name": "glm-ocr",
+      "runtime": "vllm",
+      "repository": "zai-org/GLM-OCR",
+      "bytes": 2657513472
+    },
+    {
+      "name": "keys-glm-5.3-flash-nvfp4-ablit-l15-45-anchorstock",
+      "runtime": "vllm",
+      "repository": "drowzeys/keys-GLM-5.3-Flash-NVFP4-ablit-l15-45-anchorstock",
+      "bytes": 194694127616
+    },
+    {
+      "name": "laguna-s-2.1-gguf",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Laguna-S-2.1-GGUF",
+      "bytes": 57566818304
+    },
+    {
+      "name": "laguna-s-2.1-ud-q4-k-xl",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Laguna-S-2.1-GGUF",
+      "bytes": 73395306496
+    },
+    {
+      "name": "lfm2-350m-extract",
+      "runtime": "vllm",
+      "repository": "LiquidAI/LFM2-350M-Extract",
+      "bytes": 1422860288
+    },
+    {
+      "name": "lfm2.5-8b-a1b",
+      "runtime": "vllm",
+      "repository": "LiquidAI/LFM2.5-8B-A1B",
+      "bytes": 16954007552
+    },
+    {
+      "name": "lfm2.5-vl-3b",
+      "runtime": "vllm",
+      "repository": "LiquidAI/LFM2.5-VL-3B",
+      "bytes": 6265077760
+    },
+    {
+      "name": "mimo-v2.6-flash-rl",
+      "runtime": "vllm",
+      "repository": "XiaomiMiMo/MiMo-V2.6-Flash-RL",
+      "bytes": 177765052416
+    },
+    {
+      "name": "nemotron-3.5-asr-streaming-0.6b",
+      "runtime": "vllm",
+      "repository": "nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "bytes": 2552946688
+    },
+    {
+      "name": "nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4",
+      "runtime": "vllm",
+      "repository": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4",
+      "bytes": 21583876096
+    },
+    {
+      "name": "nvidia-nemotron-3.5-lightning-30b-a3b-nvfp4-dspark",
+      "runtime": "vllm",
+      "repository": "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4-DSpark",
+      "bytes": 1349120000
+    },
+    {
+      "name": "ornith-1.0-35b",
+      "runtime": "vllm",
+      "repository": "unsloth/Ornith-1.0-35B",
+      "bytes": 70249103360
+    },
+    {
+      "name": "ornith-1.0-35b-gguf",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Ornith-1.0-35B-GGUF",
+      "bytes": 23224172544
+    },
+    {
+      "name": "ornith-1.0-35b-ud-iq4-xs",
+      "runtime": "llama.cpp",
+      "repository": "unsloth/Ornith-1.0-35B-GGUF",
+      "bytes": 18684403712
+    },
+    {
+      "name": "ornith-1.5-35b-a3b",
+      "runtime": "vllm",
+      "repository": "ornith-ai/Ornith-1.5-35B-A3B",
+      "bytes": 71927267328
+    },
+    {
+      "name": "phonellm-alpha-1-nvfp4",
+      "runtime": "vllm",
+      "repository": "pipecat-ai/phonellm-alpha-1-nvfp4",
+      "bytes": 19363127296
+    },
+    {
+      "name": "qwen3-0.6b",
+      "runtime": "vllm",
+      "repository": "Qwen/Qwen3-0.6B",
+      "bytes": 1519267840
+    },
+    {
+      "name": "qwen3.8-27b",
+      "runtime": "vllm",
+      "repository": "Qwen/Qwen3.8-27B",
+      "bytes": 55586385920
+    },
+    {
+      "name": "qwen3.8-27b-dflash2",
+      "runtime": "vllm",
+      "repository": "z-lab/Qwen3.8-27B-DFlash2",
+      "bytes": 3848863744
+    },
+    {
+      "name": "qwen3.8-27b-dspark",
+      "runtime": "vllm",
+      "repository": "RadixArk/Qwen3.8-27B-DSpark",
+      "bytes": 2718658560
+    },
+    {
+      "name": "qwen3.8-27b-dspark-vllm",
+      "runtime": "vllm",
+      "repository": "Doopeworld/Qwen3.8-27B-DSpark-vLLM",
+      "bytes": 2718658560
+    },
+    {
+      "name": "qwen3.8-27b-quasar-nvfp4",
+      "runtime": "vllm",
+      "repository": "QUASAR-QAT/Qwen3.8-27B-QUASAR-NVFP4",
+      "bytes": 20582625280
+    },
+    {
+      "name": "ternary-bonsai-2-27b-gguf",
+      "runtime": "llama.cpp",
+      "repository": "prism-ml/Ternary-Bonsai-2-27B-gguf",
+      "bytes": 7206223872
+    }
+  ]
+}

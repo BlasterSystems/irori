@@ -252,7 +252,7 @@ it("buffers snapshots while disconnected (drop-oldest) and flushes them after re
   });
 });
 
-it("closes and reconnects after a server error frame", async () => {
+it("logs a server error frame and keeps the connection ready", async () => {
   const server = await startFakeServer(60_000);
   teardown.push(server.close);
   const logs: string[] = [];
@@ -263,8 +263,16 @@ it("closes and reconnects after a server error frame", async () => {
   await vi.waitFor(() => expect(transport.isReady()).toBe(true));
   server.broadcast({ type: "error", message: "rejected: bad fleet" });
 
-  await vi.waitFor(() => expect(server.hellos).toHaveLength(2), { timeout: 5000 });
-  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+  // The socket must survive a plain error frame: closing here would drop
+  // in-flight job output. Only a fatal auth rejection should reconnect.
+  // Real delay required: we assert the ABSENCE of a reconnect over live
+  // sockets, so the transport's timers must run on the actual clock.
+  const pause = Promise.withResolvers<void>();
+  setTimeout(pause.resolve, 200);
+  await pause.promise;
+
+  expect(transport.isReady()).toBe(true);
+  expect(server.hellos).toHaveLength(1);
   expect(logs.some((l) => l.includes("rejected: bad fleet"))).toBe(true);
 });
 

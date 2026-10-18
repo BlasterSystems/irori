@@ -35,7 +35,10 @@ EXPOSE 3947
 CMD ["node", "dist/index.js"]
 
 # --- agent role (container agent; bare-metal systemd install is primary) ---
-FROM node:24-alpine AS agent
+# Debian (not alpine) + rsync/curl: model ops jobs (sync-local, push) need
+# rsync; the modelctl-install job needs curl for the uv installer.
+FROM node:24-slim AS agent
 ENV NODE_ENV=production
+RUN apt-get update && apt-get install -y --no-install-recommends rsync curl ca-certificates openssh-client && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/apps/agent/dist/irori-agent.mjs /opt/irori/irori-agent.mjs
 CMD ["node", "/opt/irori/irori-agent.mjs"]
