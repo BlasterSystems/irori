@@ -42,10 +42,91 @@ export const catalogMsgSchema = z.object({
   entries: z.array(catalogModelSchema),
 });
 
+/**
+ * Setup supervision frames (M5, SPEC §7). The start/stop pair runs on the
+ * head agent as a detached process group; state and logs flow back as events.
+ */
+
+export const setupStartMsgSchema = z.object({
+  type: z.literal("setup-start"),
+  setupId: z.string().uuid(),
+  /** Server-generated run id — echoed in events and persisted with the run. */
+  runId: z.string().uuid(),
+  scriptStart: z.string().min(1),
+  scriptStop: z.string().min(1),
+  /** Env exports for the script (MODEL_NAME/PORT/EXTRA_ARGS). */
+  env: z.record(z.string(), z.string()).default({}),
+  /** When set, the agent resolves MODEL_PATH via `modelctl path --local`. */
+  modelPathName: z.string().nullable().default(null),
+});
+
+export const setupStopMsgSchema = z.object({
+  type: z.literal("setup-stop"),
+  setupId: z.string().uuid(),
+  /** Grace for the stop script before the process-group fallback kills. */
+  gracefulMs: z.number().int().positive().default(30_000),
+});
+
+export const setupStatusMsgSchema = z.object({
+  type: z.literal("setup-status"),
+  setupId: z.string().uuid(),
+});
+
+export const setupLogAttachMsgSchema = z.object({
+  type: z.literal("setup-log-attach"),
+  setupId: z.string().uuid(),
+  /** Replay the current run's ring after this seq (0 = from the start). */
+  lastSeq: z.number().int().nonnegative(),
+});
+
+export const setupAckMsgSchema = z.object({
+  type: z.literal("setup-ack"),
+  setupId: z.string().uuid(),
+  ok: z.boolean(),
+  error: z.string().nullable().default(null),
+});
+
+export const setupEventMsgSchema = z.object({
+  type: z.literal("setup-event"),
+  setupId: z.string().uuid(),
+  runId: z.string().uuid().nullable().default(null),
+  state: z.enum(["starting", "running", "stopping", "stopped", "failed"]),
+  exitCode: z.number().int().nullable().default(null),
+  pid: z.number().int().nullable().default(null),
+  pgid: z.number().int().nullable().default(null),
+  error: z.string().nullable().default(null),
+});
+
+export const setupLogMsgSchema = z.object({
+  type: z.literal("setup-log"),
+  setupId: z.string().uuid(),
+  seq: z.number().int().nonnegative(),
+  line: z.string(),
+  ts: z.number(),
+});
+
+/** Server → agent: test -x the given script paths (create-time validation). */
+export const setupValidateMsgSchema = z.object({
+  type: z.literal("setup-validate"),
+  validateId: z.string().uuid(),
+  scripts: z.array(z.string().min(1)).min(1).max(8),
+});
+
+/** Agent → server: one result per requested script, in order. */
+export const setupValidateResultMsgSchema = z.object({
+  type: z.literal("setup-validate-result"),
+  validateId: z.string().uuid(),
+  results: z.array(z.object({ script: z.string(), ok: z.boolean(), error: z.string().nullable() })),
+});
+
 export const agentServerMsgSchema = z.discriminatedUnion("type", [
   jobOutputMsgSchema,
   jobDoneMsgSchema,
   catalogMsgSchema,
+  setupAckMsgSchema,
+  setupEventMsgSchema,
+  setupLogMsgSchema,
+  setupValidateResultMsgSchema,
 ]);
 
 export type AgentServerMsg = z.infer<typeof agentServerMsgSchema>;
@@ -55,3 +136,12 @@ export type CatalogRequestMsg = z.infer<typeof catalogRequestMsgSchema>;
 export type JobOutputMsg = z.infer<typeof jobOutputMsgSchema>;
 export type JobDoneMsg = z.infer<typeof jobDoneMsgSchema>;
 export type CatalogMsg = z.infer<typeof catalogMsgSchema>;
+export type SetupStartMsg = z.infer<typeof setupStartMsgSchema>;
+export type SetupStopMsg = z.infer<typeof setupStopMsgSchema>;
+export type SetupStatusMsg = z.infer<typeof setupStatusMsgSchema>;
+export type SetupLogAttachMsg = z.infer<typeof setupLogAttachMsgSchema>;
+export type SetupAckMsg = z.infer<typeof setupAckMsgSchema>;
+export type SetupEventMsg = z.infer<typeof setupEventMsgSchema>;
+export type SetupLogMsg = z.infer<typeof setupLogMsgSchema>;
+export type SetupValidateMsg = z.infer<typeof setupValidateMsgSchema>;
+export type SetupValidateResultMsg = z.infer<typeof setupValidateResultMsgSchema>;

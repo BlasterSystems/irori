@@ -1,0 +1,211 @@
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SetupDriver, type SetupDriverEvent, type SetupLogLine } from "../src/setups.js";
+
+const ID = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e01";
+const RUN = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+const UUID3 = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e03";
+
+const dirs: string[] = [];
+afterAll(() => {
+  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+});
+
+function makeDir(): string {
+  const d = mkdtempSync(join(tmpdir(), "irori-setup-"));
+  dirs.push(d);
+  return d;
+}
+
+interface Harness {
+  driver: SetupDriver;
+  dir: string;
+  events: SetupDriverEvent[];
+  logs: SetupLogLine[];
+}
+
+function makeHarness(modelctlScript?: string): Harness {
+  const dir = makeDir();
+  const events: SetupDriverEvent[] = [];
+  const logs: SetupLogLine[] = [];
+  const driver = new SetupDriver({
+    stateDir: dir,
+    modelctlPath: modelctlScript ?? "/nonexistent-modelctl",
+    events: {
+      onEvent: (setupId, event) => events.push({ setupId, ...event }),
+      onLog: (setupId, seq, line, ts) => logs.push({ setupId, seq, line, ts }),
+    },
+    log: () => {},
+  });
+  driver.init();
+  return { driver, dir, events, logs };
+}
+
+function script(dir: string, name: string, body: string): string {
+  const path = join(dir, name);
+  writeFileSync(path, `#!/bin/bash\n${body}\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+async function waitFor(pred: () => boolean, ms = 5000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!pred()) {
+    if (Date.now() > deadline) throw new Error("condition not met in time");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+describe("SetupDriver", () => {
+  let h: Harness;
+  beforeEach(() => {
+    h = makeHarness();
+  });
+
+  it("validates scripts and refuses to launch without an executable stop script", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", "sleep 30");
+    const notExec = join(dir, "not-exec.sh");
+    writeFileSync(notExec, "#!/bin/bash\ntrue\n");
+
+    const noStop = await h.driver.start(ID, RUN, start, "", {}, null);
+    expect(noStop.ok).toBe(false);
+    expect(noStop.error).toContain("stop script is required");
+
+    const badStart = await h.driver.start(ID, RUN, notExec, start, {}, null);
+    expect(badStart.ok).toBe(false);
+    expect(badStart.error).toContain("not executable");
+
+    const badStop = await h.driver.start(ID, RUN, start, notExec, {}, null);
+    expect(badStop.ok).toBe(false);
+    expect(badStop.error).toContain("not executable");
+
+    const validation = h.driver.validate([start, notExec, join(dir, "missing.sh")]);
+    expect(validation[0]!.ok).toBe(true);
+    expect(validation[1]!.ok).toBe(false);
+    expect(validation[1]!.error).toContain("not executable");
+    expect(validation[2]!.ok).toBe(false);
+    expect(validation[2]!.error).toContain("not found");
+  });
+
+  it("spawns the start script detached, captures logs, and stops via the stop script", async () => {
+    const dir = makeDir();
+    const marker = join(dir, "engine.touch");
+    const start = script(dir, "start.sh", `touch "${marker}"; echo engine: listening on 0.0.0.0:8081; echo -e "progress 45% 1.00MB/s\\rprogress 64% 2.00MB/s"; sleep 60`);
+    const stop = script(dir, "stop.sh", "echo stop: graceful");
+    const result = await h.driver.start(ID, RUN, start, stop, { PORT: "8081" }, null);
+    expect(result.ok).toBe(true);
+
+    await waitFor(() => h.logs.some((l) => l.line.includes("listening on 0.0.0.0:8081")));
+    await waitFor(() => h.logs.some((l) => l.line.includes("progress 64% 2.00MB/s")));
+    expect(h.events[0]).toMatchObject({ setupId: ID, state: "running" });
+    // \r-split progress chunks stream as lines
+    expect(h.logs.some((l) => l.line.includes("progress 45%"))).toBe(true);
+    expect(existsSync(join(h.dir, "setup-logs", `${ID}-${RUN}.log`))).toBe(true);
+
+    const stopped = await h.driver.stop(ID, 2000);
+    expect(stopped.ok).toBe(true);
+    expect(stopped.error).toBeNull();
+    await waitFor(() => h.events.some((e) => e.state === "stopped"));
+    // the stop script's output lands in the log ring
+    expect(h.logs.some((l) => l.line.includes("stop: graceful"))).toBe(true);
+  });
+
+  it("falls back to killing the process group when the stop script fails", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", "sleep 60");
+    const stop = script(dir, "stop.sh", "exit 3");
+    await h.driver.start(ID, RUN, start, stop, {}, null);
+    const stopped = await h.driver.stop(ID, 1000);
+    expect(stopped.ok).toBe(false);
+    expect(stopped.error).toContain("exited with code 3");
+    await waitFor(() => h.events.some((e) => e.state === "stopped"));
+  });
+
+  it("refuses double starts and stopping an unknown setup", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", "sleep 60");
+    const stop = script(dir, "stop.sh", "true");
+    const first = await h.driver.start(ID, RUN, start, stop, {}, null);
+    expect(first.ok).toBe(true);
+    const second = await h.driver.start(ID, UUID3, start, stop, {}, null);
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain("already running");
+    const unknown = await h.driver.stop(UUID3, 1000);
+    expect(unknown.ok).toBe(false);
+    await h.driver.stop(ID, 1000);
+  });
+
+  it("re-attaches to a live driver from the persisted state and drops dead ones", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", "sleep 60");
+    const stop = script(dir, "stop.sh", "true");
+    const events: SetupDriverEvent[] = [];
+    const driver = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent",
+      events: {
+        onEvent: (setupId, event) => events.push({ setupId, ...event }),
+        onLog: () => {},
+      },
+      log: () => {},
+    });
+    driver.init();
+    const result = await driver.start(ID, RUN, start, stop, {}, null);
+    expect(result.ok).toBe(true);
+
+    const stateFile = join(dir, "setups.json");
+    expect(existsSync(stateFile)).toBe(true);
+    const persisted = JSON.parse(readFileSync(stateFile, "utf8")) as Array<{ setupId: string; pgid: number | null }>;
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]!.pgid).not.toBeNull();
+
+    // A fresh agent process re-attaches: alive → running.
+    const events2: SetupDriverEvent[] = [];
+    const driver2 = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent",
+      events: { onEvent: (setupId, event) => events2.push({ setupId, ...event }), onLog: () => {} },
+      log: () => {},
+    });
+    driver2.init();
+    expect(events2.some((e) => e.setupId === ID && e.state === "running")).toBe(true);
+
+    await driver.stop(ID, 1000);
+    await driver2.stop(ID, 1000).catch(() => {});
+
+    // Dead pgid in the state file → reported stopped, record dropped.
+    const deadDir = makeDir();
+    mkdirSync(deadDir, { recursive: true });
+    writeFileSync(join(deadDir, "setups.json"), JSON.stringify([{ setupId: ID, runId: RUN, scriptStart: "x", scriptStop: "y", env: {}, pid: 999999, pgid: 999999, startedAt: 0, logPath: "x" }]));
+    const events3: SetupDriverEvent[] = [];
+    const driver3 = new SetupDriver({
+      stateDir: deadDir,
+      modelctlPath: "/nonexistent",
+      events: { onEvent: (setupId, event) => events3.push({ setupId, ...event }), onLog: () => {} },
+      log: () => {},
+    });
+    driver3.init();
+    expect(events3.some((e) => e.setupId === ID && e.state === "stopped")).toBe(true);
+  });
+
+  it("resolves MODEL_PATH via modelctl path --local and fails the start when it errors", async () => {
+    const dir = makeDir();
+    const modelctl = script(dir, "modelctl", 'echo "/hf/models--GLM-5.3-Flash-EXL3/snapshots/abc"; # args: ');
+    const h2 = makeHarness(modelctl);
+    const start = script(dir, "start.sh", 'echo "MODEL_PATH=$MODEL_PATH"; sleep 60');
+    const stop = script(dir, "stop.sh", "true");
+    const result = await h2.driver.start(ID, RUN, start, stop, {}, "GLM-5.3-Flash-EXL3");
+    expect(result.ok).toBe(true);
+    await waitFor(() => h2.logs.some((l) => l.line.includes("MODEL_PATH=/hf/models--GLM-5.3-Flash-EXL3/snapshots/abc")));
+    await h2.driver.stop(ID, 1000);
+
+    const failing = script(dir, "modelctl-fail", "exit 1");
+    const h3 = makeHarness(failing);
+    const refusal = await h3.driver.start(ID, RUN, start, stop, {}, "GLM-5.3-Flash-EXL3");
+    expect(refusal.ok).toBe(false);
+    expect(refusal.error).toContain("MODEL_PATH resolution failed");
+  });
+});

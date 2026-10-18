@@ -49,6 +49,19 @@ export interface AgentTransportOptions {
   onJobCancel?: (jobId: string) => void;
   /** Server asks the agent to read + report the NAS store catalog. */
   onCatalogRequest?: () => void;
+  /** Setup supervision (M5): start/stop resolve to an ack; status/attach are fire-and-forget. */
+  onSetupStart?: (
+    setupId: string,
+    runId: string,
+    scriptStart: string,
+    scriptStop: string,
+    env: Record<string, string>,
+    modelPathName: string | null,
+  ) => Promise<{ ok: boolean; error: string | null }>;
+  onSetupStop?: (setupId: string, gracefulMs: number) => Promise<{ ok: boolean; error: string | null }>;
+  onSetupStatus?: (setupId: string) => void;
+  onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
+  onSetupValidate?: (validateId: string, scripts: string[]) => void;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -71,6 +84,18 @@ export class AgentTransport {
   private readonly onJobRequest?: (jobId: string, kind: string, params: Record<string, unknown>) => void;
   private readonly onJobCancel?: (jobId: string) => void;
   private readonly onCatalogRequest?: () => void;
+  private readonly onSetupStart?: (
+    setupId: string,
+    runId: string,
+    scriptStart: string,
+    scriptStop: string,
+    env: Record<string, string>,
+    modelPathName: string | null,
+  ) => Promise<{ ok: boolean; error: string | null }>;
+  private readonly onSetupStop?: (setupId: string, gracefulMs: number) => Promise<{ ok: boolean; error: string | null }>;
+  private readonly onSetupStatus?: (setupId: string) => void;
+  private readonly onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
+  private readonly onSetupValidate?: (validateId: string, scripts: string[]) => void;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -107,6 +132,11 @@ export class AgentTransport {
     this.onJobRequest = options.onJobRequest;
     this.onJobCancel = options.onJobCancel;
     this.onCatalogRequest = options.onCatalogRequest;
+    this.onSetupStart = options.onSetupStart;
+    this.onSetupStop = options.onSetupStop;
+    this.onSetupStatus = options.onSetupStatus;
+    this.onSetupLogAttach = options.onSetupLogAttach;
+    this.onSetupValidate = options.onSetupValidate;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -268,6 +298,51 @@ export class AgentTransport {
       case "catalog-request":
         this.onCatalogRequest?.();
         break;
+      case "setup-start": {
+        const { setupId, runId, scriptStart, scriptStop, env, modelPathName } = parsed.data;
+        if (this.onSetupStart === undefined) {
+          this.sendAgentMsg({ type: "setup-ack", setupId, ok: false, error: "agent does not support setups" });
+          break;
+        }
+        void this.onSetupStart(setupId, runId, scriptStart, scriptStop, env, modelPathName)
+          .then((result) => this.sendAgentMsg({ type: "setup-ack", setupId, ok: result.ok, error: result.error }))
+          .catch((err: unknown) =>
+            this.sendAgentMsg({
+              type: "setup-ack",
+              setupId,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        break;
+      }
+      case "setup-stop": {
+        const { setupId, gracefulMs } = parsed.data;
+        if (this.onSetupStop === undefined) {
+          this.sendAgentMsg({ type: "setup-ack", setupId, ok: false, error: "agent does not support setups" });
+          break;
+        }
+        void this.onSetupStop(setupId, gracefulMs)
+          .then((result) => this.sendAgentMsg({ type: "setup-ack", setupId, ok: result.ok, error: result.error }))
+          .catch((err: unknown) =>
+            this.sendAgentMsg({
+              type: "setup-ack",
+              setupId,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        break;
+      }
+      case "setup-status":
+        this.onSetupStatus?.(parsed.data.setupId);
+        break;
+      case "setup-log-attach":
+        this.onSetupLogAttach?.(parsed.data.setupId, parsed.data.lastSeq);
+        break;
+      case "setup-validate":
+        this.onSetupValidate?.(parsed.data.validateId, parsed.data.scripts);
+        break;
       case "error":
         // Harmless frame-reject (e.g. our job frames on an older server) or a
         // real refusal — log it; closing here would drop in-flight job output.
@@ -394,6 +469,22 @@ export class AgentTransport {
       if (msg.type !== "job-output") this.log(`agentServer frame sent: ${msg.type}`);
     } catch (err) {
       this.log(`agentServer frame send failed: ${msg.type} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+
+  /**
+   * Send any agent frame (setup events/logs/acks). Dropped while offline —
+   * driver state is re-reported on the next config-update or status poll.
+   */
+  sendAgentMsg(msg: AgentMsg): void {
+    if (!this.ready) {
+      this.log(`agent frame DROPPED (not ready): ${msg.type}`);
+      return;
+    }
+    try {
+      this.sendRaw(msg);
+    } catch {
+      // Socket going away; the close handler schedules a reconnect.
     }
   }
 

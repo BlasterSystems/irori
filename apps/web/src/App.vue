@@ -4,6 +4,7 @@ import { live } from "./live";
 import NodeCard from "./components/NodeCard.vue";
 import NodeDetail from "./components/NodeDetail.vue";
 import ModelsView from "./components/ModelsView.vue";
+import ServeView from "./components/ServeView.vue";
 import { groupNodes } from "./llm-data";
 import { parseHash, type Route } from "./router";
 
@@ -74,7 +75,7 @@ onUnmounted(() => {
         <a href="#/" :class="{ 'is-active': route.view === 'overview' }" :aria-current="route.view === 'overview' ? 'page' : undefined">Overview</a>
         <a :class="{ 'is-active': route.view === 'node' }" :aria-current="route.view === 'node' ? 'page' : undefined">Nodes</a>
         <a href="#/models" :class="{ 'is-active': route.view === 'models' }" :aria-current="route.view === 'models' ? 'page' : undefined">Models</a>
-        <a>Serve</a>
+        <a href="#/serve" :class="{ 'is-active': route.view === 'serve' }" :aria-current="route.view === 'serve' ? 'page' : undefined">Serve</a>
         <a>Analytics</a>
         <a>Benchmarks</a>
       </nav>
@@ -89,6 +90,7 @@ onUnmounted(() => {
 
   <main class="container page">
     <ModelsView v-if="route.view === 'models'" />
+    <ServeView v-else-if="route.view === 'serve'" />
     <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />
     <template v-else>
       <div class="pagehead">

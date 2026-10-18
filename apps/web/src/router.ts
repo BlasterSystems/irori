@@ -1,9 +1,9 @@
 /**
  * Tiny hash router: "#/node/:id" for the node drill-down, "#/models" for the
- * Models v2 page, everything else is the fleet overview. vue-router is
- * deliberately not used (M1 constraint).
+ * Models v2 page, "#/serve" for serving orchestration, everything else is the
+ * fleet overview. vue-router is deliberately not used (M1 constraint).
  */
-export type Route = { view: "overview" } | { view: "node"; id: string } | { view: "models" };
+export type Route = { view: "overview" } | { view: "node"; id: string } | { view: "models" } | { view: "serve" };
 
 export function parseHash(hash: string): Route {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
@@ -13,6 +13,7 @@ export function parseHash(hash: string): Route {
     return { view: "node", id: decodeURIComponent(id) };
   }
   if (h === "/models") return { view: "models" };
+  if (h === "/serve") return { view: "serve" };
   return { view: "overview" };
 }
 
@@ -22,4 +23,8 @@ export function nodeHash(id: string): string {
 
 export function modelsHash(): string {
   return "#/models";
+}
+
+export function serveHash(): string {
+  return "#/serve";
 }

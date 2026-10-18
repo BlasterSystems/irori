@@ -1,6 +1,6 @@
 {
   "id": "b8d2e3f4-5a6b-4c7d-9e0f-1a2b3c4d5e6f",
-  "prevId": "739aef0c-25af-4e1a-8372-b9caf31102fb",
+  "prevId": "9c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -437,10 +437,10 @@
           "notNull": true,
           "default": "now()"
         },
-        "public.first_seen_at": {
+        "first_seen_at": {
           "name": "first_seen_at",
           "type": "timestamp with time zone",
-          "columnName": "first_seen_at",
+          "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
@@ -947,19 +947,19 @@
         "node_id": {
           "name": "node_id",
           "type": "uuid",
-          "columnName": "node_id",
+          "primaryKey": false,
           "notNull": true
         },
         "model": {
           "name": "model",
           "type": "text",
-          "columnName": "model",
+          "primaryKey": false,
           "notNull": true
         },
         "first_seen_at": {
           "name": "first_seen_at",
           "type": "timestamp with time zone",
-          "columnName": "first_seen_at",
+          "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
@@ -969,15 +969,15 @@
         "node_models_node_id_nodes_id_fk": {
           "name": "node_models_node_id_nodes_id_fk",
           "tableFrom": "node_models",
+          "tableTo": "nodes",
           "columnsFrom": [
             "node_id"
           ],
-          "tableTo": "nodes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1044,6 +1044,5 @@
     "columns": {},
     "schemas": {},
     "tables": {}
-  },
-  "prev": "a7c1d2e3-4f5a-4b6c-8d9e-0f1a2b3c4d5e"
+  }
 }

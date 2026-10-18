@@ -54,6 +54,21 @@ advisory-locked (ADR-0002).
 - Logs: `journalctl -u actions.runner.BlasterSystems-irori.iriori-dev-vm.service`
   (LXC 110); container logs: `docker logs irori-dev` (LXC 106).
 
+## Agent
+
+The agent is configured via env (no config file): `IRORI_SERVER_URL`,
+`IRORI_NODE_TOKEN`, `IRORI_CADENCE_MS`, `IRORI_LLM_TARGETS`,
+`IRORI_LLM_DETECT_ONLY`, `IRORI_MODELCTL_PIN`, `IRORI_MODELCTL_PATH`, and
+`IRORI_STATE_DIR` (default `~/.local/state/irori-agent`) — the state dir holds
+setup-driver state (`setups.json`) and persisted run logs (`setup-logs/`),
+so give it a persistent volume when containerized.
+
+Serving setups (M5) spawn the start/stop script pair from the agent process:
+a containerized agent on a node whose scripts manage host services (e.g.
+`docker start …` over `/var/run/docker.sock`) needs that socket bind-mounted
+into the agent container; bare-metal agents need no extra mounts. Scripts are
+validated with `test -x` inside the agent's own mount namespace.
+
 ## Production
 
 Not yet (v1 scope is dev CD; PROD follows the same pattern with an

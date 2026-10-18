@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmMsgSchema } from "./llm.js";
-import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema } from "./job-messages.js";
+import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema } from "./job-messages.js";
 
 /**
  * Agent → server messages. First frame on a connection MUST be hello;
@@ -28,6 +28,7 @@ export const agentMsgSchema = z.discriminatedUnion("type", [
   snapshotMsgSchema,
   agentPingMsgSchema,
   llmMsgSchema,
+  setupAckMsgSchema,
 ]);
 
 export type HelloMsg = z.infer<typeof helloMsgSchema>;
@@ -77,6 +78,11 @@ export const serverMsgSchema = z.discriminatedUnion("type", [
   jobRequestMsgSchema,
   jobCancelMsgSchema,
   catalogRequestMsgSchema,
+  setupStartMsgSchema,
+  setupStopMsgSchema,
+  setupStatusMsgSchema,
+  setupLogAttachMsgSchema,
+  setupValidateMsgSchema,
 ]);
 
 export type HelloOkMsg = z.infer<typeof helloOkMsgSchema>;

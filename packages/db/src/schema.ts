@@ -217,5 +217,75 @@ export const secrets = pgTable(
   (t) => [uniqueIndex("secrets_name_uq").on(t.name)],
 );
 
+/** Serving setups (M5): one start/stop script pair on the head (SPEC §7). */
+export const setupStatusEnum = pgEnum("setup_status", ["stopped", "starting", "running", "stopping", "failed"]);
+export const setupHealthEnum = pgEnum("setup_health", ["starting", "healthy", "foreign", "timeout"]);
+
+export const setups = pgTable(
+  "setups",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    kind: text("kind").notNull(),
+    model: text("model").notNull(),
+    /** Script-defined serving port on the head (probed for health, env PORT). */
+    port: integer("port").notNull(),
+    headNodeId: uuid("head_node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    /** Cluster workers beyond the head: [{nodeId, role}] (core setupNodeSchema). */
+    nodes: jsonb("nodes").notNull().default(sql`'[]'::jsonb`),
+    scriptStart: text("script_start").notNull(),
+    scriptStop: text("script_stop").notNull(),
+    /** Optional env exports (core envExportsSchema). */
+    env: jsonb("env").notNull().default(sql`'{}'::jsonb`),
+    status: setupStatusEnum("status").notNull().default("stopped"),
+    health: setupHealthEnum("health"),
+    lastError: text("last_error"),
+    startupTimeoutMs: integer("startup_timeout_ms").notNull().default(15 * 60 * 1000),
+    lastStartedAt: timestamp("last_started_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("setups_head_idx").on(t.headNodeId)],
+);
+
+/** Agent-side driver runs: pid/pgid/log path recorded per start. */
+export const setupRunStatusEnum = pgEnum("setup_run_status", ["running", "exited", "stopped", "failed", "canceled"]);
+
+export const setupRuns = pgTable(
+  "setup_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    setupId: uuid("setup_id")
+      .notNull()
+      .references(() => setups.id, { onDelete: "cascade" }),
+    status: setupRunStatusEnum("status").notNull().default("running"),
+    exitCode: integer("exit_code"),
+    pid: integer("pid"),
+    pgid: integer("pgid"),
+    logPath: text("log_path"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (t) => [index("setup_runs_setup_idx").on(t.setupId, t.startedAt)],
+);
+
+/** Staged transfer runs (wizard placement): chained M4 jobs, stages in jsonb. */
+export const setupTransfers = pgTable(
+  "setup_transfers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    setupId: uuid("setup_id")
+      .notNull()
+      .references(() => setups.id, { onDelete: "cascade" }),
+    stages: jsonb("stages").notNull().default(sql`'[]'::jsonb`),
+    status: jobStatusEnum("status").notNull().default("running"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("setup_transfers_setup_idx").on(t.setupId, t.createdAt)],
+);
+
 /** Advisory-lock key shared by every boot migration run. */
 export const MIGRATE_LOCK_KEY = sql`hashtext('irori-migrate')`;

@@ -430,7 +430,9 @@ d("llm (db integration)", () => {
 
   it("serves per-port series from buckets; falls back to raw for 1h when absent", async () => {
     const { id: bucketedId } = await makeNode("llm-hist");
-    const t0 = new Date(Date.now() - 5 * 60_000);
+    // Anchor inside one minute: t0 and t0+5s must share a bucket or the
+    // average below is flaky near minute boundaries.
+    const t0 = new Date(Math.floor((Date.now() - 5 * 60_000) / 60_000) * 60_000 + 10_000);
     await seedLlm(bucketedId, t0, [
       port(8000, { decodeTps: 40, ttftP95Ms: 200 }),
       port(9001, { decodeTps: 10 }),
@@ -538,6 +540,7 @@ d("llm (db integration)", () => {
       ],
       llmCadenceMs: 10_000,
       llmDetectOnly: true,
+      nasRoot: null,
     });
     ws.close();
   });

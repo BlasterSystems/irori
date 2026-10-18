@@ -1,6 +1,6 @@
 {
-  "id": "a7c1d2e3-4f5a-4b6c-8d9e-0f1a2b3c4d5e",
-  "prevId": "739aef0c-25af-4e1a-8372-b9caf31102fb",
+  "id": "9c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f",
+  "prevId": "be6a501a-f82b-42ef-8802-013079a2d335",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -437,10 +437,10 @@
           "notNull": true,
           "default": "now()"
         },
-        "public.first_seen_at": {
+        "first_seen_at": {
           "name": "first_seen_at",
           "type": "timestamp with time zone",
-          "columnName": "first_seen_at",
+          "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
@@ -990,6 +990,5 @@
     "columns": {},
     "schemas": {},
     "tables": {}
-  },
-  "prev": "be6a501a-f82b-42ef-8802-013079a2d335"
+  }
 }

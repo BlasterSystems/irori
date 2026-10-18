@@ -3,6 +3,7 @@ import { SCHEMA_VERSION } from "@irori/core";
 import { collect } from "./collector.js";
 import { readStore } from "./catalog-read.js";
 import { JobManager } from "./jobs.js";
+import { SetupDriver } from "./setups.js";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
 import { LlmPortProbe } from "./llm-probe.js";
 import { AgentTransport, type LlmRuntimeConfig } from "./transport.js";
@@ -51,6 +52,9 @@ async function run(): Promise<void> {
     for (const p of server.llmPorts) byPort.set(p.port, p.host);
     for (const t of config.llmTargets) byPort.set(t.port, t.host);
     const llmPorts = [...byPort].map(([port, host]) => ({ port, host }));
+    // Server-assigned ports must instantiate probes too — a setup injects its
+    // port via config-update and the node may have no IRORI_LLM_TARGETS.
+    ensureProbes(llmPorts);
     const llmCadenceMs =
       server.llmCadenceMs > 0
         ? server.llmCadenceMs
@@ -75,6 +79,17 @@ async function run(): Promise<void> {
     },
   );
 
+  const driver = new SetupDriver({
+    stateDir: config.stateDir,
+    modelctlPath: config.modelctlPath,
+    events: {
+      onEvent: (setupId, event) => transport.sendAgentMsg({ type: "setup-event", setupId, ...event }),
+      onLog: (setupId, seq, line, ts) => transport.sendAgentMsg({ type: "setup-log", setupId, seq, line, ts }),
+    },
+    log,
+  });
+  driver.init();
+
   const transport = new AgentTransport({
     token: config.token,
     hostname: os.hostname(),
@@ -97,6 +112,20 @@ async function run(): Promise<void> {
       }
     },
     onJobCancel: (jobId) => jobs.cancel(jobId),
+    onSetupStart: (setupId, runId, scriptStart, scriptStop, env, modelPathName) =>
+      driver.start(setupId, runId, scriptStart, scriptStop, env, modelPathName),
+    onSetupStop: (setupId, gracefulMs) => driver.stop(setupId, gracefulMs),
+    onSetupStatus: (setupId) => driver.reportStatus(setupId),
+    onSetupLogAttach: (setupId, lastSeq) => {
+      for (const entry of driver.ring(setupId)) {
+        if (entry.seq > lastSeq) {
+          transport.sendAgentMsg({ type: "setup-log", setupId, seq: entry.seq, line: entry.line, ts: entry.ts });
+        }
+      }
+    },
+    onSetupValidate: (validateId, scripts) => {
+      transport.sendAgentServer({ type: "setup-validate-result", validateId, results: driver.validate(scripts) });
+    },
     onCatalogRequest: () => {
       const root = transport.getNasRoot();
       if (!root) {
