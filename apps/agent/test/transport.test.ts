@@ -3,8 +3,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 import { afterEach, expect, it, vi } from "vitest";
-import { agentMsgSchema, snapshotMsgSchema } from "@irori/core";
-import type { AgentMsg, HardwareSnapshot, HelloMsg, SnapshotMsg } from "@irori/core";
+import { agentMsgSchema, llmMsgSchema, snapshotMsgSchema } from "@irori/core";
+import type { AgentMsg, HardwareSnapshot, HelloMsg, LlmMsg, LlmPortSnapshot, SnapshotMsg } from "@irori/core";
 import { AgentTransport } from "../src/transport.js";
 import type { AgentTransportOptions } from "../src/transport.js";
 
@@ -125,6 +125,30 @@ function makeTransport(overrides: Partial<AgentTransportOptions> = {}): AgentTra
 
 function snapshots(server: FakeServer): SnapshotMsg[] {
   return server.frames.filter((f): f is SnapshotMsg => f.type === "snapshot");
+}
+
+function llmFrames(server: FakeServer): LlmMsg[] {
+  return server.frames.filter((f): f is LlmMsg => f.type === "llm");
+}
+
+function fakeLlmPort(port: number, decodeTps: number): LlmPortSnapshot {
+  return {
+    port,
+    host: "127.0.0.1",
+    backend: "vllm",
+    detected: true,
+    model: "meta-llama/Llama-3.1-8B",
+    decodeTps,
+    prefillTps: null,
+    queueRunning: null,
+    queueWaiting: null,
+    kvCachePct: null,
+    ttftP95Ms: null,
+    e2eP95Ms: null,
+    itlP95Ms: null,
+    engineMeta: null,
+    probedAtMs: BASE_TS,
+  };
 }
 
 let teardown: Array<() => Promise<void>> = [];
@@ -274,4 +298,119 @@ it("does not reconnect after stop()", async () => {
 
   expect(server.hellos).toHaveLength(1);
   expect(transport.isReady()).toBe(false);
+});
+
+it("starts the LLM probe loop from config-update and sends schema-valid llm frames", async () => {
+  const server = await startFakeServer(60_000);
+  teardown.push(server.close);
+  const detectOnlyFlags: boolean[] = [];
+  const transport = makeTransport({
+    collectLlm: async (detectOnly) => {
+      detectOnlyFlags.push(detectOnly);
+      return [fakeLlmPort(8080, 123.45)];
+    },
+  });
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+
+  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+  expect(llmFrames(server)).toHaveLength(0); // no probes configured yet
+
+  server.broadcast({
+    type: "config-update",
+    cadenceMs: 60_000,
+    llmPorts: [{ port: 8080, host: "127.0.0.1" }],
+    llmCadenceMs: 25,
+    llmDetectOnly: false,
+  });
+
+  await vi.waitFor(() => expect(llmFrames(server).length).toBeGreaterThanOrEqual(3), {
+    timeout: 5000,
+  });
+  const frames = llmFrames(server).map((f) => llmMsgSchema.parse(f));
+  expect(frames[0]).toMatchObject({
+    type: "llm",
+    schemaVersion: 1,
+    agentVersion: "0.0.0-test",
+  });
+  expect(frames[0]!.ports).toHaveLength(1);
+  expect(frames[0]!.ports[0]!.port).toBe(8080);
+  expect(frames[0]!.ports[0]!.decodeTps).toBe(123.45);
+  expect(detectOnlyFlags.every((f) => f === false)).toBe(true);
+});
+
+it("passes llmDetectOnly through and applies onLlmConfig overrides", async () => {
+  const server = await startFakeServer(60_000);
+  teardown.push(server.close);
+  const detectOnlyFlags: boolean[] = [];
+  const seenServerPorts: number[][] = [];
+  const transport = makeTransport({
+    collectLlm: async (detectOnly) => {
+      detectOnlyFlags.push(detectOnly);
+      return [fakeLlmPort(8080, 1)];
+    },
+    onLlmConfig: (config) => {
+      seenServerPorts.push(config.llmPorts.map((p) => p.port));
+      // Env override: probe 9999 too, force detection-only.
+      return {
+        llmPorts: [...config.llmPorts, { port: 9999, host: "127.0.0.1" }],
+        llmCadenceMs: config.llmCadenceMs > 0 ? config.llmCadenceMs : 1000,
+        llmDetectOnly: true,
+      };
+    },
+  });
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+
+  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+  server.broadcast({
+    type: "config-update",
+    cadenceMs: 60_000,
+    llmPorts: [{ port: 8080, host: "127.0.0.1" }],
+    llmCadenceMs: 25,
+    llmDetectOnly: false,
+  });
+
+  await vi.waitFor(() => expect(llmFrames(server).length).toBeGreaterThanOrEqual(1), {
+    timeout: 5000,
+  });
+  expect(seenServerPorts).toEqual([[8080]]);
+  // The effective config carries the merged port list and the override flag.
+  expect(transport.getLlmConfig()).toEqual({
+    llmPorts: [
+      { port: 8080, host: "127.0.0.1" },
+      { port: 9999, host: "127.0.0.1" },
+    ],
+    llmCadenceMs: 25,
+    llmDetectOnly: true,
+  });
+  expect(detectOnlyFlags.every((f) => f === true)).toBe(true);
+});
+
+it("does not buffer llm frames while disconnected and drops them on send", async () => {
+  const server = await startFakeServer(60_000);
+  teardown.push(server.close);
+  const transport = makeTransport({
+    llm: { llmPorts: [{ port: 8080, host: "127.0.0.1" }], llmCadenceMs: 20, llmDetectOnly: false },
+    collectLlm: async () => [fakeLlmPort(8080, 5)],
+    // Slow enough that the disconnected window is observably long.
+    reconnectBaseMs: 500,
+  });
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+
+  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+  // Seeded llm config runs the loop even before hello-ok; frames only flow
+  // while ready, and a send on a closed socket is dropped (never buffered).
+  transport.sendLlm([fakeLlmPort(8080, 7)]);
+  expect(llmFrames(server).length).toBeGreaterThanOrEqual(1);
+
+  server.kickAll();
+  await vi.waitFor(() => expect(transport.isReady()).toBe(false));
+  transport.sendLlm([fakeLlmPort(8080, 8)]);
+
+  await vi.waitFor(() => expect(server.hellos).toHaveLength(2), { timeout: 5000 });
+  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+  const ports = llmFrames(server).flatMap((f) => f.ports.map((p) => p.decodeTps));
+  expect(ports).not.toContain(8); // point-in-time sample dropped while offline
 });

@@ -4,21 +4,32 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import { nodeCreateSchema, nodeInfoSchema, nodePatchSchema, type NodeInfo } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
+import { type LlmHistoryResponse } from "./llm-history.js";
+import type { LlmStore } from "./llm-store.js";
+import { nodeLlmAssignments } from "./llm-store.js";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import type { AgentHub } from "./hub.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
+/** Upper bound on probe assignments accepted per node. */
+const MAX_LLM_PORTS = 32;
 
 /** Builds a history response; null while degraded (no DB wired yet). */
 export type HistoryBuilder = (nodeId: string, range: HistoryRange) => Promise<HistoryResponse>;
 
+/** Builds an llm history response; null while degraded (no DB wired yet). */
+export type LlmHistoryBuilder = (nodeId: string, range: HistoryRange) => Promise<LlmHistoryResponse>;
+
 export interface AppDeps {
   /** Null while degraded (no/migrating DB): store-backed routes answer 503. */
   getStore: () => NodeStore | null;
-  /** Null while degraded: the history route answers 503. */
+  /** Null while degraded: history routes answer 503 and llm-ports writes fail. */
+  getLlmStore: () => LlmStore | null;
+  /** Null while degraded: the history routes answer 503. */
   getHistory: () => HistoryBuilder | null;
+  getLlmHistory: () => LlmHistoryBuilder | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   sse: SseHub;
@@ -139,6 +150,56 @@ export function createApp(deps: AppDeps): Express {
     res.json(await build(id, range));
   });
 
+  // Live llm probe view: in-memory ring first, latest persisted pass as
+  // fallback (fresh boot, agent still to reconnect). 404 when nothing is known.
+  app.get("/api/v1/nodes/:id/llm", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const entry = deps.rings.latestLlm(id);
+    if (entry !== undefined) {
+      return res.json({ ports: entry.ports, updatedAt: new Date(entry.serverTimeMs).toISOString() });
+    }
+    const llmStore = deps.getLlmStore();
+    const fallback = llmStore === null ? null : await llmStore.latestLlmSnapshot(id);
+    if (fallback === null) return res.status(404).json({ error: "no llm data available" });
+    res.json({ ports: fallback.ports, updatedAt: new Date(fallback.serverTimeMs).toISOString() });
+  });
+
+  app.get("/api/v1/nodes/:id/llm/history", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const range = req.query.range;
+    if (typeof range !== "string" || !isHistoryRange(range)) {
+      return res.status(400).json({ error: "unknown range" });
+    }
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const build = deps.getLlmHistory();
+    if (build === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await build(id, range));
+  });
+
+  // Dedicated probe-assignment endpoint: nodePatchSchema (core, out of M3
+  // scope) has no llmPorts yet — reported to Main. Body: { ports: number[] }.
+  app.put("/api/v1/nodes/:id/llm-ports", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const ports = parsePortsBody(req.body);
+    if (ports === null) return res.status(400).json({ error: "invalid request" });
+    const llmStore = deps.getLlmStore();
+    if (llmStore === null) return res.status(503).json({ error: "database unavailable" });
+    await llmStore.setNodeLlmPorts(id, ports);
+    const row = await store.get(id);
+    res.json({ llmPorts: nodeLlmAssignments(row) });
+  });
+
   // Unknown API paths answer JSON, not the SPA.
   app.use("/api", (_req, res) => {
     res.status(404).json({ error: "not found" });
@@ -196,4 +257,20 @@ function sendZodError(res: Response, error: { issues: Array<{ path: PropertyKey[
 function parseUuidParam(req: Request): string | null {
   const id = req.params.id;
   return typeof id === "string" && UUID_RE.test(id) ? id : null;
+}
+
+/**
+ * Validates the PUT /llm-ports body ({ ports: number[] }) without zod (not a
+ * server dependency): positive 16-bit ints, deduped, capped at MAX_LLM_PORTS.
+ */
+function parsePortsBody(body: unknown): number[] | null {
+  if (typeof body !== "object" || body === null || !("ports" in body)) return null;
+  const ports = body.ports;
+  if (!Array.isArray(ports) || ports.length > MAX_LLM_PORTS) return null;
+  const out: number[] = [];
+  for (const port of ports) {
+    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+    if (!out.includes(port)) out.push(port);
+  }
+  return out.sort((a, b) => a - b);
 }

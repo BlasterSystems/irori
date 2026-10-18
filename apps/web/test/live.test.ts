@@ -166,4 +166,64 @@ describe("createLiveStore", () => {
     expect(store.connected.value).toBe(false);
     store.stop();
   });
+
+  it("ingests llm events into the llm store", async () => {
+    const { store, es } = await startedStore([nodeFixture()]);
+    es.emit(JSON.stringify({
+      type: "llm",
+      serverTimeMs: 1_760_000_000_000,
+      nodeId: nodeFixture().id,
+      ports: [
+        {
+          port: 8000,
+          backend: "exl3",
+          detected: true,
+          model: "GLM-5.3-Flash-EXL3",
+          decodeTps: 142.3,
+          probedAtMs: 1_760_000_000_000,
+        },
+        { port: 8001, backend: "unknown", detected: false, probedAtMs: 1_760_000_000_000 },
+      ],
+    }));
+    const entry = store.getLlm(nodeFixture().id);
+    expect(entry).not.toBeNull();
+    expect(entry?.ports).toHaveLength(2);
+    expect(entry?.ports[0]).toMatchObject({ port: 8000, backend: "exl3", decodeTps: 142.3 });
+    expect(entry?.updatedAt).toBe(new Date(1_760_000_000_000).toISOString());
+    expect(store.lastEventAgeMs.value).toBe(0);
+    store.stop();
+  });
+
+  it("keeps the previous llm entry when a frame is malformed", async () => {
+    const { store, es } = await startedStore([nodeFixture()]);
+    es.emit(JSON.stringify({
+      type: "llm",
+      serverTimeMs: 1,
+      nodeId: nodeFixture().id,
+      ports: [],
+    }));
+    expect(store.getLlm(nodeFixture().id)?.ports).toEqual([]);
+
+    es.emit(JSON.stringify({
+      type: "llm",
+      serverTimeMs: 2,
+      nodeId: nodeFixture().id,
+      ports: [{ port: 8000, backend: "not-a-backend", detected: true }],
+    }));
+    expect(store.getLlm(nodeFixture().id)?.ports).toEqual([]);
+    store.stop();
+  });
+
+  it("stores llm frames for nodes the registry does not know yet", async () => {
+    const unknown = "00000000-0000-4000-8000-000000000099";
+    const { store, es } = await startedStore([nodeFixture()]);
+    es.emit(JSON.stringify({
+      type: "llm",
+      serverTimeMs: 3,
+      nodeId: unknown,
+      ports: [{ port: 8081, backend: "tensorfold", detected: true, probedAtMs: 3 }],
+    }));
+    expect(store.getLlm(unknown)?.ports[0]).toMatchObject({ port: 8081, backend: "tensorfold" });
+    store.stop();
+  });
 });

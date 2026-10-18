@@ -109,7 +109,9 @@ d("rollups / retention / history (db integration)", () => {
   function makeApiApp(): Express {
     return createApp({
       getStore: () => store,
+      getLlmStore: () => null,
       getHistory: () => (id, range) => buildHistory(h.db, id, range),
+      getLlmHistory: () => null,
       dbHealthy: async () => true,
       rings: createRings(),
       sse: createSseHub({ heartbeatMs: 0 }),

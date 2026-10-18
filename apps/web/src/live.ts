@@ -1,11 +1,20 @@
 import { computed, reactive, ref } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import {
+  llmEventSchema,
   sseEventSchema,
   type HardwareSnapshot,
+  type LlmPortSnapshot,
   type NodeInfo,
 } from "@irori/core";
 import { fetchNodes } from "./api";
+
+/** Latest LLM probe per node (SSE llm events; REST seeds it on the detail page). */
+export interface LlmEntry {
+  ports: LlmPortSnapshot[];
+  /** Server receive time of the probe, ISO. */
+  updatedAt: string;
+}
 
 export interface LiveStoreOptions {
   /** Overridable for tests. */
@@ -21,6 +30,10 @@ export interface LiveStore {
   nodes: Map<string, NodeInfo>;
   /** Latest hardware snapshot per node (id → snapshot), from SSE. */
   snapshots: Map<string, HardwareSnapshot>;
+  /** Latest LLM probe per node (id → entry), from SSE llm events. */
+  llm: Map<string, LlmEntry>;
+  /** Latest LLM entry for a node, null when no probe has arrived yet. */
+  getLlm(nodeId: string): LlmEntry | null;
   /** ms since the last SSE frame arrived (refreshed by a tick), null before the first event. */
   lastEventAgeMs: Ref<number | null>;
   /** True while the EventSource is in the OPEN state. */
@@ -51,6 +64,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
 
   const nodes = reactive(new Map<string, NodeInfo>());
   const snapshots = reactive(new Map<string, HardwareSnapshot>());
+  const llm = reactive(new Map<string, LlmEntry>());
   const lastEventAtMs = ref<number | null>(null);
   const lastEventAgeMs = ref<number | null>(null);
   const connected = ref(false);
@@ -71,6 +85,18 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       parsed = JSON.parse(raw);
     } catch {
       return; // ignore malformed frames
+    }
+    // LLM frames are validated against their dedicated schema first: older
+    // cores ship the SSE union without them, and the frame still applies.
+    const llmEvt = llmEventSchema.safeParse(parsed);
+    if (llmEvt.success) {
+      lastEventAtMs.value = now();
+      lastEventAgeMs.value = 0;
+      llm.set(llmEvt.data.nodeId, {
+        ports: llmEvt.data.ports,
+        updatedAt: new Date(llmEvt.data.serverTimeMs).toISOString(),
+      });
+      return;
     }
     const evt = sseEventSchema.safeParse(parsed);
     if (!evt.success) return; // ignore unknown event shapes
@@ -139,6 +165,10 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     void refreshNodes().catch(() => {});
   }
 
+  function getLlm(nodeId: string): LlmEntry | null {
+    return llm.get(nodeId) ?? null;
+  }
+
   function stop(): void {
     stopped = true;
     connected.value = false;
@@ -156,6 +186,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   return {
     nodes,
     snapshots,
+    llm,
+    getLlm,
     lastEventAgeMs,
     connected,
     sortedNodes,

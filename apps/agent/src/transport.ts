@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, HardwareSnapshot } from "@irori/core";
+import type { AgentMsg, HardwareSnapshot, LlmPortSnapshot, ServerMsg } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -8,6 +8,20 @@ export const MAX_BUFFERED_SNAPSHOTS = 500;
 const DEFAULT_PING_INTERVAL_MS = 15_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+
+/** Per-port LLM probe assignment. */
+export interface LlmPortConfig {
+  port: number;
+  host: string;
+}
+
+/** Effective LLM probe runtime config (ports + cadence + detection-only flag). */
+export interface LlmRuntimeConfig {
+  llmPorts: LlmPortConfig[];
+  /** 0 = LLM probes disabled. */
+  llmCadenceMs: number;
+  llmDetectOnly: boolean;
+}
 
 export interface AgentTransportOptions {
   /** Shared node token sent in the hello frame. */
@@ -20,6 +34,16 @@ export interface AgentTransportOptions {
   cadenceMs: number;
   /** Snapshot source; injectable for tests. */
   collect: () => Promise<HardwareSnapshot>;
+  /** LLM probe source: one snapshot per assigned port, in a stable order. */
+  collectLlm?: (detectOnly: boolean) => Promise<LlmPortSnapshot[]>;
+  /**
+   * Called when a config-update carries LLM probe config. Return the effective
+   * config to apply (e.g. after merging env overrides); void applies the
+   * server values as-is.
+   */
+  onLlmConfig?: (config: LlmRuntimeConfig) => LlmRuntimeConfig | void;
+  /** LLM probe config seeded before the first config-update (env). */
+  llm?: LlmRuntimeConfig;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -37,6 +61,8 @@ export class AgentTransport {
   private readonly agentVersion: string;
   private readonly schemaVersion: number;
   private readonly collect: () => Promise<HardwareSnapshot>;
+  private readonly collectLlm?: (detectOnly: boolean) => Promise<LlmPortSnapshot[]>;
+  private readonly onLlmConfig?: (config: LlmRuntimeConfig) => LlmRuntimeConfig | void;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -55,6 +81,9 @@ export class AgentTransport {
   private snapshotTimer: NodeJS.Timeout | undefined;
   private pingTimer: NodeJS.Timeout | undefined;
   private reconnectTimer: NodeJS.Timeout | undefined;
+  private llm: LlmRuntimeConfig;
+  private llmTimer: NodeJS.Timeout | undefined;
+  private llmProbing = false;
 
   constructor(options: AgentTransportOptions) {
     this.token = options.token;
@@ -63,6 +92,9 @@ export class AgentTransport {
     this.schemaVersion = options.schemaVersion;
     this.collect = options.collect;
     this.cadenceMs = options.cadenceMs;
+    this.llm = options.llm ?? { llmPorts: [], llmCadenceMs: 0, llmDetectOnly: false };
+    this.onLlmConfig = options.onLlmConfig;
+    this.collectLlm = options.collectLlm;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -84,6 +116,11 @@ export class AgentTransport {
     return this.ready;
   }
 
+  /** Effective LLM probe config (server values merged with env overrides). */
+  getLlmConfig(): LlmRuntimeConfig {
+    return this.llm;
+  }
+
   /** Snapshots currently buffered for the next connection. */
   getBufferedCount(): number {
     return this.buffer.length;
@@ -95,6 +132,7 @@ export class AgentTransport {
       throw new Error("AgentTransport is already connected");
     }
     this.serverUrl = serverUrl;
+    this.startLlmTimer();
     this.open();
   }
 
@@ -127,6 +165,8 @@ export class AgentTransport {
     this.snapshotTimer = undefined;
     clearInterval(this.pingTimer);
     this.pingTimer = undefined;
+    clearInterval(this.llmTimer);
+    this.llmTimer = undefined;
     const ws = this.ws;
     this.ws = null;
     if (ws === null || ws.readyState === WebSocket.CLOSED) return;
@@ -198,7 +238,7 @@ export class AgentTransport {
         this.handleHelloOk(parsed.data.nodeId, parsed.data.cadenceMs);
         break;
       case "config-update":
-        this.handleConfigUpdate(parsed.data.cadenceMs);
+        this.handleConfigUpdate(parsed.data);
         break;
       case "pong":
         break;
@@ -219,10 +259,34 @@ export class AgentTransport {
     this.startSnapshotTimer();
   }
 
-  private handleConfigUpdate(cadenceMs: number): void {
-    this.cadenceMs = cadenceMs;
-    this.log(`cadence updated to ${cadenceMs} ms`);
+  private handleConfigUpdate(msg: Extract<ServerMsg, { type: "config-update" }>): void {
+    this.cadenceMs = msg.cadenceMs;
+    this.log(`cadence updated to ${msg.cadenceMs} ms`);
     if (this.ready) this.startSnapshotTimer();
+
+    const serverConfig: LlmRuntimeConfig = {
+      llmPorts: msg.llmPorts.map((p) => ({ port: p.port, host: p.host })),
+      llmCadenceMs: msg.llmCadenceMs,
+      llmDetectOnly: msg.llmDetectOnly,
+    };
+    const effective = this.onLlmConfig?.(serverConfig) ?? serverConfig;
+    if (
+      this.llm.llmCadenceMs !== effective.llmCadenceMs ||
+      this.llm.llmDetectOnly !== effective.llmDetectOnly ||
+      this.llmPortsKey(effective) !== this.llmPortsKey(this.llm)
+    ) {
+      this.log(
+        `llm probes: ${effective.llmPorts.length} port(s), cadence ${effective.llmCadenceMs} ms` +
+          `${effective.llmDetectOnly ? ", detection-only" : ""}`,
+      );
+    }
+    this.llm = effective;
+    this.startLlmTimer();
+  }
+
+  /** Stable ordering key for a port list (change detection only). */
+  private llmPortsKey(cfg: LlmRuntimeConfig): string {
+    return cfg.llmPorts.map((p) => `${p.host}:${p.port}`).sort().join(",");
   }
 
   private handleClose(): void {
@@ -246,6 +310,45 @@ export class AgentTransport {
   private startSnapshotTimer(): void {
     clearInterval(this.snapshotTimer);
     this.snapshotTimer = setInterval(() => void this.tick(), this.cadenceMs);
+  }
+
+  private startLlmTimer(): void {
+    clearInterval(this.llmTimer);
+    this.llmTimer = undefined;
+    if (this.collectLlm === undefined || this.llm.llmPorts.length === 0) return;
+    if (this.llm.llmCadenceMs <= 0) return; // 0 = probes disabled
+    this.llmTimer = setInterval(() => void this.llmTick(), this.llm.llmCadenceMs);
+  }
+
+  private async llmTick(): Promise<void> {
+    if (this.llmProbing || !this.ready || this.collectLlm === undefined) return;
+    this.llmProbing = true;
+    try {
+      const ports = await this.collectLlm(this.llm.llmDetectOnly);
+      this.sendLlm(ports);
+    } catch (err) {
+      this.log(`llm probe failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.llmProbing = false;
+    }
+  }
+
+  /**
+   * Send one llm frame for the given port snapshots. LLM samples are
+   * point-in-time — unlike snapshots they are never buffered offline.
+   */
+  sendLlm(ports: LlmPortSnapshot[]): void {
+    if (!this.ready) return;
+    try {
+      this.sendRaw({
+        type: "llm",
+        schemaVersion: this.schemaVersion,
+        agentVersion: this.agentVersion,
+        ports,
+      });
+    } catch {
+      // Socket went away mid-send; the close handler schedules a reconnect.
+    }
   }
 
   private async tick(): Promise<void> {

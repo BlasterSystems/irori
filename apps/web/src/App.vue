@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "./live";
 import NodeCard from "./components/NodeCard.vue";
 import NodeDetail from "./components/NodeDetail.vue";
+import { groupNodes } from "./llm-data";
 import { parseHash, type Route } from "./router";
 
 const { sortedNodes, connected, lastEventAgeMs } = live;
@@ -23,6 +24,12 @@ const totalCount = computed(() => sortedNodes.value.length);
 const onlineCount = computed(
   () => sortedNodes.value.filter((n) => n.online).length,
 );
+
+/** Cluster grouping (M3): heads anchor the view, then workers, then standalone. */
+const orderedNodes = computed(() => {
+  const groups = groupNodes(sortedNodes.value);
+  return [...groups.heads, ...groups.workers, ...groups.standalone];
+});
 const ageText = computed(() =>
   lastEventAgeMs.value === null
     ? null
@@ -91,10 +98,11 @@ onUnmounted(() => {
 
       <section v-if="totalCount > 0" class="cols cols-3">
         <NodeCard
-          v-for="node in sortedNodes"
+          v-for="node in orderedNodes"
           :key="node.id"
           :node="node"
           :snapshot="live.snapshots.get(node.id) ?? null"
+          :llm="live.getLlm(node.id)"
         />
       </section>
       <div v-else class="banner">

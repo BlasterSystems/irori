@@ -34,6 +34,8 @@ export const nodes = pgTable(
     agentVersion: text("agent_version"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     sortOrder: integer("sort_order").notNull().default(0),
+    /** LLM ports this node serves (agent probes them; M3). */
+    llmPorts: jsonb("llm_ports").notNull().default(sql`'[]'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -100,6 +102,42 @@ export const snapshotBuckets = pgTable(
     netTxBps: doublePrecision("net_tx_bps"),
   },
   (t) => [uniqueIndex("snapshot_buckets_uq").on(t.nodeId, t.granularity, t.bucketStart)],
+);
+
+/** Raw LLM probe snapshots (same ring/retention model as `snapshots`). */
+export const llmSnapshots = pgTable(
+  "llm_snapshots",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    serverTime: timestamp("server_time", { withTimezone: true }).notNull().defaultNow(),
+    payload: jsonb("payload").notNull(),
+  },
+  (t) => [index("llm_snapshots_node_time_idx").on(t.nodeId, t.serverTime)],
+);
+
+/** Pre-aggregated LLM buckets (watermark-guarded, same model as snapshotBuckets). */
+export const llmBuckets = pgTable(
+  "llm_buckets",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    port: integer("port").notNull(),
+    granularity: bucketGranularity("granularity").notNull(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    samples: integer("samples").notNull().default(0),
+    decodeTps: doublePrecision("decode_tps"),
+    prefillTps: doublePrecision("prefill_tps"),
+    queueRunning: real("queue_running"),
+    queueWaiting: real("queue_waiting"),
+    kvCachePct: real("kv_cache_pct"),
+    ttftP95Ms: real("ttft_p95_ms"),
+  },
+  (t) => [uniqueIndex("llm_buckets_uq").on(t.nodeId, t.port, t.granularity, t.bucketStart)],
 );
 
 /** Generic secret store (SSH credentials, future per-node material). */

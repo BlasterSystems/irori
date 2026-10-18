@@ -12,6 +12,9 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
   const online = new Set<string>();
   const deps: AppDeps = {
     getStore: () => (opts.store === undefined ? fake.store : opts.store),
+    getLlmStore: () => null,
+    getHistory: () => null,
+    getLlmHistory: () => null,
     dbHealthy: opts.dbHealthy ?? (async () => true),
     rings: createRings(),
     sse: createSseHub({ heartbeatMs: 0 }),

@@ -11,7 +11,7 @@ export function isHistoryRange(value: string): value is HistoryRange {
   return (HISTORY_RANGES as readonly string[]).includes(value);
 }
 
-const RANGE_MS: Record<HistoryRange, number> = {
+export const RANGE_MS: Record<HistoryRange, number> = {
   "1h": 3_600_000,
   "24h": 24 * 3_600_000,
   "7d": 7 * 86_400_000,
@@ -20,7 +20,7 @@ const RANGE_MS: Record<HistoryRange, number> = {
 };
 
 /** 1h resolves to raw-resolution minutes; 24h/7d/30d to hours; 90d to days. */
-const RANGE_GRANULARITY: Record<HistoryRange, Granularity> = {
+export const RANGE_GRANULARITY: Record<HistoryRange, Granularity> = {
   "1h": "minute",
   "24h": "hour",
   "7d": "hour",

@@ -27,11 +27,12 @@ async function setup(overrides: Partial<AgentHubDeps> = {}) {
   const { events, sse } = makeSseSpy();
   const hub = createAgentHub({
     store: fake.store,
+    llmStore: fake.llmStore,
     rings,
     sse,
     cadenceMs: 2000,
     serverVersion: "test-server",
-    snapshotFlushMs: 30,
+    writeFlushMs: 30,
     ...overrides,
   });
   const server = createServer();
@@ -56,8 +57,12 @@ async function authenticate(url: string, token: string) {
   const ws = new WebSocket(url);
   await opened(ws);
   ws.send(hello(token));
-  const reply = await nextMessage(ws);
-  expect(reply).toMatchObject({ type: "hello-ok" });
+  // Attach both listeners before awaiting: hello-ok and config-update are sent
+  // back-to-back and can land in one TCP segment.
+  const reply = nextMessage(ws);
+  const config = nextMessage(ws);
+  expect(await reply).toMatchObject({ type: "hello-ok" });
+  await config; // asserted in detail by the llm tests
   return ws;
 }
 

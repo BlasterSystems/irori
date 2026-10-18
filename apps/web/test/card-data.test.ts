@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HardwareSnapshot, NodeInfo } from "@irori/core";
+import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
 import { computeCardData } from "../src/card-data";
 
 const GIB = 2 ** 30;
@@ -101,5 +101,20 @@ describe("computeCardData", () => {
     expect(card.cpuLine).toBe("");
     expect(card.gpus).toEqual([]);
     expect(card.agentVersion).toBe("0.1.0");
+  });
+
+  it("shows the inference summary line on head cards only", () => {
+    const ports = [
+      { port: 8000, host: "127.0.0.1", backend: "exl3", detected: true, model: "GLM", decodeTps: 142.3, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, e2eP95Ms: null, itlP95Ms: null, engineMeta: null, probedAtMs: 1 },
+      { port: 8001, host: "127.0.0.1", backend: "unknown", detected: false, model: null, decodeTps: null, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, e2eP95Ms: null, itlP95Ms: null, engineMeta: null, probedAtMs: 1 },
+    ] as LlmPortSnapshot[];
+    const head = computeCardData(nodeFixture({ role: "head" }), SNAPSHOT, { ports });
+    expect(head.inferenceLine).toBe(":8000 EXL3 · :8001 idle");
+
+    const headWithoutProbes = computeCardData(nodeFixture({ role: "head" }), SNAPSHOT);
+    expect(headWithoutProbes.inferenceLine).toBeNull();
+
+    const worker = computeCardData(nodeFixture(), SNAPSHOT, { ports });
+    expect(worker.inferenceLine).toBeNull();
   });
 });

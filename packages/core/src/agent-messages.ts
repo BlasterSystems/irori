@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
+import { llmMsgSchema } from "./llm.js";
 
 /**
  * Agent → server messages. First frame on a connection MUST be hello;
@@ -25,6 +26,7 @@ export const agentMsgSchema = z.discriminatedUnion("type", [
   helloMsgSchema,
   snapshotMsgSchema,
   agentPingMsgSchema,
+  llmMsgSchema,
 ]);
 
 export type HelloMsg = z.infer<typeof helloMsgSchema>;
@@ -42,6 +44,19 @@ export const helloOkMsgSchema = z.object({
 export const configUpdateMsgSchema = z.object({
   type: z.literal("config-update"),
   cadenceMs: z.number().int().positive(),
+  /** Per-node LLM ports to probe; empty = no probes. Role comes from the node record. */
+  llmPorts: z
+    .array(
+      z.object({
+        port: z.number().int().positive(),
+        host: z.string().min(1).default("127.0.0.1"),
+      }),
+    )
+    .default([]),
+  /** 0 = probes disabled; used for worker detection-only cadence override. */
+  llmCadenceMs: z.number().int().nonnegative().default(0),
+  /** Workers send detection-only probes (backend/model, no rate windows). */
+  llmDetectOnly: z.boolean().default(false),
 });
 
 export const serverErrorMsgSchema = z.object({

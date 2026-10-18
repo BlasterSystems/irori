@@ -1,4 +1,5 @@
-import type { HardwareSnapshot, NodeInfo } from "@irori/core";
+import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
+import { llmSummaryLine, nodeLlmPorts } from "./llm-data";
 
 export interface GpuCardData {
   index: number;
@@ -24,6 +25,8 @@ export interface CardData {
   memBarPct: number | null;
   /** "96.0 / 127.0 GB" (GiB, one decimal). */
   memLine: string;
+  /** Head cards only: ":8000 EXL3 · :8001 idle"; null when nothing to show. */
+  inferenceLine: string | null;
   gpus: GpuCardData[];
 }
 
@@ -56,6 +59,7 @@ export function formatMetricLine(...parts: Array<string | null>): string {
 export function computeCardData(
   node: NodeInfo,
   snapshot: HardwareSnapshot | null | undefined,
+  llm?: { ports: LlmPortSnapshot[] } | null,
 ): CardData {
   const cpu = snapshot?.cpu ?? null;
   const memory = snapshot?.memory ?? null;
@@ -102,6 +106,10 @@ export function computeCardData(
       memUsed === null && memTotal === null
         ? ""
         : `${memUsed ?? "?"} / ${memTotal ?? "?"} GB`,
+    inferenceLine:
+      node.role === "head"
+        ? llmSummaryLine(llm?.ports ?? null, nodeLlmPorts(node))
+        : null,
     gpus,
   };
 }

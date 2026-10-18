@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { HardwareSnapshot, NodeInfo } from "@irori/core";
+import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
 import { computeCardData } from "../card-data";
 import { nodeHash } from "../router";
 
 const props = defineProps<{
   node: NodeInfo;
   snapshot: HardwareSnapshot | null;
+  /** Latest LLM probe entry; heads render the inference summary line. */
+  llm?: { ports: LlmPortSnapshot[] } | null;
 }>();
 
-const card = computed(() => computeCardData(props.node, props.snapshot));
+const card = computed(() =>
+  computeCardData(props.node, props.snapshot, props.llm ?? null),
+);
 </script>
 
 <template>
@@ -26,6 +30,7 @@ const card = computed(() => computeCardData(props.node, props.snapshot));
       <span v-if="card.agentVersion" class="mono faint">Agent {{ card.agentVersion }}</span>
     </div>
     <div class="card__body" style="padding-top: 12px;">
+      <p v-if="card.inferenceLine" class="stat__sub" style="margin-bottom: 10px;">{{ card.inferenceLine }}</p>
       <template v-if="card.hasSnapshot">
         <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" :style="{ width: (card.cpuBarPct ?? 0) + '%' }"></div></div><span class="val">{{ card.cpuLine }}</span></div>
         <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" :style="{ width: (card.memBarPct ?? 0) + '%' }"></div></div><span class="val">{{ card.memLine }}</span></div>

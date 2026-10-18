@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
 import nodeCardSource from "../src/components/NodeCard.vue?raw";
+import llmPanelSource from "../src/components/LlmPanel.vue?raw";
+import llmDataSource from "../src/llm-data.ts?raw";
 import nodeDetailSource from "../src/components/NodeDetail.vue?raw";
 import sparklineSource from "../src/components/Sparkline.vue?raw";
 import appSource from "../src/App.vue?raw";
@@ -33,6 +35,28 @@ it("NodeDetail keeps the DS drill-down vocabulary", () => {
   expect(nodeDetailSource).toContain("waiting for first snapshot");
   expect(nodeDetailSource).toContain("no data yet");
   expect(nodeDetailSource).toContain("href=\"#/\"");
+});
+
+it("NodeDetail keeps the M3 inference section vocabulary", () => {
+  expect(nodeDetailSource).toContain(">Inference</h2>");
+  expect(nodeDetailSource).toContain("no LLM ports configured");
+  expect(nodeDetailSource).toContain("<LlmPanel");
+  expect(nodeDetailSource).toContain("inference history unavailable");
+});
+
+it("LlmPanel keeps the DS per-port panel vocabulary", () => {
+  for (const cls of ["card", "card__head", "card__body", "row", "chip", "barrow", "bar__fill", "kv", "stat__sub", "muted", "mono faint"]) {
+    expect(llmPanelSource).toContain(cls);
+  }
+  // Detected/idle chips are driven by the view model; the classes live in llm-data.
+  expect(llmPanelSource).toContain(':class="port.backendChipClass"');
+  for (const cls of ['"chip--ok"', '"chip--muted"']) {
+    expect(llmDataSource).toContain(cls);
+  }
+  for (const text of ["no engine answered", "detection-only (worker)", "Probes continue on idle ports", "Decode", "Prefill", "Queue", "KV cache", "TTFT p95"]) {
+    expect(llmPanelSource).toContain(text);
+  }
+  expect(llmPanelSource).toContain("<Sparkline");
 });
 
 it("Sparkline renders the DS .spark svg with token stroke colors", () => {
