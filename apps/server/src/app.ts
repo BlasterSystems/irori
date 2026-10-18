@@ -300,10 +300,15 @@ export function createApp(deps: AppDeps): Express {
     if (jobs === null) return res.status(503).json({ error: "database unavailable" });
     const q = typeof req.query.q === "string" ? req.query.q.toLowerCase() : "";
     const page = Math.max(1, Number.parseInt(typeof req.query.page === "string" ? req.query.page : "1", 10) || 1);
-    const rows = await jobs.listModels();
+    const sort = req.query.sort === "name" ? "name" : "recent";
+    const rows = sort === "name" ? await jobs.listModels() : await jobs.listModelsByRecent();
     const filtered = q.length === 0 ? rows : rows.filter((m) => m.name.toLowerCase().includes(q) || m.repository.toLowerCase().includes(q));
     const total = filtered.length;
-    const models = filtered.slice((page - 1) * MODELS_PAGE_SIZE, page * MODELS_PAGE_SIZE);
+    const models = filtered.slice((page - 1) * MODELS_PAGE_SIZE, page * MODELS_PAGE_SIZE).map((m) => ({
+      ...m,
+      firstSeenAt: m.firstSeenAt instanceof Date ? m.firstSeenAt.toISOString() : String(m.firstSeenAt ?? ""),
+      updatedAt: m.updatedAt instanceof Date ? m.updatedAt.toISOString() : String(m.updatedAt ?? ""),
+    }));
     res.json({ page, pageSize: MODELS_PAGE_SIZE, total, models });
   });
 
@@ -326,6 +331,10 @@ export function createApp(deps: AppDeps): Express {
     if (!store) return;
     const rows = await store.list();
     const online = deps.getHub()?.online() ?? NO_NODES_ONLINE;
+    // Where the model exists: the NAS store (always — the catalog IS the store)
+    // plus every node a succeeded transfer left it on.
+    const presentNodeIds = await jobs.presentNodesFor(model);
+    const availableOn = [{ nodeId: "nas", bytes: entry.bytes }, ...presentNodeIds.map((nodeId) => ({ nodeId, bytes: entry.bytes }))];
     const placements = [];
     for (const row of rows) {
       const snapshot = deps.rings.latest(row.id);
@@ -340,9 +349,9 @@ export function createApp(deps: AppDeps): Express {
         diskFreeBytes,
       };
       placements.push({
-        node: { id: row.id, name: row.name, kind: row.kind, role: row.role, online: online.has(row.id) },
-        placement: planPlacement({
-          availableOn: [{ nodeId: "nas", bytes: entry.bytes }],
+        node: { id: row.id, name: row.name, kind: row.kind, role: row.role, host: row.host, online: online.has(row.id) },
+        ...planPlacement({
+          availableOn,
           target,
           reserveBytes: DEFAULT_RESERVE_BYTES,
         }),

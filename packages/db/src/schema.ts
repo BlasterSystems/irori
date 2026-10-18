@@ -8,6 +8,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   real,
   text,
   timestamp,
@@ -185,8 +186,23 @@ export const modelMeta = pgTable("model_meta", {
   bytes: doublePrecision("bytes").notNull().default(0),
   /** HF revision, quantization, companions, card summary — agent-supplied JSON. */
   meta: jsonb("meta").notNull().default(sql`'{}'::jsonb`),
+  /** When Irori first saw the model (catalog read); drives "recently added" sort. */
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** Which node's local HF cache holds which model (maintained by job completions). */
+export const nodeModels = pgTable(
+  "node_models",
+  {
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    model: text("model").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ name: "node_models_node_id_model_pk", columns: [t.nodeId, t.model] })],
+);
 
 /** Generic secret store (SSH credentials, future per-node material). */
 export const secrets = pgTable(

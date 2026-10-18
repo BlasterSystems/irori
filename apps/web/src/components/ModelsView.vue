@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { fetchNodes } from "../api";
+import type { NodeInfo } from "@irori/core";
 import {
   cancelJob,
   createJob,
@@ -17,6 +19,7 @@ import {
 
 const search = ref("");
 const page = ref(1);
+const sort = ref<"recent" | "name">("recent");
 const modelsPage = ref<ModelsPage | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -26,6 +29,14 @@ const selected = ref<string | null>(null);
 const placement = ref<PlacementResponse | null>(null);
 const placementLoading = ref(false);
 const placementError = ref<string | null>(null);
+
+/** Download-from-HF modal (download-queue on the first model-ops node). */
+const downloadOpen = ref(false);
+const downloadSource = ref("");
+const downloadName = ref("");
+const downloadJobs = ref(4);
+const downloadBusy = ref(false);
+const downloadError = ref<string | null>(null);
 
 /** Active job drawer. */
 const job = ref<JobDetail | null>(null);
@@ -38,7 +49,7 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const result = await fetchModelsPage(page.value, search.value);
+    const result = await fetchModelsPage(page.value, search.value, sort.value);
     if (seq !== loadSeq) return;
     modelsPage.value = result;
   } catch (err) {
@@ -46,6 +57,45 @@ async function load(): Promise<void> {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     if (seq === loadSeq) loading.value = false;
+  }
+}
+
+function onSortToggle(): void {
+  sort.value = sort.value === "recent" ? "name" : "recent";
+  page.value = 1;
+  void load();
+}
+
+/** First online node whose agent can reach the NAS store (nasRoot set). */
+const nodes = ref<NodeInfo[]>([]);
+const storeNode = computed(() => nodes.value.find((n) => n.online && n.nasRoot !== null)?.id ?? null);
+
+onMounted(() => {
+  void fetchNodes()
+    .then((rows) => {
+      nodes.value = rows;
+    })
+    .catch(() => {
+      /* registry unavailable: download modal surfaces "no model-ops node" */
+    });
+  void load();
+});
+
+async function submitDownload(): Promise<void> {
+  const nodeId = storeNode.value;
+  const source = downloadSource.value.trim();
+  if (nodeId === null || source.length === 0) return;
+  downloadBusy.value = true;
+  downloadError.value = null;
+  try {
+    const name = downloadName.value.trim() || source.split("/").pop() || source;
+    const jobView = await createJob(nodeId, "download-queue", { downloads: [{ source, name }], jobs: downloadJobs.value });
+    downloadOpen.value = false;
+    await openJob(jobView.id);
+  } catch (err) {
+    downloadError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    downloadBusy.value = false;
   }
 }
 
@@ -129,7 +179,6 @@ function closeJob(): void {
   jobError.value = null;
 }
 
-onMounted(() => void load());
 onBeforeUnmount(() => {
   clearTimeout(debounce);
   clearInterval(jobPoll);
@@ -152,7 +201,13 @@ onBeforeUnmount(() => {
         aria-label="Search models"
         @input="onSearchInput"
       />
-      <span v-if="modelsPage" class="mono faint">{{ modelsPage.total }} models</span>
+      <div class="row" style="gap: 8px">
+        <span v-if="modelsPage" class="mono faint">{{ modelsPage.total }} models</span>
+        <button class="btn btn--secondary btn--sm" @click="onSortToggle">
+          {{ sort === "recent" ? "Recently added ↓" : "Name A–Z" }}
+        </button>
+        <button class="btn btn--primary btn--sm" :disabled="storeNode === null" @click="downloadOpen = true">Download from HF…</button>
+      </div>
     </div>
 
     <p v-if="error" class="banner banner--warn">{{ error }}</p>
@@ -215,10 +270,11 @@ onBeforeUnmount(() => {
                     class="btn btn--secondary btn--sm"
                     @click="runJob(row.node.id, 'sync-local', { name: selected, root: undefined })"
                   >Sync</button>
+                  <!-- Warnings never block (SPEC): capacity/offline reasons are advisory. -->
                   <button
-                    v-else-if="row.action === 'push'"
+                    v-else-if="row.node.online && row.node.kind !== 'nas' && row.viaNodeIds.length > 0"
                     class="btn btn--secondary btn--sm"
-                    @click="runJob(row.node.id, 'push', { name: selected, hosts: row.viaNodeIds, jobs: 4 })"
+                    @click="runJob(row.viaNodeIds[0]!, 'push', { name: selected, hosts: [row.node.host], jobs: 4 })"
                   >Push</button>
                   <button
                     v-else-if="row.node.kind === 'nas'"
@@ -252,6 +308,38 @@ onBeforeUnmount(() => {
           <span class="faint">streaming…</span>
           <button class="btn btn--danger btn--sm" @click="cancelJob(job.job.id)">Cancel job</button>
         </div>
+      </section>
+    </div>
+
+    <!-- Download from HF modal: queues a download-queue job on the model-ops node -->
+    <div v-if="downloadOpen" class="drawer-scrim" @click.self="downloadOpen = false">
+      <section class="card drawer" aria-label="Download from Hugging Face">
+        <div class="card__head">
+          <h3>Download from HF to NAS</h3>
+          <button class="btn btn--secondary btn--sm" @click="downloadOpen = false">Close</button>
+        </div>
+        <p v-if="storeNode === null" class="banner banner--warn">No online model-ops node (node with the NAS root mounted).</p>
+        <template v-else>
+          <div class="field">
+            <label class="stat__sub" for="dl-source">Hugging Face repo (owner/model)</label>
+            <input id="dl-source" v-model="downloadSource" class="input mono" type="text" placeholder="unsloth/GLM-5.3-Flash-EXL3" />
+          </div>
+          <div class="field">
+            <label class="stat__sub" for="dl-name">Store name (optional, defaults to repo name)</label>
+            <input id="dl-name" v-model="downloadName" class="input mono" type="text" placeholder="" />
+          </div>
+          <div class="field">
+            <label class="stat__sub" for="dl-jobs">Parallel jobs</label>
+            <input id="dl-jobs" v-model.number="downloadJobs" class="input" type="number" min="1" max="16" />
+          </div>
+          <p v-if="downloadError" class="banner banner--warn">{{ downloadError }}</p>
+          <div class="row row--between">
+            <span class="stat__sub faint">Resumable · preflighted · companion files included</span>
+            <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadSource.trim().length === 0" @click="submitDownload">
+              {{ downloadBusy ? "Queueing…" : "Queue download" }}
+            </button>
+          </div>
+        </template>
       </section>
     </div>
   </div>

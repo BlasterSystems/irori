@@ -41,9 +41,9 @@ describe("planPlacement", () => {
   });
 
   it("sync from nas with capacity check", () => {
-    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 300 }], target: { ...head, diskFreeBytes: 300 }, reserveBytes: 0 }))
+    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 300 }], target: { ...head, hasNasRoot: true, diskFreeBytes: 300 }, reserveBytes: 0 }))
       .toEqual({ action: "sync", bytes: 300 });
-    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 300 }], target: { ...head, diskFreeBytes: 320 }, reserveBytes: 50 }))
+    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 300 }], target: { ...head, hasNasRoot: true, diskFreeBytes: 320 }, reserveBytes: 50 }))
       .toEqual({ action: "unavailable", reason: expect.stringContaining("needs 300") });
   });
 
@@ -52,8 +52,19 @@ describe("planPlacement", () => {
       .toEqual({ action: "push", bytes: 200, viaNodeIds: ["head"] });
   });
 
+  it("nas-mounted node pushes when the model is not on the NAS but a node holds it", () => {
+    const workerWithNas = { ...head, id: "worker2", name: "worker2", hasNasRoot: true };
+    expect(planPlacement({ availableOn: [{ nodeId: "head", bytes: 200 }], target: workerWithNas, reserveBytes: 0 }))
+      .toEqual({ action: "push", bytes: 200, viaNodeIds: ["head"] });
+  });
+
+  it("unavailable when nas-only model has no local holder to push from", () => {
+    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 100 }], target: { ...head, hasNasRoot: false }, reserveBytes: 0 }))
+      .toEqual({ action: "unavailable", reason: expect.stringContaining("no node holds it locally") });
+  });
+
   it("unavailable when target offline or model nowhere", () => {
-    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 100 }], target: offline, reserveBytes: 0 }))
+    expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 100 }], target: { ...offline, hasNasRoot: true }, reserveBytes: 0 }))
       .toEqual({ action: "unavailable", reason: expect.stringContaining("not modelctl-capable") });
     expect(planPlacement({ availableOn: [], target: head, reserveBytes: 0 }))
       .toEqual({ action: "unavailable", reason: expect.stringContaining("not present") });

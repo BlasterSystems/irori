@@ -7,6 +7,8 @@ export const modelEntrySchema = z.object({
   runtime: z.string().min(1),
   repository: z.string().min(1),
   bytes: z.number().nonnegative(),
+  /** When Irori first saw the model — drives the default "recently added" sort. */
+  firstSeenAt: z.string().optional().default(""),
   updatedAt: z.string().optional().default(""),
 });
 
@@ -28,6 +30,8 @@ export const placementRowSchema = z.object({
     name: z.string(),
     kind: z.string(),
     role: z.string(),
+    /** Push destination as the source agent should dial it (user@host or host). */
+    host: z.string(),
     online: z.boolean().default(false),
   }),
   action: placementActionSchema,

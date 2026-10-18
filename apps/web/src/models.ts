@@ -21,8 +21,8 @@ async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   return res.json();
 }
 
-export async function fetchModelsPage(page: number, q: string, signal?: AbortSignal): Promise<ModelsPage> {
-  const url = `/api/v1/models?page=${page}${q.length > 0 ? `&q=${encodeURIComponent(q)}` : ""}`;
+export async function fetchModelsPage(page: number, q: string, sort: "recent" | "name" = "recent", signal?: AbortSignal): Promise<ModelsPage> {
+  const url = `/api/v1/models?page=${page}${q.length > 0 ? `&q=${encodeURIComponent(q)}` : ""}&sort=${sort}`;
   const parsed = modelsPageSchema.safeParse(await getJson(url, signal));
   if (!parsed.success) throw new Error("malformed models response");
   return parsed.data;

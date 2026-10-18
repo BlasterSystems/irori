@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { jobOutput, jobs, modelMeta } from "@irori/db";
+import { jobOutput, jobs, modelMeta, nodeModels } from "@irori/db";
 import type { Db } from "@irori/db";
 import { jobKindSchema } from "@irori/core";
 
@@ -11,6 +11,18 @@ import { jobKindSchema } from "@irori/core";
  */
 
 export const MAX_OUTPUT_LINES = 400;
+
+/** Job kinds that change the NAS store contents — trigger a catalog re-read. */
+const CATALOG_MUTATING_KINDS = new Set([
+  "download",
+  "download-queue",
+  "nas-delete",
+  "nas-delete-apply",
+  "catalog-refresh",
+  "repair-active-apply",
+  "gc-objects",
+  "cleanup-staging",
+]);
 
 export interface JobRow {
   id: string;
@@ -37,8 +49,12 @@ export interface JobsService {
   onDone(nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null): Promise<void>;
   onCatalog(nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>): Promise<void>;
   /** NAS catalog entries from the model_meta cache, sorted by name. */
-  listModels(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; updatedAt: Date }>>;
-  findModel(name: string): Promise<{ name: string; repository: string; runtime: string; bytes: number; updatedAt: Date } | null>;
+  listModels(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date }>>;
+  /** Same rows ordered by first_seen_at descending (recently-added default). */
+  listModelsByRecent(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date }>>;
+  findModel(name: string): Promise<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date } | null>;
+  /** Node ids where a succeeded transfer (sync/download/push source) left the model. */
+  presentNodesFor(name: string): Promise<string[]>;
   /** Fails every running/queued job whose node is not in `onlineNodes`; returns affected job ids. */
   reapOffline(onlineNodes: ReadonlySet<string>): Promise<string[]>;
 }
@@ -119,6 +135,22 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
         .update(jobs)
         .set({ status, exitCode, finishedAt: new Date() })
         .where(and(eq(jobs.id, jobId), inArray(jobs.status, [...ACTIVE])));
+      const [row] = await db.select({ kind: jobs.kind, params: jobs.params }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
+      if (!row) return;
+      const name = typeof row.params === "object" && row.params !== null && "name" in row.params ? String((row.params as { name: unknown }).name) : "";
+      // Keep the per-node model inventory in step with what actually succeeded.
+      if (status === "succeeded" && name.length > 0) {
+        if (row.kind === "sync-local" || row.kind === "download" || row.kind === "push") {
+          await db.insert(nodeModels).values({ nodeId, model: name }).onConflictDoNothing();
+        } else if (row.kind === "delete-local" || row.kind === "nas-delete-apply") {
+          await db.delete(nodeModels).where(and(eq(nodeModels.nodeId, nodeId), eq(nodeModels.model, name)));
+        }
+      }
+      // Store contents may have changed: ask the node to re-report its catalog
+      // so the Models page reflects downloads/deletes without manual refresh.
+      if (status === "succeeded" && CATALOG_MUTATING_KINDS.has(row.kind)) {
+        sendToAgent(nodeId, { type: "catalog-request" });
+      }
     },
 
     async onCatalog(nodeId, source, entries) {
@@ -138,9 +170,19 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
       return db.select().from(modelMeta).orderBy(modelMeta.name);
     },
 
+    async listModelsByRecent() {
+      return db.select().from(modelMeta).orderBy(desc(modelMeta.firstSeenAt), modelMeta.name);
+    },
+
     async findModel(name: string) {
       const [row] = await db.select().from(modelMeta).where(eq(modelMeta.name, name)).limit(1);
       return row ?? null;
+    },
+
+    /** Node ids whose local HF cache holds the model (node_models inventory). */
+    async presentNodesFor(name: string): Promise<string[]> {
+      const rows = await db.select({ nodeId: nodeModels.nodeId }).from(nodeModels).where(eq(nodeModels.model, name));
+      return rows.map((r) => r.nodeId);
     },
 
     async reapOffline(onlineNodes) {
