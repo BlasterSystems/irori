@@ -4,7 +4,12 @@ import {
   agentMsgSchema,
   agentServerMsgSchema,
   isAgentSupported,
+  type AgentServerMsg,
   type HardwareSnapshot,
+  type SetupAckMsg,
+  type SetupEventMsg,
+  type SetupLogMsg,
+  type SetupValidateResultMsg,
 } from "@irori/core";
 import type { NodeStore } from "@irori/db";
 import type { LlmStore } from "./llm-store.js";
@@ -33,6 +38,13 @@ export interface AgentHubDeps {
     onDone: (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => Promise<void>;
     onCatalog: (nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>) => Promise<void>;
   };
+  /** Setup supervision frames (M5): acks, driver events, log lines. */
+  setupEvents: {
+    onAck(msg: SetupAckMsg): void;
+    onEvent(msg: SetupEventMsg): Promise<void>;
+    onLog(msg: SetupLogMsg): void;
+    onValidateResult(msg: SetupValidateResultMsg): void;
+  };
   /** Injectables for tests. */
   writeFlushMs?: number;
   markSeenThrottleMs?: number;
@@ -45,6 +57,8 @@ export interface AgentHub {
   online(): ReadonlySet<string>;
   /** Sends a raw frame to a connected node's agent; false when offline. */
   sendToNode(nodeId: string, msg: unknown): boolean;
+  /** Resends the node's config-update (probe ports, cadence, nasRoot) live. */
+  refreshConfig(nodeId: string): Promise<boolean>;
   stop(): void;
 }
 
@@ -63,6 +77,19 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
   const lastMarkedAt = new Map<string, number>();
   const pending: Array<{ nodeId: string; kind: "snapshot" | "llm"; payload: unknown }> = [];
   const throttleMs = deps.markSeenThrottleMs ?? DEFAULT_MARK_SEEN_THROTTLE_MS;
+
+  /** Builds and sends the node's config-update (probe ports, cadence, nasRoot). */
+  const sendConfigUpdate = async (id: string, sendMsg: (msg: unknown) => void): Promise<void> => {
+    const row = await deps.store.get(id);
+    sendMsg({
+      type: "config-update",
+      cadenceMs: deps.cadenceMs,
+      llmPorts: nodeLlmAssignments(row),
+      llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
+      llmDetectOnly: row?.role === "worker",
+      nasRoot: row?.nasRoot ?? null,
+    });
+  };
 
   let flushing = false;
   const flushTimer = setInterval(() => void flushPending(), deps.writeFlushMs ?? DEFAULT_WRITE_FLUSH_MS);
@@ -163,15 +190,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.cadenceMs, serverVersion: deps.serverVersion });
         // Probe assignments + role-derived cadence. A worker's role may change
         // without a reconnect only via a later config-update; hello covers boot.
-        const row = await deps.store.get(id);
-        sendMsg({
-          type: "config-update",
-          cadenceMs: deps.cadenceMs,
-          llmPorts: nodeLlmAssignments(row),
-          llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
-          llmDetectOnly: row?.role === "worker",
-          nasRoot: row?.nasRoot ?? null,
-        });
+        await sendConfigUpdate(id, sendMsg);
         return;
       }
 
@@ -206,7 +225,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     }
 
     // Agent→server frames (jobs + catalog) ride the same socket; route them
-    // through the deps so persistence stays outside the hub.
+    // through the deps so persistence stays outside the hub. Setup frames are
+    // processed through a per-socket chain so ordering (stopping → stopped →
+    // ack) is preserved despite the async DB work.
+    let setupChain = Promise.resolve();
     ws.on("message", (raw: RawData) => {
       if (nodeId === null) return;
       const text = Buffer.isBuffer(raw)
@@ -236,8 +258,29 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         void deps.jobEvents.onDone(currentId, frame.jobId, frame.status, frame.exitCode).catch(() => {});
       } else if (frame.type === "catalog") {
         void deps.jobEvents.onCatalog(currentId, frame.source, frame.entries).catch(() => {});
+      } else if (
+        frame.type === "setup-ack" ||
+        frame.type === "setup-event" ||
+        frame.type === "setup-log" ||
+        frame.type === "setup-validate-result"
+      ) {
+        setupChain = setupChain.then(() => routeSetupFrame(frame)).catch(() => {});
       }
     });
+
+    const routeSetupFrame = (frame: Extract<AgentServerMsg, { type: `setup-${string}` }>): Promise<void> => {
+      if (frame.type === "setup-ack") {
+        deps.setupEvents.onAck(frame);
+        return Promise.resolve();
+      }
+      if (frame.type === "setup-event") return deps.setupEvents.onEvent(frame);
+      if (frame.type === "setup-log") {
+        deps.setupEvents.onLog(frame);
+        return Promise.resolve();
+      }
+      deps.setupEvents.onValidateResult(frame);
+      return Promise.resolve();
+    };
 
     ws.on("close", () => {
       if (nodeId === null) return;
@@ -264,6 +307,12 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       const ws = nodeSockets.get(nodeId);
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) return false;
       ws.send(JSON.stringify(msg));
+      return true;
+    },
+    async refreshConfig(nodeId) {
+      const ws = nodeSockets.get(nodeId);
+      if (ws === undefined || ws.readyState !== WebSocket.OPEN) return false;
+      await sendConfigUpdate(nodeId, (msg) => ws.send(JSON.stringify(msg)));
       return true;
     },
     stop() {

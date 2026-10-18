@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 /** One LLM engine port to probe. */
 export interface LlmTarget {
   host: string;
@@ -20,6 +23,8 @@ export interface AgentConfig {
   modelctlPin: string;
   /** IRORI_MODELCTL_PATH — explicit modelctl binary (uv's ~/.local/bin is off PATH). */
   modelctlPath: string;
+  /** IRORI_STATE_DIR — persistent agent state (setup drivers, run logs). */
+  stateDir: string;
 }
 
 export const DEFAULT_SERVER_URL = "ws://127.0.0.1:3947/agent-ws";
@@ -65,7 +70,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const modelctlPin = env.IRORI_MODELCTL_PIN?.trim() || "0.20.1";
   const modelctlPath = env.IRORI_MODELCTL_PATH?.trim() || "/root/.local/bin/modelctl";
 
-  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath };
+  const stateDir =
+    env.IRORI_STATE_DIR?.trim() ||
+    join(env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "irori-agent");
+
+  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir };
 }
 
 /** Parse "host:port,host:port" (a bare "port" probes 127.0.0.1). */

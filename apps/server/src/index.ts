@@ -16,6 +16,7 @@ import { runRetention, runLlmRetention } from "./retention.js";
 import { buildHistory } from "./history.js";
 import { buildLlmHistory } from "./llm-history.js";
 import { createApp, type HistoryBuilder, type LlmHistoryBuilder } from "./app.js";
+import { createSetupsService, type SetupsService } from "./setups-service.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -24,6 +25,8 @@ const PRUNE_INTERVAL_MS = 5 * 60_000;
 const ROLLUP_INTERVAL_MS = 60_000;
 const BOOT_RETRY_MIN_MS = 2_000;
 const BOOT_RETRY_MAX_MS = 30_000;
+/** Health watcher + driver-truth poll cadence (M5). */
+const SETUPS_TICK_MS = 5_000;
 
 // Shared wiring, filled in once the DB is reachable. Until then the app runs
 // degraded: /healthz reports db:false and store-backed routes answer 503.
@@ -33,6 +36,7 @@ const state: {
   store: NodeStore | null;
   llmStore: LlmStore | null;
   jobs: JobsService | null;
+  setups: SetupsService | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
 } = {
@@ -41,6 +45,7 @@ const state: {
   store: null,
   llmStore: null,
   jobs: null,
+  setups: null,
   history: null,
   llmHistory: null,
 };
@@ -55,6 +60,7 @@ const app = createApp({
   getStore: () => state.store,
   getLlmStore: () => state.llmStore,
   getJobs: () => state.jobs,
+  getSetups: () => state.setups,
   getHistory: () => state.history,
   getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
@@ -91,10 +97,56 @@ async function boot(): Promise<void> {
 
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg));
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, jobEvents: jobsService });
+  const setupsService = createSetupsService({
+    db: dbHandle.db,
+    rings,
+    sse,
+    getNode: (id) => store.get(id),
+    getNodes: () => store.list(),
+    online: () => hub === null ? new Set<string>() : hub.online(),
+    sendToNode: (nodeId, msg) => (hub === null ? false : hub.sendToNode(nodeId, msg)),
+    refreshNodeConfig: async (nodeId) => (hub === null ? false : hub.refreshConfig(nodeId)),
+    jobs: jobsService,
+    log: (message) => console.log(`[irori-server] ${message}`),
+  });
+
+  // Job frames feed both the jobs subsystem (persistence + inventory) and the
+  // staged-transfer engine (progress parsing + stage chaining).
+  const jobEvents = {
+    onOutput: async (nodeId: string, jobId: string, seq: number, line: string) => {
+      await jobsService.onOutput(nodeId, jobId, seq, line);
+      await setupsService.onJobOutput(nodeId, jobId, seq, line);
+    },
+    onDone: async (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => {
+      await jobsService.onDone(nodeId, jobId, status, exitCode);
+      await setupsService.onJobDone(nodeId, jobId, status, exitCode);
+    },
+    onCatalog: jobsService.onCatalog,
+  };
+
+  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, jobEvents, setupEvents: {
+    onAck: (msg) => setupsService.onDriverAck(msg),
+    onEvent: (msg) => setupsService.onDriverEvent(msg).catch(() => {}),
+    onLog: (msg) => setupsService.onDriverLog(msg),
+    onValidateResult: (msg) => setupsService.onValidateResult(msg),
+  } });
   hub.attach(server);
   state.hub = hub;
   state.jobs = jobsService;
+  state.setups = setupsService;
+
+  // Staged transfers that were running at restart resume from the first
+  // pending stage; the health watcher polls driver truth + probes every 5 s.
+  void setupsService.recover().catch((err) => {
+    console.error(`[irori-server] setups recover failed (${err instanceof Error ? err.message : String(err)})`);
+  });
+  const setupsTicker = setInterval(() => {
+    if (dbHandle === null || !dbHandle.isHealthy()) return;
+    void setupsService.tick().catch((err) => {
+      console.error(`[irori-server] setups tick failed (${err instanceof Error ? err.message : String(err)})`);
+    });
+  }, SETUPS_TICK_MS);
+  setupsTicker.unref();
 
   state.history = (nodeId, range) => buildHistory(dbHandle!.db, nodeId, range);
   state.llmHistory = (nodeId, range) => buildLlmHistory(dbHandle!.db, nodeId, range);

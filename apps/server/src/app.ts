@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { nodeCreateSchema, nodeInfoSchema, nodePatchSchema, type NodeInfo } from "@irori/core";
+import { nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, type NodeInfo } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type LlmHistoryResponse } from "./llm-history.js";
@@ -12,6 +12,7 @@ import { planPlacement } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import type { AgentHub } from "./hub.js";
+import { SetupBusyError, SetupNotFoundError, SetupOfflineError, SetupStartError, type SetupsService } from "./setups-service.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
@@ -75,6 +76,8 @@ export interface AppDeps {
   getLlmHistory: () => LlmHistoryBuilder | null;
   /** Null while degraded: jobs routes answer 503. */
   getJobs: () => JobsService | null;
+  /** Null while degraded: setups routes answer 503 (M5). */
+  getSetups: () => SetupsService | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   sse: SseHub;
@@ -358,6 +361,167 @@ export function createApp(deps: AppDeps): Express {
       });
     }
     res.json({ model: { name: entry.name, bytes: entry.bytes }, placements });
+  });
+
+  // ---- M5: setups (serving orchestration) ----
+
+  const requireSetups = (res: Response): SetupsService | null => {
+    const setups = deps.getSetups();
+    if (setups === null) res.status(503).json({ error: "database unavailable" });
+    return setups;
+  };
+
+  app.get("/api/v1/setups", async (_req, res) => {
+    const setups = requireSetups(res);
+    if (!setups) return;
+    res.json({ setups: await setups.list() });
+  });
+
+  // Create-time script validation on the head agent (test -x; no side effects).
+  app.post("/api/v1/setups/validate-scripts", async (req, res) => {
+    const setups = requireSetups(res);
+    if (!setups) return;
+    const body = req.body as { nodeId?: unknown; scripts?: unknown };
+    if (typeof body?.nodeId !== "string" || !Array.isArray(body.scripts) || body.scripts.some((s) => typeof s !== "string")) {
+      return res.status(400).json({ error: "nodeId and scripts are required" });
+    }
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(body.nodeId)) === null) return res.status(404).json({ error: "node not found" });
+    try {
+      const results = await setups.validateScripts(body.nodeId, body.scripts as string[]);
+      res.json({ results });
+    } catch (err) {
+      if (err instanceof SetupOfflineError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/v1/setups", async (req, res) => {
+    const setups = requireSetups(res);
+    if (!setups) return;
+    const body = setupCreateSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(body.data.headNodeId)) === null) return res.status(400).json({ error: "unknown head node" });
+    try {
+      res.status(201).json({ setup: await setups.create(body.data) });
+    } catch (err) {
+      if (err instanceof SetupOfflineError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.get("/api/v1/setups/:id", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    const setup = await setups.get(id);
+    if (setup === null) return res.status(404).json({ error: "setup not found" });
+    res.json({ setup, transfers: await setups.transfers(id) });
+  });
+
+  app.patch("/api/v1/setups/:id", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    const body = setupPatchSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    try {
+      res.json({ setup: await setups.patch(id, body.data) });
+    } catch (err) {
+      if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.delete("/api/v1/setups/:id", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    try {
+      await setups.remove(id);
+      res.status(204).end();
+    } catch (err) {
+      if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
+      if (err instanceof SetupBusyError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/v1/setups/:id/start", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    try {
+      const setup = await setups.start(id);
+      res.status(202).json({ setup });
+    } catch (err) {
+      if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
+      if (err instanceof SetupBusyError) return res.status(409).json({ error: err.message });
+      if (err instanceof SetupOfflineError) return res.status(409).json({ error: err.message });
+      if (err instanceof SetupStartError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/v1/setups/:id/stop", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    try {
+      const setup = await setups.stop(id);
+      res.status(202).json({ setup });
+    } catch (err) {
+      if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
+      if (err instanceof SetupBusyError) return res.status(409).json({ error: err.message });
+      if (err instanceof SetupOfflineError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  // Engine log: replays the ring, then streams live lines (per-setup SSE).
+  app.get("/api/v1/setups/:id/log", (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    setups.attachLog(res, id);
+  });
+
+  // Staged transfers: build stages from the placement plan and chain them.
+  app.post("/api/v1/setups/:id/transfers", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid setup id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    const body = req.body as { targetNodeIds?: unknown };
+    if (!Array.isArray(body?.targetNodeIds) || body.targetNodeIds.some((t) => typeof t !== "string")) {
+      return res.status(400).json({ error: "targetNodeIds is required" });
+    }
+    try {
+      const transfer = await setups.createTransfer(id, body.targetNodeIds as string[]);
+      res.status(202).json({ transfer });
+    } catch (err) {
+      if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/v1/setups/transfers/:id/cancel", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid transfer id" });
+    const setups = requireSetups(res);
+    if (!setups) return;
+    const ok = await setups.cancelTransfer(id);
+    if (!ok) return res.status(409).json({ error: "transfer is not cancelable" });
+    res.status(202).json({ ok: true });
   });
 
   // Unknown API paths answer JSON, not the SPA.
