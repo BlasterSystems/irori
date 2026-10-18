@@ -17,6 +17,7 @@ import { buildHistory } from "./history.js";
 import { buildLlmHistory } from "./llm-history.js";
 import { createApp, type HistoryBuilder, type LlmHistoryBuilder } from "./app.js";
 import { createSetupsService, type SetupsService } from "./setups-service.js";
+import { createBenchService, type BenchService } from "./bench-service.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -37,6 +38,7 @@ const state: {
   llmStore: LlmStore | null;
   jobs: JobsService | null;
   setups: SetupsService | null;
+  bench: BenchService | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
 } = {
@@ -46,6 +48,7 @@ const state: {
   llmStore: null,
   jobs: null,
   setups: null,
+  bench: null,
   history: null,
   llmHistory: null,
 };
@@ -61,6 +64,7 @@ const app = createApp({
   getLlmStore: () => state.llmStore,
   getJobs: () => state.jobs,
   getSetups: () => state.setups,
+  getBench: () => state.bench,
   getHistory: () => state.history,
   getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
@@ -97,6 +101,13 @@ async function boot(): Promise<void> {
 
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg));
 
+  const benchService = createBenchService(
+    dbHandle.db,
+    (nodeId, msg) => (hub === null ? false : hub.sendToNode(nodeId, msg)),
+    sse,
+    (message) => console.log(`[irori-server] ${message}`),
+  );
+
   const setupsService = createSetupsService({
     db: dbHandle.db,
     rings,
@@ -129,11 +140,15 @@ async function boot(): Promise<void> {
     onEvent: (msg) => setupsService.onDriverEvent(msg).catch(() => {}),
     onLog: (msg) => setupsService.onDriverLog(msg),
     onValidateResult: (msg) => setupsService.onValidateResult(msg),
+  }, benchEvents: {
+    onProgress: (nodeId, runId, progress) => benchService.onProgress(nodeId, runId, progress),
+    onDone: (nodeId, runId, status, result, error) => benchService.onDone(nodeId, runId, status, result, error),
   } });
   hub.attach(server);
   state.hub = hub;
   state.jobs = jobsService;
   state.setups = setupsService;
+  state.bench = benchService;
 
   // Staged transfers that were running at restart resume from the first
   // pending stage; the health watcher polls driver truth + probes every 5 s.
@@ -177,10 +192,15 @@ async function boot(): Promise<void> {
     void jobsService.reapOffline(hub.online()).catch((err) => {
       console.error(`[irori-server] job reaper failed (${err instanceof Error ? err.message : String(err)})`);
     });
+    // Benches die with their agent too: a running bench whose node vanished
+    // cannot deliver a terminal frame.
+    void benchService.reapOffline(hub.online()).catch((err) => {
+      console.error(`[irori-server] bench reaper failed (${err instanceof Error ? err.message : String(err)})`);
+    });
   }, 60_000);
   jobReaper.unref();
 
-  startPruneLoop(store, llmStore, dbHandle.db, config);
+  startPruneLoop(store, llmStore, dbHandle.db, config, benchService);
   console.log(`[irori-server] agent hub ready on /agent-ws (cadence ${config.cadenceMs} ms)`);
 }
 
@@ -201,7 +221,7 @@ async function migrateWithBackoff(migrate: () => Promise<void>): Promise<void> {
   }
 }
 
-function startPruneLoop(store: NodeStore, llmStore: LlmStore, db: Db, config: Config): void {
+function startPruneLoop(store: NodeStore, llmStore: LlmStore, db: Db, config: Config, bench: BenchService): void {
   const prune = async (): Promise<void> => {
     try {
       const result = await runRetention(store, db, {
@@ -232,6 +252,8 @@ function startPruneLoop(store: NodeStore, llmStore: LlmStore, db: Db, config: Co
           `[irori-server] pruned llm buckets: ${llm.minute} minute / ${llm.hour} hour / ${llm.day} day`,
         );
       }
+      const pruned = await bench.prune();
+      if (pruned > 0) console.log(`[irori-server] pruned ${pruned} bench runs (last 30 per type kept)`);
     } catch {
       // DB loss is handled by the hub buffer; prune just tries again next tick.
     }

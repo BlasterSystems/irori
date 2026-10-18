@@ -59,6 +59,25 @@ export const setupTransferEventSchema = z.object({
     .nullable(),
 });
 
+/** Bench run started/progressed/finished (M6). */
+export const benchEventSchema = z.object({
+  type: z.literal("bench"),
+  serverTimeMs: z.number(),
+  runId: z.string().uuid(),
+  bench: z.enum(["decode", "prefill", "quality", "tooleval"]),
+  nodeId: z.string().uuid(),
+  status: z.enum(["running", "completed", "failed", "canceled"]),
+  progress: z
+    .object({
+      phase: z.string(),
+      index: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative(),
+      label: z.string(),
+      liveTps: z.number().nullable(),
+    })
+    .nullable(),
+});
+
 export const sseEventSchema = z.discriminatedUnion("type", [
   snapshotEventSchema,
   nodeStatusEventSchema,
@@ -66,6 +85,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   llmEventSchema,
   setupStateEventSchema,
   setupTransferEventSchema,
+  benchEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;
@@ -74,3 +94,4 @@ export type HeartbeatEvent = z.infer<typeof heartbeatEventSchema>;
 export type SseEvent = z.infer<typeof sseEventSchema>;
 export type SetupStateEvent = z.infer<typeof setupStateEventSchema>;
 export type SetupTransferEvent = z.infer<typeof setupTransferEventSchema>;
+export type BenchEvent = z.infer<typeof benchEventSchema>;

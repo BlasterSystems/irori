@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, AgentServerMsg, HardwareSnapshot, LlmPortSnapshot, ServerMsg } from "@irori/core";
+import type { AgentMsg, AgentServerMsg, BenchType, HardwareSnapshot, LlmPortSnapshot, ServerMsg } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -49,6 +49,9 @@ export interface AgentTransportOptions {
   onJobCancel?: (jobId: string) => void;
   /** Server asks the agent to read + report the NAS store catalog. */
   onCatalogRequest?: () => void;
+  /** Server asks the agent to run one benchmark (one active per node, M6). */
+  onBenchRun?: (runId: string, bench: BenchType, config: Record<string, unknown>) => void;
+  onBenchCancel?: (runId: string) => void;
   /** Setup supervision (M5): start/stop resolve to an ack; status/attach are fire-and-forget. */
   onSetupStart?: (
     setupId: string,
@@ -84,6 +87,8 @@ export class AgentTransport {
   private readonly onJobRequest?: (jobId: string, kind: string, params: Record<string, unknown>) => void;
   private readonly onJobCancel?: (jobId: string) => void;
   private readonly onCatalogRequest?: () => void;
+  private readonly onBenchRun?: (runId: string, bench: BenchType, config: Record<string, unknown>) => void;
+  private readonly onBenchCancel?: (runId: string) => void;
   private readonly onSetupStart?: (
     setupId: string,
     runId: string,
@@ -132,6 +137,8 @@ export class AgentTransport {
     this.onJobRequest = options.onJobRequest;
     this.onJobCancel = options.onJobCancel;
     this.onCatalogRequest = options.onCatalogRequest;
+    this.onBenchRun = options.onBenchRun;
+    this.onBenchCancel = options.onBenchCancel;
     this.onSetupStart = options.onSetupStart;
     this.onSetupStop = options.onSetupStop;
     this.onSetupStatus = options.onSetupStatus;
@@ -297,6 +304,18 @@ export class AgentTransport {
         break;
       case "catalog-request":
         this.onCatalogRequest?.();
+        break;
+      case "bench-run": {
+        const { runId, bench, config } = parsed.data;
+        if (this.onBenchRun === undefined) {
+          this.sendAgentServer({ type: "bench-done", runId, status: "failed", error: "agent does not support benchmarks" });
+          break;
+        }
+        this.onBenchRun(runId, bench, config);
+        break;
+      }
+      case "bench-cancel":
+        this.onBenchCancel?.(parsed.data.runId);
         break;
       case "setup-start": {
         const { setupId, runId, scriptStart, scriptStop, env, modelPathName } = parsed.data;

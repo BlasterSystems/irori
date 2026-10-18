@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { catalogModelSchema } from "./catalog.js";
+import { benchProgressMsgSchema, benchDoneMsgSchema } from "./bench.js";
 
 /** Server → agent: run one job (one active per node enforced by the server). */
 export const jobRequestMsgSchema = z.object({
@@ -123,6 +124,8 @@ export const agentServerMsgSchema = z.discriminatedUnion("type", [
   jobOutputMsgSchema,
   jobDoneMsgSchema,
   catalogMsgSchema,
+  benchProgressMsgSchema,
+  benchDoneMsgSchema,
   setupAckMsgSchema,
   setupEventMsgSchema,
   setupLogMsgSchema,
