@@ -95,13 +95,15 @@ most 1 head + 1 worker.
 
 ## Residual risks
 
-- **TP-3 worker ranks (owner LAN action):** the real cluster's workers
-  (10.20.30.5/6) are not ssh-reachable from dgx1 and their rank processes died
-  waiting for the master during the e2e's restart churn. The head boots alone
-  and times out (601 s, "1/3 clients joined"). Restart the workers out-of-band,
-  then Start the setup in the UI — the rendezvous reforms and the setup goes
-  healthy. The start script pair (curl over docker.sock + json-log tail) is
-  deployed at `/home/deploy/.cache/huggingface/irori-e2e/` on dgx1.
+- **TP-3 worker ranks — RESOLVED 2026-10-18 20:57 UTC:** the owner restarted
+  the workers out-of-band (both ping UP from dgx1; the engine container had
+  reformed the rendezvous: `rank 0 of 3 … serving GLM-5.3-Flash-EXL3 … loaded
+  in 195.3s`, live traffic in the probe: decode 13.5 / prefill 1103 tok/s, KV
+  53.6%). The setup was still `stopped` per driver truth (polls never
+  resurrect) — `POST /start` no-op'd the running container (304) and the
+  start's own exit event promoted via the probe: status `running`, health
+  `healthy`; the setup-log SSE streamed the current run's engine boot frames.
+  No stop was issued — the engine was serving live traffic.
 - The dgx1 agent image was rebuilt on-node from the current Dockerfile agent
   role (the previous image predated the M4 `openssh-client` layer — push jobs
   failed with "No such file or directory: 'ssh'").
