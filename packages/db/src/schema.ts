@@ -287,5 +287,32 @@ export const setupTransfers = pgTable(
   (t) => [index("setup_transfers_setup_idx").on(t.setupId, t.createdAt)],
 );
 
+/** Benchmarks (M6, SPEC §8): agent-run results per node, pruned to the last 30 per type. */
+export const benchTypeEnum = pgEnum("bench_type", ["decode", "prefill", "quality", "tooleval"]);
+export const benchStatusEnum = pgEnum("bench_status", ["running", "completed", "failed", "canceled"]);
+
+export const benchRuns = pgTable(
+  "bench_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: benchTypeEnum("type").notNull(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    status: benchStatusEnum("status").notNull().default("running"),
+    /** Per-type config (core bench config schemas). */
+    config: jsonb("config").notNull(),
+    /** Type-shaped result (core bench result schemas); null until completed. */
+    result: jsonb("result"),
+    error: text("error"),
+    model: text("model"),
+    port: integer("port"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("bench_runs_type_idx").on(t.type, t.createdAt), index("bench_runs_node_idx").on(t.nodeId, t.createdAt)],
+);
+
 /** Advisory-lock key shared by every boot migration run. */
 export const MIGRATE_LOCK_KEY = sql`hashtext('irori-migrate')`;

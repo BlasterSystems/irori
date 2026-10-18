@@ -1,5 +1,6 @@
 import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
+import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
 import { readStore } from "./catalog-read.js";
 import { JobManager } from "./jobs.js";
@@ -90,6 +91,23 @@ async function run(): Promise<void> {
   });
   driver.init();
 
+  const benches = new BenchRunner(
+    {
+      onProgress: (runId, progress) => transport.sendAgentServer({ type: "bench-progress", runId, progress }),
+      onDone: (runId, status, result, error) => {
+        log(`bench ${runId} done: ${status}${error ? ` (${error})` : ""}`);
+        transport.sendAgentServer({
+          type: "bench-done",
+          runId,
+          status,
+          error,
+          ...(status === "completed" && result !== null ? { result } : {}),
+        });
+      },
+    },
+    log,
+  );
+
   const transport = new AgentTransport({
     token: config.token,
     hostname: os.hostname(),
@@ -112,6 +130,12 @@ async function run(): Promise<void> {
       }
     },
     onJobCancel: (jobId) => jobs.cancel(jobId),
+    onBenchRun: (runId, bench, cfg) => {
+      if (!benches.start({ runId, bench, config: cfg })) {
+        transport.sendAgentServer({ type: "bench-done", runId, status: "failed", error: "another benchmark is active on this node" });
+      }
+    },
+    onBenchCancel: (runId) => benches.cancel(runId),
     onSetupStart: (setupId, runId, scriptStart, scriptStop, env, modelPathName) =>
       driver.start(setupId, runId, scriptStart, scriptStop, env, modelPathName),
     onSetupStop: (setupId, gracefulMs) => driver.stop(setupId, gracefulMs),

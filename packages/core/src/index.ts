@@ -9,3 +9,4 @@ export * from "./jobs.js";
 export * from "./job-messages.js";
 export * from "./model-api.js";
 export * from "./setups.js";
+export * from "./bench.js";

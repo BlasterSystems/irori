@@ -5,6 +5,8 @@ import {
   agentServerMsgSchema,
   isAgentSupported,
   type AgentServerMsg,
+  type BenchDoneMsg,
+  type BenchProgressMsg,
   type HardwareSnapshot,
   type SetupAckMsg,
   type SetupEventMsg,
@@ -44,6 +46,11 @@ export interface AgentHubDeps {
     onEvent(msg: SetupEventMsg): Promise<void>;
     onLog(msg: SetupLogMsg): void;
     onValidateResult(msg: SetupValidateResultMsg): void;
+  };
+  /** Bench frames (M6): throttled progress + terminal results. */
+  benchEvents: {
+    onProgress(nodeId: string, runId: string, progress: BenchProgressMsg["progress"]): void;
+    onDone(nodeId: string, runId: string, status: "completed" | "failed" | "canceled", result: unknown, error: string | null): Promise<void>;
   };
   /** Injectables for tests. */
   writeFlushMs?: number;
@@ -258,6 +265,12 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         void deps.jobEvents.onDone(currentId, frame.jobId, frame.status, frame.exitCode).catch(() => {});
       } else if (frame.type === "catalog") {
         void deps.jobEvents.onCatalog(currentId, frame.source, frame.entries).catch(() => {});
+      } else if (frame.type === "bench-progress") {
+        deps.benchEvents.onProgress(currentId, frame.runId, frame.progress);
+      } else if (frame.type === "bench-done") {
+        void deps.benchEvents
+          .onDone(currentId, frame.runId, frame.status, frame.result ?? null, frame.error)
+          .catch(() => {});
       } else if (
         frame.type === "setup-ack" ||
         frame.type === "setup-event" ||

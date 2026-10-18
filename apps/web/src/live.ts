@@ -16,6 +16,16 @@ export interface LlmEntry {
   updatedAt: string;
 }
 
+/** Latest bench frame per run id (SSE bench events; M6). */
+export interface BenchLive {
+  runId: string;
+  bench: string;
+  nodeId: string;
+  status: "running" | "completed" | "failed" | "canceled";
+  progress: { phase: string; index: number; total: number; label: string; liveTps: number | null } | null;
+  serverTimeMs: number;
+}
+
 export interface LiveStoreOptions {
   /** Overridable for tests. */
   fetchNodesFn?: typeof fetchNodes;
@@ -32,6 +42,8 @@ export interface LiveStore {
   snapshots: Map<string, HardwareSnapshot>;
   /** Latest LLM probe per node (id → entry), from SSE llm events. */
   llm: Map<string, LlmEntry>;
+  /** Latest bench frame per run id, from SSE bench events (M6). */
+  benches: Map<string, BenchLive>;
   /** Latest LLM entry for a node, null when no probe has arrived yet. */
   getLlm(nodeId: string): LlmEntry | null;
   /** ms since the last SSE frame arrived (refreshed by a tick), null before the first event. */
@@ -65,6 +77,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const nodes = reactive(new Map<string, NodeInfo>());
   const snapshots = reactive(new Map<string, HardwareSnapshot>());
   const llm = reactive(new Map<string, LlmEntry>());
+  const benches = reactive(new Map<string, BenchLive>());
   const lastEventAtMs = ref<number | null>(null);
   const lastEventAgeMs = ref<number | null>(null);
   const connected = ref(false);
@@ -122,6 +135,16 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
         break;
       }
       case "heartbeat":
+        break;
+      case "bench":
+        benches.set(event.runId, {
+          runId: event.runId,
+          bench: event.bench,
+          nodeId: event.nodeId,
+          status: event.status,
+          progress: event.progress,
+          serverTimeMs: event.serverTimeMs,
+        });
         break;
     }
   }
@@ -187,6 +210,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     nodes,
     snapshots,
     llm,
+    benches,
     getLlm,
     lastEventAgeMs,
     connected,

@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, type NodeInfo } from "@irori/core";
+import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, type NodeInfo } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type LlmHistoryResponse } from "./llm-history.js";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
 import { JobBusyError, JobDispatchError, type JobsService } from "./jobs-service.js";
+import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
 import { planPlacement } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
@@ -78,6 +79,8 @@ export interface AppDeps {
   getJobs: () => JobsService | null;
   /** Null while degraded: setups routes answer 503 (M5). */
   getSetups: () => SetupsService | null;
+  /** Null while degraded: bench routes answer 503 (M6). */
+  getBench: () => BenchService | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   sse: SseHub;
@@ -522,6 +525,94 @@ export function createApp(deps: AppDeps): Express {
     const ok = await setups.cancelTransfer(id);
     if (!ok) return res.status(409).json({ error: "transfer is not cancelable" });
     res.status(202).json({ ok: true });
+  });
+
+  // ---- M6: benchmarks ----
+
+  const serializeBenchRun = (row: BenchRunRow) => ({
+    id: row.id,
+    type: row.type,
+    nodeId: row.nodeId,
+    status: row.status,
+    config: row.config,
+    result: row.result,
+    error: row.error,
+    model: row.model,
+    port: row.port,
+    durationMs: row.durationMs,
+    createdAt: row.createdAt.toISOString(),
+    finishedAt: row.finishedAt?.toISOString() ?? null,
+  });
+
+  const requireBench = (res: Response): BenchService | null => {
+    const bench = deps.getBench();
+    if (bench === null) res.status(503).json({ error: "database unavailable" });
+    return bench;
+  };
+
+  app.post("/api/v1/bench/:type", async (req, res) => {
+    const bench = requireBench(res);
+    if (!bench) return;
+    const type = benchTypeSchema.safeParse(req.params.type);
+    if (!type.success) return res.status(404).json({ error: "unknown benchmark type" });
+    const store = requireStore(res);
+    if (!store) return;
+    const nodeId = typeof req.body?.nodeId === "string" ? req.body.nodeId : "";
+    if (!UUID_RE.test(nodeId)) return res.status(400).json({ error: "nodeId is required" });
+    if ((await store.get(nodeId)) === null) return res.status(404).json({ error: "node not found" });
+    const config = (req.body?.config ?? req.body ?? {}) as Record<string, unknown>;
+    try {
+      const run = await bench.start(type.data, nodeId, config);
+      res.status(202).json({ run: serializeBenchRun(run) });
+    } catch (err) {
+      if (err instanceof BenchBusyError) return res.status(409).json({ error: err.message });
+      if (err instanceof BenchOfflineError) return res.status(409).json({ error: err.message });
+      if (err instanceof Error && err.name === "ZodError") return res.status(400).json({ error: "invalid benchmark config" });
+      throw err;
+    }
+  });
+
+  app.get("/api/v1/bench/:type/runs", async (req, res) => {
+    const bench = requireBench(res);
+    if (!bench) return;
+    const type = benchTypeSchema.safeParse(req.params.type);
+    if (!type.success) return res.status(404).json({ error: "unknown benchmark type" });
+    const nodeId = typeof req.query.nodeId === "string" && UUID_RE.test(req.query.nodeId) ? req.query.nodeId : undefined;
+    const limit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
+    const runs = await bench.list(type.data, { nodeId, limit: Number.isFinite(limit) ? limit : undefined });
+    res.json({ runs: runs.map(serializeBenchRun) });
+  });
+
+  app.get("/api/v1/bench/active", async (req, res) => {
+    const bench = requireBench(res);
+    if (!bench) return;
+    const nodeId = typeof req.query.nodeId === "string" && UUID_RE.test(req.query.nodeId) ? req.query.nodeId : undefined;
+    res.json({ runs: (await bench.active(nodeId)).map(serializeBenchRun) });
+  });
+
+  app.get("/api/v1/bench/runs/:id", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid run id" });
+    const bench = requireBench(res);
+    if (!bench) return;
+    const run = await bench.get(id);
+    if (run === null) return res.status(404).json({ error: "bench run not found" });
+    res.json({ run: serializeBenchRun(run) });
+  });
+
+  app.post("/api/v1/bench/runs/:id/cancel", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid run id" });
+    const bench = requireBench(res);
+    if (!bench) return;
+    try {
+      const run = await bench.cancel(id);
+      if (run === null) return res.status(409).json({ error: "bench run not cancelable" });
+      res.json({ run: serializeBenchRun(run) });
+    } catch (err) {
+      if (err instanceof BenchNotFoundError) return res.status(404).json({ error: err.message });
+      throw err;
+    }
   });
 
   // Unknown API paths answer JSON, not the SPA.

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmMsgSchema } from "./llm.js";
+import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
 import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema } from "./job-messages.js";
 
 /**
@@ -78,6 +79,8 @@ export const serverMsgSchema = z.discriminatedUnion("type", [
   jobRequestMsgSchema,
   jobCancelMsgSchema,
   catalogRequestMsgSchema,
+  benchRunRequestMsgSchema,
+  benchCancelRequestMsgSchema,
   setupStartMsgSchema,
   setupStopMsgSchema,
   setupStatusMsgSchema,
