@@ -29,6 +29,20 @@
       "when": 1792316084660,
       "tag": "0003_young_luckman",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792326333472,
+      "tag": "0004_model_meta_first_seen",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792327841794,
+      "tag": "0005_node_models",
+      "breakpoints": true
     }
   ]
 }

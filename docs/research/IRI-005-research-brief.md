@@ -85,9 +85,13 @@ text into the job output ring; cancel = SIGTERM process group.
 ## 6. Placement planner (packages/core, pure)
 
 `model × node → present | sync | push | unavailable`
-- node has catalog entry / local registration → present.
-- node is model-ops with the NAS root mounted & catalog contains it → sync.
-- node is a spark/gpu-host reachable & source node registered → push (CX7 hosts listed).
+- node is the store or has the model registered locally → present.
+- node mounts the NAS root & the model is on the store → sync (capacity-checked).
+- node is reachable & some node holds the model locally → push (sources from
+  the `node_models` inventory, maintained by job completions; capacity/online
+  failures keep the sources so the UI can offer the transfer with a warning —
+  warnings never block).
+- `first_seen_at` on model_meta drives the default "recently added" sort.
 - capacity math: free = diskFree − reserve (agent-reported); needs = bytes (catalog or local); ok iff `free ≥ needs + reserve`.
 
 ## Summary of findings

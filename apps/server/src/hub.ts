@@ -222,6 +222,8 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       }
       const parsed = agentServerMsgSchema.safeParse(data);
       if (!parsed.success) {
+        // snapshot/llm/ping/hello belong to the first handler — not an error here.
+        if (agentMsgSchema.safeParse(data).success) return;
         console.error(`[irori-server] agentServerFrame parse failed: ${text.slice(0, 120)}`);
         return;
       }
