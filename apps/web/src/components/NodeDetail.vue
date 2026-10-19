@@ -15,6 +15,8 @@ import {
 import { computeCardData } from "../card-data";
 import { computeDetailData } from "../detail-data";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
+import { fetchJob, startAgentUpdate } from "../models";
+import { agentDrifts, serverVersion } from "../version";
 import LlmPanel from "./LlmPanel.vue";
 import Sparkline from "./Sparkline.vue";
 import CleanupDrawer from "./CleanupDrawer.vue";
@@ -149,6 +151,62 @@ const statusChipClass = computed(() =>
   node.value?.online ? "chip--ok" : "chip--muted",
 );
 
+/* ── Agent update (IRI-012) ─────────────────────────────────────────────── */
+
+const updateBusy = ref(false);
+const updateMsg = ref<string | null>(null);
+let updateDisposed = false;
+onUnmounted(() => {
+  updateDisposed = true;
+});
+
+/** Drift chip/button state: hidden entirely on unknown or matching versions. */
+const drift = computed(() => agentDrifts(node.value?.agentVersion));
+const updateLabel = computed(() =>
+  updateBusy.value ? "updating…" : serverVersion.value !== null ? `Update agent → ${serverVersion.value}` : "Update agent",
+);
+
+/**
+ * Dispatches the self-update and polls the job to a terminal state. Success
+ * is settled server-side on the node's next hello (the restart severs the
+ * socket mid-job), which this poll picks up; live agentVersion arrives via
+ * the SSE node-online event regardless.
+ */
+async function updateAgent(): Promise<void> {
+  if (node.value === null || updateBusy.value) return;
+  const forNode = props.nodeId;
+  updateBusy.value = true;
+  updateMsg.value = "dispatching update — the agent restarts and reconnects…";
+  try {
+    const job = await startAgentUpdate(node.value.id);
+    const deadline = Date.now() + 15 * 60_000;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 2000));
+      // NodeDetail is one instance across navigations (IRI-010): stop the
+      // poll and leave the refs alone when the user moved on.
+      if (updateDisposed || props.nodeId !== forNode) return;
+      const detail = await fetchJob(job.id);
+      if (detail.job.status === "succeeded") {
+        updateMsg.value = `agent updated to ${serverVersion.value ?? "the hub version"} — running setups were restarted`;
+        void live.refreshNodes();
+        break;
+      }
+      if (detail.job.status === "failed" || detail.job.status === "canceled") {
+        updateMsg.value = `update failed: ${detail.output.at(-1)?.line ?? detail.job.status}`;
+        break;
+      }
+      if (Date.now() > deadline) {
+        updateMsg.value = "update timed out — check the job output and the node journal";
+        break;
+      }
+    }
+  } catch (err) {
+    updateMsg.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (props.nodeId === forNode) updateBusy.value = false;
+  }
+}
+
 const cleanupOpen = ref(false);
 
 /* ── Node management (IRI-010) ──────────────────────────────────────────── */
@@ -209,15 +267,24 @@ onUnmounted(() => clearTimeout(deleteTimer));
             </span>
             <span class="chip">{{ node?.host }}</span>
             <span v-if="card.agentVersion" class="chip">Agent {{ card.agentVersion }}</span>
+            <span v-if="drift" class="chip chip--warn">update available</span>
           </template>
           <template v-if="node">
             <button class="btn btn--ghost btn--sm" @click="editOpen = true">Edit</button>
             <button class="btn btn--ghost btn--sm" @click="rotateOpen = true">Rotate token</button>
+            <button
+              v-if="drift"
+              class="btn btn--secondary btn--sm"
+              :disabled="updateBusy || node.online !== true"
+              title="Restarts the agent — running setups and benches on this node stop"
+              @click="updateAgent"
+            >{{ updateLabel }}</button>
             <button class="btn btn--ghost btn--sm" @click="onRemove">{{ armedDelete ? "Confirm delete" : "Delete" }}</button>
           </template>
           <button class="btn btn--secondary btn--sm" @click="cleanupOpen = true">Disk hygiene</button>
           <a class="chip detail-back" href="#/">← Overview</a>
         </div>
+        <p v-if="updateMsg" class="stat__sub" style="margin-top: 8px;">{{ updateMsg }}</p>
         <p v-if="notFound" class="muted" style="margin-top: 8px;">
           Node not found in the registry — it may have been removed.
         </p>

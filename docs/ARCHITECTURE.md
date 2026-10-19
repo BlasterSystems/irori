@@ -32,7 +32,7 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 
 ## Integrations
 
-- **Agent link:** outbound WS `/agent-ws`, token auth, resume cursor, `config-update` for rotation; SSH bootstrap/fallback with identical snapshot shapes. Agent-supplied `jobId`/`setupId` frames are scoped to the authenticated sending node; setup events/logs/acks are accepted only from the setup's head. A half-open socket's late `close` cannot deregister a reconnected node, and pings unanswered for two intervals terminate the connection.
+- **Agent link:** outbound WS `/agent-ws`, token auth, resume cursor, `config-update` for rotation; SSH bootstrap/fallback with identical snapshot shapes. Agent-supplied `jobId`/`setupId` frames are scoped to the authenticated sending node; setup events/logs/acks are accepted only from the setup's head. A half-open socket's late `close` cannot deregister a reconnected node, and pings unanswered for two intervals terminate the connection. Agent self-updates ride the same channel (`agent-update` job, ADR-0007): the agent runs a `systemd-run` transient unit that replaces its bundle and restarts the unit; settlement is hello-driven and no credentials are involved.
 - **Browser link:** SSE `/api/v1/events` (snapshot, run-log, job, bench events); REST for actions.
 - **modelctl:** subprocess with pinned minimum version (release tag + version gate); streamed job output; dry-run → armed applies for destructive ops.
 

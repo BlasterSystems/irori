@@ -195,4 +195,22 @@ describe("agent hub", () => {
     expect(fake.snapshots[0]?.payload).toMatchObject({ timestampMs: total - 1000 });
     ws.close();
   });
+
+  it("fires jobEvents.onHello on every authenticated hello (IRI-012)", async () => {
+    const hellos: Array<{ nodeId: string; agentVersion: string }> = [];
+    const { url, created } = await setup({
+      jobEvents: {
+        onOutput: async () => {},
+        onDone: async () => {},
+        onCatalog: async () => {},
+        onHello: async (nodeId, agentVersion) => {
+          hellos.push({ nodeId, agentVersion });
+        },
+      },
+    });
+    const ws = await authenticate(url, created.token);
+    await waitUntil(() => hellos.length > 0);
+    expect(hellos).toEqual([{ nodeId: created.id, agentVersion: "0.1.0" }]);
+    ws.close();
+  });
 });

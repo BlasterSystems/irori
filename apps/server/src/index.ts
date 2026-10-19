@@ -28,6 +28,26 @@ import { JobBusyError, JobDispatchError } from "./jobs-service.js";
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
 const WEB_DIST = process.env.IRORI_STATIC_DIR ?? resolve(here, "../../web/dist");
+
+/**
+ * IRI-011 (ADR-0007): agent artifacts served to nodes. Containers point
+ * IRORI_AGENT_ARTIFACTS_DIR at a flat dir (Dockerfile ships it); the
+ * monorepo resolves the apps/agent sources + built bundle directly.
+ */
+function resolveAgentArtifacts(): { installer: string; unit: string; bundle: string } | null {
+  const dir = process.env.IRORI_AGENT_ARTIFACTS_DIR?.trim();
+  if (dir !== undefined && dir.length > 0) {
+    return { installer: join(dir, "install-agent.sh"), unit: join(dir, "irori-agent.service"), bundle: join(dir, "irori-agent.mjs") };
+  }
+  const agentPkg = resolve(here, "../../agent");
+  const artifacts = {
+    installer: join(agentPkg, "install-agent.sh"),
+    unit: join(agentPkg, "irori-agent.service"),
+    bundle: join(agentPkg, "dist", "irori-agent.mjs"),
+  };
+  return existsSync(artifacts.installer) ? artifacts : null;
+}
+const AGENT_ARTIFACTS = resolveAgentArtifacts();
 const PRUNE_INTERVAL_MS = 5 * 60_000;
 const ROLLUP_INTERVAL_MS = 60_000;
 const BOOT_RETRY_MIN_MS = 2_000;
@@ -85,6 +105,7 @@ const app = createApp({
   getHub: () => state.hub,
   version,
   staticDir: existsSync(WEB_DIST) ? WEB_DIST : null,
+  agentArtifacts: AGENT_ARTIFACTS,
 });
 
 const server = createServer(app);
@@ -153,6 +174,8 @@ async function boot(): Promise<void> {
       await setupsService.onJobDone(nodeId, jobId, status, exitCode);
     },
     onCatalog: jobsService.onCatalog,
+    // IRI-012 (ADR-0007): the fresh hello's agentVersion settles update jobs.
+    onHello: (nodeId: string, agentVersion: string) => jobsService.settleAgentUpdate(nodeId, agentVersion),
   };
 
   const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, jobEvents, setupEvents: {

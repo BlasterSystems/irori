@@ -36,6 +36,7 @@ deploy → 60×2s health gate → auto-rollback).
 | M7 Analytics, hygiene & packaging | [IR-37](https://blastersystems.atlassian.net/browse/IR-37) |
 | M8 LLM usage capture & telemetry | [IR-42](https://blastersystems.atlassian.net/browse/IR-42) |
 | Usage phase 2 — attribution & reconstruction (deferred) | [IR-51](https://blastersystems.atlassian.net/browse/IR-51) |
+| Agent onboarding & hub-driven updates | [IR-57](https://blastersystems.atlassian.net/browse/IR-57), [IR-58](https://blastersystems.atlassian.net/browse/IR-58) |
 
 ## M0 — Governance & foundations ✅ (this task)
 

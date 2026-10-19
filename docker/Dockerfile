@@ -31,6 +31,11 @@ RUN cd /build && pnpm --filter @irori/server deploy --prod --legacy /app
 COPY --from=build /src/packages/db/drizzle /app/packages/db/drizzle
 # SPA bundle served by the server (IRORI_STATIC_DIR).
 COPY --from=build /src/apps/web/dist /srv/irori-web
+# IRI-011 (ADR-0007): agent artifacts served to nodes (installer + unit + bundle).
+ENV IRORI_AGENT_ARTIFACTS_DIR=/app/agent-artifacts
+COPY --from=build /src/apps/agent/install-agent.sh /app/agent-artifacts/install-agent.sh
+COPY --from=build /src/apps/agent/irori-agent.service /app/agent-artifacts/irori-agent.service
+COPY --from=build /src/apps/agent/dist/irori-agent.mjs /app/agent-artifacts/irori-agent.mjs
 EXPOSE 3947
 CMD ["node", "dist/index.js"]
 

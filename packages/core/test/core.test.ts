@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentMsgSchema, hardwareSnapshotSchema, nodeCreateSchema, sseEventSchema } from "../src/index.ts";
+import { agentMsgSchema, hardwareSnapshotSchema, nodeCreateSchema, sseEventSchema, jobKindSchema, AGENT_UPDATE_MIN_VERSION } from "../src/index.ts";
 import { compareVersions, isAgentSupported } from "../src/version.ts";
 
 const validSnapshot = {
@@ -85,5 +85,10 @@ describe("version gate", () => {
   it("gates the minimum agent", () => {
     expect(isAgentSupported("0.1.0")).toBe(true);
     expect(isAgentSupported("0.0.9")).toBe(false);
+  });
+
+  it("accepts the agent-update job kind (IRI-012)", () => {
+    expect(jobKindSchema.parse("agent-update")).toBe("agent-update");
+    expect(AGENT_UPDATE_MIN_VERSION).toEqual(expect.any(String));
   });
 });

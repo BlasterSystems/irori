@@ -45,9 +45,28 @@ const agentWsUrl = computed(() =>
   typeof location === "undefined" ? "ws://<server>:3947/agent-ws" : `ws://${location.host}/agent-ws`,
 );
 
-const installLine = computed(() =>
-  revealedToken.value === null ? "" : `./install-agent.sh --server ${agentWsUrl.value} --token ${revealedToken.value}`,
+/** The hub's own HTTP root — the script, unit and bundle are served here. */
+const httpBase = computed(() =>
+  typeof location === "undefined" ? "http://<server>:3947" : `${location.protocol}//${location.host}`,
 );
+
+/** IRI-011: everything the node needs, fetched from the hub (no GitHub). */
+const installBlock = computed(() =>
+  revealedToken.value === null
+    ? ""
+    : [
+        `curl -fsSL ${httpBase.value}/install-agent.sh -o install-agent.sh`,
+        `curl -fsSL ${httpBase.value}/irori-agent.service -o irori-agent.service`,
+        `sudo bash install-agent.sh --server ${agentWsUrl.value} --token ${revealedToken.value} --bundle-url ${httpBase.value}/agent/irori-agent.mjs`,
+      ].join("\n"),
+);
+
+const installCopied = ref(false);
+
+async function copyInstall(): Promise<void> {
+  if (installBlock.value === "") return;
+  installCopied.value = await copyToClipboard(installBlock.value);
+}
 
 const envBlock = computed(() =>
   revealedToken.value === null ? "" : `IRORI_SERVER_URL=${agentWsUrl.value}\nIRORI_NODE_TOKEN=${revealedToken.value}`,
@@ -120,9 +139,18 @@ async function copyToken(): Promise<void> {
             </div>
           </div>
           <pre class="log" style="margin: 0 0 10px">{{ envBlock }}</pre>
+          <div class="field" style="margin-bottom: 10px">
+            <label>Install on the node (as root) — everything is fetched from this hub</label>
+            <pre class="log" style="margin: 0 0 6px">{{ installBlock }}</pre>
+            <div class="row">
+              <button class="btn btn--secondary btn--sm" @click="copyInstall">{{ installCopied ? "copied ✓" : "Copy" }}</button>
+              <a class="btn btn--ghost btn--sm" href="/install-agent.sh" download>Download install-agent.sh</a>
+            </div>
+          </div>
           <p class="stat__sub">
-            On the node, as root: <span class="mono">{{ installLine }}</span> — installs the bundle + root
-            systemd unit and completes only when the WS hello lands. The card goes live on the first snapshot.
+            Installs the bundle (fetched via <span class="mono">--bundle-url</span>) + root systemd unit and completes only
+            when the WS hello lands. The card goes live on the first snapshot. GitHub release artifacts remain a fallback
+            (docs/DEPLOYMENT.md). After a token rotation: update <span class="mono">/etc/irori/agent.env</span> and restart — no live push.
           </p>
         </template>
 

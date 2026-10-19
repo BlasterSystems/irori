@@ -76,7 +76,7 @@ async function run(): Promise<void> {
   const HYGIENE_AUDIT_TTL_MS = 5 * 60_000;
 
   const jobs = new JobManager(
-    () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath }),
+    () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath, serverUrl: config.serverUrl }),
     {
       onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
       onDone: (jobId, status, exitCode) => {

@@ -43,7 +43,8 @@ by the M7 batch (adversarial-review fixes + analytics/hygiene).
 - The agent token is returned **exactly once**: `POST /api/v1/nodes` →
   `{node, token}`, `POST /api/v1/nodes/:id/token/rotate` → `{token}` — registry
   payloads never carry it. The web NodeModal (IRI-010) is the UI surface for
-  this contract: one-time reveal with the agent env block and install line.
+  this contract: one-time reveal with the agent env block and the hub-served
+  install block (IRI-011).
 - `POST /api/v1/nodes` persists `llmPorts` (as `127.0.0.1` probe assignments)
   and `nasRoot` — a create with a NAS root yields a model-ops node, not a
   silently dropped field.
@@ -54,6 +55,34 @@ by the M7 batch (adversarial-review fixes + analytics/hygiene).
 - `PUT /api/v1/nodes/:id/llm-ports` (`{ports: number[]}`) remains the
   dedicated probe-assignment endpoint and hardcodes the probe host to
   `127.0.0.1`.
+
+## Agent onboarding & updates (IRI-011/012, ADR-0007)
+
+- `GET /install-agent.sh`, `GET /irori-agent.service`,
+  `GET /agent/irori-agent.mjs` serve the repo copies of the installer, unit
+  and bundle; `503 {error: "agent artifacts not available"}` when the server
+  has none resolved (env `IRORI_AGENT_ARTIFACTS_DIR` in containers, monorepo
+  layout in dev). No secrets are embedded — the token is supplied by the
+  operator at run time. Work while degraded.
+- `GET /api/v1/version` → `{version}` — the hub's own version, the drift
+  reference for the UI badges and the update target.
+- `POST /api/v1/nodes/:id/agent-update` dispatches an `agent-update` job
+  (params `{expectedVersion: hubVersion}`) → `202 {job}`. Refusals: `400`
+  malformed id, `404` unknown node, `409` when the agent predates
+  `AGENT_UPDATE_MIN_VERSION` (it cannot self-update — use the install
+  one-liner once), `409` while the node has an active job, a running bench or
+  a starting/running/stopping setup (the restart kills everything the agent
+  supervises), `409` when the agent is unreachable.
+- The agent fetches the bundle from the hub (URL derived from its own
+  `IRORI_SERVER_URL`), validates it with `node --check`, keeps the previous
+  bundle as `.bak` and restarts. Pre-restart failures settle via the normal
+  `job-done` path; the restart itself severs the socket, so success is
+  settled **on the node's next hello** — reported version equal to
+  `expectedVersion` flips the job to `succeeded`; a mismatch leaves it
+  running (a blip-reconnecting old agent must not fail an in-flight update).
+- `reapOffline` skips `agent-update` rows younger than 10 minutes and fails
+  older ones with a `.bak`/journalctl rollback hint; the rule lives in the
+  existing reaper loop, so it survives server restarts. No new tables.
 
 ## Jobs and benches
 
