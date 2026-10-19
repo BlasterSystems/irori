@@ -12,13 +12,23 @@ Use the `semantic-versioning` skill for version bumps, releases, and Git tags.
 
 ## Repository configuration
 
-Before the first release, document:
-
-1. The authoritative version file or files.
-2. Commands that refresh derived version references and examples.
-3. Required test, validation, build, and package-smoke commands.
-4. The release branch and any protected-branch requirements.
-5. Whether a package registry or deployment is part of a release.
+1. **Authoritative version files:** the six `package.json` `version` fields
+   (root, `apps/{server,web,agent}`, `packages/{core,db}`) — bumped together;
+   the server reports its own at `/healthz`.
+2. **Derived references:** none generated — versions are read from the
+   package files at build/boot time. Update `CHANGELOG.md` by hand.
+3. **Required commands before tagging:** `pnpm typecheck`, 
+   `IRORI_TEST_DATABASE_URL=… pnpm -r test` (real Postgres),
+   `pnpm build`, `.agentic/bin/validate`, `.agentic/bin/docs-check --strict`.
+4. **Release branch:** `main` with linear history (rebase merges); tags are
+   cut only from commits whose CI (`verify` + `docs-check`) is green on the
+   PR. No protected-branch rules are configured (homelab, single operator) —
+   green CI is the gate by convention.
+5. **Registry/deploy in a release:** a `v*` tag triggers
+   `.github/workflows/release.yml` — multi-arch GHCR images for the server and
+   agent roles plus the agent bundle/install-script/systemd-unit release
+   artifacts. The DEV VM deploy is a separate, tag-gated `dev-*` pipeline
+   (see `DEPLOYMENT.md`); production does not exist yet (IR-10 epic scope).
 
 Do not create a tag until these facts are known. Keep this file focused and link to detailed deployment documentation rather than duplicating it.
 

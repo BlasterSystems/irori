@@ -45,7 +45,7 @@ deploy → 60×2s health gate → auto-rollback).
   matterhorn-platform, README.
 - **Exit**: docs reviewed; ADRs accepted; `.agentic/bin/validate` + docs-check green.
 
-## M1 — Walking skeleton (≈1 week)
+## M1 — Walking skeleton ✅ (f4a785f; agent live on dgx1)
 
 - pnpm workspace (TS strict, vitest, eslint+prettier): `apps/server`
   (Express 5, `/healthz`, `/api/v1/nodes` CRUD, PostgreSQL on the Proxmox
@@ -58,7 +58,7 @@ deploy → 60×2s health gate → auto-rollback).
 - **Exit**: agent installed on one machine → live node card in the UI; SSE
   snapshot visible in browser devtools; validate + tests green.
 
-## M2 — Telemetry core (≈1.5 weeks)
+## M2 — Telemetry core ✅ (05cf495; rollups + history API)
 
 - Agent collectors: GPU per-card (usage/temp/power/VRAM/clocks/throttle/
   processes) via `nvidia-smi`, CPU (usage/temp/**package power**/clock) via
@@ -75,7 +75,7 @@ deploy → 60×2s health gate → auto-rollback).
 - **Exit**: two nodes streaming concurrently; charts live; rollups survive
   server restart; no unbounded tables.
 
-## M3 — Inference monitoring (≈1 week)
+## M3 — Inference monitoring ✅ (5ed4567; deployed dev-0.1.0-dev.3)
 
 - Agent LLM probes: backend detection (vLLM, llama.cpp, SGLang, EXL3, TensorFold,
   q27, LM Studio, Ollama, ds4-server), decode/prefill tok/s, queue
@@ -85,7 +85,7 @@ deploy → 60×2s health gate → auto-rollback).
   run/total); cluster view grouping head+workers; per-port panels.
 - **Exit**: serving engine on a head shows live rates + queue in cluster view.
 
-## M4 — Model supply chain (≈1.5 weeks)
+## M4 — Model supply chain ✅ (5e4b534 + 46e3751 + 0b333e6; NAS↔dgx1 e2e)
 
 - NAS node kind + agent model ops via modelctl subprocess (version pinned,
   install/upgrade job): catalog read (`catalog.json` + live-scan fallback),
@@ -100,7 +100,7 @@ deploy → 60×2s health gate → auto-rollback).
 - **Exit**: download a model on the NAS, sync to head, push to a worker over
   CX7 — all from the UI with streamed job logs.
 
-## M5 — Serving orchestration (≈1 week)
+## M5 — Serving orchestration ✅ (bd626db + a6bb7bd; TP-3 verified live)
 
 - **Setup wizard**: type (single/cluster ≤ 8 nodes) → model (NAS search or
   chained HF download) → per-node existence check → **one start/stop script
@@ -115,14 +115,14 @@ deploy → 60×2s health gate → auto-rollback).
 - **Exit**: serve GLM-5.3-flash cluster via the wizard: model staged
   NAS→head→worker, scripts validated, cluster started, logs streamed in UI.
 
-## M6 — Benchmarks (≈1 week)
+## M6 — Benchmarks ✅ (0c35acc; four benches vs live engines)
 
 - Decode, prefill, quality, tool-eval benches running via the agent against
   live engines; run lifecycle (202 + poll/cancel), persisted results, history,
   comparison views (quality paired compare; tool-eval side-by-side).
 - **Exit**: all four benches complete against one engine; results queryable.
 
-## M7 — Analytics, hygiene & packaging (≈1.5 weeks)
+## M7 — Analytics, hygiene & packaging ✅ (PR #3; release artifacts at v0.2.0)
 
 - **Disk hygiene (agent)**: audit job (per-category reclaimable: docker
   build cache/images/containers, HF orphans, modelctl staging, compiler/pkg

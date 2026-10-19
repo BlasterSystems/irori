@@ -83,4 +83,4 @@ roles + compose.
 
 ## Review
 
-- (pending)
+- Consolidated 2026-10-19: agent privilege + token auth match ADR-0003; the skeleton was superseded by M2+ collectors without contract drift (schemaVersion gating held).
