@@ -167,6 +167,13 @@ const auditRows = computed(() => {
 
 const maxReclaimable = computed(() => Math.max(1, ...auditRows.value.map((r) => r.reclaimableBytes)));
 
+/** Total the audit estimates across all categories; null before the first audit. */
+const totalReclaimable = computed(() => {
+  const audit = auditReport.value;
+  if (audit === null) return null;
+  return audit.categories.reduce((sum, c) => sum + c.reclaimableBytes, 0);
+});
+
 const diskPct = computed(() => {
   const audit = auditReport.value;
   if (audit === null || audit.totalBytes === null || audit.totalBytes <= 0 || audit.freeBytes === null) return null;
@@ -185,11 +192,12 @@ function catLabel(category: string): string {
 
 <template>
   <div class="drawer-scrim" @click.self="emit('close')">
-    <aside class="drawer" role="dialog" aria-label="Disk hygiene">
+    <aside class="drawer is-open" role="dialog" aria-label="Disk hygiene">
       <div class="row row--between" style="margin-bottom: 10px">
         <div class="row">
           <h3 style="font-size: 17px">Disk hygiene — {{ nodeName }}</h3>
           <span v-if="diskPct !== null" class="chip" :class="diskChipCls">Disk {{ diskPct }}%</span>
+          <span v-if="totalReclaimable !== null" class="chip chip--accent">{{ fmtBytes(totalReclaimable) }} reclaimable</span>
         </div>
         <button class="iconbtn" aria-label="Close disk hygiene" @click="emit('close')">✕</button>
       </div>
@@ -202,11 +210,17 @@ function catLabel(category: string): string {
       <p v-if="error" class="banner banner--warn">{{ error }}</p>
       <p v-else-if="loading" class="muted">loading…</p>
 
+      <p class="stat__sub" style="margin-bottom: 10px;">
+        Reclaims caches, journal, /tmp and stale artifacts — protected models and in-use
+        images are never touched; care rows are opt-in. Every clean is a dry-run plan
+        first, armed by typing the node name.
+      </p>
+
       <template v-if="tab === 'audit'">
         <div class="row row--between" style="margin-bottom: 10px">
           <span class="stat__sub">
             <template v-if="cleanup?.latestAudit">audited {{ auditReport === null ? 'recently' : new Date(auditReport.generatedAtMs).toLocaleTimeString() }} · cached ~5 min</template>
-            <template v-else>never audited</template>
+            <template v-else>never audited — run an audit to estimate reclaimable space</template>
           </span>
           <button class="btn btn--secondary btn--sm" :disabled="phase === 'busy' || phase === 'running'" @click="runAudit">
             {{ phase === "busy" ? "auditing…" : cleanup?.latestAudit ? "Re-audit" : "Run audit" }}
@@ -253,7 +267,7 @@ function catLabel(category: string): string {
         <!-- Dry-run plan -->
         <div v-if="phase === 'plan' || phase === 'armed' || phase === 'running' || phase === 'done'" style="margin-top: 12px">
           <h4 style="margin-bottom: 6px">Plan (dry run)</h4>
-          <table class="tbl">
+          <table class="table">
             <thead><tr><th>category</th><th>result</th><th>reclaimable</th></tr></thead>
             <tbody>
               <tr v-for="o in planOutcomes" :key="o.category">
@@ -279,7 +293,7 @@ function catLabel(category: string): string {
           </h4>
           <pre v-if="runOutput.length > 0" class="mono faint" style="max-height: 220px; overflow: auto; white-space: pre-wrap">{{ runOutput.join("\n") }}</pre>
           <div v-if="phase === 'done'" style="margin-top: 8px">
-            <table class="tbl">
+            <table class="table">
               <thead><tr><th>category</th><th>result</th><th>reclaimed</th></tr></thead>
               <tbody>
                 <tr v-for="o in planOutcomes" :key="o.category">
@@ -313,7 +327,7 @@ function catLabel(category: string): string {
       </template>
 
       <template v-else>
-        <table v-if="(cleanup?.history.length ?? 0) > 0" class="tbl">
+        <table v-if="(cleanup?.history.length ?? 0) > 0" class="table">
           <thead><tr><th>when</th><th>kind</th><th>status</th><th>detail</th></tr></thead>
           <tbody>
             <tr v-for="h in cleanup?.history" :key="h.id">

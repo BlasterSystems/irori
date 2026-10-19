@@ -173,6 +173,7 @@ button { font: inherit; color: inherit; }
 .barrow { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
 .barrow + .barrow { margin-top: 8px; }
 .barrow .val { color: var(--fg); text-align: right; white-space: nowrap; }
+.temp--hot { color: var(--thread-ink); }
 
 /* ── Tables ────────────────────────────────────────────────────────── */
 .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
@@ -190,6 +191,18 @@ button { font: inherit; color: inherit; }
 /* ── Banners ───────────────────────────────────────────────────────── */
 .banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 13px; color: var(--muted); }
 .banner--warn { border-color: var(--thread); background: var(--thread-wash); color: var(--ink); }
+
+/* ── Drawers / pick rows (shared chrome; CleanupDrawer has no scoped styles —
+   ServeView/ModelsView keep narrower scoped overrides) ────────────────────── */
+.drawer-scrim { position: fixed; inset: 0; background: var(--overlay);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+.drawer { width: min(560px, 100%); max-height: 88vh; overflow: auto; padding: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+@media (min-width: 721px) { .drawer-scrim { align-items: center; } }
+.pick { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; flex-wrap: wrap; }
+.pick.is-on { border-color: var(--ink); }
+.pick input { width: 16px; height: 16px; }
 
 /* ── Forms ─────────────────────────────────────────────────────────── */
 .field { display: grid; gap: 5px; }
