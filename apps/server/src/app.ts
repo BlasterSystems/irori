@@ -93,6 +93,8 @@ export interface AppDeps {
   sse: SseHub;
   getHub: () => Pick<AgentHub, "online" | "sendToNode"> | null;
   version: string;
+  /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
+  tag: string | null;
   /** apps/web/dist when it exists, else null. */
   staticDir: string | null;
   /**
@@ -141,7 +143,7 @@ export function createApp(deps: AppDeps): Express {
   app.get("/agent/irori-agent.mjs", serveArtifact("bundle", "text/javascript", "irori-agent.mjs"));
 
   app.get("/api/v1/version", (_req, res) => {
-    res.json({ version: deps.version });
+    res.json({ version: deps.version, tag: deps.tag });
   });
 
   app.get("/api/v1/events", (_req, res) => {

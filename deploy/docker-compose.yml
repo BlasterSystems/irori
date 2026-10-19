@@ -13,6 +13,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: server
+      args:
+        GIT_TAG: ${IRORI_GIT_TAG:-}
     ports:
       - "3947:3947"
     env_file:

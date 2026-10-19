@@ -20,6 +20,7 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
     sse: createSseHub({ heartbeatMs: 0 }),
     getHub: () => ({ online: () => online }),
     version: "test",
+    tag: null,
     staticDir: null,
   };
   return { app: createApp(deps), fake, online, rings: deps.rings };

@@ -10,7 +10,7 @@ import BenchmarksView from "./components/BenchmarksView.vue";
 import AnalyticsView from "./components/AnalyticsView.vue";
 import { groupNodes } from "./llm-data";
 import { parseHash, type Route } from "./router";
-import { loadServerVersion } from "./version";
+import { loadServerVersion, serverTag, serverVersion } from "./version";
 
 const { sortedNodes, connected, lastEventAgeMs } = live;
 
@@ -129,4 +129,8 @@ onUnmounted(() => {
       <NodeModal v-if="addOpen" mode="create" @close="addOpen = false" />
     </template>
   </main>
+
+  <footer class="container foot">
+    <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template></span>
+  </footer>
 </template>
