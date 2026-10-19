@@ -1,4 +1,4 @@
-import type { Server } from "node:http";
+import type { IncomingMessage, Server } from "node:http";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import {
   agentMsgSchema,
@@ -137,7 +137,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     while (pending.length > MAX_PENDING_WRITES) pending.shift(); // drop oldest
   }
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let nodeId: string | null = null;
     let agentVersion: string | null = null;
     let chain: Promise<void> = Promise.resolve();
@@ -146,6 +146,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
     };
     const reject = (message: string): void => {
+      console.warn(`[irori-hub] rejected agent from ${req.socket.remoteAddress ?? "unknown"}: ${message}`);
       sendMsg({ type: "error", message });
       ws.close();
     };
