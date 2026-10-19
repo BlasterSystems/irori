@@ -39,8 +39,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/blastersystems/irori:${{ github.ref_name }}
+            ghcr.io/blastersystems/irori:latest
 
       - name: Agent image (amd64 + arm64)
         uses: docker/build-push-action@v6
@@ -51,8 +51,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}-agent:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}-agent:latest
+            ghcr.io/blastersystems/irori-agent:${{ github.ref_name }}
+            ghcr.io/blastersystems/irori-agent:latest
 
   agent-artifacts:
     runs-on: ubuntu-latest

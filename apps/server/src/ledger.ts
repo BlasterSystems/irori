@@ -143,28 +143,31 @@ export function createTokenLedgerEngine(db: Db): TokenLedgerEngine {
           }
         }
 
-        for (const d of deltas.values()) {
-          await db.execute(sql`
-            insert into token_ledger
-              (node_id, port, model, granularity, bucket_start, samples, generated_tokens, prompt_tokens, cached_tokens, generated_seen, prompt_seen, cached_seen)
-            values (${d.nodeId}, ${d.port}, ${d.model}, ${sql.raw(`'${d.granularity}'::bucket_granularity`)}, ${d.bucketStart}, 1,
-                    ${Math.round(d.dGen)}, ${Math.round(d.dPrompt)}, ${Math.round(d.dCached)}, ${d.sawGen}, ${d.sawPrompt}, ${d.sawCached})
-            on conflict (node_id, port, model, granularity, bucket_start) do update set
-              samples = token_ledger.samples + 1,
-              generated_tokens = token_ledger.generated_tokens + ${Math.round(d.dGen)},
-              prompt_tokens = token_ledger.prompt_tokens + ${Math.round(d.dPrompt)},
-              cached_tokens = token_ledger.cached_tokens + ${Math.round(d.dCached)},
-              generated_seen = token_ledger.generated_seen or ${d.sawGen},
-              prompt_seen = token_ledger.prompt_seen or ${d.sawPrompt},
-              cached_seen = token_ledger.cached_seen or ${d.sawCached}
-          `);
-          total += 1;
-        }
-
-        await db
-          .insert(settings)
-          .values({ key: TOKEN_LEDGER_STATE_KEY, value: state })
-          .onConflictDoUpdate({ target: settings.key, set: { value: state } });
+        // Atomic: ledger deltas + the state advance commit together — a crash
+        // between them would double-count the batch on re-run.
+        await db.transaction(async (tx) => {
+          for (const d of deltas.values()) {
+            await tx.execute(sql`
+              insert into token_ledger
+                (node_id, port, model, granularity, bucket_start, samples, generated_tokens, prompt_tokens, cached_tokens, generated_seen, prompt_seen, cached_seen)
+              values (${d.nodeId}, ${d.port}, ${d.model}, ${sql.raw(`'${d.granularity}'::bucket_granularity`)}, ${d.bucketStart}, 1,
+                      ${Math.round(d.dGen)}, ${Math.round(d.dPrompt)}, ${Math.round(d.dCached)}, ${d.sawGen}, ${d.sawPrompt}, ${d.sawCached})
+              on conflict (node_id, port, model, granularity, bucket_start) do update set
+                samples = token_ledger.samples + 1,
+                generated_tokens = token_ledger.generated_tokens + ${Math.round(d.dGen)},
+                prompt_tokens = token_ledger.prompt_tokens + ${Math.round(d.dPrompt)},
+                cached_tokens = token_ledger.cached_tokens + ${Math.round(d.dCached)},
+                generated_seen = token_ledger.generated_seen or ${d.sawGen},
+                prompt_seen = token_ledger.prompt_seen or ${d.sawPrompt},
+                cached_seen = token_ledger.cached_seen or ${d.sawCached}
+            `);
+            total += 1;
+          }
+          await tx
+            .insert(settings)
+            .values({ key: TOKEN_LEDGER_STATE_KEY, value: state })
+            .onConflictDoUpdate({ target: settings.key, set: { value: state } });
+        });
 
         if (rows.length < BATCH) break;
       }
