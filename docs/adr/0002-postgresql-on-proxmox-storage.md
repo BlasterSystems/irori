@@ -1,6 +1,7 @@
 # ADR-0002: PostgreSQL storage on the Proxmox server, encrypted secrets, no application auth
 
-- **Status:** Accepted (2026-10-19 — owner approved after M1–M7 shipped on these decisions)
+- **Status:** Accepted
+- **Accepted:** 2026-10-19 — owner approval after M1–M7 shipped on these decisions
 - **Date:** 2026-10-16
 - **Decision owners:** operator
 - **Scope:** Persistence engine, schema tooling, retention, secrets at rest, auth posture

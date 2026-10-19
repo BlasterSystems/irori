@@ -1,6 +1,7 @@
 # ADR-0001: TypeScript pnpm monorepo (Node 24, Express 5, Vue 3)
 
-- **Status:** Accepted (2026-10-19 — owner approved after M1–M7 shipped on these decisions)
+- **Status:** Accepted
+- **Accepted:** 2026-10-19 — owner approval after M1–M7 shipped on these decisions
 - **Date:** 2026-10-16
 - **Decision owners:** operator
 - **Scope:** Repository topology, runtime language, server framework, UI stack

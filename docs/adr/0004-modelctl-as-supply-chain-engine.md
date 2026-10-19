@@ -1,6 +1,7 @@
 # ADR-0004: modelctl remains the model supply-chain engine
 
-- **Status:** Accepted (2026-10-19 — owner approved after M1–M7 shipped on these decisions)
+- **Status:** Accepted
+- **Accepted:** 2026-10-19 — owner approval after M1–M7 shipped on these decisions
 - **Date:** 2026-10-16
 - **Decision owners:** operator
 - **Scope:** Model store compatibility, transfer engine, HF integration
