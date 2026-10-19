@@ -179,6 +179,19 @@ async function onRemove(): Promise<void> {
     deleteError.value = err instanceof Error ? err.message : String(err);
   }
 }
+
+/** NodeDetail is ONE component instance across navigations (the router only
+ *  patches :node-id) — an armed delete must never carry over to the next
+ *  node, or the second click would remove the wrong one. */
+watch(
+  () => props.nodeId,
+  () => {
+    armedDelete.value = false;
+    deleteError.value = null;
+    clearTimeout(deleteTimer);
+  },
+);
+onUnmounted(() => clearTimeout(deleteTimer));
 </script>
 
 <template>

@@ -56,12 +56,16 @@ const envBlock = computed(() =>
 async function submit(): Promise<void> {
   if (busy.value) return;
   error.value = null;
-  if (props.mode === "create") {
+  if (props.mode === "create" || props.mode === "edit") {
     const problem = validateNodeForm(form.value);
     if (problem !== null) {
       error.value = problem;
       return;
     }
+  } else if (props.node == null) {
+    // Rotate with no node — the mount sites guard, but a silent no-op would
+    // be worse than doing nothing at all.
+    return;
   }
   busy.value = true;
   try {
@@ -160,7 +164,7 @@ async function copyToken(): Promise<void> {
         </span>
         <div class="row">
           <button class="btn btn--ghost btn--sm" @click="emit('close')">{{ revealedToken !== null ? "Done" : "Cancel" }}</button>
-          <button v-if="revealedToken === null" class="btn btn--primary btn--sm" :disabled="busy" @click="submit">
+          <button v-if="revealedToken === null" class="btn btn--primary btn--sm" :disabled="busy || (mode !== 'create' && node == null)" @click="submit">
             {{ busy ? "working…" : mode === "create" ? "Create node" : mode === "edit" ? "Save" : "Rotate token" }}
           </button>
         </div>
