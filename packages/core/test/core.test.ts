@@ -89,6 +89,6 @@ describe("version gate", () => {
 
   it("accepts the agent-update job kind (IRI-012)", () => {
     expect(jobKindSchema.parse("agent-update")).toBe("agent-update");
-    expect(AGENT_UPDATE_MIN_VERSION).toEqual(expect.any(String));
+    expect(AGENT_UPDATE_MIN_VERSION).toBe("0.3.0");
   });
 });

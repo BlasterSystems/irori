@@ -335,7 +335,7 @@ reported in every snapshot; upgrade = re-run install.
 
 | Area | Endpoints |
 |---|---|
-| Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/test`, `/:id/install-agent`, `/:id/agent-token/rotate` |
+| Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/agent-update`, `POST /api/v1/nodes/:id/token/rotate`, `GET /install-agent.sh`, `GET /irori-agent.service`, `GET /agent/irori-agent.mjs` |
 | Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE) |
 | Inference | `GET /api/v1/nodes/:id/llm`, `PUT /:id/llm-ports`, `GET /api/v1/clusters/:id` |
 | Models | `GET /api/v1/models?scope=nas\|node:id&q=&sort=&page=`, `POST /api/v1/models/download`, `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
@@ -344,7 +344,7 @@ reported in every snapshot; upgrade = re-run install.
 | Cleanup | `GET /api/v1/nodes/:id/cleanup/audit`, `POST /api/v1/nodes/:id/cleanup` (dry_run default) |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
-| Meta | `GET /healthz`, `GET /api/v1/settings`, `PUT /api/v1/settings`, WS `/agent-ws` |
+| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, WS `/agent-ws` |
 
 ## 14. Deviations & deferred
 
