@@ -85,6 +85,10 @@ async function loadLlm(): Promise<void> {
   llmController = new AbortController();
   const { signal } = llmController;
   llmState.value = "loading";
+  // Never show the previous node's engines during/after navigation — the
+  // template falls back to llmRest when SSE has no entry for this node yet.
+  llmRest.value = null;
+  llmHistory.value = null;
   // Older servers may not ship either endpoint yet; degrade independently.
   const [snapRes, histRes] = await Promise.allSettled([
     fetchNodeLlm(props.nodeId, signal),

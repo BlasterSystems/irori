@@ -138,21 +138,27 @@ function go(delta: number): void {
   void load();
 }
 
+let placementSeq = 0;
 async function openModel(name: string): Promise<void> {
+  const seq = ++placementSeq;
   selected.value = name;
   placement.value = null;
   placementError.value = null;
   placementLoading.value = true;
   try {
-    placement.value = await fetchPlacement(name);
+    const res = await fetchPlacement(name);
+    if (seq !== placementSeq) return; // a newer drawer opened meanwhile
+    placement.value = res;
   } catch (err) {
+    if (seq !== placementSeq) return;
     placementError.value = err instanceof Error ? err.message : String(err);
   } finally {
-    placementLoading.value = false;
+    if (seq === placementSeq) placementLoading.value = false;
   }
 }
 
 function closeDetail(): void {
+  placementSeq++; // an in-flight openModel must not repopulate the closed drawer
   selected.value = null;
   placement.value = null;
   placementError.value = null;
@@ -168,22 +174,29 @@ async function runJob(nodeId: string, kind: string, params: Record<string, unkno
   }
 }
 
+let jobSeq = 0;
 async function openJob(id: string): Promise<void> {
   clearInterval(jobPoll);
+  const seq = ++jobSeq;
   try {
     job.value = await fetchJob(id);
   } catch (err) {
+    if (seq !== jobSeq) return;
     jobError.value = err instanceof Error ? err.message : String(err);
     return;
   }
+  if (seq !== jobSeq) return; // a newer drawer opened while fetching
   jobPoll = setInterval(async () => {
     if (job.value === null) return;
     if (job.value.job.status === "succeeded" || job.value.job.status === "failed" || job.value.job.status === "canceled") {
       clearInterval(jobPoll);
       return;
     }
+    const pollSeq = jobSeq;
     try {
-      job.value = await fetchJob(job.value.job.id);
+      const next = await fetchJob(job.value.job.id);
+      if (pollSeq !== jobSeq) return;
+      job.value = next;
     } catch {
       clearInterval(jobPoll);
     }
@@ -192,6 +205,7 @@ async function openJob(id: string): Promise<void> {
 
 function closeJob(): void {
   clearInterval(jobPoll);
+  jobSeq++; // an in-flight openJob must not repopulate the closed drawer
   job.value = null;
   jobError.value = null;
 }

@@ -5,6 +5,7 @@ import {
   decodeBestLevel,
   decodeResultSchema,
   formatContextSize,
+  formatP,
   mcnemarExactP,
   normalizeConcurrencies,
   normalizeContextSizes,
@@ -34,6 +35,19 @@ describe("mcnemarExactP", () => {
 
   it("ignores negative / fractional input", () => {
     expect(mcnemarExactP(-2, 1.9)).toBe(mcnemarExactP(0, 1));
+  });
+});
+
+describe("formatP", () => {
+  it("renders sub-resolution p-values as <0.001 (exact p is never 0)", () => {
+    expect(formatP(mcnemarExactP(12, 0))).toBe("<0.001");
+    expect(formatP(0.0004)).toBe("<0.001");
+  });
+
+  it("keeps three decimals at and above the threshold", () => {
+    expect(formatP(0.001)).toBe("0.001");
+    expect(formatP(0.049)).toBe("0.049");
+    expect(formatP(1)).toBe("1.000");
   });
 });
 

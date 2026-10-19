@@ -10,7 +10,13 @@ export function parseHash(hash: string): Route {
   const m = /^\/node\/([^/]+)$/.exec(h);
   const id = m?.[1];
   if (id !== undefined) {
-    return { view: "node", id: decodeURIComponent(id) };
+    try {
+      return { view: "node", id: decodeURIComponent(id) };
+    } catch {
+      // A truncated shared link (e.g. "#/node/abc%2") must not white-screen
+      // the app at boot — fall back to the raw segment.
+      return { view: "node", id };
+    }
   }
   if (h === "/models") return { view: "models" };
   if (h === "/serve") return { view: "serve" };

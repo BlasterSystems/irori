@@ -157,7 +157,13 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   }
 
   async function init(): Promise<void> {
-    await refreshNodes();
+    try {
+      await refreshNodes();
+    } catch {
+      // Registry unavailable at boot: still open the SSE stream — its onopen
+      // re-fetches, and a hard failure here used to leave the store dead
+      // (no SSE, no retry) rendering a misleading "no nodes" banner.
+    }
     if (stopped) return;
 
     if (EventSourceImpl) {
