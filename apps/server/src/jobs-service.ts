@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { jobOutput, jobs, modelMeta, nodeModels } from "@irori/db";
 import type { Db } from "@irori/db";
 import { jobKindSchema } from "@irori/core";
+import { isUniqueViolation } from "./pg.js";
 
 /**
  * Jobs subsystem for apps/server (M4): one active job per node, streamed
@@ -74,10 +75,19 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
         .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])))
         .limit(1);
       if (active) throw new JobBusyError(`node already has an active job (${active.id})`);
-      const [row] = await db
-        .insert(jobs)
-        .values({ nodeId, kind, status: "queued", params })
-        .returning();
+      let inserted: Array<typeof jobs.$inferSelect>;
+      try {
+        inserted = await db
+          .insert(jobs)
+          .values({ nodeId, kind, status: "queued", params })
+          .returning();
+      } catch (err) {
+        // The partial unique index makes one-active-per-node hold under
+        // concurrency; the check above is the fast path.
+        if (isUniqueViolation(err)) throw new JobBusyError("node already has an active job");
+        throw err;
+      }
+      const [row] = inserted;
       if (!row) throw new Error("job insert returned no row");
       const sent = sendToAgent(nodeId, { type: "job", jobId: row.id, kind, params });
       if (!sent) {
@@ -121,16 +131,20 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
     },
 
     async onOutput(nodeId, jobId, seq, line) {
+      // Frames are keyed by jobId alone on the wire; verify the job belongs to
+      // the sending node so a rogue agent cannot forge another node's output.
+      const [owner] = await db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
+      if (!owner || owner.nodeId !== nodeId) return;
       await db.insert(jobOutput).values({ jobId, seq, line });
       // Ring: drop anything beyond the cap for this job.
       await db.execute(sql`
         DELETE FROM job_output WHERE job_id = ${jobId} AND seq <= ${seq - MAX_OUTPUT_LINES}
       `);
-      void nodeId;
     },
 
     async onDone(nodeId, jobId, status, exitCode) {
-      void nodeId;
+      const [owner] = await db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
+      if (!owner || owner.nodeId !== nodeId) return;
       await db
         .update(jobs)
         .set({ status, exitCode, finishedAt: new Date() })

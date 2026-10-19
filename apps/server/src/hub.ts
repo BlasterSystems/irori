@@ -19,7 +19,7 @@ import { nodeLlmAssignments } from "./llm-store.js";
 import type { LlmRingEntry, Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 
-/** Drop-oldest cap for buffered DB writes (snapshots + llm probe passes). */
+/** Drop-oldest cap for buffered DB writes (snapshots, llm probe passes, terminal job/bench frames). */
 const MAX_PENDING_WRITES = 1000;
 const DEFAULT_WRITE_FLUSH_MS = 5_000;
 const DEFAULT_MARK_SEEN_THROTTLE_MS = 30_000;
@@ -40,12 +40,14 @@ export interface AgentHubDeps {
     onDone: (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => Promise<void>;
     onCatalog: (nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>) => Promise<void>;
   };
-  /** Setup supervision frames (M5): acks, driver events, log lines. */
+  /** Setup supervision frames (M5): acks, driver events, log lines. All are
+   *  verified against the sending node so a rogue agent cannot forge frames
+   *  for another node's setups. */
   setupEvents: {
-    onAck(msg: SetupAckMsg): void;
-    onEvent(msg: SetupEventMsg): Promise<void>;
-    onLog(msg: SetupLogMsg): void;
-    onValidateResult(msg: SetupValidateResultMsg): void;
+    onAck(msg: SetupAckMsg, senderNodeId: string): Promise<void>;
+    onEvent(msg: SetupEventMsg, senderNodeId: string): Promise<void>;
+    onLog(msg: SetupLogMsg, senderNodeId: string): Promise<void>;
+    onValidateResult(msg: SetupValidateResultMsg, senderNodeId: string): void;
   };
   /** Bench frames (M6): throttled progress + terminal results. */
   benchEvents: {
@@ -78,11 +80,11 @@ export interface AgentHub {
  * node's probe assignments and role-derived llm cadence.
  */
 export function createAgentHub(deps: AgentHubDeps): AgentHub {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
   const onlineNodes = new Set<string>();
   const nodeSockets = new Map<string, WebSocket>();
   const lastMarkedAt = new Map<string, number>();
-  const pending: Array<{ nodeId: string; kind: "snapshot" | "llm"; payload: unknown }> = [];
+  const pending: Array<{ nodeId: string; kind: "snapshot" | "llm" | "job-done" | "bench-done"; payload: unknown }> = [];
   const throttleMs = deps.markSeenThrottleMs ?? DEFAULT_MARK_SEEN_THROTTLE_MS;
 
   /** Builds and sends the node's config-update (probe ports, cadence, nasRoot). */
@@ -110,7 +112,14 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         const next = pending[0]!;
         try {
           if (next.kind === "snapshot") await deps.store.insertSnapshot(next.nodeId, next.payload);
-          else await deps.llmStore.insertLlmSnapshot(next.nodeId, next.payload);
+          else if (next.kind === "llm") await deps.llmStore.insertLlmSnapshot(next.nodeId, next.payload);
+          else if (next.kind === "job-done") {
+            const p = next.payload as { jobId: string; status: "succeeded" | "failed" | "canceled"; exitCode: number | null };
+            await deps.jobEvents.onDone(next.nodeId, p.jobId, p.status, p.exitCode);
+          } else {
+            const p = next.payload as { runId: string; status: "completed" | "failed" | "canceled"; result: unknown; error: string | null };
+            await deps.benchEvents.onDone(next.nodeId, p.runId, p.status, p.result, p.error);
+          }
           pending.shift();
         } catch {
           break; // DB still unhealthy; retry on the next tick
@@ -121,7 +130,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     }
   }
 
-  function enqueuePending(nodeId: string, kind: "snapshot" | "llm", payload: unknown): void {
+  function enqueuePending(nodeId: string, kind: "snapshot" | "llm" | "job-done" | "bench-done", payload: unknown): void {
     pending.push({ nodeId, kind, payload });
     while (pending.length > MAX_PENDING_WRITES) pending.shift(); // drop oldest
   }
@@ -262,7 +271,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       if (frame.type === "job-output") {
         void deps.jobEvents.onOutput(currentId, frame.jobId, frame.seq, frame.line).catch(() => {});
       } else if (frame.type === "job-done") {
-        void deps.jobEvents.onDone(currentId, frame.jobId, frame.status, frame.exitCode).catch(() => {});
+        // Terminal: a transient DB failure must not strand the one-active slot.
+        void deps.jobEvents
+          .onDone(currentId, frame.jobId, frame.status, frame.exitCode)
+          .catch(() => enqueuePending(currentId, "job-done", { jobId: frame.jobId, status: frame.status, exitCode: frame.exitCode }));
       } else if (frame.type === "catalog") {
         void deps.jobEvents.onCatalog(currentId, frame.source, frame.entries).catch(() => {});
       } else if (frame.type === "bench-progress") {
@@ -270,33 +282,35 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       } else if (frame.type === "bench-done") {
         void deps.benchEvents
           .onDone(currentId, frame.runId, frame.status, frame.result ?? null, frame.error)
-          .catch(() => {});
+          .catch(() =>
+            enqueuePending(currentId, "bench-done", { runId: frame.runId, status: frame.status, result: frame.result ?? null, error: frame.error }),
+          );
       } else if (
         frame.type === "setup-ack" ||
         frame.type === "setup-event" ||
         frame.type === "setup-log" ||
         frame.type === "setup-validate-result"
       ) {
-        setupChain = setupChain.then(() => routeSetupFrame(frame)).catch(() => {});
+        setupChain = setupChain.then(() => routeSetupFrame(frame, currentId)).catch(() => {});
       }
     });
 
-    const routeSetupFrame = (frame: Extract<AgentServerMsg, { type: `setup-${string}` }>): Promise<void> => {
+    const routeSetupFrame = (frame: Extract<AgentServerMsg, { type: `setup-${string}` }>, senderNodeId: string): Promise<void> => {
       if (frame.type === "setup-ack") {
-        deps.setupEvents.onAck(frame);
+        deps.setupEvents.onAck(frame, senderNodeId);
         return Promise.resolve();
       }
-      if (frame.type === "setup-event") return deps.setupEvents.onEvent(frame);
-      if (frame.type === "setup-log") {
-        deps.setupEvents.onLog(frame);
-        return Promise.resolve();
-      }
-      deps.setupEvents.onValidateResult(frame);
+      if (frame.type === "setup-event") return deps.setupEvents.onEvent(frame, senderNodeId);
+      if (frame.type === "setup-log") return deps.setupEvents.onLog(frame, senderNodeId);
+      deps.setupEvents.onValidateResult(frame, senderNodeId);
       return Promise.resolve();
     };
 
     ws.on("close", () => {
       if (nodeId === null) return;
+      // A reconnecting agent's new hello already owns the registration; a
+      // half-open old socket firing close late must not deregister it.
+      if (nodeSockets.get(nodeId) !== ws) return;
       onlineNodes.delete(nodeId);
       nodeSockets.delete(nodeId);
       lastMarkedAt.delete(nodeId);

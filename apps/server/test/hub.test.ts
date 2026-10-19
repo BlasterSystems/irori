@@ -120,6 +120,23 @@ describe("agent hub", () => {
     expect(hub.online().has(created.id)).toBe(false);
   });
 
+  it("keeps a reconnected node online when a stale socket closes late", async () => {
+    const { url, created, hub } = await setup();
+    const stale = await authenticate(url, created.token);
+    const fresh = await authenticate(url, created.token); // hello overwrites the registration
+    expect(hub.online().has(created.id)).toBe(true);
+    // The stale socket's late close must not deregister the fresh one
+    // (half-open reconnect: the agent never notices the ghost-offline).
+    stale.close();
+    await nextClose(stale);
+    await sleep(50);
+    expect(hub.online().has(created.id)).toBe(true);
+    expect(hub.sendToNode(created.id, { type: "ping" })).toBe(true);
+    fresh.close();
+    await nextClose(fresh);
+    await waitUntil(() => !hub.online().has(created.id));
+  });
+
   it("answers ping with pong", async () => {
     const { url, created } = await setup();
     const ws = await authenticate(url, created.token);
