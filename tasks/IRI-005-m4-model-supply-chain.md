@@ -50,10 +50,16 @@ HF metadata for recipe creation.
 - **Relevant ADRs:** 0003, 0004.
 - **Proposed ADR:** None.
 
-## Validation evidence
-
-- (pending)
+- Consolidated 2026-10-19 (process audit; milestone shipped in 5e4b534 +
+  46e3751 + 0b333e6). E2E verified live: NAS → dgx1 push (preconditions
+  discovered and documented: sync-local cache registration, ssh client/keys,
+  --cache-dir alignment, --ssh path); job runner verbs vs modelctl 0.20.x;
+  placement planner capacity/offline behavior keeps push sources.
+- modelctl CLI shapes re-verified live on dgx1 2026-10-19 (staging-audit
+  --json, list --local --json, path --local) — feeding the M7 hygiene work.
 
 ## Review
 
-- (pending)
+- catalog.json stays read-only (ADR-0004); destructive verbs run
+  dry-run → armed. Residual: unreferenced-object gc remains a manual job
+  (gc-objects) — not part of the M7 hygiene automation by design.

@@ -113,4 +113,4 @@ most 1 head + 1 worker.
 
 ## Review
 
-- (pending)
+- Consolidated 2026-10-19: stop-ack ordering (registered before sendToNode) and the polls-never-resurrect invariant re-verified in the adversarial review; staged transfers recovered across server restarts (M7 fixed the residual running-stage skip).

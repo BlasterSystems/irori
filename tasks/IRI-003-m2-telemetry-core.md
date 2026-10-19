@@ -76,4 +76,4 @@ live UI (worker/head card split per SPEC §5).
 
 ## Review
 
-- (pending)
+- Consolidated 2026-10-19: the ring→rollup→retention pipeline was later formalized by ADR-0006; M7 analytics built on these buckets without schema drift (only the gpu_throttled column added).
