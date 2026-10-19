@@ -4,6 +4,30 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [0.3.0] — Agent onboarding & hub-driven updates
+
+### Added
+
+- **Hub-served agent onboarding** (IRI-011 / IR-57, ADR-0007): the hub serves
+  `install-agent.sh`, `irori-agent.service` and its own version's agent bundle
+  (`GET /agent/irori-agent.mjs`); the Add-node modal offers the download and a
+  copyable install block — nodes need no GitHub reachability.
+- **One-click agent updates** (IRI-012 / IR-58, ADR-0007): agents ≥ 0.3.0
+  update themselves to the hub's version over the existing WS link
+  (`POST /api/v1/nodes/:id/agent-update`); the bundle replace runs in a
+  `systemd-run` transient unit, keeps the previous bundle as `.bak`, and the
+  job settles from the node's next hello. Busy nodes (active job, running
+  bench or setup) and agents older than 0.3.0 are refused — the latter get
+  the install one-liner once.
+- `GET /api/v1/version` plus agent-version drift chips on the nodes list and
+  drill-down with an Update action.
+
+### Changed
+
+- `SPEC.md` §13 corrected to the shipped routes (removed the never-built
+  `/:id/install-agent`, the wrong rotate path and the nonexistent
+  `POST /api/v1/nodes/:id/test`).
+
 ## [0.2.0] — M7 Analytics, disk hygiene & packaging
 
 ### Added
