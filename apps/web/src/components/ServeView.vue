@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
 import { fetchModelsPage, fetchPlacement } from "../models";
 import { setupChip, type NodeInfo, type SetupTransfer, type TransferStage } from "@irori/core";
 import {
@@ -391,6 +391,30 @@ async function onValidate(): Promise<void> {
 /* Step 4 — placement: per-node plan + staged transfers on the created setup. */
 
 const placementRows = ref<null | Array<{ node: { id: string; name: string; role: string; online: boolean }; action: string; reason: string | null; bytes: number | null }>>(null);
+
+// Placement tie-in (SPEC §11.6): a failed capacity check offers
+// "Clean up disk — est. +N GB" from the node's latest audit.
+const CAPACITY_RE = /needs \d+ bytes, only \d+ free/;
+const capacityRows = computed(() => (placementRows.value ?? []).filter((p) => p.action === "unavailable" && p.reason !== null && CAPACITY_RE.test(p.reason)));
+const hygieneOffers = ref<Map<string, number>>(new Map());
+const hygieneNode = ref<{ id: string; name: string } | null>(null);
+watch(capacityRows, (rows) => {
+  for (const row of rows) {
+    if (hygieneOffers.value.has(row.node.id)) continue;
+    void fetchCleanup(row.node.id)
+      .then((state) => {
+        const report = state.latestAudit?.report;
+        const categories = report !== null && report !== undefined && Array.isArray((report as { categories?: unknown }).categories)
+          ? (report as { categories: Array<{ reclaimableBytes: number }> }).categories
+          : [];
+        hygieneOffers.value.set(row.node.id, categories.reduce((sum, c) => sum + c.reclaimableBytes, 0));
+      })
+      .catch(() => hygieneOffers.value.set(row.node.id, 0));
+  }
+});
+function openHygiene(nodeId: string, name: string): void {
+  hygieneNode.value = { id: nodeId, name };
+}
 const created = ref<SetupInfo | null>(null);
 const activeTransfer = ref<SetupTransfer | null>(null);
 
@@ -702,6 +726,12 @@ function fmtGiB(bytes: number | null): string {
               </template>
             </dl>
             <p v-else class="stat__sub">{{ wizard.model }} is absent from the NAS catalog — staging will chain the HF download (NAS first, then the cluster).</p>
+            <div v-for="row in capacityRows" :key="row.node.id" class="row row--between" style="margin-top: 6px">
+              <span class="stat__sub">{{ row.node.name }}: {{ row.reason }}</span>
+              <button class="btn btn--secondary btn--sm" @click="openHygiene(row.node.id, row.node.name)">
+                Clean up disk<template v-if="(hygieneOffers.get(row.node.id) ?? 0) > 0"> — est. +{{ fmtGiB(hygieneOffers.get(row.node.id) ?? 0) }}</template>
+              </button>
+            </div>
             <div class="row row--between">
               <span class="stat__sub">missing models transfer in staged progress — start runs after activation.</span>
               <button class="btn btn--secondary btn--sm" :disabled="staging" @click="onStageTransfers">{{ staging ? "staging…" : "Stage transfers" }}</button>
@@ -744,7 +774,10 @@ function fmtGiB(bytes: number | null): string {
       </div>
     </div>
   </div>
+
+  <CleanupDrawer v-if="hygieneNode !== null" :node-id="hygieneNode.id" :node-name="hygieneNode.name" @close="hygieneNode = null" />
 </template>
+
 
 <style scoped>
 .setup {

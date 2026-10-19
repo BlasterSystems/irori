@@ -21,6 +21,7 @@ function portFixture(overrides: Partial<LlmPortSnapshot> = {}): LlmPortSnapshot 
     backend: "exl3",
     detected: true,
     model: "GLM-5.3-Flash-EXL3",
+    tokens: null,
     decodeTps: 142.3,
     prefillTps: 3214,
     queueRunning: 3,

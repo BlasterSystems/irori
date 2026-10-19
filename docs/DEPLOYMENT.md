@@ -63,6 +63,31 @@ The agent is configured via env (no config file): `IRORI_SERVER_URL`,
 setup-driver state (`setups.json`) and persisted run logs (`setup-logs/`),
 so give it a persistent volume when containerized.
 
+### Release artifacts (M7)
+
+A `v*` tag triggers `.github/workflows/release.yml`: multi-arch (amd64+arm64)
+images `ghcr.io/blastersystems/irori:<tag>` (server role) and
+`ghcr.io/blastersystems/irori-agent:<tag>` (agent role) land on GHCR, and the
+agent bundle, install script and systemd unit are attached to the GitHub
+release. Tag only commits whose CI (`verify` + `docs-check`) is green, per
+`docs/RELEASING.md` — the release workflow does not run tests.
+
+Bare-metal agent install (as root on the agent host; the script completes only
+when the WS hello lands in the journal):
+
+```sh
+curl -fLsS -o install-agent.sh https://github.com/BlasterSystems/irori/releases/latest/download/install-agent.sh
+chmod +x install-agent.sh
+./install-agent.sh --server ws://IRORI_HOST:3947/agent-ws --token irn_... --version v0.2.0
+```
+
+Containerized agents (e.g. the DGX Spark) run the same bundle from the
+`irori-agent` image — upgrade by pulling the new tag and re-creating the
+container with the same binds/env. Note: the agent image ships node-slim +
+rsync/curl/openssh but no docker CLI, so disk-hygiene docker categories
+report "docker CLI not available" unless the CLI + socket are added to the
+container; bare-metal agents (the primary install, SPEC §11) have docker.
+
 Serving setups (M5) spawn the start/stop script pair from the agent process:
 a containerized agent on a node whose scripts manage host services (e.g.
 `docker start …` over `/var/run/docker.sock`) needs that socket bind-mounted

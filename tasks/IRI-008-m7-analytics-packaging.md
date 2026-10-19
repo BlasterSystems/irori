@@ -64,8 +64,34 @@ opt-in prevention, SPEC §11.6).
 
 ## Validation evidence
 
-- (pending)
+- 2026-10-19: 482/482 tests (core 48, web 118, db 4, agent 120, server 84 —
+  5 new M7 integration tests: ledger deltas + reset-safety, ledger prune,
+  analytics folding per lens (node + cluster), hygiene report persistence via
+  the job's final output line, monthly energy clamp), `pnpm typecheck` clean,
+  `.agentic/bin/validate` + `docs-check --strict` green.
+- Live smoke on a scratch DB (2026-10-19): `GET /api/v1/analytics/{temps,
+  decode,power,memory,tokens}` verified against seeded rollups (additive
+  cluster folds, fleet-max temps, clamped watts with coverage); cleanup
+  endpoint returns latestAudit + history + prevention. Browser-verified the
+  Analytics page (decode chart + prefill card, temps fleet strip + warn/critical
+  markers + guides, tokens ledger per-model table), the node-detail Disk
+  hygiene drawer (Disk 92% warn chip, 8-category checklist with safe
+  pre-checked + ◇ care opt-in, Plan/Prevention flow) and the 0.2.0 healthz
+  stamp.
+- modelctl CLI semantics verified live on dgx1 (`staging-audit --json`,
+  `list --local --json`, `path --local`, `cleanup-staging targets --apply`);
+  the NAS held ~500 GB of staging junk — the hygiene feature's first real win.
 
 ## Review
 
-- (pending)
+- Implemented in one pass (single-writer, sequential per owner preference):
+  core contracts (analytics/hygiene + llm token counters), migration 0009
+  (token_ledger, energy_monthly, cleanup_runs, gpu_throttled), agent hygiene
+  module + JobManager dispatch, server ledger/energy engines + analytics
+  service + cleanup lifecycle, web Analytics view + CleanupDrawer + card chips
+  + placement remediation, release workflow (multi-arch GHCR) + install
+  script + CHANGELOG (0.2.0).
+- Residual: containerized agents need the docker CLI + socket mounted for the
+  docker hygiene categories (documented in DEPLOYMENT.md); bare-metal agents
+  (primary install) have docker. The M7 exit (release artifacts + agent on a
+  Spark) awaits explicit owner approval for commit/tag/deploy.

@@ -23,6 +23,10 @@ export const JOB_KINDS = [
   "gc-objects",
   "catalog-refresh",
   "sync-cards",
+  // Disk hygiene (M7, SPEC §11.6) — executed by the agent itself, not modelctl.
+  "hygiene-audit",
+  "hygiene-clean",
+  "hygiene-prevent",
 ] as const;
 
 export const jobKindSchema = z.enum(JOB_KINDS);

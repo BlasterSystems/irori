@@ -3,6 +3,8 @@ import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
 import { readStore } from "./catalog-read.js";
+import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
+import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager } from "./jobs.js";
 import { SetupDriver } from "./setups.js";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
@@ -69,6 +71,10 @@ async function run(): Promise<void> {
     };
   }
 
+  // Disk-hygiene audit cache (SPEC §11.6: cached ~5 min) — invalidated by cleans.
+  let hygieneCache: { at: number; audit: HygieneAudit } | null = null;
+  const HYGIENE_AUDIT_TTL_MS = 5 * 60_000;
+
   const jobs = new JobManager(
     () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath }),
     {
@@ -77,6 +83,29 @@ async function run(): Promise<void> {
         log(`job ${jobId} done: ${status} (exit ${exitCode})`);
         transport.sendAgentServer({ type: "job-done", jobId, status, exitCode });
       },
+    },
+    async (jobId, kind, params, emit, signal) => {
+      void jobId;
+      const hygieneCtx = { nasRoot: transport.getNasRoot(), modelctlPath: config.modelctlPath };
+      if (kind === "hygiene-prevent") {
+        const result = await applyDockerLogRotation(emit);
+        return { ok: result.error === null };
+      }
+      if (kind === "hygiene-audit") {
+        if (hygieneCache !== null && Date.now() - hygieneCache.at < HYGIENE_AUDIT_TTL_MS) {
+          emit(JSON.stringify(hygieneCache.audit));
+          return { ok: true };
+        }
+        const audit = await auditHygiene(hygieneCtx);
+        hygieneCache = { at: Date.now(), audit };
+        emit(JSON.stringify(audit));
+        return { ok: true };
+      }
+      const parsed = hygieneCleanParamsSchema.parse(params);
+      const result = await cleanHygiene(parsed, hygieneCtx, emit, signal);
+      hygieneCache = null; // a clean invalidates the cached audit
+      emit(JSON.stringify(result));
+      return { ok: result.outcomes.every((o) => o.status !== "failed") };
     },
   );
 

@@ -16,6 +16,7 @@ import { computeDetailData } from "../detail-data";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import LlmPanel from "./LlmPanel.vue";
 import Sparkline from "./Sparkline.vue";
+import CleanupDrawer from "./CleanupDrawer.vue";
 
 const props = defineProps<{ nodeId: string }>();
 
@@ -145,6 +146,8 @@ const historyMeta = computed(() => {
 const statusChipClass = computed(() =>
   node.value?.online ? "chip--ok" : "chip--muted",
 );
+
+const cleanupOpen = ref(false);
 </script>
 
 <template>
@@ -163,6 +166,7 @@ const statusChipClass = computed(() =>
             <span class="chip">{{ node?.host }}</span>
             <span v-if="card.agentVersion" class="chip">Agent {{ card.agentVersion }}</span>
           </template>
+          <button class="btn btn--secondary btn--sm" @click="cleanupOpen = true">Disk hygiene</button>
           <a class="chip detail-back" href="#/">← Overview</a>
         </div>
         <p v-if="notFound" class="muted" style="margin-top: 8px;">
@@ -290,6 +294,8 @@ const statusChipClass = computed(() =>
         </div>
       </article>
     </section>
+
+    <CleanupDrawer v-if="cleanupOpen && node !== null" :node-id="nodeId" :node-name="node.name" @close="cleanupOpen = false" />
   </div>
 </template>
 

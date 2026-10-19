@@ -66,6 +66,7 @@ type LlmMetrics = Partial<
     | "e2eP95Ms"
     | "itlP95Ms"
     | "engineMeta"
+    | "tokens"
   >
 >;
 
@@ -379,6 +380,7 @@ export class LlmPortProbe {
       e2eP95Ms: metrics.e2eP95Ms ?? null,
       itlP95Ms: metrics.itlP95Ms ?? null,
       engineMeta: metrics.engineMeta ?? null,
+      tokens: metrics.tokens ?? null,
       probedAtMs: this.now(),
     };
   }
@@ -553,6 +555,14 @@ export class LlmPortProbe {
     const genS = this.sample("vllm:gen", gen);
     if (genS !== null) out.decodeTps = genS.rate;
 
+    // Cumulative token counters (M7 ledger). promSum returns the counter's
+    // current value; null when this vLLM build does not publish the metric.
+    const promptCounter = promSum(series, "vllm:prompt_tokens_total");
+    const cacheHits = promSum(series, "vllm:gpu_prefix_cache_hits_total");
+    if (gen !== null || promptCounter !== null || cacheHits !== null) {
+      out.tokens = { generated: gen, prompt: promptCounter, cached: cacheHits };
+    }
+
     // Prefill: Δiteration_tokens_total_sum surplus over decode Δ (spec-decode
     // noise below 50 % of decode Δ is ignored); fallback Δprompt_tokens_total.
     const iterSum = promSum(series, "vllm:iteration_tokens_total_sum");
@@ -569,7 +579,7 @@ export class LlmPortProbe {
         }
       }
     } else {
-      const promptS = this.sample("vllm:prompt", promSum(series, "vllm:prompt_tokens_total"));
+      const promptS = this.sample("vllm:prompt", promptCounter);
       if (promptS !== null) out.prefillTps = promptS.rate;
     }
 
@@ -599,6 +609,7 @@ export class LlmPortProbe {
     if (slots !== null && Array.isArray(slots.body)) {
       let decoded: number | null = 0;
       let processed: number | null = 0;
+      let cached: number | null = 0;
       let active = 0;
       let sawSlot = false;
       for (const slot of slots.body) {
@@ -610,6 +621,9 @@ export class LlmPortProbe {
         const p = num(slot.n_prompt_tokens_processed);
         if (p === null) processed = null;
         else if (processed !== null) processed += p;
+        const c = num(slot.n_prompt_tokens_cached);
+        if (c === null) cached = null;
+        else if (cached !== null) cached += c;
         if (slot.is_processing === true) active += 1;
       }
       if (sawSlot) {
@@ -618,6 +632,9 @@ export class LlmPortProbe {
         const dProc = this.sample("llama:processed", processed);
         if (dProc !== null) out.prefillTps = dProc.rate;
         out.queueRunning = active;
+        if (decoded !== null || processed !== null || cached !== null) {
+          out.tokens = { generated: decoded, prompt: processed, cached };
+        }
       }
     }
     await this.fetchLlamaProps();
@@ -887,10 +904,15 @@ export class LlmPortProbe {
         promSum(series, "q27_decode_tokens_total"),
     );
     if (decodeS !== null) out.decodeTps = decodeS.rate;
+    const decodeCounter = promSum(series, "q27_decode_tokens_processed_total") ?? promSum(series, "q27_decode_tokens_total");
+    const prefillCounter =
+      promSum(series, "q27_prefill_computed_tokens_processed_total") ?? promSum(series, "q27_prefill_computed_tokens_total");
+    if (decodeCounter !== null || prefillCounter !== null) {
+      out.tokens = { generated: decodeCounter, prompt: prefillCounter, cached: null };
+    }
     const computeS = this.sample(
       "q27:prefill",
-      promSum(series, "q27_prefill_computed_tokens_processed_total") ??
-        promSum(series, "q27_prefill_computed_tokens_total"),
+      prefillCounter,
     );
     if (computeS !== null) out.prefillTps = computeS.rate;
 
@@ -918,17 +940,19 @@ export class LlmPortProbe {
 
     // Cumulative counters are the live source; the *_tok_s gauges are ~60 s
     // windows and are used only when the counters are absent.
-    const decodeS = this.sample("ds4:gen", promSum(series, "ds4_tokens_decoded_total"));
+    const decodeCounter = promSum(series, "ds4_tokens_decoded_total");
+    const decodeS = this.sample("ds4:gen", decodeCounter);
     if (decodeS !== null) {
       out.decodeTps = decodeS.rate;
     } else {
       const gauge = promMax(series, "ds4_decode_tok_s");
       if (gauge !== null) out.decodeTps = round2(gauge);
     }
-    const computeS = this.sample(
-      "ds4:prefill",
-      promLabeledSum(series, "ds4_tokens_prefilled_total", (l) => l.kind === "computed"),
-    );
+    const prefillCounter = promLabeledSum(series, "ds4_tokens_prefilled_total", (l) => l.kind === "computed");
+    if (decodeCounter !== null || prefillCounter !== null) {
+      out.tokens = { generated: decodeCounter, prompt: prefillCounter, cached: null };
+    }
+    const computeS = this.sample("ds4:prefill", prefillCounter);
     if (computeS !== null) {
       out.prefillTps = computeS.rate;
     } else {

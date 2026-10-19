@@ -1,4 +1,5 @@
 import {
+  type AnalyticsResponse,
   LLM_BACKENDS,
   nodeInfoSchema,
   type LlmBackend,
@@ -247,7 +248,19 @@ function parseLlmPort(raw: unknown): LlmPortSnapshot {
     e2eP95Ms: nullableNumber(o, "e2eP95Ms"),
     itlP95Ms: nullableNumber(o, "itlP95Ms"),
     engineMeta,
+    tokens: shapeTokens(o.tokens),
     probedAtMs: typeof o.probedAtMs === "number" ? o.probedAtMs : 0,
+  };
+}
+
+/** Cumulative token counters (M7): tolerate absent/garbage payloads. */
+function shapeTokens(raw: unknown): LlmPortSnapshot["tokens"] {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  return {
+    generated: nullableNumber(o, "generated"),
+    prompt: nullableNumber(o, "prompt"),
+    cached: nullableNumber(o, "cached"),
   };
 }
 
@@ -386,4 +399,104 @@ export async function fetchLlmHistory(
   }
   const body: unknown = await res.json();
   return parseLlmHistoryResponse(body);
+}
+
+// ─── M7: analytics + cleanup ────────────────────────────────────────────────
+
+export type AnalyticsLensName = "memory" | "decode" | "power" | "temps" | "tokens";
+export type AnalyticsRangeName = "1h" | "24h" | "7d" | "30d" | "90d";
+
+/** Tolerant: identity fields validated, series shape checked structurally. */
+export async function fetchAnalytics(
+  lens: AnalyticsLensName,
+  range: AnalyticsRangeName,
+  groupBy: "cluster" | "node",
+  opts: { setupId?: string; nodeId?: string; signal?: AbortSignal } = {},
+): Promise<AnalyticsResponse> {
+  const params = new URLSearchParams({ range, groupBy });
+  if (opts.setupId !== undefined) params.set("setupId", opts.setupId);
+  if (opts.nodeId !== undefined) params.set("nodeId", opts.nodeId);
+  const res = await fetch(`/api/v1/analytics/${lens}?${params}`, { headers: { accept: "application/json" }, signal: opts.signal });
+  if (!res.ok) throw new Error(`GET /api/v1/analytics/${lens} failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("GET /api/v1/analytics: expected an object");
+  }
+  const o = body as Record<string, unknown>;
+  if (o.lens !== lens || o.range !== range || o.groupBy !== groupBy || !Array.isArray(o.series)) {
+    throw new Error("GET /api/v1/analytics: unexpected payload shape");
+  }
+  return body as AnalyticsResponse;
+}
+
+export interface CleanupCategoryAudit {
+  category: string;
+  safe: boolean;
+  rationale: string;
+  itemCount: number;
+  reclaimableBytes: number;
+}
+
+export interface CleanupAuditReport {
+  generatedAtMs: number;
+  totalBytes: number | null;
+  freeBytes: number | null;
+  categories: CleanupCategoryAudit[];
+}
+
+export interface CleanupHistoryEntry {
+  id: string;
+  kind: string;
+  status: string;
+  categories: unknown;
+  report: unknown;
+  error: string | null;
+  jobId: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface CleanupRunRow {
+  id: string;
+  kind: string;
+  status: string;
+  categories: unknown;
+  /** HygieneAudit / HygieneCleanResult — null until the job settles. */
+  report: CleanupAuditReport | Record<string, unknown> | null;
+  error: string | null;
+  jobId: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface CleanupState {
+  latestAudit: CleanupRunRow | null;
+  history: CleanupRunRow[];
+  prevention: { weeklySafePass: boolean; logRotationApplied: boolean };
+}
+
+export async function fetchCleanup(nodeId: string, signal?: AbortSignal): Promise<CleanupState> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(nodeId)}/cleanup`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/nodes/${nodeId}/cleanup failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("GET cleanup: expected an object");
+  }
+  const o = body as Record<string, unknown>;
+  return {
+    latestAudit: (o.latestAudit ?? null) as CleanupState["latestAudit"],
+    history: Array.isArray(o.history) ? (o.history as CleanupState["history"]) : [],
+    prevention: (o.prevention ?? { weeklySafePass: false, logRotationApplied: false }) as CleanupState["prevention"],
+  };
+}
+
+export async function setWeeklySafePass(nodeId: string, enabled: boolean): Promise<CleanupState["prevention"]> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(nodeId)}/hygiene`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ weeklySafePass: enabled }),
+  });
+  if (!res.ok) throw new Error(`PUT /api/v1/nodes/${nodeId}/hygiene failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  return (typeof body === "object" && body !== null ? body : {}) as CleanupState["prevention"];
 }
