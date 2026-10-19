@@ -114,7 +114,7 @@ export class LiveRate {
   }
 
   stop(): void {
-    clearInterval(this.timer);
+    clearInterval(this.timer ?? undefined);
     this.timer = null;
     try {
       this.onLive(null);
@@ -270,7 +270,9 @@ async function runWave(
   const failed = streams.length - ok.length;
   const decodeTpsList = ok.map((s) => streamResult(s.res).decodeTps);
   const ttftList = ok.map((s) => s.res.ttftMs ?? 0).filter((n) => n > 0);
-  const totalDecodeTokens = ok.reduce((sum, s) => sum + (s.res.completionTokens ?? s.res.deltaCount), 0);
+  // The first token is prefill's outcome, not decode (mirrors the per-stream
+  // rate); totalCompletionTokens keeps the raw completion count.
+  const totalDecodeTokens = ok.reduce((sum, s) => sum + Math.max(0, (s.res.completionTokens ?? s.res.deltaCount) - 1), 0);
   const totalCompletionTokens = ok.reduce((sum, s) => sum + (s.res.completionTokens ?? s.res.deltaCount), 0);
 
   // Client aggregate over the concurrent first→last token window.

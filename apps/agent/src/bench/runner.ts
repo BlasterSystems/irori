@@ -91,7 +91,7 @@ export class BenchRunner {
         this.log(`bench ${input.bench} ${input.runId} ${status}: ${error ?? ""}`);
       }
       if (this.active?.runId === input.runId) this.active = null;
-      clearInterval(this.flushTimer);
+      clearInterval(this.flushTimer ?? undefined);
       this.flushTimer = null;
       this.events.onDone(input.runId, status, status === "completed" ? result : null, error);
     })();

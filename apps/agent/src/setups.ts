@@ -1,5 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { accessSync, constants, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { join } from "node:path";
 
@@ -131,6 +131,33 @@ export class SetupDriver {
       }
     }
     this.persist(kept);
+    this.pruneRunLogs();
+  }
+
+  /** Per-run log files grow with engine stdout — keep the newest few per setup. */
+  private pruneRunLogs(keep = 5): void {
+    try {
+      const dir = join(this.deps.stateDir, LOG_DIR);
+      const bySetup = new Map<string, Array<{ name: string; mtimeMs: number }>>();
+      for (const entry of readdirSync(dir)) {
+        // <setupId>-<runId>.log — both UUIDs, so the runId is exactly the
+        // last 36 chars before the extension.
+        const m = /^(.+)-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.log$/.exec(entry);
+        if (m === null) continue;
+        const setupId = m[1]!;
+        const st = statSync(join(dir, entry));
+        const list = bySetup.get(setupId) ?? [];
+        list.push({ name: entry, mtimeMs: st.mtimeMs });
+        bySetup.set(setupId, list);
+      }
+      for (const list of bySetup.values()) {
+        if (list.length <= keep) continue;
+        list.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        for (const stale of list.slice(keep)) rmSync(join(dir, stale.name), { force: true });
+      }
+    } catch (err) {
+      this.deps.log?.(`setup log pruning skipped (${err instanceof Error ? err.message : String(err)})`);
+    }
   }
 
   /** Agent ring for the setup (bounded, oldest dropped). */
@@ -202,6 +229,7 @@ export class SetupDriver {
       logPath,
     };
     this.records.set(setupId, record);
+    this.children.set(setupId, child);
     this.persist([...this.records.values()]);
 
     const stream = createWriteStream(logPath, { flags: "a" });
@@ -230,7 +258,17 @@ export class SetupDriver {
         pgid: record.pgid,
         error: code === 0 ? null : `start script exited with code ${code}`,
       });
-      this.finish(setupId, code, code === 0 ? null : `start script exited with code ${code}`);
+      this.children.delete(setupId);
+      if (code === 0) {
+        // Daemonizing pattern (docker start …, setsid …): the engine outlives
+        // the script. Retain the record so stop() can reach the engine and
+        // the start guard refuses a double start — polls still report driver
+        // truth from the record (a dead group reports stopped, and only a
+        // start's own exit event may promote via the probe).
+        this.persist([...this.records.values()]);
+        return;
+      }
+      this.finish(setupId, code, `start script exited with code ${code}`);
     });
 
     this.deps.events.onEvent(setupId, {

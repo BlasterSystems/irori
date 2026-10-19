@@ -1,5 +1,5 @@
 import type { ToolevalConfig, ToolevalResult, ToolevalScenarioResult } from "@irori/core";
-import { benchComplete, stripFillForceFields, thinkingOffFields } from "./stream.js";
+import { benchComplete, stripThinkingFields, thinkingOffFields } from "./stream.js";
 
 /**
  * Tool-eval bench — agentic tool-use trials (M6). Deterministic scenarios in
@@ -384,7 +384,10 @@ async function runScenarioTrial(url: string, model: string | null, s: ToolEvalSc
       };
       res = await benchComplete(url, body, ctrl.signal, { apiKey: hooks.apiKey });
       if (res.error?.startsWith("HTTP 400")) {
-        res = await benchComplete(url, stripFillForceFields(thinkingOffFields()), ctrl.signal, { apiKey: hooks.apiKey });
+        // The only 400 sources in this body are the thinking-off fields;
+        // strip them from the REAL body (a bare thinkingOffFields() would
+        // retry with no model/messages/tools).
+        res = await benchComplete(url, stripThinkingFields(body), ctrl.signal, { apiKey: hooks.apiKey });
       }
     } finally {
       clearTimeout(timer);

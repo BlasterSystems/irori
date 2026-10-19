@@ -2,7 +2,11 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SetupDriver, type SetupDriverEvent, type SetupLogLine } from "../src/setups.js";
+import { SetupDriver, type SetupDriverEvent } from "../src/setups.js";
+
+/** The harness records the setupId alongside the event (the source splits them). */
+type RecordedEvent = SetupDriverEvent & { setupId: string };
+type RecordedLog = { setupId: string; seq: number; line: string; ts: number };
 
 const ID = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e01";
 const RUN = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
@@ -22,14 +26,14 @@ function makeDir(): string {
 interface Harness {
   driver: SetupDriver;
   dir: string;
-  events: SetupDriverEvent[];
-  logs: SetupLogLine[];
+  events: RecordedEvent[];
+  logs: RecordedLog[];
 }
 
 function makeHarness(modelctlScript?: string): Harness {
   const dir = makeDir();
-  const events: SetupDriverEvent[] = [];
-  const logs: SetupLogLine[] = [];
+  const events: RecordedEvent[] = [];
+  const logs: RecordedLog[] = [];
   const driver = new SetupDriver({
     stateDir: dir,
     modelctlPath: modelctlScript ?? "/nonexistent-modelctl",
@@ -142,7 +146,7 @@ describe("SetupDriver", () => {
     const dir = makeDir();
     const start = script(dir, "start.sh", "sleep 60");
     const stop = script(dir, "stop.sh", "true");
-    const events: SetupDriverEvent[] = [];
+    const events: RecordedEvent[] = [];
     const driver = new SetupDriver({
       stateDir: dir,
       modelctlPath: "/nonexistent",
@@ -163,7 +167,7 @@ describe("SetupDriver", () => {
     expect(persisted[0]!.pgid).not.toBeNull();
 
     // A fresh agent process re-attaches: alive → running.
-    const events2: SetupDriverEvent[] = [];
+    const events2: RecordedEvent[] = [];
     const driver2 = new SetupDriver({
       stateDir: dir,
       modelctlPath: "/nonexistent",
@@ -180,7 +184,7 @@ describe("SetupDriver", () => {
     const deadDir = makeDir();
     mkdirSync(deadDir, { recursive: true });
     writeFileSync(join(deadDir, "setups.json"), JSON.stringify([{ setupId: ID, runId: RUN, scriptStart: "x", scriptStop: "y", env: {}, pid: 999999, pgid: 999999, startedAt: 0, logPath: "x" }]));
-    const events3: SetupDriverEvent[] = [];
+    const events3: RecordedEvent[] = [];
     const driver3 = new SetupDriver({
       stateDir: deadDir,
       modelctlPath: "/nonexistent",
