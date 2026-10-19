@@ -78,6 +78,7 @@ function makeApp(overrides: Partial<AppDeps> = {}) {
     sse: createSseHub({ heartbeatMs: 0 }),
     getHub: () => ({ online: () => new Set<string>(), sendToNode: () => false }),
     version: "9.9.9",
+    tag: "dev-0.3.0-dev.4",
     staticDir: null,
     agentArtifacts: null,
     ...overrides,
@@ -115,7 +116,7 @@ describe("agent artifact routes (IRI-011)", () => {
     const { app } = makeApp();
     const res = await request(app).get("/api/v1/version");
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ version: "9.9.9" });
+    expect(res.body).toEqual({ version: "9.9.9", tag: "dev-0.3.0-dev.4" });
   });
 });
 

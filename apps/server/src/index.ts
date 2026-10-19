@@ -86,6 +86,8 @@ let dbHandle: DbHandle | null = null;
 
 const config = loadConfig();
 const version = readVersion();
+/** Git tag baked into the image by CD/release; null for local builds. */
+const gitTag = process.env.IRORI_GIT_TAG?.trim() || null;
 const rings = createRings();
 const sse = createSseHub();
 
@@ -104,13 +106,14 @@ const app = createApp({
   sse,
   getHub: () => state.hub,
   version,
+  tag: gitTag,
   staticDir: existsSync(WEB_DIST) ? WEB_DIST : null,
   agentArtifacts: AGENT_ARTIFACTS,
 });
 
 const server = createServer(app);
 server.listen(config.port, () => {
-  console.log(`[irori-server] ${version} listening on :${config.port}`);
+  console.log(`[irori-server] ${version}${gitTag === null ? "" : ` (${gitTag})`} listening on :${config.port}`);
 });
 
 void boot();

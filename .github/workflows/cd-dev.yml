@@ -65,6 +65,7 @@ jobs:
           VM_HOST: ${{ vars.DEV_VM_HOST }}
           VM_USER: ${{ vars.DEV_VM_USER }}
           VM_DEPLOY_DIR: ${{ vars.DEV_DEPLOY_DIR }}
+          GIT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           set -euo pipefail
           install -m 600 /dev/null /tmp/deploy_key
@@ -83,7 +84,7 @@ jobs:
           # captured BEFORE the build — compose retags irori-dev:latest to the
           # new image, so capturing after would "roll back" to the broken one.
           $SSH "cd '$VM_DEPLOY_DIR' && PREV=\$(docker images --format '{{.ID}}' irori-dev:latest | head -1); echo \"\$PREV\" > /tmp/irori-dev.prev"
-          $SSH "cd '$VM_DEPLOY_DIR' && docker compose -f deploy/docker-compose.yml build --pull irori"
+          $SSH "cd '$VM_DEPLOY_DIR' && IRORI_GIT_TAG='$GIT_TAG' docker compose -f deploy/docker-compose.yml build --pull irori"
 
           $SSH "cd '$VM_DEPLOY_DIR' && docker rm -f irori-dev 2>/dev/null || true; docker compose -f deploy/docker-compose.yml up -d --no-deps irori"
 

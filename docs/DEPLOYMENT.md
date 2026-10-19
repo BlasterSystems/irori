@@ -24,7 +24,10 @@ deploys from the self-hosted runner on the runner VM (LXC 110):
 2. SSH (localhost from the runner VM to 10.0.10.9) → fetch bundle into
    `/opt/irori`, `checkout --detach`.
 3. `docker compose -f deploy/docker-compose.yml build --pull irori`
-   (server role of `docker/Dockerfile`), remembers the previous image ID.
+   (server role of `docker/Dockerfile`), remembers the previous image ID. The
+   deployed tag is baked in as the `GIT_TAG` build arg (`IRORI_GIT_TAG`) and
+   shown in the UI footer (`Irori <version> · <tag>`); manual dispatches from
+   a branch carry no tag.
 4. Swap container `irori-dev` (port 3947, env from `deploy/.env`).
 5. Health gate: 60 × 2 s against `http://127.0.0.1:3947/healthz` inside the
    container; on failure the previous image is retagged and restarted

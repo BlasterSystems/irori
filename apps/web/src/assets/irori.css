@@ -72,6 +72,7 @@ button { font: inherit; color: inherit; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 .page { padding: var(--space-5) 0 var(--space-7); }
+.foot { padding-bottom: var(--space-5); }
 .pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
 .pagehead p { margin: var(--space-1) 0 0; color: var(--muted); font-size: 14px; }
 .cols { display: grid; gap: var(--space-3); }

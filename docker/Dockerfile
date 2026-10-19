@@ -22,6 +22,10 @@ RUN pnpm --filter @irori/core --filter @irori/db --filter @irori/server --filter
 FROM node:24-alpine AS server
 ENV NODE_ENV=production
 ENV IRORI_STATIC_DIR=/srv/irori-web
+# Git tag the image was built from — surfaced by /api/v1/version and the UI
+# footer. CD (dev-*) and Release (v*) pass it; local builds leave it empty.
+ARG GIT_TAG=""
+ENV IRORI_GIT_TAG=$GIT_TAG
 WORKDIR /app
 # Deploy resolves workspace:* into real prod deps for @irori/server.
 RUN corepack enable

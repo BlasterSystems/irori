@@ -5,6 +5,8 @@ import { ref } from "vue";
  * server has no route, and the drift badges simply stay hidden.
  */
 export const serverVersion = ref<string | null>(null);
+/** Git tag the hub image was built from (IRORI_GIT_TAG); null on local builds. */
+export const serverTag = ref<string | null>(null);
 
 /** Tolerant: best-effort load at app boot; failure leaves the badges hidden. */
 export async function loadServerVersion(): Promise<void> {
@@ -12,8 +14,12 @@ export async function loadServerVersion(): Promise<void> {
     const res = await fetch("/api/v1/version", { headers: { accept: "application/json" } });
     if (!res.ok) return;
     const body: unknown = await res.json();
-    if (typeof body === "object" && body !== null && typeof (body as { version?: unknown }).version === "string") {
-      serverVersion.value = (body as { version: string }).version;
+    if (typeof body !== "object" || body === null) return;
+    if ("version" in body && typeof body.version === "string") {
+      serverVersion.value = body.version;
+    }
+    if ("tag" in body && typeof body.tag === "string") {
+      serverTag.value = body.tag;
     }
   } catch {
     // Drift UI is cosmetic; a failed load just hides it.
