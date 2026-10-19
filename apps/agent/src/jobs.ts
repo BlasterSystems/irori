@@ -22,6 +22,7 @@ const AGENT_UPDATE_SCRIPT = [
   '  ws://*)  BASE="http://${BASE#ws://}" ;;',
   "esac",
   'BASE="${BASE%/agent-ws}"',
+  'BASE="${BASE%/}"',
   'echo "[irori] updating agent bundle from $BASE"',
   'curl -fsSL --max-time 300 "$BASE/agent/irori-agent.mjs" -o /opt/irori/irori-agent.mjs.new',
   "node --check /opt/irori/irori-agent.mjs.new",

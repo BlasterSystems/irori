@@ -207,7 +207,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         // markSeen is throttled, so this hook is the only unthrottled spot.
         if (deps.jobEvents?.onHello) void deps.jobEvents.onHello(id, msg.agentVersion).catch(() => {});
         deps.sse.send({ type: "node-online", serverTimeMs: Date.now(), nodeId: id, agentVersion });
-        void markSeen(id, msg.agentVersion);
+        // Hello is once per connection: record the version immediately (the
+        // update gate and drift views read it). Snapshots stay throttled.
+        lastMarkedAt.set(id, Date.now());
+        deps.store.markSeen(id, msg.agentVersion).catch(() => lastMarkedAt.delete(id));
         sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.cadenceMs, serverVersion: deps.serverVersion });
         // Probe assignments + role-derived cadence. A worker's role may change
         // without a reconnect only via a later config-update; hello covers boot.
