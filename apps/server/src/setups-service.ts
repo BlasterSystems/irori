@@ -48,12 +48,12 @@ export interface SetupsService {
   remove(id: string): Promise<void>;
   start(id: string): Promise<SetupInfo>;
   stop(id: string): Promise<SetupInfo>;
-  onDriverAck(msg: SetupAckMsg): void;
+  onDriverAck(msg: SetupAckMsg, senderNodeId: string): Promise<void>;
   /** Create-time `test -x` validation on the head agent (10 s timeout). */
   validateScripts(nodeId: string, scripts: string[]): Promise<Array<{ script: string; ok: boolean; error: string | null }>>;
-  onValidateResult(msg: SetupValidateResultMsg): void;
-  onDriverEvent(msg: SetupEventMsg): Promise<void>;
-  onDriverLog(msg: SetupLogMsg): void;
+  onValidateResult(msg: SetupValidateResultMsg, senderNodeId: string): void;
+  onDriverEvent(msg: SetupEventMsg, senderNodeId: string): Promise<void>;
+  onDriverLog(msg: SetupLogMsg, senderNodeId: string): Promise<void>;
   /** Per-setup log SSE: replays the ring, then streams live lines. */
   attachLog(res: Response, setupId: string): void;
   /** Periodic driver-truth poll + health evaluation; call on an interval. */
@@ -146,11 +146,31 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     return true;
   };
 
-  // Pending create-time script validations.
-  const pendingValidate = new Map<string, { resolve: (r: Array<{ script: string; ok: boolean; error: string | null }>) => void; timer: NodeJS.Timeout }>();
+  // Pending create-time script validations. The expected sender is recorded
+  // so a rogue agent cannot resolve another node's validation.
+  const pendingValidate = new Map<
+    string,
+    { resolve: (r: Array<{ script: string; ok: boolean; error: string | null }>) => void; timer: NodeJS.Timeout; nodeId: string }
+  >();
 
   const updateRow = async (id: string, patch: Partial<typeof setups.$inferInsert>): Promise<void> => {
     await deps.db.update(setups).set({ ...patch, updatedAt: new Date() }).where(eq(setups.id, id));
+  };
+
+  // setupId → headNodeId cache. headNodeId is immutable post-create and setup
+  // frames are frequent (per log line), so avoid a DB read per frame.
+  const headBySetup = new Map<string, string>();
+  const headOf = async (setupId: string): Promise<string | null> => {
+    const cached = headBySetup.get(setupId);
+    if (cached !== undefined) return cached;
+    const [row] = await deps.db
+      .select({ head: setups.headNodeId })
+      .from(setups)
+      .where(eq(setups.id, setupId))
+      .limit(1);
+    if (!row) return null;
+    headBySetup.set(setupId, row.head);
+    return row.head;
   };
 
   // Per-setup log rings (memory; the agent's run log file is the durable copy).
@@ -228,7 +248,16 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         stage.error = message.includes("active job") ? "busy: a job is already running on this node" : message;
         emitStage(transferId, setupId, stages, i);
         deps.log?.(`transfer ${transferId} stage ${i} failed: ${stage.error}`);
-        break;
+        // Same per-target semantics as a failed stage below: only the failed
+        // target's own chain is skipped; other targets keep running.
+        for (let j = i + 1; j < stages.length; j++) {
+          const later = stages[j]!;
+          if (later.status === "pending" && later.targetId !== null && later.targetId === stage.targetId) {
+            later.status = "skipped";
+          }
+        }
+        if (stages.every((s) => s.status !== "pending")) break;
+        continue;
       }
       // Register the completion waiter before any await: a fast agent can
       // deliver job-done while we are still persisting the stage.
@@ -367,6 +396,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         throw new SetupBusyError("stop the setup before removing it");
       }
       await deps.db.delete(setups).where(eq(setups.id, id));
+      headBySetup.delete(id);
     },
 
     async start(id) {
@@ -462,7 +492,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       return toInfo(updated!);
     },
 
-    onDriverAck(msg) {
+    async onDriverAck(msg, senderNodeId) {
+      const head = await headOf(msg.setupId);
+      if (head === null || head !== senderNodeId) return;
       settleAck(msg.setupId, msg.ok, msg.error ?? null);
     },
 
@@ -476,21 +508,23 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         pendingValidate.delete(validateId);
         resolve(scripts.map((script) => ({ script, ok: false, error: "agent did not answer the validation" })));
       }, 10_000);
-      pendingValidate.set(validateId, { resolve, timer });
+      pendingValidate.set(validateId, { resolve, timer, nodeId });
       return promise;
     },
 
-    onValidateResult(msg) {
+    onValidateResult(msg, senderNodeId) {
       const entry = pendingValidate.get(msg.validateId);
-      if (!entry) return;
+      if (!entry || entry.nodeId !== senderNodeId) return;
       clearTimeout(entry.timer);
       pendingValidate.delete(msg.validateId);
       entry.resolve(msg.results.map((r) => ({ script: r.script, ok: r.ok, error: r.error ?? null })));
     },
 
-    async onDriverEvent(msg) {
+    async onDriverEvent(msg, senderNodeId) {
       const [row] = await deps.db.select().from(setups).where(eq(setups.id, msg.setupId)).limit(1);
       if (!row) return;
+      if (row.headNodeId !== senderNodeId) return;
+      headBySetup.set(row.id, row.headNodeId);
 
       if (msg.runId !== null) {
         const runStatus = msg.state === "failed" ? "failed" : msg.state === "stopped" ? "stopped" : "running";
@@ -549,7 +583,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       announce(row.id, status, health, lastError);
     },
 
-    onDriverLog(msg) {
+    async onDriverLog(msg, senderNodeId) {
+      const head = await headOf(msg.setupId);
+      if (head === null || head !== senderNodeId) return;
       pushLog(msg.setupId, msg.seq, msg.line, msg.ts);
     },
 
@@ -739,6 +775,12 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const rows = await deps.db.select().from(setupTransfers).where(inArray(setupTransfers.status, ["running"]));
       for (const row of rows) {
         const stages = toStages(row.stages);
+        // A stage persisted `running` when the server died must be re-run:
+        // leaving it running would skip it (findIndex starts after it) while
+        // finalize() would still report the transfer `succeeded`.
+        for (const stage of stages) {
+          if (stage.status === "running") stage.status = "pending";
+        }
         const resumeAt = stages.findIndex((s) => s.status === "pending" || s.status === "queued");
         if (resumeAt === -1) {
           await deps.db.update(setupTransfers).set({ status: "failed", finishedAt: new Date() }).where(eq(setupTransfers.id, row.id));
