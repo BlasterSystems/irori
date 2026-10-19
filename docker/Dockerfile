@@ -1,6 +1,6 @@
-# One image, two roles (SPEC §2): server + agent.
-# Build:  docker build -t irori .
-# Run:    docker run irori server | docker run irori agent
+# Role images (SPEC §2): the server runs from the `server` target, the agent
+# from the `agent` target — separate images, no argv dispatching.
+# Build:  docker build --target server -t irori . | docker build --target agent -t irori-agent .
 
 # --- build stage -----------------------------------------------------------
 FROM node:24-alpine AS build
