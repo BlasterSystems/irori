@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   bigserial,
   doublePrecision,
@@ -103,6 +104,8 @@ export const snapshotBuckets = pgTable(
     gpuMemUsedBytes: doublePrecision("gpu_mem_used_bytes"),
     netRxBps: doublePrecision("net_rx_bps"),
     netTxBps: doublePrecision("net_tx_bps"),
+    /** Any GPU in the bucket reported a throttle reason (temps lens markers). */
+    gpuThrottled: boolean("gpu_throttled"),
   },
   (t) => [uniqueIndex("snapshot_buckets_uq").on(t.nodeId, t.granularity, t.bucketStart)],
 );
@@ -322,4 +325,85 @@ export const benchRuns = pgTable(
     // Enforces one-active-per-node under concurrency (23505 → BenchBusyError).
     uniqueIndex("bench_runs_node_running_uq").on(t.nodeId).where(sql`status = 'running'`),
   ],
+);
+
+/**
+ * Token ledger (M7, SPEC §9): cumulative probe counters diffed per
+ * (node, port, model) into hourly/daily deltas. Columns stay NULL when the
+ * backend never published that counter in the bucket — coverage, never a
+ * zero guess. `cached` is a subset of `prompt` (prefix-cache hits).
+ */
+export const tokenLedger = pgTable(
+  "token_ledger",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    port: integer("port").notNull(),
+    /** Detected model id; "unknown" while the port is undetected. */
+    model: text("model").notNull(),
+    granularity: bucketGranularity("granularity").notNull(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    samples: integer("samples").notNull().default(0),
+    generatedTokens: bigint("generated_tokens", { mode: "number" }).notNull().default(0),
+    promptTokens: bigint("prompt_tokens", { mode: "number" }).notNull().default(0),
+    cachedTokens: bigint("cached_tokens", { mode: "number" }).notNull().default(0),
+    /** True when at least one sample in the bucket carried this counter. */
+    generatedSeen: boolean("generated_seen").notNull().default(false),
+    promptSeen: boolean("prompt_seen").notNull().default(false),
+    cachedSeen: boolean("cached_seen").notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex("token_ledger_uq").on(t.nodeId, t.port, t.model, t.granularity, t.bucketStart),
+    index("token_ledger_bucket_idx").on(t.granularity, t.bucketStart),
+  ],
+);
+
+/**
+ * Monthly energy archive (M7, SPEC §9). Estimated, never wall-metered:
+ * gpu board + cpu package + base overhead, clamped to the GB10 system
+ * envelope. Wh/token is computed at read time from the token ledger.
+ */
+export const energyMonthly = pgTable(
+  "energy_monthly",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    /** UTC month start (YYYY-MM-01 00:00). */
+    monthStart: timestamp("month_start", { withTimezone: true }).notNull(),
+    samples: integer("samples").notNull().default(0),
+    gpuWh: doublePrecision("gpu_wh"),
+    cpuWh: doublePrecision("cpu_wh"),
+    baseWh: doublePrecision("base_wh"),
+    totalWh: doublePrecision("total_wh"),
+    gpuCoverage: real("gpu_coverage"),
+    cpuCoverage: real("cpu_coverage"),
+  },
+  (t) => [uniqueIndex("energy_monthly_uq").on(t.nodeId, t.monthStart)],
+);
+
+/** Disk-hygiene audit/clean runs (M7, SPEC §11.6): History tab (last 20 · 90 d). */
+export const cleanupRuns = pgTable(
+  "cleanup_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    /** "audit" | "clean". */
+    kind: text("kind").notNull(),
+    status: jobStatusEnum("status").notNull().default("running"),
+    /** Requested categories (clean) — audit covers all eight. */
+    categories: jsonb("categories").notNull().default(sql`'[]'::jsonb`),
+    /** Structured per-category report (hygiene audit / clean result). */
+    report: jsonb("report"),
+    error: text("error"),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("cleanup_runs_node_idx").on(t.nodeId, t.createdAt)],
 );

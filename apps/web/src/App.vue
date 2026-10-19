@@ -6,6 +6,7 @@ import NodeDetail from "./components/NodeDetail.vue";
 import ModelsView from "./components/ModelsView.vue";
 import ServeView from "./components/ServeView.vue";
 import BenchmarksView from "./components/BenchmarksView.vue";
+import AnalyticsView from "./components/AnalyticsView.vue";
 import { groupNodes } from "./llm-data";
 import { parseHash, type Route } from "./router";
 
@@ -77,7 +78,7 @@ onUnmounted(() => {
         <a :class="{ 'is-active': route.view === 'node' }" :aria-current="route.view === 'node' ? 'page' : undefined">Nodes</a>
         <a href="#/models" :class="{ 'is-active': route.view === 'models' }" :aria-current="route.view === 'models' ? 'page' : undefined">Models</a>
         <a href="#/serve" :class="{ 'is-active': route.view === 'serve' }" :aria-current="route.view === 'serve' ? 'page' : undefined">Serve</a>
-        <a>Analytics</a>
+        <a href="#/analytics" :class="{ 'is-active': route.view === 'analytics' }" :aria-current="route.view === 'analytics' ? 'page' : undefined">Analytics</a>
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
       </nav>
       <span v-if="connected" class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live<template v-if="ageText"> · {{ ageText }}</template></span>
@@ -93,6 +94,7 @@ onUnmounted(() => {
     <ModelsView v-if="route.view === 'models'" />
     <ServeView v-else-if="route.view === 'serve'" />
     <BenchmarksView v-else-if="route.view === 'benchmarks'" />
+    <AnalyticsView v-else-if="route.view === 'analytics'" />
     <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />
     <template v-else>
       <div class="pagehead">

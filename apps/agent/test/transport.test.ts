@@ -143,6 +143,7 @@ function fakeLlmPort(port: number, decodeTps: number): LlmPortSnapshot {
     backend: "vllm",
     detected: true,
     model: "meta-llama/Llama-3.1-8B",
+    tokens: null,
     decodeTps,
     prefillTps: null,
     queueRunning: null,

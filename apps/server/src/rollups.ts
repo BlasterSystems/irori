@@ -44,7 +44,7 @@ export async function computeBuckets(
     insert into snapshot_buckets
       (node_id, granularity, bucket_start, samples, cpu_usage_pct, cpu_temp_c, cpu_temp_min_c, cpu_temp_max_c,
        package_power_w, mem_used_bytes, mem_total_bytes, gpu_usage_pct, gpu_temp_c, gpu_temp_min_c, gpu_temp_max_c,
-       gpu_power_w, gpu_mem_used_bytes, net_rx_bps, net_tx_bps)
+       gpu_power_w, gpu_mem_used_bytes, net_rx_bps, net_tx_bps, gpu_throttled)
     select
       node_id,
       ${granularityLiteral(granularity)},
@@ -68,7 +68,8 @@ export async function computeBuckets(
       gpu_power_w = excluded.gpu_power_w,
       gpu_mem_used_bytes = excluded.gpu_mem_used_bytes,
       net_rx_bps = excluded.net_rx_bps,
-      net_tx_bps = excluded.net_tx_bps
+      net_tx_bps = excluded.net_tx_bps,
+      gpu_throttled = excluded.gpu_throttled
     returning node_id
   `);
   return result.length;
@@ -146,7 +147,8 @@ export function perSnapshotCte(fromTs: Date, toTs: Date, nodeId?: string): SQL {
         (select sum((g->>'powerW')::float8) from jsonb_array_elements(payload->'gpus') g where g->>'powerW' is not null) as gpu_power,
         (select sum((g->>'memUsedBytes')::float8) from jsonb_array_elements(payload->'gpus') g where g->>'memUsedBytes' is not null) as gpu_mem,
         (select sum((n->>'rxBps')::float8) from jsonb_array_elements(payload->'network') n where n->>'rxBps' is not null) as net_rx,
-        (select sum((n->>'txBps')::float8) from jsonb_array_elements(payload->'network') n where n->>'txBps' is not null) as net_tx
+        (select sum((n->>'txBps')::float8) from jsonb_array_elements(payload->'network') n where n->>'txBps' is not null) as net_tx,
+        exists (select 1 from jsonb_array_elements(payload->'gpus') g where jsonb_array_length(coalesce(g->'throttleReasons', '[]'::jsonb)) > 0) as gpu_throttled
       from snapshots
       where server_time >= ${fromTs.toISOString()} and server_time < ${toTs.toISOString()}
       ${nodeId === undefined ? sql`` : sql`and node_id = ${nodeId}`}
@@ -171,7 +173,8 @@ export function aggregateCols(): SQL {
     avg(gpu_power)::float8 as gpu_power_w,
     avg(gpu_mem)::float8 as gpu_mem_used_bytes,
     avg(net_rx)::float8 as net_rx_bps,
-    avg(net_tx)::float8 as net_tx_bps
+    avg(net_tx)::float8 as net_tx_bps,
+    bool_or(gpu_throttled) as gpu_throttled
   `;
 }
 

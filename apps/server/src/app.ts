@@ -4,6 +4,9 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, type NodeInfo } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
+import { type AnalyticsService } from "./analytics.js";
+import { type CleanupService } from "./cleanup-service.js";
+import { analyticsLensSchema, analyticsRangeSchema } from "@irori/core";
 import { type LlmHistoryResponse } from "./llm-history.js";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
@@ -81,6 +84,10 @@ export interface AppDeps {
   getSetups: () => SetupsService | null;
   /** Null while degraded: bench routes answer 503 (M6). */
   getBench: () => BenchService | null;
+  /** Null while degraded: analytics routes answer 503 (M7). */
+  getAnalytics: () => AnalyticsService | null;
+  /** Null while degraded: cleanup routes answer 503 (M7). */
+  getCleanup: () => CleanupService | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   sse: SseHub;
@@ -203,6 +210,50 @@ export function createApp(deps: AppDeps): Express {
     const build = deps.getHistory();
     if (build === null) return res.status(503).json({ error: "database unavailable" });
     res.json(await build(id, range));
+  });
+
+  // ---- M7: analytics (SPEC §9) — five lenses over the rollup buckets ----
+  app.get("/api/v1/analytics/:lens", async (req, res) => {
+    const lens = analyticsLensSchema.safeParse(req.params.lens);
+    if (!lens.success) return res.status(400).json({ error: "unknown lens" });
+    const range = analyticsRangeSchema.safeParse(req.query.range);
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const rawGroup = req.query.groupBy;
+    const groupBy = rawGroup === "cluster" || rawGroup === "node" ? rawGroup : "node";
+    const setupId = typeof req.query.setupId === "string" ? req.query.setupId : undefined;
+    const nodeId = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
+    const service = deps.getAnalytics();
+    if (service === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await service.build({ lens: lens.data, range: range.data, groupBy, setupId, nodeId }));
+  });
+
+  // ---- M7: cleanup drawer (SPEC §11.6) ----
+  app.get("/api/v1/nodes/:id/cleanup", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const service = deps.getCleanup();
+    if (service === null) return res.status(503).json({ error: "database unavailable" });
+    const [latestAudit, history, prevention] = await Promise.all([service.latestAudit(id), service.history(id), service.prevention(id)]);
+    res.json({ latestAudit, history, prevention });
+  });
+
+  app.put("/api/v1/nodes/:id/hygiene", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const body = req.body as { weeklySafePass?: unknown } | null;
+    if (body === null || typeof body !== "object" || typeof body.weeklySafePass !== "boolean" || Object.keys(body).length !== 1) {
+      return res.status(400).json({ error: "body must be { weeklySafePass: boolean }" });
+    }
+    const service = deps.getCleanup();
+    if (service === null) return res.status(503).json({ error: "database unavailable" });
+    await service.setPrevention(id, { weeklySafePass: body.weeklySafePass });
+    res.json(await service.prevention(id));
   });
 
   // Live llm probe view: in-memory ring first, latest persisted pass as

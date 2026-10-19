@@ -18,6 +18,12 @@ import { buildLlmHistory } from "./llm-history.js";
 import { createApp, type HistoryBuilder, type LlmHistoryBuilder } from "./app.js";
 import { createSetupsService, type SetupsService } from "./setups-service.js";
 import { createBenchService, type BenchService } from "./bench-service.js";
+import { createAnalyticsService, type AnalyticsService } from "./analytics.js";
+import { createCleanupService, weeklySafePassParams, type CleanupService } from "./cleanup-service.js";
+import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
+import { type CleanupEntry } from "./cleanup-service.js";
+import { createEnergyEngine } from "./energy.js";
+import { JobBusyError, JobDispatchError } from "./jobs-service.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -39,6 +45,8 @@ const state: {
   jobs: JobsService | null;
   setups: SetupsService | null;
   bench: BenchService | null;
+  analytics: AnalyticsService | null;
+  cleanup: CleanupService | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
 } = {
@@ -49,6 +57,8 @@ const state: {
   jobs: null,
   setups: null,
   bench: null,
+  analytics: null,
+  cleanup: null,
   history: null,
   llmHistory: null,
 };
@@ -65,6 +75,8 @@ const app = createApp({
   getJobs: () => state.jobs,
   getSetups: () => state.setups,
   getBench: () => state.bench,
+  getAnalytics: () => state.analytics,
+  getCleanup: () => state.cleanup,
   getHistory: () => state.history,
   getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
@@ -107,6 +119,14 @@ async function boot(): Promise<void> {
     sse,
     (message) => console.log(`[irori-server] ${message}`),
   );
+
+  // M7: analytics + token ledger + energy archive + hygiene reads.
+  state.analytics = createAnalyticsService(dbHandle.db);
+
+  // M7: analytics + hygiene reads (token ledger + energy engines below).
+  state.analytics = createAnalyticsService(dbHandle.db);
+  const cleanup = createCleanupService(dbHandle.db);
+  state.cleanup = cleanup;
 
   const setupsService = createSetupsService({
     db: dbHandle.db,
@@ -187,7 +207,51 @@ async function boot(): Promise<void> {
       console.error(`[irori-server] initial ${name} failed (${message}) — retrying every ${ROLLUP_INTERVAL_MS / 1000}s`);
     }
   }
-  startRollupLoop([engine, llmEngine], dbHandle.isHealthy);
+  const ledgerEngine = createTokenLedgerEngine(dbHandle.db);
+  const energyEngine = createEnergyEngine(dbHandle.db);
+  startRollupLoop([engine, llmEngine, ledgerEngine, energyEngine], dbHandle.isHealthy);
+
+  // Ledger retention mirrors the bucket knobs; hourly is plenty.
+  const ledgerPrune = setInterval(() => {
+    void dbHandle?.isHealthy().then(async (healthy) => {
+      if (!healthy) return;
+      try {
+        await pruneTokenLedger(dbHandle!.db, config.hourKeepDays, config.dayKeepDays);
+      } catch (err) {
+        console.error(`[irori-server] token ledger prune failed (${err instanceof Error ? err.message : String(err)})`);
+      }
+    });
+  }, 3_600_000);
+  ledgerPrune.unref();
+
+  // Weekly always-safe pass (SPEC §11.6): nodes with prevention enabled get a
+  // hygiene-clean of the safe categories when their last clean is > 7 d old.
+  const HYGIENE_WEEK_MS = 7 * 86_400_000;
+  const hygieneScheduler = setInterval(() => {
+    void dbHandle?.isHealthy().then(async (healthy) => {
+      if (!healthy || state.jobs === null || state.cleanup === null) return;
+      const cleanup = state.cleanup;
+      try {
+        for (const nodeId of await cleanup.weeklySafePassNodes()) {
+          const history: CleanupEntry[] = await cleanup.history(nodeId, 20);
+          const lastClean = history.find((h) => h.kind === "clean");
+          if (lastClean !== undefined && Date.now() - Date.parse(lastClean.createdAt) < HYGIENE_WEEK_MS) continue;
+          if (!hub?.online().has(nodeId)) continue; // offline nodes catch up next tick
+          try {
+            await jobsService.create(nodeId, "hygiene-clean", weeklySafePassParams());
+            console.log(`[irori-server] weekly safe-pass hygiene-clean dispatched to ${nodeId}`);
+          } catch (err) {
+            if (err instanceof JobBusyError) continue; // busy: retried next tick
+            if (err instanceof JobDispatchError) continue;
+            throw err;
+          }
+        }
+      } catch (err) {
+        console.error(`[irori-server] hygiene scheduler failed (${err instanceof Error ? err.message : String(err)})`);
+      }
+    });
+  }, 3_600_000);
+  hygieneScheduler.unref();
 
   // Jobs die with their agent: any running job whose node is offline is
   // failed immediately (container-agent model — the process dies with it).
