@@ -74,6 +74,13 @@ web-only plus the two missing DS overlay classes.
 
 ## Review
 
+- In-session PR review (2026-10-19, posted on PR #4): 3 findings fixed in
+  `183a379` — **MAJOR**: armed delete survived node-to-node navigation
+  (disarm on `watch(nodeId)` + unmount), **MINOR**: edit mode skipped
+  `validateNodeForm` (raw HTTP 400 on cleared name), **NIT**: silent no-op
+  submit for node-bound modes without a node; 1 accepted (parsePorts drops
+  >65535). Rotate copy verified against hub.ts:195-196 / store.ts:114-121.
+  Browser re-verified after the push; CI green (verify 1m08s, docs-check).
 - Correctness: mutations reuse the existing endpoints; PATCH sends the full
   desired form state (server applies present keys); refreshNodes() after every
   mutation keeps cards current without SSE registry events
@@ -83,6 +90,7 @@ web-only plus the two missing DS overlay classes.
   contract) untouched — new `NodeCreatePayload`/`NodePatchPayload` (z.input)
   added alongside; ds-markup guard updated with the intended markup change
 - Residual risks: token Copy button depends on the async clipboard API
-  (graceful `copied` fallback, false on denial); mobile full-screen behavior
-  for `.modal__panel` relies on the pre-existing `body`-prefixed rules in
+  (graceful `copied` fallback, false on denial); no modal focus trap/Escape
+  (consistent with the ServeView wizard); mobile full-screen behavior for
+  `.modal__panel` relies on the pre-existing `body`-prefixed rules in
   iroiri.css (same heritage as `.drawer`/`.wizard`)
