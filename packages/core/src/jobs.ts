@@ -27,6 +27,9 @@ export const JOB_KINDS = [
   "hygiene-audit",
   "hygiene-clean",
   "hygiene-prevent",
+  // Agent self-update (IRI-012, ADR-0007) — the agent replaces its own bundle
+  // and restarts; settlement is hello-driven, params carry `expectedVersion`.
+  "agent-update",
 ] as const;
 
 export const jobKindSchema = z.enum(JOB_KINDS);

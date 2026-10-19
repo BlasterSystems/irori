@@ -1,5 +1,54 @@
 import { buildCommand, runStreaming, type ModelctlCtx, type RunOutcome } from "./modelctl.js";
 
+/** Job context: modelctl config + the hub URL the update script dials. */
+export interface JobCtx extends ModelctlCtx {
+  /** The agent's own IRORI_SERVER_URL (ws://host:port/agent-ws). */
+  serverUrl: string;
+}
+
+/**
+ * IRI-012 (ADR-0007): replace the agent bundle and restart the unit. Runs as
+ * a `systemd-run --pipe --wait` transient service — its own cgroup, so the
+ * restart inside it cannot kill it (the agent unit sets no KillMode and the
+ * systemd default is control-group). Failure before the restart exits
+ * nonzero and settles the job normally; the restart itself severs the
+ * socket, so success is settled server-side on the next hello.
+ */
+const AGENT_UPDATE_SCRIPT = [
+  "set -euo pipefail",
+  'BASE="${IRORI_SERVER_URL:-}"',
+  'case "$BASE" in',
+  '  wss://*) BASE="https://${BASE#wss://}" ;;',
+  '  ws://*)  BASE="http://${BASE#ws://}" ;;',
+  "esac",
+  'BASE="${BASE%/agent-ws}"',
+  'echo "[irori] updating agent bundle from $BASE"',
+  'curl -fsSL --max-time 300 "$BASE/agent/irori-agent.mjs" -o /opt/irori/irori-agent.mjs.new',
+  "node --check /opt/irori/irori-agent.mjs.new",
+  "if [ -f /opt/irori/irori-agent.mjs ]; then",
+  "  cp -f /opt/irori/irori-agent.mjs /opt/irori/irori-agent.mjs.bak",
+  "fi",
+  "mv -f /opt/irori/irori-agent.mjs.new /opt/irori/irori-agent.mjs",
+  'echo "[irori] bundle replaced — restarting irori-agent"',
+  "systemctl restart irori-agent.service",
+].join("\n");
+
+/** Transient-unit argv; the unit name embeds the job id (unique, --collect). */
+export function buildAgentUpdateArgs(jobId: string, serverUrl: string): string[] {
+  const unit = `irori-agent-update-${jobId.replace(/-/g, "").slice(0, 12)}`;
+  return [
+    "systemd-run",
+    "--collect",
+    "--pipe",
+    "--wait",
+    `--unit=${unit}`,
+    `--setenv=IRORI_SERVER_URL=${serverUrl}`,
+    "bash",
+    "-c",
+    AGENT_UPDATE_SCRIPT,
+  ];
+}
+
 export interface JobEvents {
   onOutput: (jobId: string, seq: number, line: string) => void;
   onDone: (jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => void;
@@ -30,7 +79,7 @@ export class JobManager {
   } | null = null;
 
   constructor(
-    private readonly ctx: () => ModelctlCtx,
+    private readonly ctx: () => JobCtx,
     private readonly events: JobEvents,
     private readonly hygiene?: HygieneJobRunner,
   ) {}
@@ -69,14 +118,26 @@ export class JobManager {
     }
 
     let argv: string[];
-    try {
-      const built = buildCommand(kind, params, this.ctx());
-      argv = built.argv;
-    } catch (e) {
-      // Invalid params: report as failed output rather than throwing — the UI sees why.
-      this.events.onOutput(jobId, 0, `error: ${e instanceof Error ? e.message : String(e)}`);
-      this.events.onDone(jobId, "failed", null);
-      return true;
+    if (kind === "agent-update") {
+      // IRI-012 (ADR-0007): guards live server-side; the script is agent code
+      // and takes no params. A missing hub URL is an agent config bug.
+      const url = this.ctx().serverUrl;
+      if (url.length === 0) {
+        this.events.onOutput(jobId, 0, "error: agent has no IRORI_SERVER_URL configured");
+        this.events.onDone(jobId, "failed", null);
+        return true;
+      }
+      argv = buildAgentUpdateArgs(jobId, url);
+    } else {
+      try {
+        const built = buildCommand(kind, params, this.ctx());
+        argv = built.argv;
+      } catch (e) {
+        // Invalid params: report as failed output rather than throwing — the UI sees why.
+        this.events.onOutput(jobId, 0, `error: ${e instanceof Error ? e.message : String(e)}`);
+        this.events.onDone(jobId, "failed", null);
+        return true;
+      }
     }
     let seq = 0;
     const run = runStreaming(argv, {

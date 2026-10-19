@@ -73,7 +73,18 @@ release. Tag only commits whose CI (`verify` + `docs-check`) is green, per
 `docs/RELEASING.md` — the release workflow does not run tests.
 
 Bare-metal agent install (as root on the agent host; the script completes only
-when the WS hello lands in the journal):
+when the WS hello lands in the journal). Preferred since IRI-011: everything
+comes from the hub itself — no GitHub reachability needed on the node. The
+Add-node modal shows this block ready to copy:
+
+```sh
+curl -fLsS -o install-agent.sh http://IRORI_HOST:3947/install-agent.sh
+curl -fLsS -o irori-agent.service http://IRORI_HOST:3947/irori-agent.service
+sudo bash install-agent.sh --server ws://IRORI_HOST:3947/agent-ws --token irn_... --bundle-url http://IRORI_HOST:3947/agent/irori-agent.mjs
+```
+
+GitHub release artifacts remain the fallback (`--bundle-url` may be omitted to
+pull the bundle from GitHub):
 
 ```sh
 curl -fLsS -o install-agent.sh https://github.com/BlasterSystems/irori/releases/latest/download/install-agent.sh
@@ -81,9 +92,22 @@ chmod +x install-agent.sh
 ./install-agent.sh --server ws://IRORI_HOST:3947/agent-ws --token irn_... --version v0.2.0
 ```
 
-Containerized agents (e.g. the DGX Spark) run the same bundle from the
-`irori-agent` image — upgrade by pulling the new tag and re-creating the
-container with the same binds/env. Note: the agent image ships node-slim +
+### Updating agents (IRI-012, ADR-0007)
+
+For any agent ≥ 0.3.0 that is online, updates are one click on the node
+drill-down ("Update agent → <hub version>"): the hub dispatches an
+`agent-update` job over the existing WS link, the agent fetches the hub's own
+bundle, validates it (`node --check`), keeps the old one as
+`/opt/irori/irori-agent.mjs.bak` and restarts. No credentials are requested
+or stored; the token/env/unit are never rewritten. The job settles from the
+node's first hello after the restart (or fails after a 10-minute grace with a
+rollback hint in the job output). Restarting the agent stops its running
+setups and benches — the dispatch refuses while either is active.
+
+Agents older than 0.3.0 cannot self-update: run the install one-liner once
+(same token — it only replaces the bundle), then update from the UI.
+Containerized agents upgrade by pulling the new tag and re-creating the
+container (unchanged). Note: the agent image ships node-slim +
 rsync/curl/openssh but no docker CLI, so disk-hygiene docker categories
 report "docker CLI not available" unless the CLI + socket are added to the
 container; bare-metal agents (the primary install, SPEC §11) have docker.

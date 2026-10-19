@@ -39,6 +39,8 @@ export interface AgentHubDeps {
     onOutput: (nodeId: string, jobId: string, seq: number, line: string) => Promise<void>;
     onDone: (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => Promise<void>;
     onCatalog: (nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>) => Promise<void>;
+    /** IRI-012: fires on every authenticated hello — settles agent-update jobs. */
+    onHello?: (nodeId: string, agentVersion: string) => Promise<unknown>;
   };
   /** Setup supervision frames (M5): acks, driver events, log lines. All are
    *  verified against the sending node so a rogue agent cannot forge frames
@@ -201,6 +203,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         agentVersion = msg.agentVersion;
         onlineNodes.add(id);
         nodeSockets.set(id, ws);
+        // IRI-012: settle any in-flight agent-update from the fresh version.
+        // markSeen is throttled, so this hook is the only unthrottled spot.
+        if (deps.jobEvents?.onHello) void deps.jobEvents.onHello(id, msg.agentVersion).catch(() => {});
         deps.sse.send({ type: "node-online", serverTimeMs: Date.now(), nodeId: id, agentVersion });
         void markSeen(id, msg.agentVersion);
         sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.cadenceMs, serverVersion: deps.serverVersion });

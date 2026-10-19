@@ -5,6 +5,7 @@ import { computeCardData } from "../card-data";
 import { nodeHash } from "../router";
 import { fetchCleanup } from "../api";
 import { diskChipCls, diskPct, fmtBytes, sumReclaimable } from "../analytics";
+import { agentDrifts } from "../version";
 
 const props = defineProps<{
   node: NodeInfo;
@@ -64,6 +65,7 @@ const diskChip = computed(() => diskChipCls(diskPctValue.value));
         </span>
       </div>
       <span v-if="card.agentVersion" class="mono faint">Agent {{ card.agentVersion }}</span>
+      <span v-if="agentDrifts(card.agentVersion)" class="chip chip--warn">update</span>
     </div>
     <div class="card__body" style="padding-top: 12px;">
       <p v-if="card.inferenceLine" class="stat__sub" style="margin-bottom: 10px;">{{ card.inferenceLine }}</p>

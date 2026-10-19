@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, type NodeInfo } from "@irori/core";
+import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, type NodeInfo } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
@@ -95,6 +95,12 @@ export interface AppDeps {
   version: string;
   /** apps/web/dist when it exists, else null. */
   staticDir: string | null;
+  /**
+   * IRI-011 (ADR-0007): agent artifacts served to nodes — resolved once at
+   * boot from IRORI_AGENT_ARTIFACTS_DIR (container, flat) or the monorepo
+   * apps/agent layout. Null/missing files → 503 on the artifact routes.
+   */
+  agentArtifacts?: { installer: string; unit: string; bundle: string } | null;
 }
 
 export function createApp(deps: AppDeps): Express {
@@ -111,6 +117,31 @@ export function createApp(deps: AppDeps): Express {
 
   app.get("/healthz", async (_req, res) => {
     res.json({ ok: true, db: await deps.dbHealthy(), version: deps.version });
+  });
+
+  // ---- IRI-011 (ADR-0007): hub-served agent artifacts ----
+  // Root-level GETs; registered before the static/SPA fallback below so they
+  // are not swallowed by it. No secrets are embedded — the token is supplied
+  // by the operator at run time. Works while degraded (no store needed).
+  const serveArtifact =
+    (kind: "installer" | "unit" | "bundle", type: string, name: string) =>
+    (_req: Request, res: Response): void => {
+      const path = deps.agentArtifacts?.[kind];
+      if (!path || !existsSync(path)) {
+        res.status(503).json({ error: "agent artifacts not available" });
+        return;
+      }
+      res.setHeader("Content-Type", type);
+      res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
+      res.setHeader("Cache-Control", "no-store");
+      res.sendFile(path);
+    };
+  app.get("/install-agent.sh", serveArtifact("installer", "text/x-shellscript", "install-agent.sh"));
+  app.get("/irori-agent.service", serveArtifact("unit", "text/plain", "irori-agent.service"));
+  app.get("/agent/irori-agent.mjs", serveArtifact("bundle", "text/javascript", "irori-agent.mjs"));
+
+  app.get("/api/v1/version", (_req, res) => {
+    res.json({ version: deps.version });
   });
 
   app.get("/api/v1/events", (_req, res) => {
@@ -187,6 +218,46 @@ export function createApp(deps: AppDeps): Express {
     if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
     const created = await store.rotateToken(id);
     res.json({ token: created.token });
+  });
+
+  // ---- IRI-012 (ADR-0007): one-click agent update to the hub's own version.
+  // Refuses while the node is busy: restarting the agent kills its jobs,
+  // benches and running setups (the agent supervises them as children).
+  app.post("/api/v1/nodes/:id/agent-update", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    const node = await store.get(id);
+    if (node === null) return res.status(404).json({ error: "node not found" });
+    // An agent older than the kind itself cannot self-update; the first hop
+    // to AGENT_UPDATE_MIN_VERSION belongs to the install one-liner.
+    if (node.agentVersion !== null && compareVersions(node.agentVersion, AGENT_UPDATE_MIN_VERSION) < 0) {
+      return res.status(409).json({
+        error: `agent ${node.agentVersion} predates self-update (needs ${AGENT_UPDATE_MIN_VERSION}) — run the install one-liner once, then update from here`,
+      });
+    }
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const bench = deps.getBench();
+    if (bench !== null && (await bench.active(id)).length > 0) {
+      return res.status(409).json({ error: "node has a running benchmark — wait for it or cancel it first" });
+    }
+    const setups = deps.getSetups();
+    if (setups !== null) {
+      const busy = (await setups.list()).some(
+        (s) => s.headNodeId === id && (s.status === "starting" || s.status === "running" || s.status === "stopping"),
+      );
+      if (busy) return res.status(409).json({ error: "node has a running setup — stop it first (an agent restart kills it)" });
+    }
+    try {
+      const job = await jobs.create(id, "agent-update", { expectedVersion: deps.version });
+      res.status(202).json({ job: serializeJob(job) });
+    } catch (err) {
+      if (err instanceof JobBusyError) return res.status(409).json({ error: err.message });
+      if (err instanceof JobDispatchError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
   });
 
   app.get("/api/v1/nodes/:id/snapshot", async (req, res) => {
