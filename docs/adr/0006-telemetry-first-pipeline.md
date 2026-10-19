@@ -1,6 +1,6 @@
 # ADR-0006: Telemetry-first pipeline (agent push → rings/rollups → SSE)
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-19 — owner approved after M1–M7 shipped on these decisions)
 - **Date:** 2026-10-16
 - **Decision owners:** operator
 - **Scope:** Data collection, streaming, storage, and live-update architecture

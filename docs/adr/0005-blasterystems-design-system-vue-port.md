@@ -1,6 +1,6 @@
 # ADR-0005: BlasterSystems design system, Vue 3 port (uptime-monitoring recipes)
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-19 — owner approved after M1–M7 shipped on these decisions)
 - **Date:** 2026-10-16
 - **Decision owners:** operator
 - **Scope:** UI framework, visual language, theming, branding
