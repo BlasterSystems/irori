@@ -43,3 +43,9 @@ export const nodePatchSchema = nodeInfoSchema
 
 export type NodeCreateInput = z.infer<typeof nodeCreateSchema>;
 export type NodePatchInput = z.infer<typeof nodePatchSchema>;
+
+/** Wire payload for POST /api/v1/nodes: fields with defaults stay optional
+ *  (builders use the INPUT type — z.infer makes defaulted keys REQUIRED). */
+export type NodeCreatePayload = z.input<typeof nodeCreateSchema>;
+/** Wire payload for PATCH /api/v1/nodes/:id (every key optional). */
+export type NodePatchPayload = z.input<typeof nodePatchSchema>;

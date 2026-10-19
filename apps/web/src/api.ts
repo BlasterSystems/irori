@@ -4,7 +4,9 @@ import {
   nodeInfoSchema,
   type LlmBackend,
   type LlmPortSnapshot,
+  type NodeCreatePayload,
   type NodeInfo,
+  type NodePatchPayload,
 } from "@irori/core";
 
 /** Registry entries carry the node's configured probe ports (M3); older
@@ -42,6 +44,84 @@ export async function fetchNodes(signal?: AbortSignal): Promise<NodeInfo[]> {
     const lenient = nodeInfoSchema.omit({ llmPorts: true }).parse(item);
     return { ...lenient, llmPorts: extractLlmPorts(item) };
   });
+}
+
+/* ── Node registry mutations (IRI-010) ────────────────────────────────── */
+
+/** Parse the `{ node, token }` / `{ node }` envelope shape. */
+function parseNodeEnvelope(
+  endpoint: string,
+  body: unknown,
+  requireToken: boolean,
+): { node: NodeInfo; token: string | null } {
+  if (typeof body !== "object" || body === null) {
+    throw new Error(`${endpoint}: expected an object`);
+  }
+  const { node, token } = body as { node?: unknown; token?: unknown };
+  if (requireToken && typeof token !== "string") {
+    throw new Error(`${endpoint}: expected a token string`);
+  }
+  return { node: nodeInfoSchema.parse(node), token: typeof token === "string" ? token : null };
+}
+
+/**
+ * Create a node. The returned `token` is the agent's secret and is shown
+ * exactly once — no other endpoint ever returns it.
+ */
+export async function createNode(
+  input: NodeCreatePayload,
+): Promise<{ node: NodeInfo; token: string }> {
+  const res = await fetch("/api/v1/nodes", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(`POST /api/v1/nodes failed: HTTP ${res.status}`);
+  }
+  const parsed = parseNodeEnvelope("POST /api/v1/nodes", await res.json(), true);
+  return { node: parsed.node, token: parsed.token as string };
+}
+
+/** Patch a node. Only the keys present in `patch` are applied server-side. */
+export async function patchNode(id: string, patch: NodePatchPayload): Promise<NodeInfo> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    throw new Error(`PATCH /api/v1/nodes/${id} failed: HTTP ${res.status}`);
+  }
+  return parseNodeEnvelope(`PATCH /api/v1/nodes/${id}`, await res.json(), false).node;
+}
+
+/** Delete a node (also drops its in-memory rings server-side). */
+export async function deleteNode(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`DELETE /api/v1/nodes/${id} failed: HTTP ${res.status}`);
+  }
+}
+
+/** Rotate a node's agent token. The old token fails at the agent's next hello. */
+export async function rotateNodeToken(id: string): Promise<string> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/token/rotate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`POST /api/v1/nodes/${id}/token/rotate failed: HTTP ${res.status}`);
+  }
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null) {
+    throw new Error(`POST /api/v1/nodes/${id}/token/rotate: expected an object`);
+  }
+  const { token } = body as { token?: unknown };
+  if (typeof token !== "string") {
+    throw new Error(`POST /api/v1/nodes/${id}/token/rotate: expected a token string`);
+  }
+  return token;
 }
 
 /* ── Node history ─────────────────────────────────────────────────────── */

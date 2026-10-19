@@ -16,7 +16,7 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 | Component | Responsibility |
 |---|---|
 | `apps/server` | Express 5: REST `/api/v1`, SSE hub `/api/v1/events`, agent WS hub `/agent-ws`, job runner, static SPA, settings |
-| `apps/web` | Vue 3 + Vite SPA; BlasterSystems DS token port, brand lockup, Overview/Node/Models/Serve/Benchmarks/Analytics views |
+| `apps/web` | Vue 3 + Vite SPA; BlasterSystems DS token port, brand lockup, Overview/Node/Models/Serve/Benchmarks/Analytics views, node management modal (add/edit/rotate/delete, IRI-010) |
 | `apps/agent` | Node daemon (esbuild bundle): collectors, LLM probes, clock control, modelctl job execution, serving supervision; root systemd unit |
 | `packages/core` | Cross-process contracts: snapshot/job/serving schemas (zod), store-layout constants, catalog reader, placement planner |
 | `packages/db` | Drizzle schema + migrations (PostgreSQL on the Proxmox pgsql server): nodes, snapshots, rollups, models, recipes, runs, jobs, benchmarks, token/energy ledgers, secrets |
