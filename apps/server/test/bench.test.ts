@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { BenchProgress } from "@irori/core";
-import { createDbHandle, nodes } from "@irori/db";
+import { createDbHandle, nodes, benchRuns } from "@irori/db";
 import { eq } from "drizzle-orm";
-import { createBenchService, BENCH_KEEP_PER_TYPE, type BenchRunRow } from "../src/bench-service.js";
+import { BenchBusyError, createBenchService, BENCH_KEEP_PER_TYPE, type BenchRunRow } from "../src/bench-service.js";
 import { createSseHub } from "../src/sse.js";
 
 /**
@@ -92,13 +92,41 @@ d("bench service (db integration)", () => {
     await service.onDone(nodeId, randomUUID(), "completed", { levels: [] }, null); // must not throw
   });
 
-  it("keeps only the newest rows per type", async () => {
+  it("keeps only the newest rows per type and returns the true pruned count", async () => {
     for (let i = 0; i < BENCH_KEEP_PER_TYPE + 3; i++) {
       const run = await service.start("quality", nodeId, { host: "127.0.0.1", port: 8080, model: null, categories: ["qa"], concurrency: 1 });
       await service.onDone(nodeId, run.id, "completed", { suiteVersion: 1, scoringVersion: 1, total: 1, passed: 1, byCategory: { qa: { total: 1, passed: 1 } }, items: [{ id: "x", category: "qa", pass: true, error: null }] }, null);
     }
-    await service.prune();
+    const pruned = await service.prune();
+    // `delete … returning 1` used to report 0 forever (unnamed column).
+    expect(pruned).toBeGreaterThan(0);
     const remaining = await service.list("quality", { nodeId });
     expect(remaining.length).toBe(BENCH_KEEP_PER_TYPE);
+  });
+
+  it("maps a concurrent second start to BenchBusyError", async () => {
+    // The partial unique index backs the check-then-insert; simulate the race
+    // by inserting a running row directly and starting through the service.
+    const [phantom] = await handle.db.insert(benchRuns).values({ type: "tooleval", nodeId, status: "running", config: { host: "127.0.0.1", port: 1 } }).returning();
+    await expect(service.start("tooleval", nodeId, { host: "127.0.0.1", port: 8080, model: null })).rejects.toThrow(BenchBusyError);
+    await handle.db.delete(benchRuns).where(eq(benchRuns.id, phantom!.id)); // don't poison the shared node
+  });
+
+  it("does not overwrite a completed result with the offline reaper", async () => {
+    const run = await service.start("tooleval", nodeId, { host: "127.0.0.1", port: 8080, model: null });
+    await service.onDone(
+      nodeId,
+      run.id,
+      "completed",
+      {
+        total: 1,
+        passed: 1,
+        byCategory: { selection: { total: 1, passed: 1 }, params: { total: 0, passed: 0 }, multistep: { total: 0, passed: 0 }, safety: { total: 0, passed: 0 }, negative: { total: 0, passed: 0 } },
+        scenarios: [{ id: "s1", title: "selection", category: "selection", pass: true, turns: 1, error: null }],
+      },
+      null,
+    );
+    await service.reapOffline(new Set());
+    expect((await service.get(run.id))!.status).toBe("completed");
   });
 });

@@ -136,10 +136,10 @@ async function boot(): Promise<void> {
   };
 
   const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, jobEvents, setupEvents: {
-    onAck: (msg) => setupsService.onDriverAck(msg),
-    onEvent: (msg) => setupsService.onDriverEvent(msg).catch(() => {}),
-    onLog: (msg) => setupsService.onDriverLog(msg),
-    onValidateResult: (msg) => setupsService.onValidateResult(msg),
+    onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
+    onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
+    onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),
+    onValidateResult: (msg, senderNodeId) => setupsService.onValidateResult(msg, senderNodeId),
   }, benchEvents: {
     onProgress: (nodeId, runId, progress) => benchService.onProgress(nodeId, runId, progress),
     onDone: (nodeId, runId, status, result, error) => benchService.onDone(nodeId, runId, status, result, error),
@@ -156,9 +156,13 @@ async function boot(): Promise<void> {
     console.error(`[irori-server] setups recover failed (${err instanceof Error ? err.message : String(err)})`);
   });
   const setupsTicker = setInterval(() => {
-    if (dbHandle === null || !dbHandle.isHealthy()) return;
-    void setupsService.tick().catch((err) => {
-      console.error(`[irori-server] setups tick failed (${err instanceof Error ? err.message : String(err)})`);
+    if (dbHandle === null) return;
+    // isHealthy is async; testing the promise directly would always be truthy.
+    void dbHandle.isHealthy().then((healthy) => {
+      if (!healthy) return;
+      void setupsService.tick().catch((err) => {
+        console.error(`[irori-server] setups tick failed (${err instanceof Error ? err.message : String(err)})`);
+      });
     });
   }, SETUPS_TICK_MS);
   setupsTicker.unref();
@@ -188,14 +192,17 @@ async function boot(): Promise<void> {
   // Jobs die with their agent: any running job whose node is offline is
   // failed immediately (container-agent model — the process dies with it).
   const jobReaper = setInterval(() => {
-    if (dbHandle === null || !dbHandle.isHealthy()) return;
-    void jobsService.reapOffline(hub.online()).catch((err) => {
-      console.error(`[irori-server] job reaper failed (${err instanceof Error ? err.message : String(err)})`);
-    });
-    // Benches die with their agent too: a running bench whose node vanished
-    // cannot deliver a terminal frame.
-    void benchService.reapOffline(hub.online()).catch((err) => {
-      console.error(`[irori-server] bench reaper failed (${err instanceof Error ? err.message : String(err)})`);
+    if (dbHandle === null) return;
+    void dbHandle.isHealthy().then((healthy) => {
+      if (!healthy) return;
+      void jobsService.reapOffline(hub.online()).catch((err) => {
+        console.error(`[irori-server] job reaper failed (${err instanceof Error ? err.message : String(err)})`);
+      });
+      // Benches die with their agent too: a running bench whose node vanished
+      // cannot deliver a terminal frame.
+      void benchService.reapOffline(hub.online()).catch((err) => {
+        console.error(`[irori-server] bench reaper failed (${err instanceof Error ? err.message : String(err)})`);
+      });
     });
   }, 60_000);
   jobReaper.unref();

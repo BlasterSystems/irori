@@ -158,14 +158,17 @@ d("setups service", () => {
     // Simulate the agent's validate-result frame.
     const sentValidate = ctx.sent.filter((s) => (s.msg as { type?: string }).type === "setup-validate").pop()!;
     expect(sentValidate).toBeDefined();
-    ctx.service.onValidateResult({
-      type: "setup-validate-result",
-      validateId: (sentValidate!.msg as { validateId: string }).validateId,
-      results: [
-        { script: "/a/start.sh", ok: true, error: null },
-        { script: "/a/stop.sh", ok: false, error: "not found" },
-      ],
-    });
+    ctx.service.onValidateResult(
+      {
+        type: "setup-validate-result",
+        validateId: (sentValidate!.msg as { validateId: string }).validateId,
+        results: [
+          { script: "/a/start.sh", ok: true, error: null },
+          { script: "/a/stop.sh", ok: false, error: "not found" },
+        ],
+      },
+      ids.head,
+    );
     const results = await promise;
     expect(results[0]!.ok).toBe(true);
     expect(results[1]!.ok).toBe(false);
@@ -189,7 +192,7 @@ d("setups service", () => {
 
     const failing = ctx.service.start(setup.id);
     await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === setup.id));
-    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: false, error: "start script is not executable" });
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: false, error: "start script is not executable" }, ids.head);
     await expect(failing).rejects.toThrow("start script is not executable");
     const after = await ctx.service.get(setup.id);
     expect(after!.status).toBe("failed");
@@ -210,7 +213,7 @@ d("setups service", () => {
     });
     const starting = ctx.service.start(setup.id);
     await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === setup.id));
-    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null });
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
     const info = await starting;
     expect(info.status).toBe("starting");
 
@@ -223,7 +226,7 @@ d("setups service", () => {
     expect((frame!.msg as { modelPathName: string | null }).modelPathName).toBe("GLM-5.3-Flash-EXL3");
 
     // Driver running → status starting until the probe confirms.
-    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "running", exitCode: null, pid: 10, pgid: 10, error: null });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "running", exitCode: null, pid: 10, pgid: 10, error: null }, ids.head);
     expect((await ctx.service.get(setup.id))!.status).toBe("starting");
 
     rings.pushLlm(ids.head, {
@@ -274,9 +277,9 @@ d("setups service", () => {
     // even when the probe still sees the model on the port.
     const stopping = ctx.service.stop(setup.id);
     await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === setup.id));
-    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null });
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
     expect((await stopping)!.status).toBe("stopped");
-    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null }, ids.head);
     const afterPoll = await ctx.service.get(setup.id);
     expect(afterPoll!.status).toBe("stopped");
     expect(afterPoll!.health).toBeNull();

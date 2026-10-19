@@ -1,6 +1,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { benchConfigFor, benchResultSchemaFor, benchTypeSchema, type BenchProgress, type BenchType } from "@irori/core";
 import { benchRuns, type Db } from "@irori/db";
+import { isUniqueViolation } from "./pg.js";
 import type { SseHub } from "./sse.js";
 
 /**
@@ -53,7 +54,11 @@ export function createBenchService(db: Db, sendToAgent: BenchAgentSend, sse: Pic
     async start(type, nodeId, config) {
       const parsedType = benchTypeSchema.parse(type);
       // Throws ZodError → 400 when the config does not fit the bench.
-      benchConfigFor(parsedType, config);
+      const parsed = benchConfigFor(parsedType, config);
+      // The bench runs from the agent on the node itself; a client-supplied
+      // host would turn every agent into a network probe. The node-local
+      // engine is the only legitimate target (mirrors llm-ports hardcoding).
+      const effective = { ...parsed, host: "127.0.0.1" } as typeof parsed;
       const [active] = await db
         .select({ id: benchRuns.id })
         .from(benchRuns)
@@ -61,12 +66,24 @@ export function createBenchService(db: Db, sendToAgent: BenchAgentSend, sse: Pic
         .limit(1);
       if (active) throw new BenchBusyError(`node already has an active benchmark (${active.id})`);
 
-      const model = typeof config.model === "string" ? config.model : null;
-      const port = typeof config.port === "number" ? config.port : null;
-      const [row] = await db.insert(benchRuns).values({ type: parsedType, nodeId, status: "running", config, model, port }).returning();
+      const model = typeof effective.model === "string" ? effective.model : null;
+      const port = typeof effective.port === "number" ? effective.port : null;
+      let inserted: Array<typeof benchRuns.$inferSelect>;
+      try {
+        inserted = await db
+          .insert(benchRuns)
+          .values({ type: parsedType, nodeId, status: "running", config: effective, model, port })
+          .returning();
+      } catch (err) {
+        // The partial unique index makes one-active-per-node hold under
+        // concurrency; the agent-side guard remains the backstop.
+        if (isUniqueViolation(err)) throw new BenchBusyError("node already has an active benchmark");
+        throw err;
+      }
+      const [row] = inserted;
       if (!row) throw new Error("bench insert returned no row");
 
-      const sent = sendToAgent(nodeId, { type: "bench-run", runId: row.id, bench: parsedType, config });
+      const sent = sendToAgent(nodeId, { type: "bench-run", runId: row.id, bench: parsedType, config: effective });
       if (!sent) {
         await db.update(benchRuns).set({ status: "failed", error: "node is not connected", finishedAt: new Date() }).where(eq(benchRuns.id, row.id));
         throw new BenchOfflineError("node is not connected");
@@ -168,18 +185,25 @@ export function createBenchService(db: Db, sendToAgent: BenchAgentSend, sse: Pic
         await db
           .update(benchRuns)
           .set({ status: "failed", error: "node went offline", finishedAt: new Date() })
-          .where(eq(benchRuns.id, row.id));
+          // A terminal frame can land while this update is in flight (the
+          // offline snapshot is already stale) — never overwrite a result.
+          .where(and(eq(benchRuns.id, row.id), eq(benchRuns.status, "running")));
       }
       return dead.map((r) => r.id);
     },
 
     async prune() {
+      // `delete … returning 1` yields an unnamed column; count the CTE instead
+      // so the caller's log/return reflect reality (same shape as pruneBuckets).
       const result = await db.execute<{ n: number }>(sql`
         with ranked as (
           select id, row_number() over (partition by type order by created_at desc) as rn
           from bench_runs
+        ),
+        deleted as (
+          delete from bench_runs where id in (select id from ranked where rn > ${BENCH_KEEP_PER_TYPE}) returning 1
         )
-        delete from bench_runs where id in (select id from ranked where rn > ${BENCH_KEEP_PER_TYPE}) returning 1
+        select count(*)::int as n from deleted
       `);
       const rows = result as unknown as Array<{ n: number }>;
       return rows[0]?.n ?? 0;
