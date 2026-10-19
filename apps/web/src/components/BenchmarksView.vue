@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes } from "../api";
 import type { NodeInfo } from "@irori/core";
+import { formatP } from "@irori/core";
 import { live } from "../live";
 import {
   cancelBenchRun,
@@ -499,7 +500,7 @@ onBeforeUnmount(() => {
               <td class="mono">{{ row.pctB !== null ? `${row.pctB.toFixed(1)}%` : "—" }}</td>
               <td class="mono">{{ row.onlyA }}</td>
               <td class="mono">{{ row.onlyB }}</td>
-              <td class="mono">{{ row.onlyA + row.onlyB === 0 ? "—" : row.p.toFixed(3) }}</td>
+              <td class="mono">{{ row.onlyA + row.onlyB === 0 ? "—" : formatP(row.p) }}</td>
             </tr>
           </tbody>
         </table>

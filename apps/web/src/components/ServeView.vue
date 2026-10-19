@@ -56,12 +56,16 @@ function chipOf(setup: SetupInfo): string {
 }
 
 async function refreshLlm(rows: SetupInfo[]): Promise<void> {
+  const seen = new Set<string>();
   for (const setup of rows) {
-    if (headLlm.value.has(setup.headNodeId)) continue;
+    if (seen.has(setup.headNodeId)) continue;
+    seen.add(setup.headNodeId);
     try {
       headLlm.value.set(setup.headNodeId, await fetchNodeLlm(setup.headNodeId));
     } catch {
-      headLlm.value.set(setup.headNodeId, null);
+      // Keep the last good snapshot; retried on the next poll. Seeding once
+      // froze tok/s at page-load values and cached "no probe" forever after
+      // a single failed fetch.
     }
   }
 }
@@ -83,6 +87,11 @@ onMounted(async () => {
   await refreshLlm(setups.value);
   pollTimer = setInterval(() => {
     void load();
+    void fetchNodes()
+      .then((rows) => {
+        nodes.value = rows;
+      })
+      .catch(() => {});
     void refreshLlm(setups.value);
     if (selected.value !== null) void refreshDetail();
     if (wizardOpen.value && activeTransfer.value !== null && created.value !== null) void refreshWizardTransfer();
@@ -169,12 +178,15 @@ async function openDetail(setup: SetupInfo): Promise<void> {
 
 async function refreshDetail(): Promise<void> {
   if (selected.value === null) return;
+  const id = selected.value.id;
   try {
-    const d = await fetchSetup(selected.value.id);
+    const d = await fetchSetup(id);
     if (detailId !== d.setup.id) return;
     detail.value = d;
     selected.value = d.setup;
+    detailError.value = null; // success clears a stale banner
   } catch (err) {
+    if (detailId !== id) return; // the failing request no longer owns the drawer
     detailError.value = err instanceof Error ? err.message : String(err);
   }
 }
@@ -546,7 +558,7 @@ function fmtGiB(bytes: number | null): string {
               {{ line.label }} · <span class="dot" :class="line.cls.includes('ok') ? 'dot--ok' : line.cls.includes('warn') ? 'dot--warn' : line.cls.includes('halt') ? 'dot--halt' : 'dot--run'" aria-hidden="true"></span> {{ line.detail }}
             </span>
           </div>
-          <div v-if="latestStages.length > 0 && (setup.status === 'starting' || setup.status === 'running')" class="stages">
+          <div v-if="selected !== null && selected.id === setup.id && latestStages.length > 0 && (setup.status === 'starting' || setup.status === 'running')" class="stages">
             <div v-for="(stage, i) in latestStages" :key="i" class="stage">
               <span>{{ stage.label }}</span>
               <div class="bar"><div class="bar__fill" :style="{ width: `${stagePercent(stage)}%` }"></div></div>
