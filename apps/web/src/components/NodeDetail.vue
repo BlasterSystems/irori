@@ -12,7 +12,7 @@ import {
   type LlmHistoryResponse,
   type LlmSnapshot,
 } from "../api";
-import { computeCardData } from "../card-data";
+import { computeCardData, formatTemp, isHotTemp } from "../card-data";
 import { computeDetailData } from "../detail-data";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import { fetchJob, startAgentUpdate } from "../models";
@@ -285,7 +285,11 @@ onUnmounted(() => clearTimeout(deleteTimer));
             >{{ updateLabel }}</button>
             <button class="btn btn--ghost btn--sm" @click="onRemove">{{ armedDelete ? "Confirm delete" : "Delete" }}</button>
           </template>
-          <button class="btn btn--secondary btn--sm" @click="cleanupOpen = true">Disk hygiene</button>
+          <button
+            class="btn btn--secondary btn--sm"
+            title="Audit and reclaim disk space — caches, journal, /tmp; dry-run plan first, nothing deleted without a typed confirm"
+            @click="cleanupOpen = true"
+          >Disk hygiene</button>
           <a class="chip detail-back" href="#/">← Overview</a>
         </div>
         <p v-if="updateMsg" class="stat__sub" style="margin-top: 8px;">{{ updateMsg }}</p>
@@ -305,12 +309,10 @@ onUnmounted(() => clearTimeout(deleteTimer));
         </div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="card?.hasSnapshot">
-            <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" :style="{ width: (card.cpuBarPct ?? 0) + '%' }"></div></div><span class="val">{{ card.cpuLine }}</span></div>
-            <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" :style="{ width: (card.memBarPct ?? 0) + '%' }"></div></div><span class="val">{{ card.memLine }}</span></div>
-            <div v-for="gpu in card.gpus" :key="gpu.index" class="barrow">
-              <span>GPU{{ gpu.index }}</span>
-              <div class="bar"><div class="bar__fill" :style="{ width: (gpu.barPct ?? 0) + '%' }"></div></div>
-              <span class="val">{{ gpu.name }} · {{ gpu.line }}</span>
+            <div v-for="row in card.rows" :key="row.key" class="barrow">
+              <span>{{ row.label }}</span>
+              <div class="bar"><div class="bar__fill" :style="{ width: (row.barPct ?? 0) + '%' }"></div></div>
+              <span class="val">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'temp--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
             </div>
           </template>
           <p v-else class="muted">waiting for first snapshot</p>
