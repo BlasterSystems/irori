@@ -78,6 +78,23 @@ export async function cancelJob(id: string): Promise<void> {
   if (!res.ok && res.status !== 204) throw new Error(`cancel failed (${res.status})`);
 }
 
+/**
+ * IRI-012: dispatch an agent self-update to the hub's own version. The
+ * server refuses (409) while the node has an active job/bench/running setup
+ * or the agent predates the agent-update kind.
+ */
+export async function startAgentUpdate(nodeId: string): Promise<JobView> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(nodeId)}/agent-update`, { method: "POST" });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" ? body.error : `HTTP ${res.status}`;
+    throw new Error(message);
+  }
+  const job = jobInfoSchema.safeParse(typeof body === "object" && body !== null && "job" in body ? body.job : undefined);
+  if (!job.success) throw new Error("malformed job response");
+  return job.data;
+}
+
 /** Verbs the UI offers, with their human labels and destructive marking. */
 export const JOB_VERBS: Array<{ kind: string; label: string; destructive: boolean }> = [
   { kind: "download-queue", label: "Download to NAS", destructive: false },

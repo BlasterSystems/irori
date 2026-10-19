@@ -18,6 +18,7 @@ Accepted records are historical. Create a new ADR to replace a decision, mark th
 | [ADR-0004](0004-modelctl-as-supply-chain-engine.md) | Accepted | Model store compatibility, transfer engine, HF integration | modelctl, nas, hf, subprocess, storage | Agent drives `modelctl` for all store mutations; `catalog.json` read-only contract; dry-run-then-armed destructive ops; no NAS migration | None |
 | [ADR-0005](0005-blasterystems-design-system-vue-port.md) | Accepted | UI framework, visual language, theming, branding | frontend, vue, design-system, blastersystems, branding | Vue 3 + token-only port of the BlasterSystems DS (uptime-monitoring recipes); Irori lockup + ink-tile favicon | None |
 | [ADR-0006](0006-telemetry-first-pipeline.md) | Accepted | Data collection, streaming, storage, live updates | telemetry, sse, websocket, rollups, architecture | Agent push → validated snapshots → rings/rollups → SSE hub; versioned contracts; bounded retention | None |
+| [ADR-0007](0007-hub-served-agent-artifacts-and-updates.md) | Proposed | Agent onboarding artifacts, update path, server image contents, job-kind surface | agent, deployment, security, websocket, jobs, docker | Hub serves its own version's installer/unit/bundle; updates dispatch as an `agent-update` WS job running in a `systemd-run` transient unit; no credentials, hello-driven settlement | None |
 
 ## When an ADR is required
 

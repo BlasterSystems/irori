@@ -10,6 +10,7 @@ import BenchmarksView from "./components/BenchmarksView.vue";
 import AnalyticsView from "./components/AnalyticsView.vue";
 import { groupNodes } from "./llm-data";
 import { parseHash, type Route } from "./router";
+import { loadServerVersion } from "./version";
 
 const { sortedNodes, connected, lastEventAgeMs } = live;
 
@@ -63,6 +64,7 @@ function toggleTheme(): void {
 onMounted(() => {
   window.addEventListener("hashchange", onHashChange);
   void live.init().catch(() => {});
+  void loadServerVersion().catch(() => {});
 });
 onUnmounted(() => {
   window.removeEventListener("hashchange", onHashChange);

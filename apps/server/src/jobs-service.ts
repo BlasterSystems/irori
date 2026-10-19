@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -50,6 +50,15 @@ async function settleCleanupRun(db: Db, jobId: string, kind: "hygiene-audit" | "
 
 export const MAX_OUTPUT_LINES = 400;
 
+/**
+ * IRI-012 (ADR-0007): an agent-update restarts the agent, so its job stays
+ * "running" across the reconnect window. The reaper must not fail it while
+ * the update is plausibly still in flight; past this grace a node that has
+ * not come back settles the job as failed. Enforced by the existing 60 s
+ * reaper loop (no timers/maps) — restart-safe by construction.
+ */
+export const AGENT_UPDATE_GRACE_MS = 10 * 60_000;
+
 /** Job kinds that change the NAS store contents — trigger a catalog re-read. */
 const CATALOG_MUTATING_KINDS = new Set([
   "download",
@@ -95,6 +104,14 @@ export interface JobsService {
   presentNodesFor(name: string): Promise<string[]>;
   /** Fails every running/queued job whose node is not in `onlineNodes`; returns affected job ids. */
   reapOffline(onlineNodes: ReadonlySet<string>): Promise<string[]>;
+  /**
+   * IRI-012 (ADR-0007): settle an active agent-update job from the node's
+   * hello. "succeeded" when the reported version matches expectedVersion;
+   * "pending" on mismatch (an old agent blip-reconnecting mid-update must not
+   * fail the in-flight update — the reaper's grace is the backstop); "none"
+   * when the node has no active agent-update job.
+   */
+  settleAgentUpdate(nodeId: string, agentVersion: string): Promise<"succeeded" | "pending" | "none">;
 }
 
 export class JobBusyError extends Error {}
@@ -270,18 +287,56 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
 
     async reapOffline(onlineNodes) {
       const active = await db
-        .select({ id: jobs.id, nodeId: jobs.nodeId })
+        .select({ id: jobs.id, nodeId: jobs.nodeId, kind: jobs.kind, createdAt: jobs.createdAt })
         .from(jobs)
         .where(inArray(jobs.status, [...ACTIVE]));
-      const dead = active.filter((j) => !onlineNodes.has(j.nodeId));
+      const now = Date.now();
+      const dead = active.filter(
+        (j) =>
+          !onlineNodes.has(j.nodeId) &&
+          // An agent-update is EXPECTED to lose its socket mid-flight (the
+          // restart kills the agent); only fail it once the grace expires.
+          !(j.kind === "agent-update" && now - j.createdAt.getTime() < AGENT_UPDATE_GRACE_MS),
+      );
       for (const j of dead) {
         await db
           .update(jobs)
           .set({ status: "failed", finishedAt: new Date() })
           .where(and(eq(jobs.id, j.id), inArray(jobs.status, [...ACTIVE])));
-        await db.insert(jobOutput).values({ jobId: j.id, seq: MAX_OUTPUT_LINES, line: "error: agent connection lost" });
+        await db.insert(jobOutput).values({
+          jobId: j.id,
+          seq: MAX_OUTPUT_LINES,
+          line:
+            j.kind === "agent-update"
+              ? "error: update timed out — the agent did not return with the expected version (rollback: cp /opt/irori/irori-agent.mjs.bak /opt/irori/irori-agent.mjs && systemctl restart irori-agent; journalctl -u irori-agent -n 50)"
+              : "error: agent connection lost",
+        });
       }
       return dead.map((j) => j.id);
+    },
+
+    async settleAgentUpdate(nodeId, agentVersion) {
+      const [row] = await db
+        .select({ id: jobs.id, params: jobs.params })
+        .from(jobs)
+        .where(and(eq(jobs.nodeId, nodeId), eq(jobs.kind, "agent-update"), inArray(jobs.status, [...ACTIVE])))
+        .limit(1);
+      if (!row) return "none";
+      const expected =
+        typeof row.params === "object" && row.params !== null && typeof (row.params as { expectedVersion?: unknown }).expectedVersion === "string"
+          ? (row.params as { expectedVersion: string }).expectedVersion
+          : null;
+      // Mismatch → leave running: either the update is still in flight (an
+      // old agent blip-reconnected) or the new bundle failed to boot (the
+      // reaper's grace window settles that). Only an exact match proves the
+      // update took.
+      if (expected === null || compareVersions(agentVersion, expected) !== 0) return "pending";
+      await db
+        .update(jobs)
+        .set({ status: "succeeded", exitCode: 0, finishedAt: new Date() })
+        .where(and(eq(jobs.id, row.id), inArray(jobs.status, [...ACTIVE])));
+      await db.insert(jobOutput).values({ jobId: row.id, seq: MAX_OUTPUT_LINES, line: `update confirmed: agent reports ${agentVersion}` });
+      return "succeeded";
     },
   };
 }
