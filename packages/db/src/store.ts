@@ -70,6 +70,10 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
           role: input.role,
           host: input.host,
           enabled: input.enabled ?? true,
+          // The create contract accepts both (core nodeCreateSchema) — persist
+          // them or a "model-ops NAS root" create silently yields neither.
+          llmPorts: (input.llmPorts ?? []).map((p) => ({ port: p, host: "127.0.0.1" })),
+          nasRoot: input.nasRoot ?? null,
           ...tokenPair(token),
         })
         .returning({ id: nodes.id });
@@ -78,7 +82,18 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
     },
 
     async patch(id, patch) {
-      await db.update(nodes).set({ ...patch, updatedAt: new Date() }).where(eq(nodes.id, id));
+      const { llmPorts, ...rest } = patch;
+      await db
+        .update(nodes)
+        .set({
+          ...rest,
+          // The wire contract is number[]; the store shape is {port, host}.
+          // Coerce here so nodeLlmAssignments (config-update) keeps probing
+          // instead of silently dropping plain numbers.
+          ...(llmPorts !== undefined ? { llmPorts: llmPorts.map((p) => ({ port: p, host: "127.0.0.1" })) } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(nodes.id, id));
     },
 
     async remove(id) {

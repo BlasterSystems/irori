@@ -54,12 +54,17 @@ export function createDbHandle(databaseUrl: string): DbHandle {
       }
     },
     migrate: async () => {
-      // Advisory lock so N containers booting concurrently don't race (ADR-0002).
-      await sql`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
+      // Advisory lock so N containers booting concurrently don't race
+      // (ADR-0002). pg_advisory_lock is session-scoped: acquire/release must
+      // run on the SAME connection, so reserve one for the whole critical
+      // section — pooled checkouts would leak the lock and race after 30 s.
+      const reserved = await sql.reserve();
       try {
+        await reserved`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
         await migrate(db, { migrationsFolder });
       } finally {
-        await sql`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`;
+        await reserved`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`.catch(() => {});
+        reserved.release();
       }
     },
     close: async () => {

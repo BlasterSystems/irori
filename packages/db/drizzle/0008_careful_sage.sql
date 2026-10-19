@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "bench_runs_node_running_uq" ON "bench_runs" USING btree ("node_id") WHERE status = 'running';--> statement-breakpoint
+CREATE UNIQUE INDEX "jobs_node_active_uq" ON "jobs" USING btree ("node_id") WHERE status IN ('queued', 'running');
