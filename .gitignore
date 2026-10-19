@@ -8,6 +8,8 @@ dist/
 
 # Runtime state
 data/
+# …except the seeded bench suites (MIT-licensed GSM8K/MMLU samples, see NOTICE).
+!apps/agent/src/bench/data/
 config/secrets*
 .env
 .env.*
