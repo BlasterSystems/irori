@@ -29,6 +29,17 @@ done
 [[ -n "$TOKEN" ]] || { echo "--token irn_... is required (server UI or POST /api/v1/nodes)" >&2; exit 2; }
 [[ $EUID -eq 0 ]] || { echo "run as root (the agent is a privileged service)" >&2; exit 2; }
 
+# The bundle targets node24 and bundles undici 7, which needs the File global
+# (Node 20+). Without this check the unit crash-loops for 60 s and the script
+# blames the handshake instead of the runtime.
+NODE_BIN="$(command -v node || true)"
+NODE_VERSION="$([[ -n "$NODE_BIN" ]] && "$NODE_BIN" --version 2>/dev/null || true)"
+if [[ -z "$NODE_VERSION" ]] || ! "$NODE_BIN" -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>20||(a===20&&b>=18)?0:1)' 2>/dev/null; then
+  echo "[irori] ${NODE_VERSION:-node not found on PATH} — the agent bundle requires Node.js >= 20.18.1 (undici 7 needs the File global)" >&2
+  echo "        install Node 24 and re-run — e.g. curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs" >&2
+  exit 2
+fi
+
 if [[ -z "$BUNDLE_URL" ]]; then
   if [[ "$VERSION" == "latest" ]]; then
     BUNDLE_URL="https://github.com/BlasterSystems/irori/releases/latest/download/irori-agent.mjs"
