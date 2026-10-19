@@ -130,7 +130,9 @@ onUnmounted(() => {
     </template>
   </main>
 
-  <footer class="container foot">
-    <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template></span>
+  <footer class="foot">
+    <div class="container foot__in">
+      <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template></span>
+    </div>
   </footer>
 </template>
