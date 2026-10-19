@@ -1,6 +1,6 @@
 import type { QualityCategory, QualityConfig, QualityItemResult, QualityResult } from "@irori/core";
-import gsm8kData from "./data/gsm8k-200.json";
-import mmluData from "./data/mmlu-285.json";
+import gsm8kData from "./data/gsm8k-200.json" with { type: "json" };
+import mmluData from "./data/mmlu-285.json" with { type: "json" };
 import { benchStream, labBody, thinkingOffFields } from "./stream.js";
 
 /**
@@ -126,7 +126,7 @@ function genQa(): QualityItem[] {
   const rng = rngFor("qa-count");
   for (let i = 0; i < 10; i++) {
     const word = pick(rng, COUNT_WORDS);
-    const letter = pick(rng, "abcdefghijklmnopqrstuvwxyz");
+    const letter = pick(rng, "abcdefghijklmnopqrstuvwxyz".split(""));
     const n = randint(rng, 2, 5);
     items.push({
       id: `qa-cnt-${String(i + 1).padStart(2, "0")}`,
@@ -237,7 +237,7 @@ function genTrack(): QualityItem[] {
   // Family 1: person-to-person transfers (names rotate per item).
   for (let i = 0; i < 12; i++) {
     const rotated = [...NAMES.slice(i % NAMES.length), ...NAMES.slice(0, i % NAMES.length)];
-    const [a, b, c] = rotated.slice(0, 3).map((n) => n.toLowerCase());
+    const [a, b, c] = rotated.slice(0, 3).map((n) => n.toLowerCase()) as [string, string, string];
     const start = [randint(rng, 1, 9), randint(rng, 1, 9), randint(rng, 1, 9)];
     const give1 = randint(rng, 1, start[0]!);
     const give2 = randint(rng, 1, start[1]!);

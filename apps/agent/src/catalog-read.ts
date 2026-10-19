@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync, readlinkSync, lstatSync, statSync, existsSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { parseCatalog, CatalogFormatError, type Catalog, type ScannedModel } from "@irori/core";
 
 /**
@@ -43,19 +45,42 @@ export function parseManifestFields(yaml: string): { name?: string; repo?: strin
   return out;
 }
 
-/** du-style byte size of a directory (block counts, like modelctl's catalog). */
-function dirBytes(path: string): number {
+const execFileAsync = promisify(execFile);
+
+/**
+ * du-style byte size of a directory (block counts, like modelctl's catalog).
+ * Async so a slow NAS never stalls the agent's event loop mid-catalog; GNU
+ * `du -sb` falls back to a manual walk where it is unavailable (BSD/macOS).
+ */
+async function dirBytes(path: string): Promise<number> {
   try {
-    const out = execFileSync("du", ["-sb", path], { encoding: "utf8", timeout: 30_000 });
-    const n = Number.parseInt(out.split("\t")[0] ?? "0", 10);
+    const { stdout } = await execFileAsync("du", ["-sb", path], { encoding: "utf8", timeout: 30_000 });
+    const n = Number.parseInt(stdout.split("\t")[0] ?? "0", 10);
     return Number.isFinite(n) ? n : 0;
   } catch {
-    return 0;
+    return walkBytes(path);
   }
 }
 
+async function walkBytes(path: string): Promise<number> {
+  const dirents = await readdir(path, { withFileTypes: true }).catch(() => null);
+  if (dirents === null) return 0;
+  let total = 0;
+  for (const entry of dirents) {
+    const child = join(path, entry.name);
+    try {
+      if (entry.isSymbolicLink()) continue; // never follow links out of the store
+      if (entry.isDirectory()) total += await walkBytes(child);
+      else total += (await stat(child)).size;
+    } catch {
+      // unreadable entries contribute nothing
+    }
+  }
+  return total;
+}
+
 /** Live scan of active/ — name → manifest parse → object dir size. */
-export function scanStore(root: string): ScannedModel[] {
+export async function scanStore(root: string): Promise<ScannedModel[]> {
   const activeDir = join(root, "active");
   const entries: ScannedModel[] = [];
   for (const name of readdirSync(activeDir).sort()) {
@@ -71,7 +96,7 @@ export function scanStore(root: string): ScannedModel[] {
       const manifestPath = join(root, "manifests", `${name}.yaml`);
       if (existsSync(manifestPath)) {
         const mf = parseManifestFields(readFileSync(manifestPath, "utf8"));
-        entries.push({ name, runtime: mf.runtimeType ?? "unknown", repository: mf.repo ?? name, bytes: dirBytes(ref) });
+        entries.push({ name, runtime: mf.runtimeType ?? "unknown", repository: mf.repo ?? name, bytes: await dirBytes(ref) });
       }
       continue;
     }
@@ -100,7 +125,7 @@ export function scanStore(root: string): ScannedModel[] {
       const rel = objectDir.startsWith(root) ? objectDir.slice(root.length + 1).split("/") : [];
       if (rel.length >= 3 && rel[0] === "models") repo = `${rel[1]}/${rel[2]}`;
     }
-    entries.push({ name, runtime: runtimeType, repository: repo, bytes: dirBytes(objectDir) });
+    entries.push({ name, runtime: runtimeType, repository: repo, bytes: await dirBytes(objectDir) });
   }
   return entries;
 }
@@ -109,7 +134,7 @@ export function scanStore(root: string): ScannedModel[] {
  * Reads the store with the ADR-0004 fallback ladder:
  * catalog.json parse → live scan. Never writes anything.
  */
-export function readStore(root: string): StoreRead {
+export async function readStore(root: string): Promise<StoreRead> {
   const catalogPath = join(root, "catalog.json");
   if (existsSync(catalogPath)) {
     try {
@@ -117,13 +142,13 @@ export function readStore(root: string): StoreRead {
       if (catalog.schema === 3) {
         return { entries: catalog.models.map((m) => ({ ...m })), source: "catalog" };
       }
-      return { entries: scanStore(root), source: "scan", warning: `catalog schema ${catalog.schema} unsupported; scanned active/` };
+      return { entries: await scanStore(root), source: "scan", warning: `catalog schema ${catalog.schema} unsupported; scanned active/` };
     } catch (e) {
       if (e instanceof CatalogFormatError) {
-        return { entries: scanStore(root), source: "scan", warning: `catalog unreadable (${e.message}); scanned active/` };
+        return { entries: await scanStore(root), source: "scan", warning: `catalog unreadable (${e.message}); scanned active/` };
       }
       throw e;
     }
   }
-  return { entries: scanStore(root), source: "scan", warning: "no catalog.json; scanned active/" };
+  return { entries: await scanStore(root), source: "scan", warning: "no catalog.json; scanned active/" };
 }

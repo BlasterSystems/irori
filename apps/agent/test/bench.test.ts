@@ -257,7 +257,10 @@ describe("runDecode e2e against the fixture server", () => {
     for (const level of result.levels) {
       expect(level.error).toBeNull();
       expect(level.streamsOk).toBe(level.concurrency);
-      expect(level.totalDecodeTokens).toBe(41 * level.concurrency);
+      // 41 completion tokens/stream: the first is prefill's outcome, so
+      // decode tokens exclude it while the completion total does not.
+      expect(level.totalDecodeTokens).toBe(40 * level.concurrency);
+      expect(level.totalCompletionTokens).toBe(41 * level.concurrency);
       expect(level.meanDecodeTps).toBeGreaterThan(0);
       expect(level.meanTtftMs).toBeGreaterThanOrEqual(0);
     }
@@ -266,7 +269,7 @@ describe("runDecode e2e against the fixture server", () => {
   it("records per-stream failures without killing the wave", async () => {
     handler = (body) => {
       const prompt = (body.messages as Array<{ content: string }>)[0]!.content;
-      if (prompt.includes("from 1 to")) return { status: 400 };
+      if (prompt.includes("from 1 to")) return { status: 400, events: [] };
       return { events: streamEvents("y".repeat(5), { completion_tokens: 30, prompt_tokens: 8 }) };
     };
     const result = await runDecode(

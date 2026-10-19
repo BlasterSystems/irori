@@ -20,7 +20,7 @@ interface FakeServer {
 }
 
 /** Local http server + ws upgrade endpoint implementing the server side. */
-async function startFakeServer(helloCadenceMs: number): Promise<FakeServer> {
+async function startFakeServer(helloCadenceMs: number, opts: { noPong?: boolean } = {}): Promise<FakeServer> {
   const hellos: HelloMsg[] = [];
   const frames: AgentMsg[] = [];
   const connections: WebSocket[] = [];
@@ -34,6 +34,11 @@ async function startFakeServer(helloCadenceMs: number): Promise<FakeServer> {
       const parsed = agentMsgSchema.safeParse(JSON.parse(String(data)));
       if (!parsed.success) return;
       frames.push(parsed.data);
+      if (parsed.data.type === "ping" && !opts.noPong) {
+        // The real hub pongs; without it the transport's zombie detection
+        // would terminate the socket mid-test.
+        ws.send(JSON.stringify({ type: "pong", t: parsed.data.t }));
+      }
       if (parsed.data.type === "hello") {
         hellos.push(parsed.data);
         ws.send(
@@ -286,6 +291,18 @@ it("sends periodic pings", async () => {
   await vi.waitFor(() => expect(server.frames.filter((f) => f.type === "ping").length).toBeGreaterThanOrEqual(1), { timeout: 5000 });
   const pings = server.frames.filter((f) => f.type === "ping");
   expect(typeof pings[0]!.t).toBe("number");
+});
+
+it("terminates and reconnects when pings go unanswered", async () => {
+  const server = await startFakeServer(60_000, { noPong: true }); // half-open peer
+  teardown.push(server.close);
+  const transport = makeTransport({ pingIntervalMs: 30 });
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+
+  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+  // No pongs → lastPongAt goes stale → terminate → reconnect handshake.
+  await vi.waitFor(() => expect(server.hellos.length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
 });
 
 it("does not reconnect after stop()", async () => {

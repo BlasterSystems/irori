@@ -156,14 +156,16 @@ async function run(): Promise<void> {
         log("catalog-request ignored: node has no nasRoot");
         return;
       }
-      try {
-        const read = readStore(root);
-        transport.sendAgentServer({ type: "catalog", source: read.source, entries: read.entries });
-        if (read.warning) log(`catalog: ${read.warning}`);
-        log(`catalog: ${read.entries.length} models (${read.source})`);
-      } catch (err) {
-        log(`catalog read failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      void (async () => {
+        try {
+          const read = await readStore(root);
+          transport.sendAgentServer({ type: "catalog", source: read.source, entries: read.entries });
+          if (read.warning) log(`catalog: ${read.warning}`);
+          log(`catalog: ${read.entries.length} models (${read.source})`);
+        } catch (err) {
+          log(`catalog read failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      })();
     },
     llm: {
       llmPorts: config.llmTargets.map((t) => ({ port: t.port, host: t.host })),

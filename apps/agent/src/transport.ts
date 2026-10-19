@@ -5,6 +5,10 @@ import type { AgentMsg, AgentServerMsg, BenchType, HardwareSnapshot, LlmPortSnap
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
 
+/** Bound on terminal job/bench frames queued while offline (drop-oldest);
+ *  losing one strands the server's one-active slot, so these are replayed. */
+export const MAX_BUFFERED_TERMINAL = 100;
+
 const DEFAULT_PING_INTERVAL_MS = 15_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -115,6 +119,10 @@ export class AgentTransport {
   private stopped = false;
   private reconnectAttempts = 0;
   private collecting = false;
+  /** Last pong timestamp — a half-open connection never pong-acks. */
+  private lastPongAt = 0;
+  /** Terminal job/bench frames dropped while offline, replayed on hello-ok. */
+  private pendingTerminal: Array<Extract<AgentServerMsg, { type: "job-done" | "bench-done" }>> = [];
   private readonly buffer: HardwareSnapshot[] = [];
   private snapshotTimer: NodeJS.Timeout | undefined;
   private pingTimer: NodeJS.Timeout | undefined;
@@ -254,6 +262,7 @@ export class AgentTransport {
 
   private handleOpen(): void {
     this.log(`connected to ${this.serverUrl}`);
+    this.lastPongAt = Date.now();
     try {
       this.sendRaw({
         type: "hello",
@@ -267,7 +276,16 @@ export class AgentTransport {
     }
     this.pingTimer = setInterval(() => {
       try {
-        if (this.ready) this.sendRaw({ type: "ping", t: Date.now() });
+        if (this.ready) {
+          this.sendRaw({ type: "ping", t: Date.now() });
+          // A half-open connection (sleep, NAT drop) sends fine but never
+          // pongs — terminate so handleClose schedules a reconnect.
+          if (Date.now() - this.lastPongAt > this.pingIntervalMs * 2) {
+            this.log("ping timeout — terminating unresponsive connection");
+            this.ws?.terminate();
+            return;
+          }
+        }
       } catch {
         // Connection is going away; close handler cleans up.
       }
@@ -295,6 +313,7 @@ export class AgentTransport {
         this.handleConfigUpdate(parsed.data);
         break;
       case "pong":
+        this.lastPongAt = Date.now();
         break;
       case "job":
         this.onJobRequest?.(parsed.data.jobId, parsed.data.kind, parsed.data.params);
@@ -377,6 +396,10 @@ export class AgentTransport {
     this.cadenceMs = cadenceMs;
     this.log(`handshake ok (node ${nodeId}, cadence ${cadenceMs} ms)`);
     this.flushBuffered();
+    // Terminal frames lost while offline: the server's one-active slot must
+    // learn the job/bench ended (replays may race a 60 s reaper — fine, both
+    // settle the row).
+    for (const msg of this.pendingTerminal.splice(0)) this.sendAgentServer(msg);
     this.startSnapshotTimer();
   }
 
@@ -480,6 +503,14 @@ export class AgentTransport {
    */
   sendAgentServer(msg: AgentServerMsg): void {
     if (!this.ready) {
+      if (msg.type === "job-done" || msg.type === "bench-done") {
+        // Losing a terminal frame strands the server's one-active slot until
+        // manual cancel — buffer and replay on the next hello-ok.
+        this.pendingTerminal.push(msg);
+        while (this.pendingTerminal.length > MAX_BUFFERED_TERMINAL) this.pendingTerminal.shift();
+        this.log(`agentServer frame buffered (not ready): ${msg.type}`);
+        return;
+      }
       this.log(`agentServer frame DROPPED (not ready): ${msg.type}`);
       return;
     }
@@ -488,6 +519,10 @@ export class AgentTransport {
       if (msg.type !== "job-output") this.log(`agentServer frame sent: ${msg.type}`);
     } catch (err) {
       this.log(`agentServer frame send failed: ${msg.type} (${err instanceof Error ? err.message : String(err)})`);
+      if (msg.type === "job-done" || msg.type === "bench-done") {
+        this.pendingTerminal.push(msg);
+        while (this.pendingTerminal.length > MAX_BUFFERED_TERMINAL) this.pendingTerminal.shift();
+      }
     }
   }
 
@@ -495,7 +530,7 @@ export class AgentTransport {
    * Send any agent frame (setup events/logs/acks). Dropped while offline —
    * driver state is re-reported on the next config-update or status poll.
    */
-  sendAgentMsg(msg: AgentMsg): void {
+  sendAgentMsg(msg: AgentMsg | Extract<AgentServerMsg, { type: "setup-event" | "setup-log" }>): void {
     if (!this.ready) {
       this.log(`agent frame DROPPED (not ready): ${msg.type}`);
       return;
