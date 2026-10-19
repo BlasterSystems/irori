@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { createCipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 
 /**
  * AES-256-GCM envelope: "v1:" + base64(iv(12) | authTag(16) | ciphertext).
@@ -22,17 +22,6 @@ export function encryptSecret(keyHex: string, plaintext: string): string {
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return PREFIX + Buffer.concat([iv, tag, ciphertext]).toString("base64");
-}
-
-export function decryptSecret(keyHex: string, envelope: string): string {
-  if (!envelope.startsWith(PREFIX)) throw new Error("unknown secret envelope");
-  const raw = Buffer.from(envelope.slice(PREFIX.length), "base64");
-  const iv = raw.subarray(0, 12);
-  const tag = raw.subarray(12, 28);
-  const ciphertext = raw.subarray(28);
-  const decipher = createDecipheriv("aes-256-gcm", parseKey(keyHex), iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
 
 function parseKey(keyHex: string): Buffer {

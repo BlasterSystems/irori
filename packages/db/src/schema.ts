@@ -161,7 +161,12 @@ export const jobs = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("jobs_node_idx").on(t.nodeId, t.createdAt)],
+  (t) => [
+    index("jobs_node_idx").on(t.nodeId, t.createdAt),
+    // Enforces one-active-per-node under concurrency (the service's
+    // check-then-insert alone races; 23505 maps to the 409 busy error).
+    uniqueIndex("jobs_node_active_uq").on(t.nodeId).where(sql`status IN ('queued', 'running')`),
+  ],
 );
 
 /** Job output ring (last N lines, streamed to the UI). */
@@ -311,8 +316,10 @@ export const benchRuns = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("bench_runs_type_idx").on(t.type, t.createdAt), index("bench_runs_node_idx").on(t.nodeId, t.createdAt)],
+  (t) => [
+    index("bench_runs_type_idx").on(t.type, t.createdAt),
+    index("bench_runs_node_idx").on(t.nodeId, t.createdAt),
+    // Enforces one-active-per-node under concurrency (23505 → BenchBusyError).
+    uniqueIndex("bench_runs_node_running_uq").on(t.nodeId).where(sql`status = 'running'`),
+  ],
 );
-
-/** Advisory-lock key shared by every boot migration run. */
-export const MIGRATE_LOCK_KEY = sql`hashtext('irori-migrate')`;
