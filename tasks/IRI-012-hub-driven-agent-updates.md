@@ -70,6 +70,9 @@ Offline agents fall back to IRI-011's manual one-liner.
   mismatch / none when idle), `onboarding.test.ts` (route 200s, 503, 409
   gates incl. too-old agent, busy bench/setup), hub `onHello` spy test.
 - Build: `pnpm build` — green.
+- Typecheck: `pnpm typecheck` (the CI `verify` gate — includes `test/`, which
+  `pnpm build` does not) — green after supplying `serverUrl` in
+  `apps/agent/test/m4.test.ts`'s JobManager context.
 - Documentation check: `.agentic/bin/docs-check` — passed.
 - Live smoke (real server on a scratch DB + scripted WS agent): agent at
   0.2.0 → `409 predates self-update (needs 0.3.0)`; agent at 0.3.0 → `202`,
