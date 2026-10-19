@@ -22,10 +22,16 @@ services:
     restart: unless-stopped
 
   agent:
-    image: irori:latest
+    # The agent role has its own image stage (node:24-slim + rsync/ssh) —
+    # the server image has neither the bundle path nor an entrypoint that
+    # dispatches on argv, so `image: irori + command: ["agent"]` crash-looped.
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: agent
+    image: irori-agent:latest
     # Container agent is for testing; primary install is bare-metal (SPEC §2).
     profiles: ["agent"]
-    command: ["agent"]
     environment:
       IRORI_SERVER_URL: ws://server:3947/agent-ws
       IRORI_NODE_TOKEN: ${IRORI_NODE_TOKEN:?set IRORI_NODE_TOKEN}
