@@ -319,6 +319,11 @@ export interface QualityCompare {
   note: string | null;
 }
 
+/** Exact p-values are never 0 — render sub-resolution results as "<0.001". */
+export function formatP(p: number): string {
+  return p < 0.001 ? "<0.001" : p.toFixed(3);
+}
+
 /**
  * Paired per-item compare of two quality runs. Rows are keyed by item id:
  * pairs missing from either run (request error) are excluded from the
@@ -384,8 +389,8 @@ export function compareQualityRuns(a: QualityResult, b: QualityResult): QualityC
     onlyA + onlyB === 0
       ? `Identical outcomes on every paired item.${excludedNote}`
       : p >= 0.05
-        ? `McNemar p = ${p.toFixed(3)} — the difference is within noise.${excludedNote}`
-        : `McNemar p = ${p.toFixed(3)} — ${onlyA > onlyB ? "the first" : "the second"} run is better, beyond noise.${excludedNote}`;
+        ? `McNemar p = ${formatP(p)} — the difference is within noise.${excludedNote}`
+        : `McNemar p = ${formatP(p)} — ${onlyA > onlyB ? "the first" : "the second"} run is better, beyond noise.${excludedNote}`;
   return { rows, onlyA, onlyB, p, verdict: onlyA + onlyB === 0 || p >= 0.05 ? "noise" : onlyA > onlyB ? "a" : "b", note };
 }
 
