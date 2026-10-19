@@ -1,6 +1,7 @@
 # ADR-0003: Privileged per-node agent with outbound WebSocket
 
-- **Status:** Accepted (2026-10-19 — owner approved after M1–M7 shipped on these decisions)
+- **Status:** Accepted
+- **Accepted:** 2026-10-19 — owner approval after M1–M7 shipped on these decisions
 - **Date:** 2026-10-16
 - **Decision owners:** piresbruno
 - **Scope:** Node-side runtime, transport topology, privilege model, bootstrap
