@@ -25,6 +25,7 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 
 - Authoritative store: **PostgreSQL on the Proxmox pgsql server** (`DATABASE_URL`), schema via Drizzle, migrations applied on boot under an advisory lock pinned to a reserved connection. Bounded raw snapshot ring + minute/hour/day rollups + prune job (ADR-0002, ADR-0006). The server degrades gracefully (in-memory rings, bounded ingest buffer) while the DB is unreachable; terminal job/bench frames ride the same drop-oldest buffer and are retried until the write lands.
 - One active job/bench per node is enforced by partial unique indexes (`jobs_node_active_uq`, `bench_runs_node_running_uq`) — the 409 busy error survives concurrent requests, not just the check-then-insert fast path.
+- **M7 analytics state**: the token ledger (`token_ledger`) diffs the probes' cumulative token counters per (node, port, model) into hourly/daily deltas (reset-safe; coverage columns, never guessed zeros); the monthly energy archive (`energy_monthly`) integrates clamped estimated watts from hour buckets; disk-hygiene runs persist to `cleanup_runs` (last 20 / 90 d). All three advance on watermark/idempotent-upsert patterns and never raw-scan the raw tables.
 - The NAS store is **external state owned by modelctl** (ADR-0004); Irori reads `catalog.json` and mutates only through modelctl commands.
 - Secrets table: SSH credentials + agent tokens encrypted AES-256-GCM under `ENCRYPTION_KEY`.
 - Desired clock state per node; re-applied on node online transitions (ADR-0003).

@@ -2,7 +2,41 @@
 
 Endpoint inventory lives in `SPEC.md` §6; this file records the behavioral
 guarantees callers rely on, kept current when behavior changes. Last updated
-by the adversarial-review fix batch (PR #2).
+by the M7 batch (adversarial-review fixes + analytics/hygiene).
+
+## Analytics (M7)
+
+- `GET /api/v1/analytics/:lens?range=&groupBy=` — five lenses
+  (`memory|decode|power|temps|tokens`), ranges `1h|24h|7d|30d|90d`,
+  `groupBy=cluster|node` (cluster = a serving setup; nodes in no setup fold
+  into a `standalone` group). Optional `setupId`/`nodeId` filters. Answers
+  from the rollup buckets — never raw scans. Temps uses minute buckets for
+  the 7d range (min/max pairs); every other combination uses hour/day.
+- Aggregation semantics are per lens and physical: decode/tokens/power/memory
+  add across members; temps aggregate fleet-max (max-of-max, min-of-min,
+  mean-of-avg, any-throttled). Power points carry `baseW` and a `coverage`
+  fraction; watts are clamped to the 240 W GB10 envelope and labeled
+  estimated, not wall-metered.
+- The tokens lens additionally returns `models[]` — per-model
+  generated/prompt/cached totals over the range from the ledger. Ledger
+  columns reflect only counters the backend actually published; an unpublished
+  counter is NULL-coverage, never a zero.
+
+## Disk hygiene (M7)
+
+- `GET /api/v1/nodes/:id/cleanup` — `{latestAudit, history (last 20),
+  prevention}`; `PUT /api/v1/nodes/:id/hygiene` — `{weeklySafePass: boolean}`.
+- `hygiene-audit` / `hygiene-clean` / `hygiene-prevent` are agent-side jobs
+  (one active per node, 409 otherwise). The agent's FINAL output line is the
+  JSON report (validated against the core schemas) and lands in
+  `cleanup_runs.report`; a clean's categories continue past a failing
+  category (per-category `failed` outcome). The protected set — modelctl
+  registrations, running-container images, `/proc` open files, files <24 h
+  outside caches, the NAS store — is enforced agent-side; `modelctl-staging`
+  cleans go through `modelctl cleanup-staging --apply`, never raw `rm`.
+- `hygiene-prevent` writes docker `daemon.json` log rotation (backup kept)
+  and records `logRotationApplied` in the node's prevention settings; docker
+  is NOT restarted by the agent (it may live on that daemon).
 
 ## Nodes
 

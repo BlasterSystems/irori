@@ -10,3 +10,5 @@ export * from "./job-messages.js";
 export * from "./model-api.js";
 export * from "./setups.js";
 export * from "./bench.js";
+export * from "./analytics.js";
+export * from "./hygiene.js";

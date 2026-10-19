@@ -233,7 +233,11 @@ node**, with time ranges backed by rollups:
 - Tokens: generated / cached / prefill, hourly + daily (ledger per model).
 - Power: estimated watts (GPU board + CPU model + base overhead, clamped to
   the GB10 envelope), explicit coverage fields; monthly archive; Wh/token.
-  Labeled *estimated, not wall-metered*.
+  Labeled *estimated, not wall-metered*. Constants (NVIDIA DGX Spark
+  documentation): GB10 SOC TDP 140 W (GPU+CPU), 100 W budget for other
+  components, 240 W peak system power — the estimator clamps
+  gpu + cpu package + base overhead (default 40 W) to the 240 W system
+  envelope before integrating.
 - Memory: unified-memory pressure (GB10) / RAM+VRAM (discrete), trends.
 - Temperatures: fleet strip (latest GPU/CPU per node, hottest first, no
   color-only tiers — ◇ warn ≥ 85 °C, ▫ critical ≥ 90 °C, shapes carry the

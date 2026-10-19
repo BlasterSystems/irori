@@ -1,8 +1,45 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { jobOutput, jobs, modelMeta, nodeModels } from "@irori/db";
+import { cleanupRuns, jobOutput, jobs, modelMeta, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { jobKindSchema } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
+
+/**
+ * Persists a hygiene job's structured result into cleanup_runs: the agent's
+ * FINAL output line is the JSON report (audit or clean), validated by the
+ * core schema. Runs that already settled (double done, reap-after-done) are
+ * left alone.
+ */
+async function settleCleanupRun(db: Db, jobId: string, kind: "hygiene-audit" | "hygiene-clean", status: "succeeded" | "failed" | "canceled"): Promise<void> {
+  const [last] = await db
+    .select({ line: jobOutput.line })
+    .from(jobOutput)
+    .where(eq(jobOutput.jobId, jobId))
+    .orderBy(desc(jobOutput.seq))
+    .limit(1);
+  let report: unknown = null;
+  let parseError: string | null = null;
+  if (last !== undefined) {
+    try {
+      const parsed = hygieneResultSchemaFor(kind).safeParse(JSON.parse(last.line));
+      if (parsed.success) report = parsed.data;
+      else parseError = "final output is not a valid hygiene report";
+    } catch {
+      parseError = "final output is not JSON";
+    }
+  } else {
+    parseError = "agent produced no output";
+  }
+  await db
+    .update(cleanupRuns)
+    .set({
+      status,
+      report: report === null ? null : report,
+      error: status === "succeeded" && report === null ? parseError : null,
+      finishedAt: new Date(),
+    })
+    .where(and(eq(cleanupRuns.jobId, jobId), eq(cleanupRuns.status, "running")));
+}
 
 /**
  * Jobs subsystem for apps/server (M4): one active job per node, streamed
@@ -89,9 +126,25 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
       }
       const [row] = inserted;
       if (!row) throw new Error("job insert returned no row");
+      if (kind === "hygiene-audit" || kind === "hygiene-clean") {
+        // History row (SPEC §11.6): the report lands via onDone's output parse.
+        await db.insert(cleanupRuns).values({
+          nodeId,
+          kind: kind === "hygiene-audit" ? "audit" : "clean",
+          status: "running",
+          categories: kind === "hygiene-clean" ? (params as { categories?: unknown }).categories ?? [] : [],
+          jobId: row.id,
+        });
+      }
       const sent = sendToAgent(nodeId, { type: "job", jobId: row.id, kind, params });
       if (!sent) {
         await db.update(jobs).set({ status: "failed", finishedAt: new Date() }).where(eq(jobs.id, row.id));
+        if (kind === "hygiene-audit" || kind === "hygiene-clean") {
+          await db
+            .update(cleanupRuns)
+            .set({ status: "failed", error: "node is not connected", finishedAt: new Date() })
+            .where(eq(cleanupRuns.jobId, row.id));
+        }
         throw new JobDispatchError("node is not connected");
       }
       await db.update(jobs).set({ status: "running", startedAt: new Date() }).where(eq(jobs.id, row.id));
@@ -127,6 +180,12 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
       if (row.status === "succeeded" || row.status === "failed" || row.status === "canceled") return false;
       sendToAgent(row.nodeId, { type: "job-cancel", jobId: id });
       await db.update(jobs).set({ status: "canceled", finishedAt: new Date() }).where(eq(jobs.id, id));
+      if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
+        await db
+          .update(cleanupRuns)
+          .set({ status: "canceled", finishedAt: new Date() })
+          .where(and(eq(cleanupRuns.jobId, id), eq(cleanupRuns.status, "running")));
+      }
       return true;
     },
 
@@ -151,6 +210,16 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
         .where(and(eq(jobs.id, jobId), inArray(jobs.status, [...ACTIVE])));
       const [row] = await db.select({ kind: jobs.kind, params: jobs.params }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
       if (!row) return;
+      if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
+        await settleCleanupRun(db, jobId, row.kind, status);
+      } else if (row.kind === "hygiene-prevent") {
+        // Prevention state (SPEC §11.6): log rotation applied iff the agent
+        // wrote daemon.json successfully.
+        const key = `hygiene:${nodeId}`;
+        const [prev] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, key));
+        const state = { ...((typeof prev?.value === "object" && prev.value !== null ? prev.value : {}) as Record<string, unknown>), logRotationApplied: status === "succeeded" };
+        await db.insert(settings).values({ key, value: state }).onConflictDoUpdate({ target: settings.key, set: { value: state } });
+      }
       const name = typeof row.params === "object" && row.params !== null && "name" in row.params ? String((row.params as { name: unknown }).name) : "";
       // Keep the per-node model inventory in step with what actually succeeded.
       if (status === "succeeded" && name.length > 0) {

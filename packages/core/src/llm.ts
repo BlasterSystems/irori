@@ -39,6 +39,17 @@ export const llmPortSnapshotSchema = z.object({
   itlP95Ms: z.number().nonnegative().nullable().default(null),
   /** Engine-specific extras (e.g. TensorFold prefill/decode split), verbatim. */
   engineMeta: z.record(z.string(), z.unknown()).nullable().default(null),
+  /** Cumulative token counters where the engine publishes them (M7 ledger).
+   *  Null counters mean "this backend does not expose it" — the ledger
+   *  records coverage and never guesses a zero. */
+  tokens: z
+    .object({
+      generated: z.number().nonnegative().nullable().default(null),
+      prompt: z.number().nonnegative().nullable().default(null),
+      cached: z.number().nonnegative().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
   probedAtMs: z.number().nonnegative(),
 });
 
