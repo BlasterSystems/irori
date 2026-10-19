@@ -17,6 +17,13 @@ d("db integration", () => {
 
   beforeAll(async () => {
     h = createDbHandle(url!);
+    // The suite owns the schema (doc above): drop + migrate so ordering vs
+    // the other suites (server tests leave rows behind) can never fail it.
+    // drizzle's migration bookkeeping lives in its own schema — drop it too
+    // or migrate() sees all migrations applied and creates nothing.
+    await h.sql`drop schema if exists public cascade`;
+    await h.sql`create schema public`;
+    await h.sql`drop schema if exists drizzle cascade`;
     await h.migrate();
   });
 
