@@ -23,20 +23,21 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 
 ## Data and State
 
-- Authoritative store: **PostgreSQL on the Proxmox pgsql server** (`DATABASE_URL`), schema via Drizzle, migrations applied on boot under an advisory lock. Bounded raw snapshot ring + minute/hour/day rollups + prune job (ADR-0002, ADR-0006). The server degrades gracefully (in-memory rings, bounded ingest buffer) while the DB is unreachable.
+- Authoritative store: **PostgreSQL on the Proxmox pgsql server** (`DATABASE_URL`), schema via Drizzle, migrations applied on boot under an advisory lock pinned to a reserved connection. Bounded raw snapshot ring + minute/hour/day rollups + prune job (ADR-0002, ADR-0006). The server degrades gracefully (in-memory rings, bounded ingest buffer) while the DB is unreachable; terminal job/bench frames ride the same drop-oldest buffer and are retried until the write lands.
+- One active job/bench per node is enforced by partial unique indexes (`jobs_node_active_uq`, `bench_runs_node_running_uq`) — the 409 busy error survives concurrent requests, not just the check-then-insert fast path.
 - The NAS store is **external state owned by modelctl** (ADR-0004); Irori reads `catalog.json` and mutates only through modelctl commands.
 - Secrets table: SSH credentials + agent tokens encrypted AES-256-GCM under `ENCRYPTION_KEY`.
 - Desired clock state per node; re-applied on node online transitions (ADR-0003).
 
 ## Integrations
 
-- **Agent link:** outbound WS `/agent-ws`, token auth, resume cursor, `config-update` for rotation; SSH bootstrap/fallback with identical snapshot shapes.
+- **Agent link:** outbound WS `/agent-ws`, token auth, resume cursor, `config-update` for rotation; SSH bootstrap/fallback with identical snapshot shapes. Agent-supplied `jobId`/`setupId` frames are scoped to the authenticated sending node; setup events/logs/acks are accepted only from the setup's head. A half-open socket's late `close` cannot deregister a reconnected node, and pings unanswered for two intervals terminate the connection.
 - **Browser link:** SSE `/api/v1/events` (snapshot, run-log, job, bench events); REST for actions.
-- **modelctl:** subprocess with pinned minimum version; streamed job output; dry-run → armed applies for destructive ops.
+- **modelctl:** subprocess with pinned minimum version (release tag + version gate); streamed job output; dry-run → armed applies for destructive ops.
 
 ## Deployment and Operations
 
-- One Dockerfile, two roles (`server`, `agent`); compose happy path for the server on any LAN computer; the agent's primary install is bare-metal (bundle + root systemd unit via install script, UI-assisted over SSH).
+- One Dockerfile, two role stages (`server`, `agent`) — separate role images, no argv dispatching; compose happy path for the server on any LAN computer; the agent's primary install is bare-metal (bundle + root systemd unit via install script, UI-assisted over SSH). The CD rollback captures the previous image id *before* the build retags `irori-dev:latest`.
 - Validation gates: `pnpm test`, `pnpm build`, `.agentic/bin/validate`, `.agentic/bin/docs-check`; CI builds amd64 + arm64 (M7).
 
 ## Agent-Guided Maintenance Boundary
