@@ -62,6 +62,10 @@ watch(
   () => {
     void load();
     void loadLlm();
+    // IRI-010 lesson: one component instance across :nodeId changes — the
+    // next node must not inherit "updating…" state from the previous one.
+    updateBusy.value = false;
+    updateMsg.value = null;
   },
 );
 watch(range, () => {
