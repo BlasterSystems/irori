@@ -8,7 +8,7 @@ import { parseCatalog } from "@irori/core";
 import { parseManifestFields, readStore, scanStore } from "../src/catalog-read.js";
 
 const FIXTURES = join(import.meta.dirname, "fixtures", "store");
-const ctx = { nasRoot: "/mnt/nas", pin: "0.20.1" };
+const ctx = { nasRoot: "/mnt/nas", pin: "0.20.1", serverUrl: "ws://hub/agent-ws" };
 
 describe("buildQueueYaml", () => {
   it("emits field-ordered entries with force flags", () => {
