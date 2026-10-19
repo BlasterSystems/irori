@@ -38,15 +38,18 @@ export function buildQueueYaml(entries: DownloadEntry[]): string {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new CommandBuildError("downloads must be a non-empty list");
   }
+  // JSON string literals are valid YAML double-quoted scalars (same escapes),
+  // so quoting defeats newline/key injection from model or source strings.
+  const ystr = (v: unknown): string => (typeof v === "string" ? JSON.stringify(v) : String(v));
   const lines: string[] = ["downloads:"];
   for (const e of entries) {
     if (!e || typeof e.source !== "string" || e.source.length === 0) {
       throw new CommandBuildError("every download entry needs a source");
     }
-    lines.push(`  - source: ${e.source}`);
+    lines.push(`  - source: ${ystr(e.source)}`);
     const opt = (key: string, value: unknown) => {
       if (value === undefined || value === null || value === "") return;
-      lines.push(`    ${key}: ${value}`);
+      lines.push(`    ${key}: ${ystr(value)}`);
     };
     opt("name", e.name);
     opt("revision", e.revision);
@@ -87,12 +90,22 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
 
   switch (kind) {
     case "modelctl-install": {
-      // Provisioning (ADR-0004): uv → pinned GitHub release → version gate.
+      // Provisioning (ADR-0004): uv → pinned GitHub release tag → version
+      // gate. ~/.local/bin is off PATH on the shipped image (IRORI_MODELCTL_PATH
+      // exists for exactly that reason) — export it or nothing here works.
+      if (!/^\d+\.\d+\.\d+$/.test(ctx.pin)) {
+        throw new CommandBuildError(`IRORI_MODELCTL_PIN must be semver, got "${ctx.pin}"`);
+      }
       const script = [
         "set -e",
+        'export PATH="$HOME/.local/bin:$PATH"',
         "command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh",
-        `uv tool install --force piresbruno/modelctl`,
-        `modelctl --version`,
+        `uv tool install --force "git+https://github.com/piresbruno/modelctl@v${ctx.pin}"`,
+        `INSTALLED="$(modelctl --version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1)"`,
+        `[ -n "$INSTALLED" ] || { echo "modelctl --version produced no version"; exit 1; }`,
+        `LOWEST="$(printf '%s\\n' "$INSTALLED" "${ctx.pin}" | sort -V | head -n1)"`,
+        `[ "$LOWEST" = "${ctx.pin}" ] || { echo "modelctl $INSTALLED is older than required ${ctx.pin}"; exit 1; }`,
+        `echo "modelctl $INSTALLED satisfies the ${ctx.pin} gate"`,
       ].join("\n");
       return { argv: ["bash", "-c", script], shell: "bash" };
     }

@@ -17,13 +17,20 @@ describe("buildQueueYaml", () => {
       { source: "org/model-GGUF", name: "m-q4", quantization: "Q4_K_M", runtime: "llama.cpp", mmproj: "mmproj-F16.gguf", force: true },
     ]);
     expect(yaml).toContain("downloads:");
-    expect(yaml).toContain("  - source: Qwen/Qwen3-8B");
-    expect(yaml).toContain("    name: qwen3-8b-vllm");
-    expect(yaml).toContain("    revision: main");
-    expect(yaml).toContain("    quantization: Q4_K_M");
-    expect(yaml).toContain("    runtime: llama.cpp");
-    expect(yaml).toContain("    mmproj: mmproj-F16.gguf");
+    expect(yaml).toContain('  - source: "Qwen/Qwen3-8B"');
+    expect(yaml).toContain('    name: "qwen3-8b-vllm"');
+    expect(yaml).toContain('    revision: "main"');
+    expect(yaml).toContain('    quantization: "Q4_K_M"');
+    expect(yaml).toContain('    runtime: "llama.cpp"');
+    expect(yaml).toContain('    mmproj: "mmproj-F16.gguf"');
     expect(yaml).toContain("    force: true");
+  });
+
+  it("quotes scalars so newlines cannot inject extra entries", () => {
+    const yaml = buildQueueYaml([{ source: "x\n  - source: evil" }]);
+    const parsed = yaml.split("\n").filter((l) => l.trim().startsWith("-"));
+    expect(parsed).toHaveLength(1); // the injected line stays inside the quoted scalar
+    expect(yaml).toContain('"x\\n  - source: evil"');
   });
 
   it("rejects empty lists and missing sources", () => {
@@ -67,8 +74,11 @@ describe("buildCommand", () => {
     const { argv, shell } = buildCommand("modelctl-install", {}, ctx);
     expect(shell).toBe("bash");
     expect(argv[0]).toBe("bash");
-    expect(argv[2]).toContain("uv tool install --force piresbruno/modelctl");
-    expect(argv[2]).toContain("modelctl --version");
+    // Pinned release tag + PATH export + enforced minimum version.
+    expect(argv[2]).toContain('export PATH="$HOME/.local/bin:$PATH"');
+    expect(argv[2]).toContain('uv tool install --force "git+https://github.com/piresbruno/modelctl@v0.20.1"');
+    expect(argv[2]).toContain("sort -V");
+    expect(() => buildCommand("modelctl-install", {}, { ...ctx, pin: "not-semver" })).toThrow(CommandBuildError);
   });
 
   it("errors without a store root and for unknown kinds", () => {
@@ -82,7 +92,7 @@ describe("buildCommand", () => {
     expect(argv[1]).toBe("queue");
     const yamlPath = argv[2]!;
     expect(existsSync(yamlPath)).toBe(true);
-    expect(readFileSync(yamlPath, "utf8")).toContain("  - source: Qwen/Qwen3-8B");
+    expect(readFileSync(yamlPath, "utf8")).toContain('  - source: "Qwen/Qwen3-8B"');
     expect(argv).toContain("--jobs");
     expect(argv).toContain("--root");
     rmSync(yamlPath, { force: true });
@@ -122,8 +132,8 @@ describe("JobManager", () => {
 describe("store reading", () => {
   const golden = parseCatalog(readFileSync(join(FIXTURES, "catalog.json"), "utf8"));
 
-  it("reads the real catalog.json (127 models) with source=catalog", () => {
-    const read = readStore(FIXTURES);
+  it("reads the real catalog.json (127 models) with source=catalog", async () => {
+    const read = await readStore(FIXTURES);
     expect(read.source).toBe("catalog");
     expect(read.entries.length).toBe(127);
     expect(read.entries.find((m) => m.name === "glm-5.3-flash-exl3-q4")?.repository).toBe("0xSero/GLM-5.3-Flash-EXL3-Q4");
@@ -134,7 +144,7 @@ describe("store reading", () => {
     expect(mf).toMatchObject({ name: "DeepSeek-V4-Flash-0731-EXL3-3.0bpw", repo: "0xSero/DeepSeek-V4-Flash-0731-EXL3-3.0bpw", revision: "main", format: "safetensors", runtimeType: "vllm" });
   });
 
-  it("live-scans a store without a catalog", () => {
+  it("live-scans a store without a catalog", async () => {
     const dir = mkdtempSync(join(tmpdir(), "irori-store-"));
     try {
       const obj = join(dir, "models", "unsloth", "DeepSeek-OCR-2", "abc123--vllm");
@@ -144,9 +154,9 @@ describe("store reading", () => {
       writeFileSync(join(dir, "manifests", "deepseek-ocr-2.yaml"), "name: deepseek-ocr-2\nrepo: unsloth/DeepSeek-OCR-2\nrevision: main\nformat: safetensors\nruntime:\n  type: vllm\n");
       mkdirSync(join(dir, "active"), { recursive: true });
       symlinkSync(obj, join(dir, "active", "deepseek-ocr-2"));
-      const scanned = scanStore(dir);
+      const scanned = await scanStore(dir);
       expect(scanned).toEqual([{ name: "deepseek-ocr-2", runtime: "vllm", repository: "unsloth/DeepSeek-OCR-2", bytes: expect.any(Number) }]);
-      const read = readStore(dir);
+      const read = await readStore(dir);
       expect(read.source).toBe("scan");
       expect(read.warning).toContain("no catalog.json");
     } finally {
