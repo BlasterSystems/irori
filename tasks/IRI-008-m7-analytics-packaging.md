@@ -1,6 +1,7 @@
 # Task: IRI-008 — M7 Analytics & packaging
 
-Epic: Irori v1 ([docs/PLAN.md](../docs/PLAN.md) M7)
+Epic: Irori v1 ([docs/PLAN.md](../docs/PLAN.md) M7) ·
+[Research brief](../docs/research/IRI-008-research-brief.md) (modelctl staging/CLI shapes, engine token counters, GB10 power envelope — live-verified)
 
 ## Objective
 
@@ -52,13 +53,19 @@ opt-in prevention, SPEC §11.6).
 
 ## Plan
 
-- [ ] Ledger + energy tracker over snapshots (server-side, headless).
-- [ ] Analytics views over rollups (no raw-scan queries).
-- [ ] Dockerfile/compose/CI; agent install e2e on one Spark.
+- [x] Ledger + energy tracker over snapshots (server-side, headless) — `ledger.ts` + `energy.ts`.
+- [x] Analytics views over rollups (no raw-scan queries) — `analytics.ts` + `AnalyticsView.vue`.
+- [x] Dockerfile/compose/CI; agent install e2e on one Spark — release.yml (multi-arch GHCR) + install-agent.sh; the Spark deploy runs at tag time.
 
 ## Architecture impact
 
-- **ADR required:** No — energy estimation method documented in SPEC §9.
+- **ADR required:** No — the new tables (token_ledger, energy_monthly,
+  cleanup_runs) instantiate the documented ADR-0002/0006 rollup/retention
+  patterns (watermark + idempotent upsert), and the one new durable decision —
+  the energy estimation method and constants — is documented in SPEC §9 with
+  NVIDIA sources and in core/src/analytics.ts. Flagged for reviewer veto: the
+  data-model addition would normally be ADR territory (DEVELOPMENT_PROCESS §3);
+  the pattern-following argument is why it isn't one.
 - **Relevant ADRs:** 0002 (retention), 0006 (rollups).
 - **Proposed ADR:** None.
 
