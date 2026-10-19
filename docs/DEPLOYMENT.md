@@ -73,12 +73,13 @@ release. Tag only commits whose CI (`verify` + `docs-check`) is green, per
 `docs/RELEASING.md` — the release workflow does not run tests.
 
 Bare-metal agent install (as root on the agent host; the script completes only
-when the WS hello lands in the journal). The host needs **Node.js ≥ 20.18.1 on
-`PATH`** — the bundle targets node24 and bundles undici 7, whose `File` global
-does not exist on Node 18; the installer refuses to run on an older runtime.
-Preferred since IRI-011: everything comes from the hub itself — no GitHub
-reachability needed on the node. The Add-node modal shows this block ready to
-copy:
+when the WS hello lands in the journal). The installer needs no Node.js
+preinstalled: it uses the host's node when it is 24+, otherwise it provisions
+a pinned Node 24 into `/opt/irori/node` (sha256-verified from nodejs.org,
+override with `IRORI_NODE_VERSION`) and pins the unit's `ExecStart` and `PATH`
+to it. Preferred since IRI-011: everything comes from the hub itself — no
+GitHub reachability needed on the node. The Add-node modal shows this block
+ready to copy:
 
 ```sh
 curl -fLsS -o install-agent.sh http://IRORI_HOST:3947/install-agent.sh

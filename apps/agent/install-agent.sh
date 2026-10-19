@@ -29,16 +29,37 @@ done
 [[ -n "$TOKEN" ]] || { echo "--token irn_... is required (server UI or POST /api/v1/nodes)" >&2; exit 2; }
 [[ $EUID -eq 0 ]] || { echo "run as root (the agent is a privileged service)" >&2; exit 2; }
 
-# The bundle targets node24 and bundles undici 7, which needs the File global
-# (Node 20+). Without this check the unit crash-loops for 60 s and the script
-# blames the handshake instead of the runtime.
+# The bundle targets node24 (undici 7 needs the File global). Use the host's
+# node when it is node24+; otherwise provision a pinned Node 24 under
+# /opt/irori/node so the node needs no system packages. The unit's ExecStart
+# and PATH are pointed at the chosen binary further down.
 NODE_BIN="$(command -v node || true)"
-NODE_VERSION="$([[ -n "$NODE_BIN" ]] && "$NODE_BIN" --version 2>/dev/null || true)"
-if [[ -z "$NODE_VERSION" ]] || ! "$NODE_BIN" -e 'const [a,b]=process.versions.node.split(".").map(Number); process.exit(a>20||(a===20&&b>=18)?0:1)' 2>/dev/null; then
-  echo "[irori] ${NODE_VERSION:-node not found on PATH} — the agent bundle requires Node.js >= 20.18.1 (undici 7 needs the File global)" >&2
-  echo "        install Node 24 and re-run — e.g. curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs" >&2
-  exit 2
+NODE_MAJOR=0
+if [[ -n "$NODE_BIN" ]]; then
+  NODE_MAJOR="$("$NODE_BIN" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
 fi
+if [[ "$NODE_MAJOR" -lt 24 ]]; then
+  NODE_DIST="${IRORI_NODE_VERSION:-v24.22.0}"
+  case "$(uname -m)" in
+    x86_64 | amd64) NODE_ARCH=x64 ;;
+    aarch64 | arm64) NODE_ARCH=arm64 ;;
+    *) echo "[irori] unsupported architecture: $(uname -m)" >&2; exit 2 ;;
+  esac
+  NODE_DIR="${IRORI_NODE_DIR:-/opt/irori/node}"
+  if [[ "$("$NODE_DIR/bin/node" -p 'process.versions.node' 2>/dev/null || true)" != "${NODE_DIST#v}" ]]; then
+    TARBALL="node-$NODE_DIST-linux-$NODE_ARCH.tar.xz"
+    echo "[irori] host node ${NODE_BIN:+at $NODE_BIN }is not node24+ — provisioning $NODE_DIST ($NODE_ARCH) into $NODE_DIR"
+    curl -fLsS "https://nodejs.org/dist/$NODE_DIST/$TARBALL" -o "/tmp/$TARBALL"
+    curl -fLsS "https://nodejs.org/dist/$NODE_DIST/SHASUMS256.txt" -o /tmp/irori-node-SHASUMS256.txt
+    (cd /tmp && grep " $TARBALL\$" irori-node-SHASUMS256.txt | sha256sum -c -)
+    rm -rf "$NODE_DIR"
+    mkdir -p "$NODE_DIR"
+    tar -xJf "/tmp/$TARBALL" -C "$NODE_DIR" --strip-components=1
+    rm -f "/tmp/$TARBALL" /tmp/irori-node-SHASUMS256.txt
+  fi
+  NODE_BIN="$NODE_DIR/bin/node"
+fi
+echo "[irori] node: $("$NODE_BIN" --version) ($NODE_BIN)"
 
 if [[ -z "$BUNDLE_URL" ]]; then
   if [[ "$VERSION" == "latest" ]]; then
@@ -65,6 +86,14 @@ if [[ -f "$UNIT_SRC" ]]; then
   cp "$UNIT_SRC" "$UNIT_DIR/irori-agent.service"
 else
   echo "[irori] irori-agent.service not next to the script — expecting it installed already" >&2
+fi
+
+# Pin the unit to the chosen runtime and put it first on the service PATH so
+# child processes (e.g. the agent-update job's `node --check`) use the same one.
+if [[ -f "$UNIT_DIR/irori-agent.service" ]]; then
+  sed -i "s|^ExecStart=.*|ExecStart=$NODE_BIN $BUNDLE|" "$UNIT_DIR/irori-agent.service"
+  sed -i "/^Environment=PATH=/d" "$UNIT_DIR/irori-agent.service"
+  sed -i "/^EnvironmentFile=/a Environment=PATH=$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" "$UNIT_DIR/irori-agent.service"
 fi
 
 systemctl daemon-reload
