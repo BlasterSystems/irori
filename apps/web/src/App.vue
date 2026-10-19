@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "./live";
 import NodeCard from "./components/NodeCard.vue";
+import NodeModal from "./components/NodeModal.vue";
 import NodeDetail from "./components/NodeDetail.vue";
 import ModelsView from "./components/ModelsView.vue";
 import ServeView from "./components/ServeView.vue";
@@ -23,6 +24,9 @@ function onHashChange(): void {
 const detailNodeId = computed(() =>
   route.value.view === "node" ? route.value.id : null,
 );
+
+/** Add-node modal on the Overview fleet page (IRI-010). */
+const addOpen = ref(false);
 
 const totalCount = computed(() => sortedNodes.value.length);
 const onlineCount = computed(
@@ -102,6 +106,9 @@ onUnmounted(() => {
           <h1>Fleet</h1>
           <p><span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online<template v-if="ageText"> · last event {{ ageText }} ago</template></span></p>
         </div>
+        <div class="row">
+          <button class="btn btn--primary" @click="addOpen = true">Add node…</button>
+        </div>
       </div>
 
       <section v-if="totalCount > 0" class="cols cols-3">
@@ -113,9 +120,12 @@ onUnmounted(() => {
           :llm="live.getLlm(node.id)"
         />
       </section>
-      <div v-else class="banner">
-        <span class="muted">No nodes registered. Add a node in the server config / API.</span>
+      <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
+        <span>no nodes yet</span>
+        <span style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
       </div>
+
+      <NodeModal v-if="addOpen" mode="create" @close="addOpen = false" />
     </template>
   </main>
 </template>

@@ -40,6 +40,10 @@ by the M7 batch (adversarial-review fixes + analytics/hygiene).
 
 ## Nodes
 
+- The agent token is returned **exactly once**: `POST /api/v1/nodes` →
+  `{node, token}`, `POST /api/v1/nodes/:id/token/rotate` → `{token}` — registry
+  payloads never carry it. The web NodeModal (IRI-010) is the UI surface for
+  this contract: one-time reveal with the agent env block and install line.
 - `POST /api/v1/nodes` persists `llmPorts` (as `127.0.0.1` probe assignments)
   and `nasRoot` — a create with a NAS root yields a model-ops node, not a
   silently dropped field.
