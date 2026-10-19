@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { live } from "../live";
 import {
+  deleteNode,
   fetchHistory,
   fetchLlmHistory,
   fetchNodeLlm,
@@ -17,6 +18,7 @@ import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import LlmPanel from "./LlmPanel.vue";
 import Sparkline from "./Sparkline.vue";
 import CleanupDrawer from "./CleanupDrawer.vue";
+import NodeModal from "./NodeModal.vue";
 
 const props = defineProps<{ nodeId: string }>();
 
@@ -148,6 +150,35 @@ const statusChipClass = computed(() =>
 );
 
 const cleanupOpen = ref(false);
+
+/* ── Node management (IRI-010) ──────────────────────────────────────────── */
+
+const editOpen = ref(false);
+const rotateOpen = ref(false);
+const deleteError = ref<string | null>(null);
+/** Armed two-click delete (ServeView onRemove pattern): 4 s window. */
+const armedDelete = ref(false);
+let deleteTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function onRemove(): Promise<void> {
+  if (!armedDelete.value) {
+    armedDelete.value = true;
+    clearTimeout(deleteTimer);
+    deleteTimer = setTimeout(() => (armedDelete.value = false), 4000);
+    return;
+  }
+  clearTimeout(deleteTimer);
+  armedDelete.value = false;
+  deleteError.value = null;
+  try {
+    await deleteNode(props.nodeId);
+    await live.refreshNodes();
+    // The node no longer exists — back to the fleet grid.
+    if (typeof location !== "undefined") location.hash = "#/";
+  } catch (err) {
+    deleteError.value = err instanceof Error ? err.message : String(err);
+  }
+}
 </script>
 
 <template>
@@ -166,12 +197,18 @@ const cleanupOpen = ref(false);
             <span class="chip">{{ node?.host }}</span>
             <span v-if="card.agentVersion" class="chip">Agent {{ card.agentVersion }}</span>
           </template>
+          <template v-if="node">
+            <button class="btn btn--ghost btn--sm" @click="editOpen = true">Edit</button>
+            <button class="btn btn--ghost btn--sm" @click="rotateOpen = true">Rotate token</button>
+            <button class="btn btn--ghost btn--sm" @click="onRemove">{{ armedDelete ? "Confirm delete" : "Delete" }}</button>
+          </template>
           <button class="btn btn--secondary btn--sm" @click="cleanupOpen = true">Disk hygiene</button>
           <a class="chip detail-back" href="#/">← Overview</a>
         </div>
         <p v-if="notFound" class="muted" style="margin-top: 8px;">
           Node not found in the registry — it may have been removed.
         </p>
+        <p v-if="deleteError" class="banner banner--warn" style="margin-top: 8px;">{{ deleteError }}</p>
       </div>
     </div>
 
@@ -295,6 +332,8 @@ const cleanupOpen = ref(false);
       </article>
     </section>
 
+    <NodeModal v-if="editOpen && node !== null" mode="edit" :node="node" @close="editOpen = false" />
+    <NodeModal v-if="rotateOpen && node !== null" mode="rotate" :node="node" @close="rotateOpen = false" />
     <CleanupDrawer v-if="cleanupOpen && node !== null" :node-id="nodeId" :node-name="node.name" @close="cleanupOpen = false" />
   </div>
 </template>

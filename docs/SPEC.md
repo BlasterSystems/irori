@@ -116,6 +116,13 @@ flowchart LR
 
 - Node kinds: `spark` (head/worker/standalone roles), `gpu-host` (discrete NVIDIA
   GPU Linux box), `nas`. Registry is hot-editable (add/edit/remove, no restart).
+- Node management UI (IRI-010): "Add node…" modal on the fleet page; the agent
+  token is shown **exactly once** at create/rotate, alongside the agent env
+  (`IRORI_SERVER_URL`, `IRORI_NODE_TOKEN`) and the `install-agent.sh` line.
+  Edit / rotate / delete live on the node drill-down (delete is an armed
+  two-click confirm). Rotation is **not** pushed live — `config-update`
+  carries no token — so the env file is updated and `irori-agent` restarted;
+  the old token fails at the agent's next hello.
 - A **cluster** is a head plus its workers (recipe-declared via `NNODES` /
   `WORKER_IP`). UI grouping: cluster view is the default lens; per-node view is
   one click away.

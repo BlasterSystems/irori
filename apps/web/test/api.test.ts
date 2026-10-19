@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchNodeLlm, fetchLlmHistory, fetchNodes } from "../src/api";
+import {
+  createNode,
+  deleteNode,
+  fetchNodeLlm,
+  fetchLlmHistory,
+  fetchNodes,
+  patchNode,
+  rotateNodeToken,
+} from "../src/api";
 
 const VALID_NODE = {
   id: "00000000-0000-4000-8000-000000000001",
@@ -67,6 +75,111 @@ describe("fetchNodes", () => {
     vi.stubGlobal("fetch", mockFetch(200, [VALID_NODE]));
     const nodes = await fetchNodes();
     expect(nodes[0]).toMatchObject({ llmPorts: [] });
+    vi.unstubAllGlobals();
+  });
+});
+
+/* ── Node registry mutations (IRI-010) ────────────────────────────────── */
+
+/** mockFetch that also records the request URL + init. */
+function captureFetch(status: number, body: unknown) {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fn = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init });
+    return new Response(body === null ? null : JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  return { fn, calls };
+}
+
+const NODE_ID = "00000000-0000-4000-8000-000000000001";
+const CREATE_INPUT = { name: "spark2", kind: "spark", role: "worker", host: "10.50.50.21" } as const;
+
+describe("createNode", () => {
+  it("posts the payload and returns the one-time token", async () => {
+    const { fn, calls } = captureFetch(201, { node: VALID_NODE, token: "irn_new" });
+    vi.stubGlobal("fetch", fn);
+    const res = await createNode(CREATE_INPUT);
+    expect(res.token).toBe("irn_new");
+    expect(res.node).toMatchObject({ name: "spark2", kind: "spark" });
+    expect(calls[0]?.url).toBe("/api/v1/nodes");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(CREATE_INPUT);
+    vi.unstubAllGlobals();
+  });
+
+  it("throws on HTTP errors and when the token is missing", async () => {
+    vi.stubGlobal("fetch", captureFetch(500, { error: "boom" }).fn);
+    await expect(createNode(CREATE_INPUT)).rejects.toThrow("HTTP 500");
+    vi.stubGlobal("fetch", mockFetch(200, { node: VALID_NODE }));
+    await expect(createNode(CREATE_INPUT)).rejects.toThrow("expected a token string");
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a malformed node payload", async () => {
+    const { host: _host, ...invalid } = VALID_NODE;
+    vi.stubGlobal("fetch", captureFetch(201, { node: invalid, token: "irn_x" }).fn);
+    await expect(createNode(CREATE_INPUT)).rejects.toThrow();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("patchNode", () => {
+  it("patches with exactly the given keys and parses the node", async () => {
+    const { fn, calls } = captureFetch(200, { node: VALID_NODE });
+    vi.stubGlobal("fetch", fn);
+    const res = await patchNode(NODE_ID, { name: "renamed", llmPorts: [8080] });
+    expect(res).toMatchObject({ name: "spark2" });
+    expect(calls[0]?.url).toBe(`/api/v1/nodes/${NODE_ID}`);
+    expect(calls[0]?.init?.method).toBe("PATCH");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ name: "renamed", llmPorts: [8080] });
+    vi.unstubAllGlobals();
+  });
+
+  it("throws on non-OK responses", async () => {
+    vi.stubGlobal("fetch", captureFetch(404, { error: "node not found" }).fn);
+    await expect(patchNode(NODE_ID, { name: "x" })).rejects.toThrow("HTTP 404");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("deleteNode", () => {
+  it("sends DELETE and tolerates 204 and 404 (goal state reached)", async () => {
+    const ok = captureFetch(204, null);
+    vi.stubGlobal("fetch", ok.fn);
+    await expect(deleteNode(NODE_ID)).resolves.toBeUndefined();
+    expect(ok.calls[0]?.init?.method).toBe("DELETE");
+
+    const gone = captureFetch(404, { error: "node not found" });
+    vi.stubGlobal("fetch", gone.fn);
+    await expect(deleteNode(NODE_ID)).resolves.toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+
+  it("throws on other non-OK responses", async () => {
+    vi.stubGlobal("fetch", captureFetch(500, { error: "boom" }).fn);
+    await expect(deleteNode(NODE_ID)).rejects.toThrow("HTTP 500");
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("rotateNodeToken", () => {
+  it("posts to the rotate endpoint and returns the new token", async () => {
+    const { fn, calls } = captureFetch(200, { token: "irn_rotated" });
+    vi.stubGlobal("fetch", fn);
+    await expect(rotateNodeToken(NODE_ID)).resolves.toBe("irn_rotated");
+    expect(calls[0]?.url).toBe(`/api/v1/nodes/${NODE_ID}/token/rotate`);
+    expect(calls[0]?.init?.method).toBe("POST");
+    vi.unstubAllGlobals();
+  });
+
+  it("throws on HTTP errors and missing tokens", async () => {
+    vi.stubGlobal("fetch", captureFetch(404, { error: "node not found" }).fn);
+    await expect(rotateNodeToken(NODE_ID)).rejects.toThrow("HTTP 404");
+    vi.stubGlobal("fetch", mockFetch(200, { nope: true }));
+    await expect(rotateNodeToken(NODE_ID)).rejects.toThrow("expected a token string");
     vi.unstubAllGlobals();
   });
 });
