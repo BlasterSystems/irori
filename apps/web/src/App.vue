@@ -81,7 +81,6 @@ onUnmounted(() => {
       </a>
       <nav class="nav" aria-label="Primary">
         <a href="#/" :class="{ 'is-active': route.view === 'overview' }" :aria-current="route.view === 'overview' ? 'page' : undefined">Overview</a>
-        <a :class="{ 'is-active': route.view === 'node' }" :aria-current="route.view === 'node' ? 'page' : undefined">Nodes</a>
         <a href="#/models" :class="{ 'is-active': route.view === 'models' }" :aria-current="route.view === 'models' ? 'page' : undefined">Models</a>
         <a href="#/serve" :class="{ 'is-active': route.view === 'serve' }" :aria-current="route.view === 'serve' ? 'page' : undefined">Serve</a>
         <a href="#/analytics" :class="{ 'is-active': route.view === 'analytics' }" :aria-current="route.view === 'analytics' ? 'page' : undefined">Analytics</a>
