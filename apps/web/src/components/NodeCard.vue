@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
-import { computeCardData } from "../card-data";
+import { computeCardData, formatTemp, isHotTemp } from "../card-data";
 import { nodeHash } from "../router";
 import { fetchCleanup } from "../api";
 import { diskChipCls, diskPct, fmtBytes, sumReclaimable } from "../analytics";
@@ -70,12 +70,10 @@ const diskChip = computed(() => diskChipCls(diskPctValue.value));
     <div class="card__body" style="padding-top: 12px;">
       <p v-if="card.inferenceLine" class="stat__sub" style="margin-bottom: 10px;">{{ card.inferenceLine }}</p>
       <template v-if="card.hasSnapshot">
-        <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" :style="{ width: (card.cpuBarPct ?? 0) + '%' }"></div></div><span class="val">{{ card.cpuLine }}</span></div>
-        <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" :style="{ width: (card.memBarPct ?? 0) + '%' }"></div></div><span class="val">{{ card.memLine }}</span></div>
-        <div v-for="gpu in card.gpus" :key="gpu.index" class="barrow">
-          <span>GPU{{ gpu.index }}</span>
-          <div class="bar"><div class="bar__fill" :style="{ width: (gpu.barPct ?? 0) + '%' }"></div></div>
-          <span class="val">{{ gpu.name }} · {{ gpu.line }}</span>
+        <div v-for="row in card.rows" :key="row.key" class="barrow">
+          <span>{{ row.label }}</span>
+          <div class="bar"><div class="bar__fill" :style="{ width: (row.barPct ?? 0) + '%' }"></div></div>
+          <span class="val">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'temp--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
         </div>
       </template>
       <p v-else class="muted">waiting for first snapshot</p>

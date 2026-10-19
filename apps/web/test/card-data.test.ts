@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
-import { computeCardData } from "../src/card-data";
+import { computeCardData, isHotTemp } from "../src/card-data";
 
 const GIB = 2 ** 30;
 
@@ -70,16 +70,19 @@ describe("computeCardData", () => {
     expect(offline.statusText).toBe("offline");
   });
 
-  it("formats cpu, memory and gpu lines from the snapshot", () => {
+  it("formats cpu, memory and gpu rows in importance order (GPU → CPU → MEM)", () => {
     const card = computeCardData(nodeFixture(), SNAPSHOT);
     expect(card.hasSnapshot).toBe(true);
-    expect(card.cpuLine).toBe("18% · 62°C");
-    expect(card.memLine).toBe("96.0 / 127.0 GB");
-    expect(card.memBarPct).toBeCloseTo((96 / 127) * 100);
-    expect(card.gpus).toHaveLength(1);
-    expect(card.gpus[0]?.name).toBe("NVIDIA GB10");
-    expect(card.gpus[0]?.line).toBe("34% · 61°C · 42.1 / 127.0 GB");
-    expect(card.gpus[0]?.barPct).toBe(34);
+    expect(card.rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem"]);
+    const [gpu, cpu, mem] = card.rows;
+    expect(cpu?.line).toBe("18%");
+    expect(cpu?.tempC).toBe(62);
+    expect(mem?.line).toBe("96.0 / 127.0 GB");
+    expect(mem?.barPct).toBeCloseTo((96 / 127) * 100);
+    expect(gpu?.label).toBe("GPU0");
+    expect(gpu?.line).toBe("NVIDIA GB10 · 34% · 42.1 / 127.0 GB");
+    expect(gpu?.tempC).toBe(61);
+    expect(gpu?.barPct).toBe(34);
   });
 
   it("omits unreadable segments instead of printing nulls", () => {
@@ -91,18 +94,48 @@ describe("computeCardData", () => {
       ],
     };
     const card = computeCardData(nodeFixture(), partial);
-    expect(card.cpuLine).toBe("62°C");
+    const [gpu, cpu] = card.rows;
+    expect(cpu?.line).toBe("");
+    expect(cpu?.tempC).toBe(62);
     // memory is never nullable in the schema, so its line stays readable
-    expect(card.memLine).toBe("96.0 / 127.0 GB");
-    expect(card.gpus[0]?.line).toBe("");
+    expect(card.rows[2]?.line).toBe("96.0 / 127.0 GB");
+    // the gpu name is always readable — only the metric segments drop out
+    expect(gpu?.line).toBe("NVIDIA GB10");
+    expect(gpu?.tempC).toBeNull();
   });
 
   it("reports the waiting state when no snapshot has arrived", () => {
     const card = computeCardData(nodeFixture(), null);
     expect(card.hasSnapshot).toBe(false);
-    expect(card.cpuLine).toBe("");
-    expect(card.gpus).toEqual([]);
+    expect(card.rows).toEqual([]);
     expect(card.agentVersion).toBe("0.1.0");
+  });
+
+  it("puts disk first on NAS cards, from the largest real mount", () => {
+    const storage: HardwareSnapshot["storage"] = [
+      { mount: "/", fs: "ext4", totalBytes: 21_171_355_648, usedBytes: 4_802_015_232 },
+      { mount: "/mnt/nas", fs: "ext4", totalBytes: 18_108_599_115_776, usedBytes: 11_603_944_087_552 },
+      { mount: "/mnt/llms", fs: "cifs", totalBytes: 18_108_599_115_776, usedBytes: 11_604_497_735_680 },
+    ];
+    const card = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage });
+    expect(card.rows.map((r) => r.key)).toEqual(["disk", "mem", "cpu"]);
+    expect(card.rows[0]?.label).toBe("DISK");
+    expect(card.rows[0]?.line).toBe("11.6 TB / 18.1 TB");
+    expect(card.rows[0]?.barPct).toBeCloseTo((11_603_944_087_552 / 18_108_599_115_776) * 100);
+    // sparks keep GPU/CPU/MEM and surface disk only via the ≥80% chip
+    expect(computeCardData(nodeFixture(), { ...SNAPSHOT, storage }).rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem"]);
+  });
+
+  it("omits the disk row when a NAS has no readable storage", () => {
+    const card = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [] });
+    expect(card.rows.map((r) => r.key)).toEqual(["mem", "cpu"]);
+  });
+
+  it("flags hot temps at the analytics temps warn tier", () => {
+    expect(isHotTemp(null)).toBe(false);
+    expect(isHotTemp(84)).toBe(false);
+    expect(isHotTemp(85)).toBe(true);
+    expect(isHotTemp(91)).toBe(true);
   });
 
   it("shows the inference summary line on head cards only", () => {
