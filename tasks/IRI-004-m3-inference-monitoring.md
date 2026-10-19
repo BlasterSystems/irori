@@ -76,4 +76,4 @@ grouping a head and its workers.
 
 ## Review
 
-- (pending)
+- Consolidated 2026-10-19: per-backend detection order and counter semantics documented in the research brief; M7 token ledger reuses the same cumulative counters.

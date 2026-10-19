@@ -96,4 +96,4 @@ quality, tool-eval — with persisted results, history, and comparison.
 
 ## Review
 
-- (pending)
+- Consolidated 2026-10-19: the z.record(enum) exhaustiveness gotcha resolved via byCategory seeding; mcnemarExactP pinned by tests; decode/prefill math re-audited (aggregate first-token exclusion fixed in the adversarial-review batch).
