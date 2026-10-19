@@ -141,10 +141,13 @@ async function lensBuckets(
       out.set(r.nodeId, m);
       const existing = m.get(t);
       // Multiple engine ports fold into one node bucket: tok/s adds; nulls
-      // (engine publishes nothing) never zero out the sum.
+      // (engine publishes nothing) never zero out the sum — a bucket where
+      // NO port published a metric stays null.
       if (existing) {
-        existing.v.decodeTps = (existing.v.decodeTps ?? 0) + (r.decode ?? 0);
-        existing.v.prefillTps = (existing.v.prefillTps ?? 0) + (r.prefill ?? 0);
+        const decodeSeen = (existing.v.decodeTps !== null && existing.v.decodeTps !== undefined) || r.decode !== null;
+        existing.v.decodeTps = decodeSeen ? (existing.v.decodeTps ?? 0) + (r.decode ?? 0) : null;
+        const prefillSeen = (existing.v.prefillTps !== null && existing.v.prefillTps !== undefined) || r.prefill !== null;
+        existing.v.prefillTps = prefillSeen ? (existing.v.prefillTps ?? 0) + (r.prefill ?? 0) : null;
       } else {
         m.set(t, { t, v: { t, decodeTps: r.decode, prefillTps: r.prefill } });
       }
