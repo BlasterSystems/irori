@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import nodeCardSource from "../src/components/NodeCard.vue?raw";
 import llmPanelSource from "../src/components/LlmPanel.vue?raw";
@@ -5,6 +6,9 @@ import llmDataSource from "../src/llm-data.ts?raw";
 import nodeDetailSource from "../src/components/NodeDetail.vue?raw";
 import sparklineSource from "../src/components/Sparkline.vue?raw";
 import appSource from "../src/App.vue?raw";
+
+// vitest's css pipeline returns "" for *.css?raw — read the stylesheet directly.
+const cssSource = readFileSync(new URL("../src/assets/irori.css", import.meta.url), "utf8");
 
 /**
  * DOM-free DS fidelity guard: the components must use the mockup vocabulary
@@ -27,6 +31,18 @@ it("App keeps the DS topbar lockup, nav and empty state", () => {
   expect(appSource).toContain("no nodes yet");
   expect(appSource).toContain("<NodeModal");
   expect(appSource).toContain("irori-theme");
+});
+
+it("App pins the version/build footer to the viewport-bottom shell", () => {
+  expect(appSource).toContain('<footer class="foot">');
+  expect(appSource).toContain('class="container foot__in"');
+  for (const rule of [
+    "#app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }",
+    ".foot { position: sticky; bottom: 0; z-index: 5;",
+    ".foot__in { display: flex; align-items: center; min-height: 38px; }",
+  ]) {
+    expect(cssSource).toContain(rule);
+  }
 });
 
 it("NodeDetail keeps the DS drill-down vocabulary", () => {
