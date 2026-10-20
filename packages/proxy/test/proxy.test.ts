@@ -21,6 +21,21 @@ const seenAuth: string[] = [];
 function startStreamEngine(): void {
   engine = createServer((req, res) => {
     seenAuth.push(String(req.headers.authorization ?? ""));
+    // Bulk mode (backpressure regression test): 60 × 8 KiB lines, written
+    // only as fast as the client drains (engine honors res.write false).
+    if (req.method === "POST" && req.url?.includes("bulk=1")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      const chunk = "x".repeat(8192) + "\n";
+      let i = 0;
+      const writeNext = (): void => {
+        if (i >= 60) return void res.end();
+        i += 1;
+        if (res.write(chunk)) writeNext();
+        else res.once("drain", writeNext);
+      };
+      writeNext();
+      return;
+    }
     if (req.method === "POST" && req.url?.split("?")[0] === "/v1/chat/completions") {
       if (req.url.includes("fail=1")) {
         res.writeHead(400, { "content-type": "application/json" });
@@ -208,6 +223,37 @@ describe("capture proxy", () => {
     expect(e.resBytes).toBe(res.raw.length);
     expect(e.setupId).toBe("11111111-1111-4111-8111-111111111111");
     expect(e.sourceAddr).toContain("127.0.0.1");
+  });
+
+  it("keeps the stream byte-identical while the client backpressures", async () => {
+    // Slow client: hold the response paused mid-stream, then drain. The
+    // proxy must pause the upstream (not buffer it all) and deliver every
+    // byte, in order.
+    const done = Promise.withResolvers<Buffer>();
+    const req = httpRequest(
+      {
+        host: "127.0.0.1",
+        port: proxy.address!.port,
+        method: "POST",
+        path: "/v1/chat/completions?bulk=1",
+        headers: { "content-type": "application/json", "content-length": 2 },
+      },
+      (res) => {
+        res.pause();
+        const parts: Array<{ buf: Buffer }> = [];
+        res.on("data", (c: Buffer) => parts.push({ buf: c }));
+        res.on("end", () => done.resolve(Buffer.concat(parts.map((p) => p.buf))));
+        // Real-timer exception: kernel-socket backpressure cannot be driven
+        // by fake timers, and the proxy exposes no pause signal to await.
+        setTimeout(() => res.resume(), 200);
+      },
+    );
+    req.on("error", () => {});
+    req.end("{}");
+    const all = await done.promise;
+    const lines = all.toString("utf8").split("\n").filter((l) => l.length > 0);
+    expect(lines).toHaveLength(60);
+    for (const line of lines) expect(line).toBe("x".repeat(8192));
   });
 
   it("captures non-streaming responses from the buffered JSON body", async () => {

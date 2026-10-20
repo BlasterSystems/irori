@@ -62,9 +62,12 @@ d("job settle events (db integration)", () => {
 
   it("emits failed when the reaper collects an offline node's job", async () => {
     const row = await service.create(nodeId, "sync-local", {});
+    // The reaper is global across the shared disposable DB — foreign active
+    // rows (crashed earlier runs) may be collected too. Assert on THIS row.
     const reaped = await service.reapOffline(new Set());
     expect(reaped).toContain(row.id);
-    expect(settled).toHaveLength(3);
-    expect(settled[2]).toMatchObject({ jobId: row.id, kind: "sync-local", status: "failed" });
+    const mine = settled.filter((s) => s.jobId === row.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ jobId: row.id, kind: "sync-local", status: "failed" });
   });
 });

@@ -312,7 +312,21 @@ export class SetupDriver {
     child.stderr?.on("data", onChunk);
     child.on("error", (err) => {
       this.pushLog(setupId, `driver: spawn failed: ${err.message}`);
-      this.finish(setupId, null, `spawn failed: ${err.message}`);
+      // The proxy is already bound — a leaked listener would EADDRINUSE the
+      // next start attempt and serve 502s until the agent restarts.
+      void this.stopCaptureProxy(setupId, record.proxyPort).then(() => {
+        // Mirror the exit path: the server must learn the run failed (node
+        // emits 'exit' only MAYBE alongside 'error' for a failed spawn).
+        this.deps.events.onEvent(setupId, {
+          runId: record.runId,
+          state: "failed",
+          exitCode: null,
+          pid: record.pid,
+          pgid: record.pgid,
+          error: `spawn failed: ${err.message}`,
+        });
+        this.finish(setupId, null, `spawn failed: ${err.message}`);
+      });
     });
     child.on("exit", async (code) => {
       if (this.stopping.has(setupId)) return; // stop() reports the outcome

@@ -137,6 +137,7 @@ async function submitDownload(): Promise<void> {
 /** Download queue panel state (IRI-014). */
 const downloadQueueEntries = ref<DownloadQueueEntry[]>([]);
 const queueError = ref<string | null>(null);
+const queueSeq = { n: 0 }; // stale-response guard (object: survives interval closures)
 let queuePoll: ReturnType<typeof setInterval> | undefined;
 
 function queueHasActive(entries: DownloadQueueEntry[]): boolean {
@@ -144,8 +145,10 @@ function queueHasActive(entries: DownloadQueueEntry[]): boolean {
 }
 
 async function refreshQueue(): Promise<void> {
+  const seq = ++queueSeq.n;
   try {
     const entries = await fetchDownloadQueue();
+    if (seq !== queueSeq.n) return; // a newer refresh won
     downloadQueueEntries.value = entries;
     queueError.value = null;
     // Poll only while something is queued/running; terminal states are static.
@@ -160,6 +163,7 @@ async function refreshQueue(): Promise<void> {
       }, 2000);
     }
   } catch (err) {
+    if (seq !== queueSeq.n) return; // a newer refresh won
     queueError.value = err instanceof Error ? err.message : String(err);
   }
 }
