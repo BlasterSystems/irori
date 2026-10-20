@@ -3,6 +3,7 @@ import { downloadQueue, jobs as jobsTable, nodes } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
   deriveDownloadName,
+  downloadBatchCreateSchema,
   downloadCreateSchema,
   pickStoreNode,
   type DownloadQueueEntry,
@@ -38,6 +39,46 @@ export class DownloadValidationError extends Error {}
 
 type Row = typeof downloadQueue.$inferSelect;
 
+interface ResultsDocumentEntry {
+  name: string;
+  status: "complete" | "failed";
+  error: string | null;
+  errorType: string | null;
+}
+
+/**
+ * Extracts the modelctl `queue --json` results document from batch output:
+ * a single compact JSON line (`{"schema":1,"results":[…]}`) printed as the
+ * LAST stdout line. Older modelctl pins emit no document → null (the caller
+ * falls back to the terminal-line parser).
+ */
+export function parseResultsDocument(output: Array<{ line: string }>): { results: ResultsDocumentEntry[] } | null {
+  for (let i = output.length - 1; i >= 0; i--) {
+    const line = output[i]!.line;
+    if (!line.startsWith(`{"schema":1,`)) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (typeof parsed !== "object" || parsed === null || !("results" in parsed) || !Array.isArray(parsed.results)) return null;
+      const results: ResultsDocumentEntry[] = [];
+      for (const r of parsed.results) {
+        if (typeof r !== "object" || r === null) return null;
+        const e = r as Record<string, unknown>;
+        if (typeof e.name !== "string" || (e.status !== "complete" && e.status !== "failed")) return null;
+        results.push({
+          name: e.name,
+          status: e.status,
+          error: typeof e.error === "string" ? e.error : null,
+          errorType: typeof e.error_type === "string" ? e.error_type : null,
+        });
+      }
+      return { results };
+    } catch {
+      return null; // a malformed document is not a fallback signal — use lines
+    }
+  }
+  return null;
+}
+
 /** Row → API DTO (dates as ISO strings). */
 export function toDownloadDto(row: Row): DownloadQueueEntry {
   return {
@@ -64,6 +105,8 @@ export interface DownloadQueueDeps {
 export interface DownloadQueueService {
   /** Validates + inserts a pending entry, then attempts an immediate dispatch. */
   enqueue(input: unknown): Promise<DownloadQueueEntry>;
+  /** Bulk form (IRI-015): N entries in one atomic submission + one drain attempt. */
+  enqueueBatch(input: unknown): Promise<DownloadQueueEntry[]>;
   list(): Promise<DownloadQueueEntry[]>;
   /** Removes a pending or terminal row; a running entry must settle first. */
   remove(id: string): Promise<void>;
@@ -139,6 +182,33 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       return;
     }
     const detail = await jobs.get(jobId);
+    // Preferred: the modelctl `queue --json` results document (a single
+    // compact JSON line, the LAST stdout line when the pinned modelctl
+    // supports it). Fallback: the `[i/n] complete|failed` terminal lines
+    // (older modelctl versions).
+    const doc = parseResultsDocument(detail?.output ?? []);
+    if (doc !== null) {
+      const verdicts = new Map<string, { status: "succeeded" | "failed"; error: string | null }>();
+      for (const r of doc.results) {
+        verdicts.set(
+          r.name,
+          r.status === "complete"
+            ? { status: "succeeded", error: null }
+            : { status: "failed", error: r.error === null ? "failed" : r.errorType === null ? r.error : `${r.errorType}: ${r.error}` },
+        );
+      }
+      for (const row of rows) {
+        const verdict = verdicts.get(row.name);
+        if (verdict === undefined) {
+          await db.update(downloadQueue).set({ status: "failed", error: "did not complete in the batch", updatedAt: now }).where(eq(downloadQueue.id, row.id));
+        } else {
+          await db.update(downloadQueue).set({ status: verdict.status, error: verdict.error, updatedAt: now }).where(eq(downloadQueue.id, row.id));
+        }
+      }
+      // Partial failure: published entries still changed the store — refresh.
+      sendToAgent(nodeId, { type: "catalog-request" });
+      return;
+    }
     const completed = new Set<string>();
     const failedMsgs = new Map<string, string>();
     for (const { line } of detail?.output ?? []) {
@@ -177,6 +247,29 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       await dispatchIfIdle();
       const [fresh] = await db.select().from(downloadQueue).where(eq(downloadQueue.id, row.id)).limit(1);
       return toDownloadDto(fresh ?? row);
+    },
+
+    async enqueueBatch(input) {
+      const parsed = downloadBatchCreateSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new DownloadValidationError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+      }
+      // Atomic: one insert for the whole submission (any invalid entry
+      // rejected above → nothing lands).
+      const inserted = await db
+        .insert(downloadQueue)
+        .values(
+          parsed.data.downloads.map((e) => ({
+            source: e.source,
+            name: e.name ?? deriveDownloadName(e.source),
+            jobs: parsed.data.jobs,
+          })),
+        )
+        .returning();
+      await dispatchIfIdle();
+      const fresh = await db.select().from(downloadQueue).where(inArray(downloadQueue.id, inserted.map((r) => r.id)));
+      const byId = new Map(fresh.map((r) => [r.id, toDownloadDto(r)]));
+      return inserted.map((r) => byId.get(r.id)!);
     },
 
     async list() {
