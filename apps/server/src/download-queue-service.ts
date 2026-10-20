@@ -269,7 +269,9 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       await dispatchIfIdle();
       const fresh = await db.select().from(downloadQueue).where(inArray(downloadQueue.id, inserted.map((r) => r.id)));
       const byId = new Map(fresh.map((r) => [r.id, toDownloadDto(r)]));
-      return inserted.map((r) => byId.get(r.id)!);
+      // A concurrent remove() between dispatch and re-select drops a row from
+      // `fresh` — skip it instead of echoing an undefined entry.
+      return inserted.map((r) => byId.get(r.id)).filter((e): e is DownloadQueueEntry => e !== undefined);
     },
 
     async list() {
