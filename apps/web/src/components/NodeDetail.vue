@@ -12,8 +12,9 @@ import {
   type LlmHistoryResponse,
   type LlmSnapshot,
 } from "../api";
-import { computeCardData, formatTemp, isHotTemp } from "../card-data";
-import { computeDetailData } from "../detail-data";
+import { computeCardData, formatPct, formatTemp, isHotTemp } from "../card-data";
+import { computeDetailData, formatRate } from "../detail-data";
+import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import { fetchJob, startAgentUpdate } from "../models";
 import { agentDrifts, serverVersion } from "../version";
@@ -31,6 +32,11 @@ const card = computed(() =>
 );
 /** Registry loaded but the id is unknown → real "not found", not "loading". */
 const notFound = computed(() => node.value === null && live.nodes.size > 0);
+
+/** Hover tooltip formatters (units included); wrappers absorb the null side
+ *  of the shared formatters' domains — series values are already non-null. */
+const tipPct = (v: number): string => formatPct(v) ?? "";
+const tipRate = (v: number): string => formatRate(v) ?? "";
 
 const range = ref<HistoryRange>("24h");
 const history = ref<HistoryResponse | null>(null);
@@ -367,7 +373,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
         <div class="card__head"><h3>CPU</h3><span class="mono faint">{{ detail.cpu.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.cpu.current">
-            <Sparkline :points="detail.cpu.series" :domain="{ min: 0, max: 100 }" :aria-label="`CPU usage, ${range}`" />
+            <Sparkline :points="detail.cpu.series" :domain="{ min: 0, max: 100 }" :format="tipPct" :aria-label="`CPU usage, ${range}`" />
             <p v-if="detail.cpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.cpu.sub }}</p>
           </template>
           <p v-else class="muted">no data yet</p>
@@ -378,7 +384,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
         <div class="card__head"><h3>Memory</h3><span class="mono faint">{{ detail.memory.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.memory.current">
-            <Sparkline :points="detail.memory.series" :aria-label="`Memory used, ${range}`" />
+            <Sparkline :points="detail.memory.series" :format="fmtBytes" :aria-label="`Memory used, ${range}`" />
             <p v-if="detail.memory.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.memory.sub }}</p>
             <p v-for="note in detail.memory.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
@@ -390,7 +396,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
         <div class="card__head"><h3>GPU</h3><span class="mono faint">{{ detail.gpu.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.gpu.current">
-            <Sparkline :points="detail.gpu.series" :domain="{ min: 0, max: 100 }" :aria-label="`GPU usage, ${range}`" />
+            <Sparkline :points="detail.gpu.series" :domain="{ min: 0, max: 100 }" :format="tipPct" :aria-label="`GPU usage, ${range}`" />
             <p v-if="detail.gpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.gpu.sub }}</p>
             <p v-for="note in detail.gpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
@@ -404,12 +410,12 @@ onUnmounted(() => clearTimeout(deleteTimer));
           <template v-if="detail.network.current">
             <div class="barrow">
               <span>RX</span>
-              <Sparkline :points="detail.network.series" :height="36" :aria-label="`Network receive, ${range}`" />
+              <Sparkline :points="detail.network.series" :height="36" :format="tipRate" :aria-label="`Network receive, ${range}`" />
               <span class="val">{{ detail.network.current }}</span>
             </div>
             <div v-if="detail.network.series2" class="barrow">
               <span>TX</span>
-              <Sparkline :points="detail.network.series2" :height="36" :aria-label="`Network transmit, ${range}`" />
+              <Sparkline :points="detail.network.series2" :height="36" :format="tipRate" :aria-label="`Network transmit, ${range}`" />
               <span class="val">{{ detail.network.sub }}</span>
             </div>
           </template>

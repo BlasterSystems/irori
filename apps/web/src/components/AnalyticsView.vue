@@ -9,6 +9,7 @@ import {
   GROUP_TABS,
   LENS_TABS,
   RANGE_TABS,
+  fmtBucket,
   fmtBytes,
   fmtCount,
   fmtTemp,
@@ -133,6 +134,12 @@ function fmtPoint(v: number | null | undefined): string {
   }
 }
 
+/** Hover tooltip bucket labels, per the response's granularity. */
+const bucketFmt = computed(() => {
+  const g = data.value?.granularity ?? "hour";
+  return (t: number): string => fmtBucket(t, g);
+});
+
 const headline = computed(() => {
   const c = chart.value;
   if (c === null || data.value === null) return "";
@@ -204,7 +211,7 @@ const headline = computed(() => {
       </div>
       <div class="card__body">
         <template v-if="chart !== null && chart.paths.length > 0">
-          <LensChart :chart="chart" :unit="unit" :aria-label="`${lens} over ${range}`" />
+          <LensChart :chart="chart" :unit="unit" :aria-label="`${lens} over ${range}`" :format="fmtPoint" :time-format="bucketFmt" />
           <p class="stat__sub">{{ headline }}</p>
           <p v-if="lens === 'power'" class="stat__sub">estimated, not wall-metered — GPU board + CPU package + base overhead, clamped to the GB10 envelope (240 W)</p>
           <p v-if="lens === 'temps'" class="stat__sub">◇ warn ≥{{ TEMPS_WARN_C }}°C · ▫ critical ≥90°C — markers are bucket crossings, no rules engine</p>
@@ -216,7 +223,7 @@ const headline = computed(() => {
     <section v-if="lens === 'decode' && prefillChart !== null && prefillChart.paths.length > 0" class="card" style="margin-bottom: 12px">
       <div class="card__head"><div class="row"><h3>Prefill throughput</h3><span class="chip">tok/s</span></div></div>
       <div class="card__body">
-        <LensChart :chart="prefillChart" unit="tok/s" :aria-label="`prefill over ${range}`" />
+        <LensChart :chart="prefillChart" unit="tok/s" :aria-label="`prefill over ${range}`" :format="fmtTps" :time-format="bucketFmt" />
         <p class="stat__sub">prefill excludes cached tokens</p>
       </div>
     </section>
