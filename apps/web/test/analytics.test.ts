@@ -3,6 +3,7 @@ import type { AnalyticsSeries } from "@irori/core";
 import {
   diskChipCls,
   diskPct,
+  fmtBucket,
   fmtBytes,
   fmtCount,
   lensChart,
@@ -40,6 +41,28 @@ describe("lensChart", () => {
   it("renders nothing for all-null series", () => {
     const chart = lensChart([series([{ gpuMax: null }])], "gpuMax", 600, 100, { floor: 30 });
     expect(chart.paths).toHaveLength(0);
+  });
+
+  it("exposes hoverable series values and the canonical bucket times", () => {
+    const chart = lensChart(
+      [series([{ t: 1000, decodeTps: 10 }, { t: 2000, decodeTps: null }]), series([{ t: 1000 }, { t: 2000 }])],
+      "decodeTps",
+      600,
+      100,
+      { floorZero: true },
+    );
+    expect(chart.series).toHaveLength(2);
+    expect(chart.series[0]!.points).toEqual([10, null]);
+    expect(chart.times).toEqual([1000, 2000]);
+  });
+});
+
+describe("fmtBucket", () => {
+  const t = new Date(2026, 9, 20, 14, 5).getTime();
+  it("labels buckets per granularity", () => {
+    expect(fmtBucket(t, "minute")).toBe("14:05");
+    expect(fmtBucket(t, "hour")).toBe("Oct 20 14:00");
+    expect(fmtBucket(t, "day")).toBe("Oct 20");
   });
 });
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Sparkline from "./Sparkline.vue";
+import { fmtTps } from "../analytics";
 import type { LlmPortView } from "../llm-data";
 
 const props = defineProps<{
@@ -31,6 +32,7 @@ const props = defineProps<{
           v-if="props.decode"
           :points="props.decode"
           :height="26"
+          :format="fmtTps"
           :aria-label="`Decode tok/s, ${props.range}`"
         />
         <span v-else></span>
@@ -42,6 +44,7 @@ const props = defineProps<{
           v-if="props.prefill"
           :points="props.prefill"
           :height="26"
+          :format="fmtTps"
           :aria-label="`Prefill tok/s, ${props.range}`"
         />
         <span v-else></span>

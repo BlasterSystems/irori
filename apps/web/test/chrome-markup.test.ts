@@ -3,6 +3,10 @@ import { expect, it } from "vitest";
 import nodeCardSource from "../src/components/NodeCard.vue?raw";
 import nodeDetailSource from "../src/components/NodeDetail.vue?raw";
 import cleanupDrawerSource from "../src/components/CleanupDrawer.vue?raw";
+import lensChartSource from "../src/components/LensChart.vue?raw";
+import sparklineSource from "../src/components/Sparkline.vue?raw";
+import analyticsViewSource from "../src/components/AnalyticsView.vue?raw";
+import llmPanelSource from "../src/components/LlmPanel.vue?raw";
 
 // vitest's css pipeline returns "" for *.css?raw — read the stylesheet directly.
 const cssSource = readFileSync(new URL("../src/assets/irori.css", import.meta.url), "utf8");
@@ -51,4 +55,24 @@ it("irori.css ships the shared drawer chrome and the temp accent", () => {
   ]) {
     expect(cssSource).toContain(rule);
   }
+});
+
+it("charts show a hover tooltip; call sites pass unit formatters", () => {
+  for (const src of [lensChartSource, sparklineSource]) {
+    for (const token of [
+      'class="charttip"', // shared fixed-position tooltip (irori.css, z 6)
+      "@pointermove=", // value appears on hover, not only on tap
+      "@pointerleave=",
+    ]) {
+      expect(src).toContain(token);
+    }
+  }
+  expect(analyticsViewSource).toContain(':time-format="bucketFmt"');
+  expect(analyticsViewSource).toContain(':format="fmtPoint"');
+  expect(llmPanelSource).toContain(':format="fmtTps"');
+  expect(nodeDetailSource).toContain(':format="tipPct"');
+  expect(nodeDetailSource).toContain(':format="fmtBytes"');
+  expect(nodeDetailSource).toContain(':format="tipRate"');
+  expect(cssSource).toContain(".charttip {");
+  expect(cssSource).toContain("z-index: 6");
 });
