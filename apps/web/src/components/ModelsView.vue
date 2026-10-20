@@ -112,7 +112,8 @@ function runHygiene(kind: string, perModel: boolean): void {
  * `download-queue` batch on the store node when it is idle.
  */
 const downloadPaste = ref("");
-const downloadRows = ref<Array<{ source: string; name: string }>>([]);
+let rowIdCounter = 0;
+const downloadRows = ref<Array<{ id: number; source: string; name: string }>>([]);
 
 function parsePaste(): void {
   const seen = new Set(downloadRows.value.map((r) => r.source.trim().toLowerCase()));
@@ -122,7 +123,8 @@ function parsePaste(): void {
     const key = line.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    downloadRows.value.push({ source: line, name: "" });
+    rowIdCounter += 1;
+    downloadRows.value.push({ id: rowIdCounter, source: line, name: "" });
   }
   downloadPaste.value = "";
 }
@@ -530,7 +532,7 @@ onBeforeUnmount(() => {
               <tr><th>Hugging Face repo</th><th>Store name (optional)</th><th></th></tr>
             </thead>
             <tbody>
-              <tr v-for="(row, index) in downloadRows" :key="row.source">
+              <tr v-for="(row, index) in downloadRows" :key="row.id">
                 <td><input v-model="row.source" class="input mono" type="text" :aria-label="`Repo ${index + 1}`" /></td>
                 <td><input v-model="row.name" class="input mono" type="text" :placeholder="row.source.split('/').pop() || ''" :aria-label="`Store name ${index + 1}`" /></td>
                 <td><button class="btn btn--ghost btn--sm" :aria-label="`Remove ${row.source}`" @click="removeRow(index)">✕</button></td>
