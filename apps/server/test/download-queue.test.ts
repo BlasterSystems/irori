@@ -62,6 +62,7 @@ d("download queue (db integration)", () => {
       inArray(downloadQueueTable.source, [
         "org/alpha", "org/beta", "org/gamma", "org/delta", "org/epsilon",
         "org/zeta", "org/eta", "org/theta", "org/iota", "org/juliet", "org/kappa", "org/lambda", "org/mike",
+        "org/november", "org/oscar", "org/papa", "org/quebec",
       ]),
     );
     await db.delete(nodes).where(inArray(nodes.id, [NAS_ID, HEAD_ID, WORKER_ID])); // cascades jobs + job_output
@@ -199,6 +200,67 @@ d("download queue (db integration)", () => {
   it("rejects invalid enqueue payloads", async () => {
     await expect(queue.enqueue({ source: "" })).rejects.toBeInstanceOf(DownloadValidationError);
     await expect(queue.enqueue({ source: "org/x", jobs: 99 })).rejects.toBeInstanceOf(DownloadValidationError);
+  });
+
+  it("rejects a whole batch when any entry is invalid (atomic)", async () => {
+    const before = await queue.list();
+    await expect(
+      queue.enqueueBatch({ downloads: [{ source: "org/valid" }, { source: "" }], jobs: 4 }),
+    ).rejects.toBeInstanceOf(DownloadValidationError);
+    expect(await queue.list()).toEqual(before); // nothing landed
+  });
+
+  it("enqueues a batch atomically and dispatches it as ONE modelctl batch", async () => {
+    const entries = await queue.enqueueBatch({
+      downloads: [{ source: "org/november" }, { source: "org/oscar", name: "oscar-custom" }],
+      jobs: 6,
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.name).toBe("november"); // derived from the repo tail
+    expect(entries[1]!.name).toBe("oscar-custom");
+    expect(entries[0]!.status).toBe("running");
+    expect(entries[1]!.jobId).toBe(entries[0]!.jobId); // one shared batch
+    const job = await jobsService.get(entries[0]!.jobId!);
+    expect(job?.nodeId).toBe(NAS_ID);
+    expect(job?.params).toMatchObject({
+      downloads: [
+        { source: "org/november", name: "november" },
+        { source: "org/oscar", name: "oscar-custom" },
+      ],
+      jobs: 6,
+    });
+    await settle(entries[0]!, "succeeded");
+    expect((await rowFor(entries[1]!.id))?.status).toBe("succeeded");
+  });
+
+  it("reconciles a failed batch from the modelctl queue --json results document", async () => {
+    // Busy the node first so both entries land in ONE batch (idle dispatches
+    // the first add immediately).
+    const busy = await jobsService.create(NAS_ID, "sync-local", { name: "alpha" });
+    const a = await queue.enqueue({ source: "org/papa", jobs: 4 });
+    const b = await queue.enqueue({ source: "org/quebec", jobs: 4 });
+    for (const e of [a, b]) expect(e.status).toBe("pending");
+    await jobsService.cancel(busy.id);
+    await queue.dispatchIfIdle();
+    const rowA0 = await rowFor(a.id);
+    expect(rowA0?.status).toBe("running");
+    const jobId = rowA0!.jobId!;
+    expect((await rowFor(b.id))?.jobId).toBe(jobId);
+    // Output carries ONLY the queue --json document (last stdout line) —
+    // no [i/n] terminal lines; the JSON tail is authoritative.
+    await db.insert(jobOutput).values({
+      jobId,
+      seq: 1,
+      line:
+        '{"schema":1,"results":[' +
+        '{"index":1,"name":"papa","source":"org/papa","status":"complete","active_path":"/mnt/llms/models/org/papa/x--y","error_type":null,"error":null},' +
+        '{"index":2,"name":"quebec","source":"org/quebec","status":"failed","active_path":null,"error_type":"DownloadError","error":"connection reset mid-stream"}]}',
+    });
+    await settle(rowA0!, "failed", 1);
+    expect((await rowFor(a.id))?.status).toBe("succeeded");
+    const rowB = await rowFor(b.id);
+    expect(rowB?.status).toBe("failed");
+    expect(rowB?.error).toBe("DownloadError: connection reset mid-stream");
   });
 
   it("settles orphaned running rows when the batch job reference is lost (node delete cascade)", async () => {

@@ -1,0 +1,105 @@
+# Task: IRI-015 — bulk download modal + modelctl queue --json
+
+Jira: (none yet)
+Decision: owner picked **A + C** from
+[docs/research/IRI-015-research-brief.md](../docs/research/IRI-015-research-brief.md)
+(paste + rows combined modal; server queue unchanged; modelctl `queue --json` lands now).
+
+## Objective
+
+"Download from HF" popup accepts all downloads at once (paste list → editable rows →
+batch submit); the server queue batches them into one modelctl queue invocation when
+the store node is idle (unchanged ADR-0009 semantics). modelctl `queue` gains `--json`
+structured per-entry results; Irori's failed-batch reconcile prefers the JSON tail and
+keeps the terminal-line parser as fallback for older pins.
+
+## Acceptance criteria
+
+- [x] Modal: textarea (one `owner/model` per line) → parse → editable rows (source +
+      optional store name, per-row remove) → batch submit ("Add N to queue"); single
+      entry works through the same flow; queue panel/drive unchanged.
+- [x] `POST /api/v1/downloads` accepts `{downloads: [{source, name?}…], jobs?}` (cap
+      50, atomic: any invalid entry → 400, nothing inserted) alongside the existing
+      single shape (back-compat).
+- [x] modelctl `queue --json`: appends one compact JSON results document as the last
+      stdout line (per-entry index/name/source/status/active_path/error); human
+      output unchanged (stderr when --json); README updated; tests added.
+- [x] Server reconcile: `settleBatch` reads the JSON results tail when present
+      (authoritative per-entry verdicts), falls back to the `[i/n] complete|failed`
+      line parser otherwise (older pinned modelctl versions keep working).
+- [x] Batch failures still trigger catalog-refresh; retry/remove/recover unchanged.
+- [x] Tests: core batch schema, server batch enqueue + JSON-tail reconcile (db-gated),
+      web chrome pins; existing suites green.
+- [x] Docs: SPEC §6 modal description, API.md batch shape + JSON tail, ADR-0009 risk
+      note updated (parsing fragility resolved via --json tail).
+
+## Scope
+
+### Included
+
+- Web modal paste+rows UX; batch endpoint; JSON-tail reconcile.
+- modelctl `--json` flag implementation + tests + README (owner's repo; release/tag
+  and version-pin bump remain owner actions — Irori works with any pinned version via
+  the fallback).
+
+### Excluded
+
+- Server debounce/coalescing (option B — deferred).
+- modelctl-native persistent queue (option D — rejected for now).
+- Per-entry advanced fields (revision/quantization/runtime/mmproj/mtp) in the modal
+  (agent/YAML builder already supports them; UI later).
+
+## Plan
+
+- [x] Research brief: [docs/research/IRI-015-research-brief.md](../docs/research/IRI-015-research-brief.md)
+      (options A–E, owner decision A + C, paste+rows).
+- [x] modelctl: `queue --json` + tests + README.
+- [x] Core: batch create schema (cap 50).
+- [x] Server: batch endpoint + JSON-tail reconcile + tests.
+- [x] Web: paste+rows modal + tests.
+- [x] Docs: SPEC §6, API.md, ADR-0009 note.
+- [x] Validate: pnpm test/build, validate, docs-check, browser smoke; modelctl pytest.
+
+## Architecture impact
+
+- **ADR required:** No — implements ADR-0009 as decided; risk-mitigation note updated
+  in place (Proposed ADR, pre-acceptance edits allowed).
+- **Relevant ADRs:** 0003, 0004, 0009.
+- **Proposed ADR:** None.
+
+## Validation evidence
+
+- modelctl (owner repo, `~/Developer/modelctl`, uncommitted): `uv run --extra test
+  pytest tests/test_cli.py -k queue tests/test_download_queue.py` green (new
+  `--json` tests: single-line doc on success AND on partially failed batches with
+  exit-1 semantics; human lines on stderr). One pre-existing failure on a clean tree,
+  unrelated: `test_root_preflight_reports_cifs_symlink_requirement` (fails before and
+  after this change — macOS-local symlink-probe expectation).
+- iroiri: `pnpm build` ✓; `pnpm -r test` green — core 61 (batch schema bounds), db 4,
+  proxy 9, web 183 (updated chrome pins), agent 133, server 133 (new: atomic batch
+  reject, batch→one-dispatch, `--json`-tail reconcile); `.agentic/bin/validate` ✓;
+  `.agentic/bin/docs-check` ✓ (no gaps).
+- Browser smoke (built stack, disposable Postgres): paste with duplicate + `#` comment
+  lines → parse yields 3 deduped editable rows; "Add 3 to queue" → one `downloads`
+  submission → 3 pending rows (no online store node → correctly no dispatch), names
+  derived from repo tails; queue panel + modal close verified (screenshot in trace).
+
+## Review
+
+- Correctness: batch insert is atomic; dispatch takes ALL pending rows as one batch
+  (existing path); JSON tail is authoritative per entry with the line parser as
+  fallback; duplicate effective names cannot collide within a batch (modelctl
+  preflight rejects them) so name-keyed verdicts are unambiguous.
+- Security: no new unvalidated surface — batch shape zod-bounded (≤50 entries,
+  source ≤255, jobs 1–16); agent command surface untouched; modelctl JSON document
+  is generated by modelctl itself (no user-controlled YAML beyond the existing
+  escaped builder).
+- Compatibility: single-entry API shape and older modelctl pins keep working
+  (feature-detected JSON tail at reconcile time — no pin bump REQUIRED for Irori to
+  ship).
+- Residual risks: (1) modelctl changes are uncommitted in the owner's repo — release
+  a tag (and bump the agent's `IRORI_MODELCTL_PIN`) to get structured results on the
+  fleet; until then the fallback parser is used. (2) `POST /api/v1/nodes` returns 500
+  (not 409) on duplicate node names — pre-existing, observed during smoke. (3) modelctl
+  `test_root_preflight_reports_cifs_symlink_requirement` fails on a clean tree
+  (macOS-local; pre-existing).

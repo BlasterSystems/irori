@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveDownloadName, downloadCreateSchema, pickStoreNode } from "../src/downloads.js";
+import { deriveDownloadName, downloadBatchCreateSchema, downloadCreateSchema, pickStoreNode } from "../src/downloads.js";
 
 /** IRI-014 contracts: store-node policy, name fallback, payload validation. */
 
@@ -44,5 +44,21 @@ describe("download create contract", () => {
     expect(downloadCreateSchema.parse({ source: "org/m" })).toMatchObject({ source: "org/m", jobs: 4 });
     expect(downloadCreateSchema.safeParse({ source: "org/m", jobs: 0 }).success).toBe(false);
     expect(downloadCreateSchema.safeParse({ source: "org/m", jobs: 17 }).success).toBe(false);
+  });
+
+  it("bounds the bulk submission shape (IRI-015)", () => {
+    const ok = downloadBatchCreateSchema.parse({
+      downloads: [{ source: "org/a" }, { source: "org/b", name: "b" }],
+      jobs: 2,
+    });
+    expect(ok.downloads).toHaveLength(2);
+    expect(ok.jobs).toBe(2);
+    expect(downloadBatchCreateSchema.safeParse({ downloads: [] }).success).toBe(false);
+    expect(
+      downloadBatchCreateSchema.safeParse({
+        downloads: Array.from({ length: 51 }, (_, i) => ({ source: `org/m${i}` })),
+      }).success,
+    ).toBe(false);
+    expect(downloadBatchCreateSchema.safeParse({ downloads: [{ source: "" }] }).success).toBe(false);
   });
 });
