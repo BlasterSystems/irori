@@ -190,6 +190,16 @@ export class CaptureProxy {
       res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
 
       let errorBody: Buffer | null = (upstreamRes.statusCode ?? 0) >= 400 ? Buffer.alloc(0) : null;
+      // Backpressure: when the client stops draining, pause the upstream so
+      // engine bytes don't buffer unbounded in memory; resume on drain.
+      let paused = false;
+      const pumpDrain = (): void => {
+        if (paused && res.writableNeedDrain === false) {
+          paused = false;
+          upstreamRes.resume();
+        }
+      };
+      res.on("drain", pumpDrain);
       upstreamRes.on("data", (chunk: Buffer) => {
         try {
           capture?.observeResponseChunk(chunk, Date.now());
@@ -200,12 +210,17 @@ export class CaptureProxy {
           this.opts.log(`capture tee failed (ignored): ${msg(err)}`);
         }
         // Byte-identity: raw chunk out, in arrival order.
-        if (!clientGone) res.write(chunk);
+        if (!clientGone) {
+          if (res.write(chunk) === false && !paused) {
+            paused = true;
+            upstreamRes.pause();
+          }
+        }
       });
       upstreamRes.on("end", () => {
+        res.off("drain", pumpDrain);
         if (errorBody !== null && errorBody.length > 0) capture?.observeErrorBody(errorBody);
-        if (!clientGone || res.writableEnded) res.end();
-        else res.end();
+        res.end();
         this.emit(capture);
       });
       upstreamRes.on("error", (err: Error) => {

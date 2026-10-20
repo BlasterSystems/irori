@@ -81,6 +81,10 @@ export class UsageSync {
         if (!ok) return; // rows remain; next tick retries
         this.deps.buffer.remove(rows.map((r) => r.id));
       }
+    } catch (err) {
+      // A buffer/SQLite failure must never crash the agent as an unhandled
+      // rejection — rows stay (durable) and the next tick retries.
+      this.deps.log?.(`usage flush failed (rows retained): ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.flushing = false;
     }

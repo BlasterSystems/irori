@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { downloadQueue, jobs as jobsTable, nodes } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
@@ -81,6 +81,13 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
   const { db, jobs, sendToAgent, online } = deps;
 
   async function dispatchIfIdle(): Promise<void> {
+    // An orphan can only arise from the jobs FK cascade (a deleted node's
+    // download_queue rows lose their jobId): running + no jobId is never a
+    // live state — settle it instead of waiting for a server restart.
+    await db
+      .update(downloadQueue)
+      .set({ status: "failed", error: "batch job reference lost", updatedAt: new Date() })
+      .where(and(eq(downloadQueue.status, "running"), isNull(downloadQueue.jobId)));
     const pending = await db.select().from(downloadQueue).where(eq(downloadQueue.status, "pending")).orderBy(downloadQueue.createdAt);
     if (pending.length === 0) return;
     const nodeRows = await db.select().from(nodes);

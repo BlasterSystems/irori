@@ -31,6 +31,29 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   probes and LLM probes target `127.0.0.1:<port>` and work through the
   proxy unchanged; unflagged setups are byte-identical to before.
 
+## Download queue (IRI-014, ADR-0009)
+
+- `POST /api/v1/downloads` `{source, name?, jobs? (1–16, default 4)}` —
+  **always queues**: `202 {entry}` with the row in `pending` (or already
+  `running` when the store node was idle and the batch dispatched
+  immediately). Adding a download NEVER starts a one-off per-node job and
+  never returns 409. Invalid payload → `400`; degraded DB → `503`.
+- The server picks the store node (`pickStoreNode`: `nas`-kind node with
+  `nasRoot` first, then any online node with the store mounted). Pending
+  entries drain as **one `download-queue` batch** on the idle node — drained
+  on enqueue, on any job settle, on the 60 s reaper tick, and at boot.
+- `GET /api/v1/downloads` → `{entries}` (newest first, last 50);
+  `DELETE /api/v1/downloads/:id` removes a pending or terminal row (404
+  unknown, 409 while the entry is in the running batch — cancel the job
+  instead); `POST /api/v1/downloads/:id/retry` re-queues a failed/canceled
+  row (409 otherwise).
+- Batch reconcile: job `succeeded` ⇒ every entry succeeded (modelctl exits
+  non-zero if any entry failed); `canceled` ⇒ entries canceled; `failed` ⇒
+  per-entry status from modelctl's terminal `[i/n] complete|failed` output
+  lines, unmatched entries fail with "did not complete in the batch". Partial
+  failure/cancel still triggers a catalog refresh. Retry is cheap: modelctl
+  reuses published objects and resumes staging.
+
 ## Analytics (M7)
 
 - `GET /api/v1/analytics/:lens?range=&groupBy=` — five lenses
