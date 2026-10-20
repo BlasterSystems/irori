@@ -69,12 +69,12 @@ keeps the terminal-line parser as fallback for older pins.
 
 ## Validation evidence
 
-- modelctl (owner repo, `~/Developer/modelctl`, uncommitted): `uv run --extra test
-  pytest tests/test_cli.py -k queue tests/test_download_queue.py` green (new
-  `--json` tests: single-line doc on success AND on partially failed batches with
-  exit-1 semantics; human lines on stderr). One pre-existing failure on a clean tree,
-  unrelated: `test_root_preflight_reports_cifs_symlink_requirement` (fails before and
-  after this change — macOS-local symlink-probe expectation).
+- modelctl (owner repo): **released as v0.21.0** (`c883481` feat + `40204e6` bump,
+  tag pushed): `uv run --extra test pytest` green — 216 tests, incl. the new
+  `--json` cases (single-line doc on success AND on partially failed batches with
+  exit-1 semantics; human lines on stderr) and a portability fix for the CIFS-hint
+  errno set (macOS `EOPNOTSUPP` = 102 now gets the hint; stale hardcoded version pin
+  removed from the version test).
 - iroiri: `pnpm build` ✓; `pnpm -r test` green — core 61 (batch schema bounds), db 4,
   proxy 9, web 183 (updated chrome pins), agent 133, server 133 (new: atomic batch
   reject, batch→one-dispatch, `--json`-tail reconcile); `.agentic/bin/validate` ✓;
@@ -97,9 +97,7 @@ keeps the terminal-line parser as fallback for older pins.
 - Compatibility: single-entry API shape and older modelctl pins keep working
   (feature-detected JSON tail at reconcile time — no pin bump REQUIRED for Irori to
   ship).
-- Residual risks: (1) modelctl changes are uncommitted in the owner's repo — release
-  a tag (and bump the agent's `IRORI_MODELCTL_PIN`) to get structured results on the
-  fleet; until then the fallback parser is used. (2) `POST /api/v1/nodes` returns 500
-  (not 409) on duplicate node names — pre-existing, observed during smoke. (3) modelctl
-  `test_root_preflight_reports_cifs_symlink_requirement` fails on a clean tree
-  (macOS-local; pre-existing).
+- Residual risks: (1) the fleet gets structured results once the deployed agent's
+  `IRORI_MODELCTL_PIN` default (0.21.0) reaches nodes via a dev-tag deploy; until
+  then the fallback line parser is used. (2) `POST /api/v1/nodes` returns 500
+  (not 409) on duplicate node names — pre-existing, observed during smoke.
