@@ -133,6 +133,32 @@ describe("SetupDriver capture lifecycle", () => {
     expect(hooks.started).toHaveLength(0);
   });
 
+  it("stops the capture proxy when the start script fails to spawn", async () => {
+    const hooks = makeHooks();
+    const h = makeHarness(hooks);
+    // The proxy binds BEFORE spawn; a spawn-time failure must not leak the
+    // listener (the next start would EADDRINUSE and serve 502s). The script
+    // passes the driver's executable pre-check — it fails at exec time via
+    // a broken interpreter shebang.
+    const start = join(h.dir, "start-bad-shebang.sh");
+    writeFileSync(start, "#!/nonexistent-interpreter-xyz\necho never\n");
+    chmodSync(start, 0o755);
+    const result = await h.driver.start(
+      ID, RUN,
+      start,
+      script(h.dir, "stop.sh", "true"),
+      { PORT: "8081" }, null, { proxyPort: 9100 },
+    );
+    expect(result.ok).toBe(true); // spawn accepted; failure arrives async
+    // The stop is idempotent: node may emit BOTH 'error' and 'exit' for a
+    // failed spawn, so the exact call count is not pinned — the listener
+    // must simply be closed.
+    await waitFor(() => hooks.stopped.includes(ID));
+    expect(new Set(hooks.stopped)).toEqual(new Set([ID]));
+    // The run settles as failed once the proxy teardown completes.
+    await waitFor(() => h.events.some((e) => e.setupId === ID && e.state === "failed"));
+  });
+
   it("re-attaches the proxy for a surviving engine after an agent restart", async () => {
     const hooks = makeHooks();
     const h = makeHarness(hooks);

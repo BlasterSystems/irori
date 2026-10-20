@@ -61,7 +61,7 @@ d("download queue (db integration)", () => {
     await db.delete(downloadQueueTable).where(
       inArray(downloadQueueTable.source, [
         "org/alpha", "org/beta", "org/gamma", "org/delta", "org/epsilon",
-        "org/zeta", "org/eta", "org/theta", "org/iota", "org/juliet", "org/kappa", "org/lambda",
+        "org/zeta", "org/eta", "org/theta", "org/iota", "org/juliet", "org/kappa", "org/lambda", "org/mike",
       ]),
     );
     await db.delete(nodes).where(inArray(nodes.id, [NAS_ID, HEAD_ID, WORKER_ID])); // cascades jobs + job_output
@@ -199,6 +199,25 @@ d("download queue (db integration)", () => {
   it("rejects invalid enqueue payloads", async () => {
     await expect(queue.enqueue({ source: "" })).rejects.toBeInstanceOf(DownloadValidationError);
     await expect(queue.enqueue({ source: "org/x", jobs: 99 })).rejects.toBeInstanceOf(DownloadValidationError);
+  });
+
+  it("settles orphaned running rows when the batch job reference is lost (node delete cascade)", async () => {
+    const a = await queue.enqueue({ source: "org/mike", jobs: 4 });
+    expect(a.status).toBe("running");
+    // Simulate the FK cascade: the node row is deleted, download_queue.job_id
+    // drops to NULL while the entry still reads "running".
+    await db
+      .update(downloadQueueTable)
+      .set({ status: "running", jobId: null })
+      .where(eq(downloadQueueTable.id, a.id));
+    // The reaper tick (dispatchIfIdle) must settle it without a restart.
+    await queue.dispatchIfIdle();
+    const row = await rowFor(a.id);
+    expect(row?.status).toBe("failed");
+    expect(row?.error).toBe("batch job reference lost");
+    // Free the store node for the next test: the batch job itself is still
+    // active even though this row's reference was lost.
+    await settle(a, "failed", 1);
   });
 
   it("recovers: settles rows whose batch ended while the server was down, then drains", async () => {
