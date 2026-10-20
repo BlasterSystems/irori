@@ -525,8 +525,11 @@ export function createApp(deps: AppDeps): Express {
     const downloads = deps.getDownloads();
     if (downloads === null) return res.status(503).json({ error: "database unavailable" });
     try {
-      const entry = await downloads.enqueue(req.body);
-      res.status(202).json({ entry });
+      // IRI-015: `{downloads: […]}` is the bulk form (atomic insert, one
+      // drain attempt); the single `{source, …}` shape stays for back-compat.
+      const isBatch = typeof req.body === "object" && req.body !== null && "downloads" in req.body && Array.isArray(req.body.downloads);
+      const body = isBatch ? await downloads.enqueueBatch(req.body) : [await downloads.enqueue(req.body)];
+      res.status(202).json(body.length === 1 ? { entry: body[0] } : { entries: body });
     } catch (err) {
       if (err instanceof DownloadValidationError) return res.status(400).json({ error: err.message });
       throw err;

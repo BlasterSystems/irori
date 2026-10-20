@@ -58,14 +58,16 @@ it("irori.css ships the shared drawer chrome and the temp accent", () => {
   }
 });
 
-it("ModelsView always queues downloads and shows the queue panel (IRI-014)", () => {
+it("ModelsView always queues downloads and shows the queue panel (IRI-014/015)", () => {
   for (const token of [
-    "enqueueDownload({", // adds go through POST /downloads, never a direct node job
+    "enqueueDownload({", // single-row path still goes through POST /downloads
+    "enqueueDownloadsBatch({", // bulk path: ONE atomic submission
     "Download queue",
     "downloadStatusChip(e.status)",
     "retryEntry(e.id)",
     "removeEntry(e.id)",
-    "Add to queue",
+    "`Add ${downloadRows.length} to queue`",
+    "parsePaste()", // paste → editable rows
     "pickStoreNode(nodes.value)", // NAS-preferred store node (shared core policy)
     "clearInterval(queuePoll)",
   ]) {

@@ -114,6 +114,29 @@ export async function fetchDownloadQueue(signal?: AbortSignal): Promise<Download
   return parsed.data.entries;
 }
 
+/** IRI-015: queue N downloads in ONE atomic submission. */
+export async function enqueueDownloadsBatch(
+  input: { downloads: Array<{ source: string; name?: string }>; jobs: number },
+  signal?: AbortSignal,
+): Promise<DownloadQueueEntry[]> {
+  const res = await fetch("/api/v1/downloads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!res.ok) throw new Error(await errorFrom(res));
+  const body: unknown = await res.json().catch(() => null);
+  const raw = typeof body === "object" && body !== null && "entries" in body && Array.isArray(body.entries) ? body.entries : [];
+  const entries: DownloadQueueEntry[] = [];
+  for (const item of raw) {
+    const parsed = downloadQueueEntrySchema.safeParse(item);
+    if (!parsed.success) throw new Error("malformed download queue response");
+    entries.push(parsed.data);
+  }
+  return entries;
+}
+
 /** Removes a pending or terminal entry; the running batch must settle first. */
 export async function removeDownload(id: string): Promise<void> {
   const res = await fetch(`/api/v1/downloads/${encodeURIComponent(id)}`, { method: "DELETE" });

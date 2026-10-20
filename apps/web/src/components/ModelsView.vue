@@ -7,6 +7,7 @@ import {
   createJob,
   downloadStatusChip,
   enqueueDownload,
+  enqueueDownloadsBatch,
   fetchDownloadQueue,
   fetchJob,
   fetchModelsPage,
@@ -36,10 +37,8 @@ const placement = ref<PlacementResponse | null>(null);
 const placementLoading = ref(false);
 const placementError = ref<string | null>(null);
 
-/** Download-from-HF modal (download-queue on the first model-ops node). */
+/** Download-from-HF modal state (paste + rows, IRI-015). */
 const downloadOpen = ref(false);
-const downloadSource = ref("");
-const downloadName = ref("");
 const downloadJobs = ref(4);
 const downloadBusy = ref(false);
 const downloadError = ref<string | null>(null);
@@ -106,27 +105,55 @@ function runHygiene(kind: string, perModel: boolean): void {
 }
 
 /**
- * IRI-014: adding a download ALWAYS queues (POST /api/v1/downloads); the
- * server picks the store node (NAS-preferred) and drains pending entries as
- * one batch when it is idle. An immediately-dispatched entry opens the job
- * drawer like before; a pending one waits in the queue panel.
+ * IRI-015 paste+rows modal: a textarea takes one `owner/model` per line and
+ * parses into editable rows (source + optional store name). Submit sends ONE
+ * batch (`POST /downloads {downloads, jobs}`; a single row uses the
+ * single-entry shape) — the server always queues and drains them as one
+ * `download-queue` batch on the store node when it is idle.
  */
+const downloadPaste = ref("");
+const downloadRows = ref<Array<{ source: string; name: string }>>([]);
+
+function parsePaste(): void {
+  const seen = new Set(downloadRows.value.map((r) => r.source.trim().toLowerCase()));
+  for (const raw of downloadPaste.value.split("\n")) {
+    const line = raw.trim();
+    if (line.length === 0 || line.startsWith("#")) continue;
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    downloadRows.value.push({ source: line, name: "" });
+  }
+  downloadPaste.value = "";
+}
+
+function removeRow(index: number): void {
+  downloadRows.value.splice(index, 1);
+}
+
 async function submitDownload(): Promise<void> {
-  const source = downloadSource.value.trim();
-  if (source.length === 0) return;
+  const rows = downloadRows.value
+    .map((r) => ({ source: r.source.trim(), name: r.name.trim() }))
+    .filter((r) => r.source.length > 0);
+  if (rows.length === 0) return;
   downloadBusy.value = true;
   downloadError.value = null;
+  let entries: DownloadQueueEntry[];
   try {
-    const entry = await enqueueDownload({
-      source,
-      name: downloadName.value.trim() || undefined,
-      jobs: downloadJobs.value,
-    });
+    if (rows.length === 1) {
+      entries = [await enqueueDownload({ source: rows[0]!.source, name: rows[0]!.name || undefined, jobs: downloadJobs.value })];
+    } else {
+      entries = await enqueueDownloadsBatch({
+        downloads: rows.map((r) => ({ source: r.source, name: r.name || undefined })),
+        jobs: downloadJobs.value,
+      });
+    }
     downloadOpen.value = false;
-    downloadSource.value = "";
-    downloadName.value = "";
+    downloadRows.value = [];
+    downloadPaste.value = "";
     void refreshQueue();
-    if (entry.status === "running" && entry.jobId !== null) await openJob(entry.jobId);
+    const running = entries.find((e) => e.status === "running" && e.jobId !== null);
+    if (running?.jobId !== undefined && running.jobId !== null) await openJob(running.jobId);
   } catch (err) {
     downloadError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -481,12 +508,35 @@ onBeforeUnmount(() => {
           No online model-ops node (node with the NAS root mounted) — adds queue until one is online.
         </p>
         <div class="field">
-          <label class="stat__sub" for="dl-source">Hugging Face repo (owner/model)</label>
-          <input id="dl-source" v-model="downloadSource" class="input mono" type="text" placeholder="unsloth/GLM-5.3-Flash-EXL3" />
+          <label class="stat__sub" for="dl-paste">Hugging Face repos — one owner/model per line (# comments ignored)</label>
+          <textarea
+            id="dl-paste"
+            v-model="downloadPaste"
+            class="input mono"
+            rows="3"
+            placeholder="unsloth/GLM-5.3-Flash-EXL3&#10;zai-org/Second-Model"
+          ></textarea>
+          <button class="btn btn--secondary btn--sm" style="margin-top: 6px" :disabled="downloadPaste.trim().length === 0" @click="parsePaste">
+            Parse rows
+          </button>
         </div>
         <div class="field">
-          <label class="stat__sub" for="dl-name">Store name (optional, defaults to repo name)</label>
-          <input id="dl-name" v-model="downloadName" class="input mono" type="text" placeholder="" />
+          <span class="stat__sub">Downloads to queue ({{ downloadRows.length }})</span>
+          <p v-if="downloadRows.length === 0" class="stat__sub faint" style="margin: 4px 0 0">
+            Nothing parsed yet — paste repos above and parse, then tweak names before queueing.
+          </p>
+          <table v-else class="hytable" style="margin-top: 4px">
+            <thead>
+              <tr><th>Hugging Face repo</th><th>Store name (optional)</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in downloadRows" :key="row.source">
+                <td><input v-model="row.source" class="input mono" type="text" :aria-label="`Repo ${index + 1}`" /></td>
+                <td><input v-model="row.name" class="input mono" type="text" :placeholder="row.source.split('/').pop() || ''" :aria-label="`Store name ${index + 1}`" /></td>
+                <td><button class="btn btn--ghost btn--sm" :aria-label="`Remove ${row.source}`" @click="removeRow(index)">✕</button></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         <div class="field">
           <label class="stat__sub" for="dl-jobs">Parallel jobs</label>
@@ -495,8 +545,8 @@ onBeforeUnmount(() => {
         <p v-if="downloadError" class="banner banner--warn">{{ downloadError }}</p>
         <div class="row row--between">
           <span class="stat__sub faint">Always queued · dispatched to the NAS when idle · resumable · companion files included</span>
-          <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadSource.trim().length === 0" @click="submitDownload">
-            {{ downloadBusy ? "Queueing…" : "Add to queue" }}
+          <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadRows.length === 0" @click="submitDownload">
+            {{ downloadBusy ? "Queueing…" : `Add ${downloadRows.length} to queue` }}
           </button>
         </div>
       </section>
