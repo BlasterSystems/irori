@@ -71,7 +71,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
 
   const llmDetectOnly = parseDetectOnly(env.IRORI_LLM_DETECT_ONLY?.trim() ?? "");
 
-  const modelctlPin = env.IRORI_MODELCTL_PIN?.trim() || "0.20.1";
+  const modelctlPin = env.IRORI_MODELCTL_PIN?.trim() || "0.21.0";
   const modelctlPath = env.IRORI_MODELCTL_PATH?.trim() || "/root/.local/bin/modelctl";
 
   const stateDir =

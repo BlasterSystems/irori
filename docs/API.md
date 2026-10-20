@@ -38,6 +38,11 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `running` when the store node was idle and the batch dispatched
   immediately). Adding a download NEVER starts a one-off per-node job and
   never returns 409. Invalid payload → `400`; degraded DB → `503`.
+- **Bulk form (IRI-015)**: `POST /api/v1/downloads`
+  `{downloads: [{source, name?}…] (1–50), jobs?}` → `202 {entries}` (same
+  per-row states). Atomic: any invalid entry rejects the whole submission
+  with `400` and nothing lands. Single-row bulk submissions are equivalent
+  to the single shape.
 - The server picks the store node (`pickStoreNode`: `nas`-kind node with
   `nasRoot` first, then any online node with the store mounted). Pending
   entries drain as **one `download-queue` batch** on the idle node — drained
@@ -49,10 +54,12 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   row (409 otherwise).
 - Batch reconcile: job `succeeded` ⇒ every entry succeeded (modelctl exits
   non-zero if any entry failed); `canceled` ⇒ entries canceled; `failed` ⇒
-  per-entry status from modelctl's terminal `[i/n] complete|failed` output
-  lines, unmatched entries fail with "did not complete in the batch". Partial
-  failure/cancel still triggers a catalog refresh. Retry is cheap: modelctl
-  reuses published objects and resumes staging.
+  per-entry status from the modelctl `queue --json` results document
+  (single-line JSON, last stdout line — IRI-015) when the pinned modelctl
+  emits it, falling back to the `[i/n] complete|failed` output lines
+  otherwise; unmatched entries fail with "did not complete in the batch".
+  Partial failure/cancel still triggers a catalog refresh. Retry is cheap:
+  modelctl reuses published objects and resumes staging.
 
 ## Analytics (M7)
 

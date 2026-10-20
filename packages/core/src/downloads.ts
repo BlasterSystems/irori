@@ -19,6 +19,20 @@ export const downloadCreateSchema = z.object({
 
 export type DownloadCreateInput = z.infer<typeof downloadCreateSchema>;
 
+/** Hard cap per batch submission — preflight validates each entry remotely. */
+export const DOWNLOAD_BATCH_MAX_ENTRIES = 50;
+
+/** Bulk submission (IRI-015): N entries + one batch concurrency value. */
+export const downloadBatchCreateSchema = z.object({
+  downloads: z
+    .array(downloadCreateSchema.pick({ source: true, name: true }))
+    .min(1)
+    .max(DOWNLOAD_BATCH_MAX_ENTRIES),
+  jobs: z.number().int().min(1).max(16).default(4),
+});
+
+export type DownloadBatchCreateInput = z.infer<typeof downloadBatchCreateSchema>;
+
 export const DOWNLOAD_QUEUE_STATUSES = ["pending", "running", "succeeded", "failed", "canceled", "removed"] as const;
 export const downloadQueueStatusSchema = z.enum(DOWNLOAD_QUEUE_STATUSES);
 export type DownloadQueueStatus = (typeof DOWNLOAD_QUEUE_STATUSES)[number];

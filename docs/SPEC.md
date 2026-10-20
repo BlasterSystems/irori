@@ -196,7 +196,9 @@ flowchart LR
   carries no timestamp — plus name, size), pagination 25/page. Row click
   opens a **detail drawer** (HF metadata, files, companions, per-node
   placement + remediations, serve-command copy, armed delete). Downloads are
-  added from a **modal** into a persistent **queue panel** on the page (per-entry
+  added from a **modal** that takes a pasted list (one HF repo per line)
+  parsed into editable rows — bulk submissions land as ONE `download_queue`
+  batch (IRI-015) — with a persistent **queue panel** on the page (per-entry
   status/remove/retry); store hygiene (doctor/gc) a **popover** off the
   status strip. No inline form walls.
 

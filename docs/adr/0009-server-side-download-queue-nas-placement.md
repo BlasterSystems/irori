@@ -104,7 +104,11 @@ Option 1 with NAS-preferred placement:
 - Output-line parsing drift across modelctl versions → a mismatch only mislabels a
   failed row; retrying reuses published objects (no re-download), and the
   catalog-request refresh keeps the Models page truthful. Minimum-version pin + golden
-  tests guard the format.
+  tests guard the format. **Update 2026-10-20 (IRI-015):** modelctl `queue` gained
+  `--json` — a single-line per-entry results document printed as the last stdout line;
+  the reconcile prefers it and keeps the line parser as fallback for older pins,
+  closing the drift risk. The fallback itself is idempotent: a mismatch only
+  mislabels a failed row, and retry reuses published objects.
 - Store node prerequisites (modelctl ≥ pin, HF egress) are verified by the modelctl
   install job + `doctor`; a missing prerequisite fails the batch loudly in preflight,
   and rows fail (retryable) rather than half-writing the store.
