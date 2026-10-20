@@ -13,14 +13,22 @@ export interface SparklineDomain {
   max?: number;
 }
 
-export function sparklinePath(
+export interface SparklineScale {
+  min: number;
+  max: number;
+}
+
+/**
+ * Value domain for a series (nulls = gaps): data min/max widened by any fixed
+ * domain, never clipping. A flat series gets ±0.5 slack so values render at
+ * mid-height. null when no point is readable.
+ */
+export function sparklineScale(
   points: Array<number | null>,
-  width: number,
-  height: number,
   domain?: SparklineDomain,
-): string {
-  const finite = points.filter((p): p is number => p !== null);
-  if (finite.length === 0) return "";
+): SparklineScale | null {
+  const finite = points.filter((p): p is number => p !== null && p !== undefined);
+  if (finite.length === 0) return null;
 
   let min = Infinity;
   let max = -Infinity;
@@ -28,15 +36,24 @@ export function sparklinePath(
     if (v < min) min = v;
     if (v > max) max = v;
   }
-  // Honor a fixed domain but never clip: widen it to include the data.
   if (domain?.min !== undefined) min = Math.min(domain.min, min);
   if (domain?.max !== undefined) max = Math.max(domain.max, max);
-  // A flat series would collapse to a zero-height edge line; give it slack so
-  // the value renders at mid-height instead.
   if (min === max) {
     min -= 0.5;
     max += 0.5;
   }
+  return { min, max };
+}
+
+export function sparklinePath(
+  points: Array<number | null>,
+  width: number,
+  height: number,
+  domain?: SparklineDomain,
+): string {
+  const scale = sparklineScale(points, domain);
+  if (scale === null) return "";
+  const { min, max } = scale;
 
   const n = points.length;
   let d = "";
@@ -58,4 +75,23 @@ export function sparklinePath(
     }
   }
   return d;
+}
+
+/**
+ * Nearest bucket index for a pointer x-fraction (0..1 across the plot).
+ * Returns -1 when there is nothing to point at.
+ */
+export function hoverIndex(count: number, frac: number): number {
+  if (count <= 0) return -1;
+  const f = Math.min(1, Math.max(0, frac));
+  return Math.round(f * (count - 1));
+}
+
+/**
+ * Keep a centered tooltip (≈2·half px wide) on screen: clamp its anchor x to
+ * the viewport. DOM-free guard so the helper stays unit-testable.
+ */
+export function clampTipX(x: number, half = 72): number {
+  if (typeof window === "undefined") return x;
+  return Math.min(Math.max(x, half + 4), window.innerWidth - half - 4);
 }

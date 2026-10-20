@@ -36,6 +36,10 @@ export interface ChartSeries {
 
 export interface LensChart {
   paths: Array<{ d: string; color: string; dashed: boolean }>;
+  /** Hover sources: label/color per series with per-bucket values (nulls = gaps). */
+  series: ChartSeries[];
+  /** Bucket start (epoch ms) per index — from the longest series grid. */
+  times: number[];
   /** Horizontal guide lines (y in viewBox coords) with their value. */
   guides: Array<{ y: number; value: number }>;
   /** Throttle/crossing markers: x position + tier. */
@@ -118,7 +122,13 @@ export function lensChart(
     .map((c) => ({ d: sparklinePath(c.points, width, height, { min: yMin, max: yMax }), color: c.color, dashed: c.dashed === true }))
     .filter((p) => p.d !== "");
 
-  return { paths, guides, markers, yMin, yMax, width, height };
+  // All series share the server's bucket grid; the longest one is canonical.
+  const times = series.reduce<number[]>(
+    (best, s) => (s.points.length > best.length ? s.points.map((p) => p.t) : best),
+    [],
+  );
+
+  return { paths, series: charts, times, guides, markers, yMin, yMax, width, height };
 }
 
 export function seriesKeys(response: AnalyticsResponse): AnalyticsSeries[] {
@@ -160,6 +170,20 @@ export function fmtWatts(v: number | null | undefined): string {
 export function fmtTemp(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return "—";
   return `${Math.round(v)}°C`;
+}
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Bucket-start label for chart hover tooltips: "14:05" (minute buckets),
+ *  "Oct 20 14:00" (hour), "Oct 20" (day). Local time, en-US abbreviations. */
+export function fmtBucket(t: number, granularity: "minute" | "hour" | "day"): string {
+  const d = new Date(t);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const day = `${MONTHS_SHORT[d.getMonth()]!} ${d.getDate()}`;
+  if (granularity === "minute") return `${hh}:${mm}`;
+  if (granularity === "hour") return `${day} ${hh}:00`;
+  return day;
 }
 
 /** 0–100 disk usage percent, or null when unknown. */
