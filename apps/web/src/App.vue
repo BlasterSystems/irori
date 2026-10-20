@@ -1,18 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "./live";
-import NodeCard from "./components/NodeCard.vue";
-import NodeModal from "./components/NodeModal.vue";
 import NodeDetail from "./components/NodeDetail.vue";
 import ModelsView from "./components/ModelsView.vue";
 import ServeView from "./components/ServeView.vue";
 import BenchmarksView from "./components/BenchmarksView.vue";
 import AnalyticsView from "./components/AnalyticsView.vue";
-import { groupNodes } from "./llm-data";
-import { parseHash, type Route } from "./router";
+import OverviewView from "./components/OverviewView.vue";
+import UsageView from "./components/UsageView.vue";
+import { parseHash, usageHash, type Route } from "./router";
 import { loadServerVersion, serverTag, serverVersion } from "./version";
 
-const { sortedNodes, connected, lastEventAgeMs } = live;
+const { connected } = live;
 
 const route = ref<Route>(
   parseHash(typeof location === "undefined" ? "" : location.hash),
@@ -26,24 +25,10 @@ const detailNodeId = computed(() =>
   route.value.view === "node" ? route.value.id : null,
 );
 
-/** Add-node modal on the Overview fleet page (IRI-010). */
-const addOpen = ref(false);
-
-const totalCount = computed(() => sortedNodes.value.length);
-const onlineCount = computed(
-  () => sortedNodes.value.filter((n) => n.online).length,
-);
-
-/** Cluster grouping (M3): heads anchor the view, then workers, then standalone. */
-const orderedNodes = computed(() => {
-  const groups = groupNodes(sortedNodes.value);
-  return [...groups.heads, ...groups.workers, ...groups.standalone];
+const ageText = computed(() => {
+  const v = live.lastEventAgeMs.value;
+  return v === null ? null : `${Math.round(v / 1000)}s`;
 });
-const ageText = computed(() =>
-  lastEventAgeMs.value === null
-    ? null
-    : `${Math.round(lastEventAgeMs.value / 1000)}s`,
-);
 
 const isDark = ref(
   typeof document !== "undefined" &&
@@ -84,6 +69,7 @@ onUnmounted(() => {
         <a href="#/models" :class="{ 'is-active': route.view === 'models' }" :aria-current="route.view === 'models' ? 'page' : undefined">Models</a>
         <a href="#/serve" :class="{ 'is-active': route.view === 'serve' }" :aria-current="route.view === 'serve' ? 'page' : undefined">Serve</a>
         <a href="#/analytics" :class="{ 'is-active': route.view === 'analytics' }" :aria-current="route.view === 'analytics' ? 'page' : undefined">Analytics</a>
+        <a :href="usageHash()" :class="{ 'is-active': route.view === 'usage' }" :aria-current="route.view === 'usage' ? 'page' : undefined">Usage</a>
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
       </nav>
       <span v-if="connected" class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live<template v-if="ageText"> · {{ ageText }}</template></span>
@@ -100,34 +86,9 @@ onUnmounted(() => {
     <ServeView v-else-if="route.view === 'serve'" />
     <BenchmarksView v-else-if="route.view === 'benchmarks'" />
     <AnalyticsView v-else-if="route.view === 'analytics'" />
+    <UsageView v-else-if="route.view === 'usage'" />
     <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />
-    <template v-else>
-      <div class="pagehead">
-        <div>
-          <h1>Fleet</h1>
-          <p><span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online<template v-if="ageText"> · last event {{ ageText }} ago</template></span></p>
-        </div>
-        <div class="row">
-          <button class="btn btn--primary" @click="addOpen = true">Add node…</button>
-        </div>
-      </div>
-
-      <section v-if="totalCount > 0" class="cols cols-3">
-        <NodeCard
-          v-for="node in orderedNodes"
-          :key="node.id"
-          :node="node"
-          :snapshot="live.snapshots.get(node.id) ?? null"
-          :llm="live.getLlm(node.id)"
-        />
-      </section>
-      <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
-        <span>no nodes yet</span>
-        <span style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
-      </div>
-
-      <NodeModal v-if="addOpen" mode="create" @close="addOpen = false" />
-    </template>
+    <OverviewView v-else />
   </main>
 
   <footer class="foot">

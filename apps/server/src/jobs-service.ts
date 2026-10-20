@@ -119,7 +119,17 @@ export class JobDispatchError extends Error {}
 
 const ACTIVE = ["queued", "running"] as const;
 
-export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsService {
+/** Terminal transition of a job — emitted as an SSE `job` frame (IRI-013). */
+export interface JobSettledEvent {
+  nodeId: string;
+  jobId: string;
+  kind: string;
+  status: "succeeded" | "failed" | "canceled";
+  exitCode: number | null;
+  durationMs: number | null;
+}
+
+export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?: (event: JobSettledEvent) => void): JobsService {
   return {
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
@@ -197,6 +207,14 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
       if (row.status === "succeeded" || row.status === "failed" || row.status === "canceled") return false;
       sendToAgent(row.nodeId, { type: "job-cancel", jobId: id });
       await db.update(jobs).set({ status: "canceled", finishedAt: new Date() }).where(eq(jobs.id, id));
+      onSettled?.({
+        nodeId: row.nodeId,
+        jobId: id,
+        kind: row.kind,
+        status: "canceled",
+        exitCode: row.exitCode,
+        durationMs: row.startedAt !== null ? Date.now() - row.startedAt.getTime() : null,
+      });
       if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
         await db
           .update(cleanupRuns)
@@ -221,10 +239,15 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
     async onDone(nodeId, jobId, status, exitCode) {
       const [owner] = await db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
       if (!owner || owner.nodeId !== nodeId) return;
-      await db
+      // .returning() doubles as the terminal-transition guard: a repeated
+      // done frame (or reap-after-done) must not re-run the settle effects
+      // or re-emit the feed event.
+      const settled = await db
         .update(jobs)
         .set({ status, exitCode, finishedAt: new Date() })
-        .where(and(eq(jobs.id, jobId), inArray(jobs.status, [...ACTIVE])));
+        .where(and(eq(jobs.id, jobId), inArray(jobs.status, [...ACTIVE])))
+        .returning({ startedAt: jobs.startedAt, finishedAt: jobs.finishedAt });
+      if (settled.length === 0) return;
       const [row] = await db.select({ kind: jobs.kind, params: jobs.params }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
       if (!row) return;
       if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
@@ -251,6 +274,16 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
       if (status === "succeeded" && CATALOG_MUTATING_KINDS.has(row.kind)) {
         sendToAgent(nodeId, { type: "catalog-request" });
       }
+      const startedAt = settled[0]!.startedAt;
+      const finishedAt = settled[0]!.finishedAt;
+      onSettled?.({
+        nodeId,
+        jobId,
+        kind: row.kind,
+        status,
+        exitCode,
+        durationMs: startedAt !== null && finishedAt !== null ? finishedAt.getTime() - startedAt.getTime() : null,
+      });
     },
 
     async onCatalog(nodeId, source, entries) {
@@ -287,7 +320,7 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
 
     async reapOffline(onlineNodes) {
       const active = await db
-        .select({ id: jobs.id, nodeId: jobs.nodeId, kind: jobs.kind, createdAt: jobs.createdAt })
+        .select({ id: jobs.id, nodeId: jobs.nodeId, kind: jobs.kind, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
         .from(jobs)
         .where(inArray(jobs.status, [...ACTIVE]));
       const now = Date.now();
@@ -311,13 +344,21 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
               ? "error: update timed out — the agent did not return with the expected version (rollback: cp /opt/irori/irori-agent.mjs.bak /opt/irori/irori-agent.mjs && systemctl restart irori-agent; journalctl -u irori-agent -n 50)"
               : "error: agent connection lost",
         });
+        onSettled?.({
+          nodeId: j.nodeId,
+          jobId: j.id,
+          kind: j.kind,
+          status: "failed",
+          exitCode: null,
+          durationMs: j.startedAt !== null ? now - j.startedAt.getTime() : null,
+        });
       }
       return dead.map((j) => j.id);
     },
 
     async settleAgentUpdate(nodeId, agentVersion) {
       const [row] = await db
-        .select({ id: jobs.id, params: jobs.params })
+        .select({ id: jobs.id, params: jobs.params, startedAt: jobs.startedAt })
         .from(jobs)
         .where(and(eq(jobs.nodeId, nodeId), eq(jobs.kind, "agent-update"), inArray(jobs.status, [...ACTIVE])))
         .limit(1);
@@ -331,11 +372,20 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend): JobsServic
       // reaper's grace window settles that). Only an exact match proves the
       // update took.
       if (expected === null || compareVersions(agentVersion, expected) !== 0) return "pending";
+      const finishedAt = new Date();
       await db
         .update(jobs)
-        .set({ status: "succeeded", exitCode: 0, finishedAt: new Date() })
+        .set({ status: "succeeded", exitCode: 0, finishedAt })
         .where(and(eq(jobs.id, row.id), inArray(jobs.status, [...ACTIVE])));
       await db.insert(jobOutput).values({ jobId: row.id, seq: MAX_OUTPUT_LINES, line: `update confirmed: agent reports ${agentVersion}` });
+      onSettled?.({
+        nodeId,
+        jobId: row.id,
+        kind: "agent-update",
+        status: "succeeded",
+        exitCode: 0,
+        durationMs: row.startedAt !== null ? finishedAt.getTime() - row.startedAt.getTime() : null,
+      });
       return "succeeded";
     },
   };

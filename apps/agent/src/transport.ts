@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, AgentServerMsg, BenchType, HardwareSnapshot, LlmPortSnapshot, ServerMsg } from "@irori/core";
+import type { AgentMsg, AgentServerMsg, BenchType, HardwareSnapshot, LlmPortSnapshot, ServerMsg, UsageRequest } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -64,11 +64,16 @@ export interface AgentTransportOptions {
     scriptStop: string,
     env: Record<string, string>,
     modelPathName: string | null,
+    capture: { proxyPort: number } | null,
   ) => Promise<{ ok: boolean; error: string | null }>;
   onSetupStop?: (setupId: string, gracefulMs: number) => Promise<{ ok: boolean; error: string | null }>;
   onSetupStatus?: (setupId: string) => void;
   onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   onSetupValidate?: (validateId: string, scripts: string[]) => void;
+  /** Server acked a durable usage-batch insert (ids safe to delete locally). */
+  onUsageAck?: (ids: string[]) => void;
+  /** Called after hello-ok on every (re)connection — replay triggers. */
+  onReconnect?: () => void;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -105,6 +110,8 @@ export class AgentTransport {
   private readonly onSetupStatus?: (setupId: string) => void;
   private readonly onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   private readonly onSetupValidate?: (validateId: string, scripts: string[]) => void;
+  private readonly onUsageAck?: (ids: string[]) => void;
+  private readonly onReconnect?: () => void;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -152,6 +159,8 @@ export class AgentTransport {
     this.onSetupStatus = options.onSetupStatus;
     this.onSetupLogAttach = options.onSetupLogAttach;
     this.onSetupValidate = options.onSetupValidate;
+    this.onUsageAck = options.onUsageAck;
+    this.onReconnect = options.onReconnect;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -186,6 +195,20 @@ export class AgentTransport {
   /** Snapshots currently buffered for the next connection. */
   getBufferedCount(): number {
     return this.buffer.length;
+  }
+
+  /**
+   * Sends one usage batch; false when offline or the socket rejected it.
+   * Never WS-buffered — the durable node buffer owns retries (ADR-0008 §3).
+   */
+  sendUsageBatch(events: UsageRequest[]): boolean {
+    if (!this.ready) return false;
+    try {
+      this.sendRaw({ type: "usage-batch", schemaVersion: this.schemaVersion, agentVersion: this.agentVersion, events });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Open the connection and start managing it. Call once. */
@@ -337,12 +360,12 @@ export class AgentTransport {
         this.onBenchCancel?.(parsed.data.runId);
         break;
       case "setup-start": {
-        const { setupId, runId, scriptStart, scriptStop, env, modelPathName } = parsed.data;
+        const { setupId, runId, scriptStart, scriptStop, env, modelPathName, capture } = parsed.data;
         if (this.onSetupStart === undefined) {
           this.sendAgentMsg({ type: "setup-ack", setupId, ok: false, error: "agent does not support setups" });
           break;
         }
-        void this.onSetupStart(setupId, runId, scriptStart, scriptStop, env, modelPathName)
+        void this.onSetupStart(setupId, runId, scriptStart, scriptStop, env, modelPathName, capture)
           .then((result) => this.sendAgentMsg({ type: "setup-ack", setupId, ok: result.ok, error: result.error }))
           .catch((err: unknown) =>
             this.sendAgentMsg({
@@ -381,6 +404,9 @@ export class AgentTransport {
       case "setup-validate":
         this.onSetupValidate?.(parsed.data.validateId, parsed.data.scripts);
         break;
+      case "usage-batch-ack":
+        this.onUsageAck?.(parsed.data.ids);
+        break;
       case "error":
         // Harmless frame-reject (e.g. our job frames on an older server) or a
         // real refusal — log it; closing here would drop in-flight job output.
@@ -401,6 +427,7 @@ export class AgentTransport {
     // settle the row).
     for (const msg of this.pendingTerminal.splice(0)) this.sendAgentServer(msg);
     this.startSnapshotTimer();
+    this.onReconnect?.();
   }
 
   private handleConfigUpdate(msg: Extract<ServerMsg, { type: "config-update" }>): void {

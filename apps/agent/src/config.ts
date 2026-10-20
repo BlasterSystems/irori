@@ -25,6 +25,10 @@ export interface AgentConfig {
   modelctlPath: string;
   /** IRORI_STATE_DIR — persistent agent state (setup drivers, run logs). */
   stateDir: string;
+  /** IRORI_USAGE_FLUSH_MS — usage buffer upload interval (ADR-0008: 30–60 s). */
+  usageFlushMs: number;
+  /** IRORI_USAGE_MAX_ROWS — hard cap on buffered usage rows (drop-oldest). */
+  usageMaxRows: number;
 }
 
 export const DEFAULT_SERVER_URL = "ws://127.0.0.1:3947/agent-ws";
@@ -74,7 +78,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
     env.IRORI_STATE_DIR?.trim() ||
     join(env.XDG_STATE_HOME?.trim() || join(homedir(), ".local", "state"), "irori-agent");
 
-  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir };
+  const usageFlushMsRaw = Number.parseInt(env.IRORI_USAGE_FLUSH_MS?.trim() ?? "", 10);
+  const usageFlushMs = Number.isFinite(usageFlushMsRaw) && usageFlushMsRaw >= 1000 ? usageFlushMsRaw : 30_000;
+  const usageMaxRowsRaw = Number.parseInt(env.IRORI_USAGE_MAX_ROWS?.trim() ?? "", 10);
+  const usageMaxRows = Number.isFinite(usageMaxRowsRaw) && usageMaxRowsRaw > 0 ? usageMaxRowsRaw : 200_000;
+
+  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows };
 }
 
 /** Parse "host:port,host:port" (a bare "port" probes 127.0.0.1). */

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@irori/core": "workspace:*",
+    "@irori/proxy": "workspace:*",
     "undici": "^7.16.0",
     "ws": "^8.18.3"
   },

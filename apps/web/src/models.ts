@@ -1,8 +1,11 @@
 import {
+  downloadQueueEntrySchema,
+  downloadQueueResponseSchema,
   jobInfoSchema,
   jobKindSchema,
   modelsPageSchema,
   placementResponseSchema,
+  type DownloadQueueEntry,
   type JobView,
   type ModelsPage,
   type PlacementResponse,
@@ -13,7 +16,7 @@ import {
  * parsed once at this boundary via the @irori/core contracts.
  */
 
-export type { JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse } from "@irori/core";
+export type { DownloadQueueEntry, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse } from "@irori/core";
 
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });
@@ -76,6 +79,71 @@ export async function createJob(nodeId: string, kind: string, params: Record<str
 export async function cancelJob(id: string): Promise<void> {
   const res = await fetch(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
   if (!res.ok && res.status !== 204) throw new Error(`cancel failed (${res.status})`);
+}
+
+/** Server error text from an `{ error }` body, with an HTTP fallback. */
+async function errorFrom(res: Response): Promise<string> {
+  const body: unknown = await res.json().catch(() => null);
+  if (typeof body === "object" && body !== null && "error" in body && typeof body.error === "string") return body.error;
+  return `HTTP ${res.status}`;
+}
+
+/**
+ * IRI-014: queue a HF download. The server ALWAYS queues (never starts a
+ * one-off job); it picks the store node (NAS-preferred) and drains pending
+ * entries as one `download-queue` batch whenever that node is idle.
+ */
+export async function enqueueDownload(input: { source: string; name?: string; jobs: number }, signal?: AbortSignal): Promise<DownloadQueueEntry> {
+  const res = await fetch("/api/v1/downloads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+    signal,
+  });
+  if (!res.ok) throw new Error(await errorFrom(res));
+  const body: unknown = await res.json().catch(() => null);
+  const raw = typeof body === "object" && body !== null && "entry" in body ? body.entry : undefined;
+  const entry = downloadQueueEntrySchema.safeParse(raw);
+  if (!entry.success) throw new Error("malformed download queue response");
+  return entry.data;
+}
+
+export async function fetchDownloadQueue(signal?: AbortSignal): Promise<DownloadQueueEntry[]> {
+  const parsed = downloadQueueResponseSchema.safeParse(await getJson("/api/v1/downloads", signal));
+  if (!parsed.success) throw new Error("malformed download queue response");
+  return parsed.data.entries;
+}
+
+/** Removes a pending or terminal entry; the running batch must settle first. */
+export async function removeDownload(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/downloads/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) throw new Error(await errorFrom(res));
+}
+
+/** Re-queues a failed/canceled entry; the server drains when idle. */
+export async function retryDownload(id: string): Promise<DownloadQueueEntry> {
+  const res = await fetch(`/api/v1/downloads/${encodeURIComponent(id)}/retry`, { method: "POST" });
+  if (!res.ok) throw new Error(await errorFrom(res));
+  const body: unknown = await res.json().catch(() => null);
+  const raw = typeof body === "object" && body !== null && "entry" in body ? body.entry : undefined;
+  const entry = downloadQueueEntrySchema.safeParse(raw);
+  if (!entry.success) throw new Error("malformed download queue response");
+  return entry.data;
+}
+
+/** Pure: download queue status → chip label + class. */
+export function downloadStatusChip(status: DownloadQueueEntry["status"]): { label: string; cls: string } {
+  switch (status) {
+    case "succeeded":
+      return { label: "downloaded", cls: "chip--ok" };
+    case "failed":
+      return { label: "failed", cls: "chip--warn" };
+    case "canceled":
+    case "removed":
+      return { label: status, cls: "chip" };
+    default:
+      return { label: status, cls: "chip--accent" };
+  }
 }
 
 /**

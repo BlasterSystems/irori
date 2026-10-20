@@ -68,6 +68,9 @@ export interface LensChartOptions {
   markers?: { key: keyof AnalyticsPoint; warn: number; critical: number };
   /** Extra floor (temps never chart below ~30 °C). */
   floor?: number;
+  /** Per-series metric (parallel to `series`); defaults to `valueKey` for all.
+   *  Lets one chart mix metrics over a shared domain (e.g. decode+prefill). */
+  valueKeys?: Array<keyof AnalyticsPoint>;
 }
 
 /** Shared-domain chart geometry for one lens view. */
@@ -78,11 +81,14 @@ export function lensChart(
   height: number,
   opts: LensChartOptions = {},
 ): LensChart {
-  const charts: ChartSeries[] = series.map((s, i) => ({
-    label: s.label,
-    color: colorFor(i),
-    points: s.points.map((p) => (typeof p[valueKey] === "number" ? (p[valueKey] as number) : null)),
-  }));
+  const charts: ChartSeries[] = series.map((s, i) => {
+    const key = opts.valueKeys?.[i] ?? valueKey;
+    return {
+      label: s.label,
+      color: colorFor(i),
+      points: s.points.map((p) => (typeof p[key] === "number" ? (p[key] as number) : null)),
+    };
+  });
   const finite = charts.flatMap((c) => c.points).filter((v): v is number => v !== null && Number.isFinite(v));
   let yMin = finite.length > 0 ? Math.min(...finite) : 0;
   let yMax = finite.length > 0 ? Math.max(...finite) : 1;
