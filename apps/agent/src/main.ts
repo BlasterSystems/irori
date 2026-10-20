@@ -6,7 +6,11 @@ import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager } from "./jobs.js";
-import { SetupDriver } from "./setups.js";
+import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
+import { MAX_USAGE_BATCH } from "@irori/core";
+import { UsageBuffer } from "./usage-buffer.js";
+import { UsageSync } from "./usage-sync.js";
+import { CaptureProxy } from "@irori/proxy";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
 import { LlmPortProbe } from "./llm-probe.js";
 import { AgentTransport, type LlmRuntimeConfig } from "./transport.js";
@@ -75,6 +79,53 @@ async function run(): Promise<void> {
   let hygieneCache: { at: number; audit: HygieneAudit } | null = null;
   const HYGIENE_AUDIT_TTL_MS = 5 * 60_000;
 
+  // M8 capture proxy hooks: one listener per running flagged setup (ADR-0008).
+  const proxies = new Map<string, CaptureProxy>();
+  const captureHooks: SetupCaptureHooks = {
+    start: async (setupId, listenPort, targetPort) => {
+      await captureHooks.stop(setupId);
+      const proxy = new CaptureProxy({
+        listenPort,
+        targetHost: "127.0.0.1",
+        targetPort,
+        setupId,
+        onEvent: (request) => {
+          try {
+            buffer.add(request);
+          } catch (err) {
+            log(`usage buffer insert failed (ignored): ${err instanceof Error ? err.message : String(err)}`);
+          }
+        },
+        log: (message) => captureHooks.log(setupId, message),
+      });
+      await proxy.start();
+      proxies.set(setupId, proxy);
+    },
+    stop: async (setupId) => {
+      const proxy = proxies.get(setupId);
+      if (proxy === undefined) return;
+      proxies.delete(setupId);
+      await proxy.stop();
+    },
+    log: (setupId, line) => driver.pushSetupLog(setupId, line),
+  };
+
+  let usageAckHandler: ((ids: string[]) => void) | null = null;
+  const buffer = new UsageBuffer(config.stateDir);
+  const usageSync = new UsageSync({
+    buffer,
+    connected: () => transport.isReady(),
+    send: (events) => transport.sendUsageBatch(events),
+    onAck: (handler) => {
+      usageAckHandler = handler;
+    },
+    flushMs: config.usageFlushMs,
+    batchSize: MAX_USAGE_BATCH,
+    keepDays: 90,
+    maxRows: config.usageMaxRows,
+    log,
+  });
+
   const jobs = new JobManager(
     () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath, serverUrl: config.serverUrl }),
     {
@@ -116,6 +167,7 @@ async function run(): Promise<void> {
       onEvent: (setupId, event) => transport.sendAgentMsg({ type: "setup-event", setupId, ...event }),
       onLog: (setupId, seq, line, ts) => transport.sendAgentMsg({ type: "setup-log", setupId, seq, line, ts }),
     },
+    capture: captureHooks,
     log,
   });
   driver.init();
@@ -165,8 +217,8 @@ async function run(): Promise<void> {
       }
     },
     onBenchCancel: (runId) => benches.cancel(runId),
-    onSetupStart: (setupId, runId, scriptStart, scriptStop, env, modelPathName) =>
-      driver.start(setupId, runId, scriptStart, scriptStop, env, modelPathName),
+    onSetupStart: (setupId, runId, scriptStart, scriptStop, env, modelPathName, capture) =>
+      driver.start(setupId, runId, scriptStart, scriptStop, env, modelPathName, capture),
     onSetupStop: (setupId, gracefulMs) => driver.stop(setupId, gracefulMs),
     onSetupStatus: (setupId) => driver.reportStatus(setupId),
     onSetupLogAttach: (setupId, lastSeq) => {
@@ -201,16 +253,21 @@ async function run(): Promise<void> {
       llmCadenceMs: config.llmTargets.length > 0 ? DEFAULT_LLM_CADENCE_MS : 0,
       llmDetectOnly: config.llmDetectOnly,
     },
+    onUsageAck: (ids) => usageAckHandler?.(ids),
+    onReconnect: () => void usageSync.flush(),
     log,
   });
   ensureProbes(config.llmTargets);
   transport.connect(config.serverUrl);
+  usageSync.start();
 
   let stopping = false;
   const shutdown = (signal: string): void => {
     if (stopping) return;
     stopping = true;
     log(`${signal} received, stopping`);
+    usageSync.stop();
+    buffer.close();
     void transport.stop().then(() => process.exit(0));
   };
   process.on("SIGINT", () => shutdown("SIGINT"));

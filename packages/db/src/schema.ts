@@ -225,6 +225,41 @@ export const secrets = pgTable(
   (t) => [uniqueIndex("secrets_name_uq").on(t.name)],
 );
 
+/**
+ * Download queue (IRI-014): one row per requested HF download. Entries batch
+ * into a single `download-queue` job on the store node (NAS-preferred) when
+ * it is idle; batch outcomes reconcile back onto these rows.
+ */
+export const downloadQueueStatusEnum = pgEnum("download_queue_status", [
+  "pending",
+  "running",
+  "succeeded",
+  "failed",
+  "canceled",
+  "removed",
+]);
+
+export const downloadQueue = pgTable(
+  "download_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** HF repo id or URL. */
+    source: text("source").notNull(),
+    /** Store name passed to modelctl (labels in batch output match this). */
+    name: text("name").notNull(),
+    status: downloadQueueStatusEnum("status").notNull().default("pending"),
+    /** Batch job that carried the entry; null until first dispatch. */
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    /** Batch concurrency for the entry; a dispatch uses the batch max. */
+    jobs: integer("jobs").notNull().default(4),
+    /** Failure detail (batch output reconcile). */
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("download_queue_status_idx").on(t.status, t.createdAt)],
+);
+
 /** Serving setups (M5): one start/stop script pair on the head (SPEC §7). */
 export const setupStatusEnum = pgEnum("setup_status", ["stopped", "starting", "running", "stopping", "failed"]);
 export const setupHealthEnum = pgEnum("setup_health", ["starting", "healthy", "foreign", "timeout"]);
@@ -247,6 +282,8 @@ export const setups = pgTable(
     scriptStop: text("script_stop").notNull(),
     /** Optional env exports (core envExportsSchema). */
     env: jsonb("env").notNull().default(sql`'{}'::jsonb`),
+    /** M8: engine traffic served through the agent capture proxy (ADR-0008). */
+    captureProxy: boolean("capture_proxy").notNull().default(false),
     status: setupStatusEnum("status").notNull().default("stopped"),
     health: setupHealthEnum("health"),
     lastError: text("last_error"),
@@ -405,5 +442,90 @@ export const cleanupRuns = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("cleanup_runs_node_idx").on(t.nodeId, t.createdAt)],
+    (t) => [index("cleanup_runs_node_idx").on(t.nodeId, t.createdAt)],
+);
+
+/**
+ * Captured LLM requests (M8, ADR-0008). One row per proxied request, UUID
+ * keyed for exactly-once sync (`ON CONFLICT DO NOTHING` on redelivery).
+ * Bucketing keys on `receivedAt` (server ingest time, ADR-0006) — agent `ts`
+ * is advisory. Raw retention 90 d.
+ */
+export const llmRequests = pgTable(
+  "llm_requests",
+  {
+    id: uuid("id").primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    setupId: uuid("setup_id").references(() => setups.id, { onDelete: "set null" }),
+    /** Client-facing port (the proxy listener). */
+    port: integer("port").notNull(),
+    /** Agent wall-clock request start (advisory). */
+    ts: timestamp("ts", { withTimezone: true }).notNull(),
+    model: text("model"),
+    endpoint: text("endpoint").notNull(),
+    stream: boolean("stream").notNull().default(false),
+    status: integer("status"),
+    finishReason: text("finish_reason"),
+    error: text("error"),
+    /** Normalized error signature (core normalizeErrorSignature) for grouping. */
+    errorSig: text("error_sig"),
+    durationMs: integer("duration_ms"),
+    ttftMs: integer("ttft_ms"),
+    decodeTps: real("decode_tps"),
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    cachedTokens: integer("cached_tokens"),
+    reasoningTokens: integer("reasoning_tokens"),
+    totalTokens: integer("total_tokens"),
+    /** Engine-internal metrics block (e.g. TensorFold), verbatim. */
+    engineMeta: jsonb("engine_meta"),
+    reqBytes: integer("req_bytes").notNull().default(0),
+    resBytes: integer("res_bytes").notNull().default(0),
+    sourceAddr: text("source_addr"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("llm_requests_node_received_idx").on(t.nodeId, t.receivedAt),
+    index("llm_requests_model_idx").on(t.model, t.receivedAt),
+    index("llm_requests_sig_idx").on(t.errorSig, t.receivedAt),
+  ],
+);
+
+/**
+ * Pre-aggregated usage buckets (M8): hourly/daily rollups of `llm_requests`
+ * per (node, model), watermark-guarded like snapshotBuckets. Model "" is the
+ * unknown-model row (request without a parseable model). Retention 1 y.
+ */
+export const usageBuckets = pgTable(
+  "usage_buckets",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    /** Empty string = model unknown (not carried by the request). */
+    model: text("model").notNull().default(""),
+    granularity: bucketGranularity("granularity").notNull(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    requests: integer("requests").notNull().default(0),
+    errors: integer("errors").notNull().default(0),
+    promptTokens: bigint("prompt_tokens", { mode: "number" }).notNull().default(0),
+    completionTokens: bigint("completion_tokens", { mode: "number" }).notNull().default(0),
+    cachedTokens: bigint("cached_tokens", { mode: "number" }).notNull().default(0),
+    reasoningTokens: bigint("reasoning_tokens", { mode: "number" }).notNull().default(0),
+    totalTokens: bigint("total_tokens", { mode: "number" }).notNull().default(0),
+    ttftP50Ms: real("ttft_p50_ms"),
+    ttftP95Ms: real("ttft_p95_ms"),
+    durationP95Ms: real("duration_p95_ms"),
+    /** Token-weighted mean decode tok/s (null when no decode window seen). */
+    decodeTps: real("decode_tps"),
+    /** Sum of completion-token weights behind decodeTps (for re-weighting). */
+    decodeTpsWeight: bigint("decode_tps_weight", { mode: "number" }).notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex("usage_buckets_uq").on(t.nodeId, t.model, t.granularity, t.bucketStart),
+    index("usage_buckets_bucket_idx").on(t.granularity, t.bucketStart),
+  ],
 );

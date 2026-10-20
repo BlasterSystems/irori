@@ -91,6 +91,13 @@ from agreed ground truth.
   fit metas) + Analytics **Temps lens** (fleet strip shape-tiered ◇/▫,
   fleet-max GPU/CPU charts with 85/90 guides + throttle/crossing markers,
   7d minute buckets). SPEC §4/§9; PLAN M2; IRI-002/IRI-008.
+- Round 5 (2026-10-20, owner review of overview.html against the live M4–M7
+  product): overview refreshed to current reality — `Add node…` primary,
+  compressed Setups strip (serve v2 IA), M8 usage placeholder card (explicitly
+  empty, no illustrative numbers), all-in-one telemetry feed reconfirmed.
+  Owner decisions: default lens **Cluster**, **one feed for all event
+  classes**. Browser-verified light/dark, zero console errors. Drives
+  IRI-013 (overview v1 implementation); usage KPIs stay in M8/IR-42.
 - Docs-check: run after skills + README land (see M0 completion).
 
 ## Review

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { Db, NodeStore } from "@irori/db";
 import type { Granularity } from "./rollups.js";
 import type { LlmStore } from "./llm-store.js";
+import type { UsageStore } from "./usage-store.js";
 
 export interface RetentionPolicy {
   /** Raw snapshots older than this are deleted. */
@@ -74,4 +75,26 @@ export async function runLlmRetention(
   const hour = await llmStore.pruneLlmBuckets("hour", policy.hourKeepDays);
   const day = await llmStore.pruneLlmBuckets("day", policy.dayKeepDays);
   return { raw, minute, hour, day };
+}
+
+export interface UsageRetentionResult {
+  raw: number;
+  hour: number;
+  day: number;
+}
+
+/**
+ * One usage retention pass (M8, ADR-0008 §6): raw `llm_requests` 90 d,
+ * `usage_buckets` 1 y. Raw pruning runs first so nothing is deleted before
+ * the usage rollup engine had its chance (boot runs rollups first).
+ */
+export async function runUsageRetention(
+  usage: Pick<UsageStore, "pruneRaw" | "pruneBuckets">,
+  rawKeepDays: number,
+  bucketKeepDays: number,
+): Promise<UsageRetentionResult> {
+  const raw = await usage.pruneRaw(new Date(Date.now() - rawKeepDays * 86_400_000));
+  const hour = await usage.pruneBuckets("hour", bucketKeepDays);
+  const day = await usage.pruneBuckets("day", bucketKeepDays);
+  return { raw, hour, day };
 }

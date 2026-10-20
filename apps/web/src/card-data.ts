@@ -1,5 +1,6 @@
 import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
-import { fmtBytes, TEMPS_WARN_C } from "./analytics";
+import { GB10_SOC_TDP_W } from "@irori/core";
+import { fmtBytes, fmtWatts, TEMPS_WARN_C } from "./analytics";
 import { llmSummaryLine, nodeLlmPorts } from "./llm-data";
 
 export interface CardRow {
@@ -108,28 +109,40 @@ export function computeCardData(
     };
   });
 
-  // On a NAS the store volume is the whole point: surface the largest real
-  // mount (/mnt/nas on the QNAP instance) as the first-class disk row. Sparks
-  // keep their ≥80% disk chip instead — GPU/CPU/MEM dominate there.
+  // Largest real mount — the store volume on a NAS (/mnt/nas on the QNAP
+  // instance), the local disk on sparks (overview mockup round 5 renders
+  // DISK on worker cards; the ≥80% disk chip stays as the warning tier).
+  const bestMount = (snapshot?.storage ?? []).reduce<{ usedBytes: number; totalBytes: number } | null>(
+    (acc, s) =>
+      s.totalBytes > 0 && (acc === null || s.totalBytes > acc.totalBytes)
+        ? { usedBytes: s.usedBytes, totalBytes: s.totalBytes }
+        : acc,
+    null,
+  );
   let diskRow: CardRow | null = null;
-  if (node.kind === "nas") {
-    const best = (snapshot?.storage ?? []).reduce<{ usedBytes: number; totalBytes: number } | null>(
-      (acc, s) =>
-        s.totalBytes > 0 && (acc === null || s.totalBytes > acc.totalBytes)
-          ? { usedBytes: s.usedBytes, totalBytes: s.totalBytes }
-          : acc,
-      null,
-    );
-    if (best !== null) {
-      diskRow = {
-        key: "disk",
-        label: "DISK",
-        barPct: (best.usedBytes / best.totalBytes) * 100,
-        line: `${fmtBytes(best.usedBytes)} / ${fmtBytes(best.totalBytes)}`,
-        tempC: null,
-      };
-    }
+  if (bestMount !== null) {
+    diskRow = {
+      key: "disk",
+      label: "DISK",
+      barPct: (bestMount.usedBytes / bestMount.totalBytes) * 100,
+      line: `${fmtBytes(bestMount.usedBytes)} / ${fmtBytes(bestMount.totalBytes)}`,
+      tempC: null,
+    };
   }
+
+  // Package power (M2 collector), bar scaled against the documented GB10 SOC
+  // TDP (SPEC §9). Omitted entirely when the collector cannot read it.
+  const pkgW = cpu?.packagePowerW ?? null;
+  const pkgRow: CardRow | null =
+    pkgW === null
+      ? null
+      : {
+          key: "pkg",
+          label: "PKG",
+          barPct: Math.min(100, (pkgW / GB10_SOC_TDP_W) * 100),
+          line: fmtWatts(pkgW),
+          tempC: null,
+        };
 
   return {
     name: node.name,
@@ -149,6 +162,6 @@ export function computeCardData(
         ? []
         : node.kind === "nas"
           ? [...(diskRow !== null ? [diskRow] : []), memRow, cpuRow]
-          : [...gpuRows, cpuRow, memRow],
+          : [...gpuRows, cpuRow, memRow, ...(pkgRow !== null ? [pkgRow] : []), ...(diskRow !== null ? [diskRow] : [])],
   };
 }

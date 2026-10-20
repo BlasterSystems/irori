@@ -26,6 +26,19 @@ describe("lensChart", () => {
     expect(chart.yMax).toBe(300);
   });
 
+  it("mixes metrics per series via valueKeys (hero decode+prefill)", () => {
+    const chart = lensChart(
+      [series([{ t: 1000, decodeTps: 10 }, { t: 2000, decodeTps: 20 }]), series([{ t: 1000, prefillTps: 2000 }, { t: 2000, prefillTps: null }])],
+      "decodeTps",
+      600,
+      100,
+      { floorZero: true, valueKeys: ["decodeTps", "prefillTps"] },
+    );
+    expect(chart.series[0]?.points).toEqual([10, 20]);
+    expect(chart.series[1]?.points).toEqual([2000, null]);
+    expect(chart.yMax).toBe(2000);
+  });
+
   it("emits 85/90 guides and crossing markers for temps", () => {
     const chart = lensChart([series([{ gpuMax: 60 }, { gpuMax: 88 }, { gpuMax: 92 }])], "gpuMax", 600, 100, {
       floor: 30,

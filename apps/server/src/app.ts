@@ -1,20 +1,29 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, type NodeInfo } from "@irori/core";
+import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, type NodeInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
-import { analyticsLensSchema, analyticsRangeSchema } from "@irori/core";
+import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
+import type { UsageStore } from "./usage-store.js";
 import { type LlmHistoryResponse } from "./llm-history.js";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
 import { JobBusyError, JobDispatchError, type JobsService } from "./jobs-service.js";
+import {
+  DownloadBusyError,
+  DownloadInvalidTransitionError,
+  DownloadNotFoundError,
+  DownloadValidationError,
+  type DownloadQueueService,
+} from "./download-queue-service.js";
 import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
 import { planPlacement } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
+import { EVENT_FEED_CAP } from "./events-feed.js";
 import type { AgentHub } from "./hub.js";
 import { SetupBusyError, SetupNotFoundError, SetupOfflineError, SetupStartError, type SetupsService } from "./setups-service.js";
 
@@ -88,9 +97,14 @@ export interface AppDeps {
   getAnalytics: () => AnalyticsService | null;
   /** Null while degraded: cleanup routes answer 503 (M7). */
   getCleanup: () => CleanupService | null;
+  /** Null while degraded: usage routes answer 503 (M8). */
+  getUsage: () => UsageStore | null;
+  /** Null while degraded: download-queue routes answer 503 (IRI-014). */
+  getDownloads: () => DownloadQueueService | null;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
-  sse: SseHub;
+  /** SSE hub; when wrapped in the IRI-013 recording feed it also serves /events/recent history. */
+  sse: SseHub & { recent?(limit?: number): SseEvent[] };
   getHub: () => Pick<AgentHub, "online" | "sendToNode"> | null;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
@@ -148,6 +162,14 @@ export function createApp(deps: AppDeps): Express {
 
   app.get("/api/v1/events", (_req, res) => {
     deps.sse.subscribe(res);
+  });
+
+  // IRI-013: feed history for freshly loaded pages — the SSE stream itself
+  // has none. Empty until the hub is wrapped in the recording feed.
+  app.get("/api/v1/events/recent", (req, res) => {
+    const raw = Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "", 10);
+    const limit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), EVENT_FEED_CAP) : 200;
+    res.json({ events: deps.sse.recent?.(limit) ?? [] });
   });
 
   const onlineSet = (): ReadonlySet<string> => deps.getHub()?.online() ?? NO_NODES_ONLINE;
@@ -300,6 +322,70 @@ export function createApp(deps: AppDeps): Express {
     res.json(await service.build({ lens: lens.data, range: range.data, groupBy, setupId, nodeId }));
   });
 
+  // ---- M8: usage capture (SPEC §13, ADR-0008) ----
+  const requireUsage = (res: Response): UsageStore | null => {
+    const usage = deps.getUsage();
+    if (usage === null) res.status(503).json({ error: "database unavailable" });
+    return usage;
+  };
+  const usageFilters = (req: Request): { range: UsageRange; nodeId?: string; model?: string } | null => {
+    const range = usageRangeSchema.safeParse(req.query.range);
+    if (!range.success) return null;
+    const nodeId = typeof req.query.nodeId === "string" && UUID_RE.test(req.query.nodeId) ? req.query.nodeId : undefined;
+    const model = typeof req.query.model === "string" && req.query.model.length > 0 && req.query.model.length <= 300 ? req.query.model : undefined;
+    return { range: range.data, nodeId, model };
+  };
+
+  app.get("/api/v1/usage/overview", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    res.json(await usage.overview(filters));
+  });
+
+  app.get("/api/v1/usage/requests", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    const pageRaw = Number.parseInt(typeof req.query.page === "string" ? req.query.page : "", 10);
+    const limitRaw = Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "", 10);
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+    const errorOnly = req.query.errors === "1" || req.query.errors === "true";
+    const sig = typeof req.query.sig === "string" && req.query.sig.length > 0 ? req.query.sig.slice(0, 240) : undefined;
+    const statusRaw = Number.parseInt(typeof req.query.status === "string" ? req.query.status : "", 10);
+    const status = Number.isFinite(statusRaw) && statusRaw >= 100 && statusRaw <= 599 ? statusRaw : undefined;
+    res.json(await usage.requests({ ...filters, page, limit, errorOnly, sig, status }));
+  });
+
+  app.get("/api/v1/usage/requests/:id", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid request id" });
+    const row = await usage.requestById(id);
+    if (row === null) return res.status(404).json({ error: "request not found" });
+    res.json(row);
+  });
+
+  app.get("/api/v1/usage/errors", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    res.json(await usage.errorGroups(filters));
+  });
+
+  app.get("/api/v1/usage/models", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    res.json(await usage.models(filters));
+  });
+
   // ---- M7: cleanup drawer (SPEC §11.6) ----
   app.get("/api/v1/nodes/:id/cleanup", async (req, res) => {
     const id = parseUuidParam(req);
@@ -422,6 +508,59 @@ export function createApp(deps: AppDeps): Express {
     const ok = await jobs.cancel(id);
     if (!ok) return res.status(409).json({ error: "job not cancelable" });
     res.status(204).end();
+  });
+
+  // ---- IRI-014: server-side download queue ----
+  // Adding a download ALWAYS queues; the server picks the store node
+  // (NAS-preferred) and drains pending entries as one download-queue batch
+  // whenever it is idle. The per-node jobs route above stays for hygiene,
+  // sync, push and other model-ops verbs.
+  app.get("/api/v1/downloads", async (_req, res) => {
+    const downloads = deps.getDownloads();
+    if (downloads === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ entries: await downloads.list() });
+  });
+
+  app.post("/api/v1/downloads", async (req, res) => {
+    const downloads = deps.getDownloads();
+    if (downloads === null) return res.status(503).json({ error: "database unavailable" });
+    try {
+      const entry = await downloads.enqueue(req.body);
+      res.status(202).json({ entry });
+    } catch (err) {
+      if (err instanceof DownloadValidationError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.delete("/api/v1/downloads/:id", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid download id" });
+    const downloads = deps.getDownloads();
+    if (downloads === null) return res.status(503).json({ error: "database unavailable" });
+    try {
+      await downloads.remove(id);
+      res.status(204).end();
+    } catch (err) {
+      if (err instanceof DownloadNotFoundError) return res.status(404).json({ error: err.message });
+      if (err instanceof DownloadBusyError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
+  app.post("/api/v1/downloads/:id/retry", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid download id" });
+    const downloads = deps.getDownloads();
+    if (downloads === null) return res.status(503).json({ error: "database unavailable" });
+    try {
+      const entry = await downloads.retry(id);
+      res.json({ entry });
+    } catch (err) {
+      if (err instanceof DownloadNotFoundError) return res.status(404).json({ error: err.message });
+      if (err instanceof DownloadInvalidTransitionError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
   });
 
   // NAS catalog listing from the model_meta cache (refreshed by catalog frames).

@@ -6,8 +6,13 @@ import {
   type HardwareSnapshot,
   type LlmPortSnapshot,
   type NodeInfo,
+  type SseEvent,
+  type UsageEvent,
 } from "@irori/core";
-import { fetchNodes } from "./api";
+import { fetchEventsRecent, fetchNodes } from "./api";
+
+/** Cap on the newest-first captured-request ring (M8). */
+const USAGE_LATEST_CAP = 50;
 
 /** Latest LLM probe per node (SSE llm events; REST seeds it on the detail page). */
 export interface LlmEntry {
@@ -29,6 +34,7 @@ export interface BenchLive {
 export interface LiveStoreOptions {
   /** Overridable for tests. */
   fetchNodesFn?: typeof fetchNodes;
+  fetchEventsRecentFn?: typeof fetchEventsRecent;
   EventSourceCtor?: typeof EventSource | null;
   now?: () => number;
   /** Interval at which lastEventAgeMs is refreshed. */
@@ -44,6 +50,12 @@ export interface LiveStore {
   llm: Map<string, LlmEntry>;
   /** Latest bench frame per run id, from SSE bench events (M6). */
   benches: Map<string, BenchLive>;
+  /** Bounded feed ring (newest last): node status, setups, benches, jobs,
+   *  thermal — never the 2 s snapshot/llm floods (IRI-013). Seeded from
+   *  /api/v1/events/recent on init. */
+  events: Ref<SseEvent[]>;
+  /** Latest captured usage requests (newest first, M8). */
+  usageLatest: Ref<UsageEvent[]>;
   /** Latest LLM entry for a node, null when no probe has arrived yet. */
   getLlm(nodeId: string): LlmEntry | null;
   /** ms since the last SSE frame arrived (refreshed by a tick), null before the first event. */
@@ -78,6 +90,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const snapshots = reactive(new Map<string, HardwareSnapshot>());
   const llm = reactive(new Map<string, LlmEntry>());
   const benches = reactive(new Map<string, BenchLive>());
+  const events = ref<SseEvent[]>([]);
+  const usageLatest = ref<UsageEvent[]>([]);
   const lastEventAtMs = ref<number | null>(null);
   const lastEventAgeMs = ref<number | null>(null);
   const connected = ref(false);
@@ -128,6 +142,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       }
       case "node-online":
       case "node-offline": {
+        pushEvent(event);
         const node = nodes.get(event.nodeId);
         if (!node) break; // registry is authoritative; next refresh picks it up
         node.online = event.type === "node-online";
@@ -145,8 +160,31 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
           progress: event.progress,
           serverTimeMs: event.serverTimeMs,
         });
+        pushEvent(event);
         break;
+      case "job":
+      case "thermal":
+      case "setup-state":
+      case "setup-transfer":
+        pushEvent(event);
+        break;
+      case "usage": {
+        // Newest-first ring; also rides the feed (bounded by pushEvent).
+        usageLatest.value.unshift(event);
+        if (usageLatest.value.length > USAGE_LATEST_CAP) {
+          usageLatest.value.length = USAGE_LATEST_CAP;
+        }
+        pushEvent(event);
+        break;
+      }
     }
+  }
+
+  /** Feed ring cap: generous for a session, small enough to stay cheap. */
+  const EVENT_RING_CAP = 300;
+  function pushEvent(event: SseEvent): void {
+    events.value.push(event);
+    if (events.value.length > EVENT_RING_CAP) events.value.splice(0, events.value.length - EVENT_RING_CAP);
   }
 
   async function refreshNodes(): Promise<void> {
@@ -157,6 +195,12 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   }
 
   async function init(): Promise<void> {
+    try {
+      const recent = await (options.fetchEventsRecentFn ?? fetchEventsRecent)(200);
+      if (!stopped) events.value = recent.slice(-EVENT_RING_CAP);
+    } catch {
+      // Feed history unavailable (older hub) — SSE still populates the ring.
+    }
     try {
       await refreshNodes();
     } catch {
@@ -217,6 +261,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     snapshots,
     llm,
     benches,
+    events,
+    usageLatest,
     getLlm,
     lastEventAgeMs,
     connected,

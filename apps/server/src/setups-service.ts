@@ -5,6 +5,7 @@ import {
   envExportsSchema,
   modelIdMatches,
   parseTransferProgress,
+  pickStoreNode,
   setupInfoSchema,
   setupNodeSchema,
   transferStageSchema,
@@ -126,6 +127,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       scriptStart: row.scriptStart,
       scriptStop: row.scriptStop,
       env: envExportsSchema.parse(row.env),
+      captureProxy: row.captureProxy === true,
       status: row.status,
       health: row.health,
       lastError: row.lastError,
@@ -363,6 +365,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
           scriptStart: input.scriptStart,
           scriptStop: input.scriptStop,
           env: input.env,
+          captureProxy: input.captureProxy,
         })
         .returning();
       if (!row) throw new Error("setup insert returned no row");
@@ -381,6 +384,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         ...(patch.scriptStart !== undefined ? { scriptStart: patch.scriptStart } : {}),
         ...(patch.scriptStop !== undefined ? { scriptStop: patch.scriptStop } : {}),
         ...(patch.env !== undefined ? { env: patch.env } : {}),
+        ...(patch.captureProxy !== undefined ? { captureProxy: patch.captureProxy } : {}),
       });
       if (patch.port !== undefined && patch.port !== row.port) {
         await ensurePortAssigned(row.headNodeId, patch.port);
@@ -410,7 +414,10 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const envCfg = envExportsSchema.parse(row.env);
       const env: Record<string, string> = {};
       if (envCfg.modelName) env.MODEL_NAME = row.model;
-      if (envCfg.port) env.PORT = String(row.port);
+      // ADR-0008 §7: captured setups get the agent-chosen loopback engine
+      // port injected agent-side ($PORT contract) — the server cannot know a
+      // node-local free port, so it omits PORT here.
+      if (envCfg.port && row.captureProxy !== true) env.PORT = String(row.port);
       if (envCfg.extraArgs.length > 0) env.EXTRA_ARGS = envCfg.extraArgs;
 
       await ensurePortAssigned(row.headNodeId, row.port);
@@ -425,6 +432,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         scriptStop: row.scriptStop,
         env,
         modelPathName: envCfg.modelPath ? row.model : null,
+        capture: row.captureProxy === true ? { proxyPort: row.port } : null,
       });
       if (!sent) {
         await deps.db.update(setupRuns).set({ status: "failed", endedAt: new Date() }).where(eq(setupRuns.id, runId));
@@ -646,10 +654,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const holderIds = new Set(await deps.jobs.presentNodesFor(row.model));
       const allNodes = await deps.getNodes();
       const byId = new Map(allNodes.map((n) => [n.id, n]));
-      const nasNode =
-        allNodes.find((n) => n.kind === "nas" && n.nasRoot !== null && n.enabled) ??
-        allNodes.find((n) => n.nasRoot !== null && n.enabled) ??
-        null;
+      // Same NAS-first store policy as the download queue (IRI-014); the
+      // transfer stages run later, so no online filter here.
+      const nasNode = pickStoreNode(allNodes);
       const online = deps.online();
 
       const stages: TransferStage[] = [];

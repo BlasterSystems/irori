@@ -22,15 +22,37 @@ it("NodeCard keeps the DS card vocabulary", () => {
   expect(nodeCardSource).toContain("waiting for first snapshot");
 });
 
-it("App keeps the DS topbar lockup, nav and empty state", () => {
-  for (const cls of ["topbar__in", "brand-mark", "mark-node", "mark-line", "mark-square", "brand-name", "brand-endorsement", "nav", "is-active", "chip--ok", "pulse", "pagehead", "cols-3", "ghost-grid"]) {
+it("App keeps the DS topbar lockup and nav", () => {
+  for (const cls of ["topbar__in", "brand-mark", "mark-node", "mark-line", "mark-square", "brand-name", "brand-endorsement", "nav", "is-active", "chip--ok", "pulse"]) {
     expect(appSource).toContain(cls);
+  }
+  expect(appSource).toContain("irori-theme");
+  // IRI-013: the fleet page body moved to OverviewView — the shell keeps only routing.
+  expect(appSource).toContain("<OverviewView v-else />");
+  // M8: Usage is a first-class nav entry mounted as its own view.
+  expect(appSource).toContain("usageHash()");
+  expect(appSource).toContain('<UsageView v-else-if="route.view === \'usage\'" />');
+});
+
+it("UsageView keeps the DS section vocabulary (M8)", () => {
+  const src = readFileSync(new URL("../src/components/UsageView.vue", import.meta.url), "utf8");
+  for (const cls of ["pagehead", "tabs", "seg", "statgrid", "card__head", "card__body--flush", "table", "chip", "drawer-scrim", "drawer", "btn--ghost"]) {
+    expect(src).toContain(cls);
+  }
+  // Live indicator mirrors the topbar chip; tabs come from the shared USAGE_TABS.
+  expect(src).toContain("USAGE_TABS");
+  expect(src).toContain("live.connected");
+});
+
+it("OverviewView keeps the page vocabulary: pagehead, card grid, first-run ghost, add node", () => {
+  const src = readFileSync(new URL("../src/components/OverviewView.vue", import.meta.url), "utf8");
+  for (const cls of ["pagehead", "cols-3", "ghost-grid", "btn--primary"]) {
+    expect(src).toContain(cls);
   }
   // IRI-010: the empty state is the mockup's first-run ghost; node management
   // moved into the NodeModal instead of a pointer at the API.
-  expect(appSource).toContain("no nodes yet");
-  expect(appSource).toContain("<NodeModal");
-  expect(appSource).toContain("irori-theme");
+  expect(src).toContain("no nodes yet");
+  expect(src).toContain("<NodeModal");
 });
 
 it("App pins the version/build footer to the viewport-bottom shell", () => {

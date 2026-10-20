@@ -63,8 +63,10 @@ The agent is configured via env (no config file): `IRORI_SERVER_URL`,
 `IRORI_NODE_TOKEN`, `IRORI_CADENCE_MS`, `IRORI_LLM_TARGETS`,
 `IRORI_LLM_DETECT_ONLY`, `IRORI_MODELCTL_PIN`, `IRORI_MODELCTL_PATH`, and
 `IRORI_STATE_DIR` (default `~/.local/state/irori-agent`) — the state dir holds
-setup-driver state (`setups.json`) and persisted run logs (`setup-logs/`),
-so give it a persistent volume when containerized.
+setup-driver state (`setups.json`), persisted run logs (`setup-logs/`), and the
+usage capture buffer (`usage-buffer.db`, M8/ADR-0008: `IRORI_USAGE_FLUSH_MS`
+upload interval, default 30 s; `IRORI_USAGE_MAX_ROWS` buffer cap, default
+200 000) — so give it a persistent volume when containerized.
 
 ### Release artifacts (M7)
 

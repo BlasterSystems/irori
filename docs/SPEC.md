@@ -174,7 +174,12 @@ flowchart LR
   - **Search/download** on the NAS: HF id/URL → manifest generation → staged
     resumable download → validate → atomic publish → activate. GGUF
     quantization selection; mmproj/MTP companions detected. Queue YAML built
-    server-side from form rows (raw YAML never accepted).
+    server-side from form rows (raw YAML never accepted). Adding a download
+    **always queues** (IRI-014, ADR-0009): the server inserts a pending
+    `download_queue` row and drains all pending entries as one `download-queue`
+    batch on the **NAS-preferred store node** (`pickStoreNode`: NAS kind first,
+    fallback to a node with the store mounted) whenever it is idle; batch
+    outcomes reconcile per entry, with retry reusing published objects.
   - **Delete**: dry-run plan → armed `--apply --yes`.
   - **sync-local** NAS → node HF cache (resumable rsync, ETag validation).
   - **push** node → node over the CX7 fabric (parallel rsync streams,
@@ -190,8 +195,9 @@ flowchart LR
   added** default — via Irori-side `first_seen_at`, since `catalog.json`
   carries no timestamp — plus name, size), pagination 25/page. Row click
   opens a **detail drawer** (HF metadata, files, companions, per-node
-  placement + remediations, serve-command copy, armed delete). The download
-  queue is a **modal**; store hygiene (doctor/gc) a **popover** off the
+  placement + remediations, serve-command copy, armed delete). Downloads are
+  added from a **modal** into a persistent **queue panel** on the page (per-entry
+  status/remove/retry); store hygiene (doctor/gc) a **popover** off the
   status strip. No inline form walls.
 
 ## 7. Serving orchestration
@@ -320,6 +326,22 @@ unit. Install completes only when the WS hello lands. Token rotation pushes
 `config-update`; disconnected agents are re-bootstrapped. Agent version is
 reported in every snapshot; upgrade = re-run install.
 
+7. **Usage capture** (M8, ADR-0008) — opt-in per setup
+   (`captureProxy`): the agent binds the setup's declared LAN port and
+   forwards to a loopback engine port injected as `$PORT` (the start script
+   must honor it; the wizard pre-fills a loopback-bind hint in `EXTRA_ARGS`).
+   The proxy is a raw byte pipe with a passive capped tee: streaming is
+   byte-identical, capture failures degrade to pass-through, and only
+   OpenAI-compat inference requests are recorded (probes/`/metrics` are
+   forwarded uncaptured). Per request: model, endpoint, status, finish
+   reason, errors (+ normalized signature), duration/TTFT/decode tok/s,
+   prompt/completion/cached/reasoning/total tokens, the TensorFold block
+   verbatim, payload sizes, source address — no bodies (IR-51). Captured
+   events land in a node-local SQLite WAL buffer (expendable, 90 d / capped)
+   and sync to Postgres in ≤500-event batches with ack-driven deletion and
+   UUID dedup (exactly-once). Raw retention 90 d, hourly/daily buckets 1 y,
+   keyed on server ingest time.
+
 ## 12. Security model (homelab)
 
 - No application auth, no user management. The server binds LAN; document the
@@ -336,20 +358,26 @@ reported in every snapshot; upgrade = re-run install.
 | Area | Endpoints |
 |---|---|
 | Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/agent-update`, `POST /api/v1/nodes/:id/token/rotate`, `GET /install-agent.sh`, `GET /irori-agent.service`, `GET /agent/irori-agent.mjs` |
-| Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE) |
+| Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE), `GET /api/v1/events/recent?limit=` (feed history, IRI-013) |
 | Inference | `GET /api/v1/nodes/:id/llm`, `PUT /:id/llm-ports`, `GET /api/v1/clusters/:id` |
-| Models | `GET /api/v1/models?scope=nas\|node:id&q=&sort=&page=`, `POST /api/v1/models/download`, `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
+| Models | `GET /api/v1/models?scope=nas\|node:id&q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
 | Serving | `GET/POST /api/v1/setups`, `PATCH/DELETE /api/v1/setups/:id`, `POST /api/v1/setups/:id/start\|stop`, `GET /api/v1/setups/:id/log` (stream) |
 | Jobs | `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel` |
 | Cleanup | `GET /api/v1/nodes/:id/cleanup/audit`, `POST /api/v1/nodes/:id/cleanup` (dry_run default) |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
+| Usage | `GET /api/v1/usage/{overview,requests,errors,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
 | Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, WS `/agent-ws` |
 
 ## 14. Deviations & deferred
 
-- **Deferred (not in v1):** inference gateway + request analysis (sparkControl's
-  proxy/trace store), alert notifications, Prometheus export, PWA/mobile,
+- **Shipped (M8):** usage **capture** only — the deferred "inference gateway"
+  is rescoped per the IRI-009 research brief: an in-agent pass-through proxy
+  records usage; no routing, fallbacks, or auth (no gateway features).
+- **Deferred (not in v1):** gateway features proper (request routing,
+  fallbacks, per-client auth/keys), request/body retention + chats
+  reconstruction, tool attribution, client identity, retry lineage (all
+  phase-2, IR-51), alert notifications, Prometheus export, PWA/mobile,
   health-findings rules engine, prompt showcase, auto-discovery of Sparks,
   recipe git-drift tracking (setups re-validate script existence at start
   instead).

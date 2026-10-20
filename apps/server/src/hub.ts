@@ -7,11 +7,13 @@ import {
   type AgentServerMsg,
   type BenchDoneMsg,
   type BenchProgressMsg,
+  type GpuSnapshot,
   type HardwareSnapshot,
   type SetupAckMsg,
   type SetupEventMsg,
   type SetupLogMsg,
   type SetupValidateResultMsg,
+  type UsageRequest,
 } from "@irori/core";
 import type { NodeStore } from "@irori/db";
 import type { LlmStore } from "./llm-store.js";
@@ -21,6 +23,25 @@ import type { SseHub } from "./sse.js";
 
 /** Drop-oldest cap for buffered DB writes (snapshots, llm probe passes, terminal job/bench frames). */
 const MAX_PENDING_WRITES = 1000;
+
+/**
+ * GPU throttle-reason set changes between consecutive snapshots (IRI-013).
+ * Compared as sorted sets (nvidia-smi ordering is not guaranteed); a card
+ * seen for the first time produces no transition. Active reasons are
+ * returned sorted so feed lines are deterministic.
+ */
+export function thermalTransitions(prev: GpuSnapshot[], next: GpuSnapshot[]): Array<{ gpuIndex: number; active: string[] }> {
+  const out: Array<{ gpuIndex: number; active: string[] }> = [];
+  for (const g of next) {
+    const was = prev.find((p) => p.index === g.index);
+    if (was === undefined) continue;
+    const active = [...g.throttleReasons].sort();
+    if (was.throttleReasons === undefined) continue;
+    if ([...was.throttleReasons].sort().join("\u0000") === active.join("\u0000")) continue;
+    out.push({ gpuIndex: g.index, active });
+  }
+  return out;
+}
 const DEFAULT_WRITE_FLUSH_MS = 5_000;
 const DEFAULT_MARK_SEEN_THROTTLE_MS = 30_000;
 /** Probe cadence handed to agents: heads/standalone probe, workers detect-only. */
@@ -55,6 +76,10 @@ export interface AgentHubDeps {
   benchEvents: {
     onProgress(nodeId: string, runId: string, progress: BenchProgressMsg["progress"]): void;
     onDone(nodeId: string, runId: string, status: "completed" | "failed" | "canceled", result: unknown, error: string | null): Promise<void>;
+  };
+  /** Usage batches (M8): durable insert; false when the DB is unavailable (no ack). */
+  usageEvents: {
+    onBatch(nodeId: string, events: UsageRequest[]): Promise<boolean>;
   };
   /** Injectables for tests. */
   writeFlushMs?: number;
@@ -221,8 +246,15 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
 
       if (msg.type === "snapshot") {
         const snapshot: HardwareSnapshot = msg.snapshot;
+        const prev = deps.rings.latest(currentId);
         deps.rings.push(currentId, snapshot);
         deps.sse.send({ type: "snapshot", serverTimeMs: Date.now(), nodeId: currentId, snapshot });
+        // IRI-013: GPU throttle-reason set changes become feed events
+        // (e.g. "HW Slowdown" appearing, then clearing) without any new
+        // agent surface — computed from consecutive snapshots.
+        for (const t of thermalTransitions(prev?.gpus ?? [], snapshot.gpus)) {
+          deps.sse.send({ type: "thermal", serverTimeMs: Date.now(), nodeId: currentId, gpuIndex: t.gpuIndex, active: t.active });
+        }
         void markSeen(currentId, agentVersion ?? "unknown");
         try {
           await deps.store.insertSnapshot(currentId, snapshot);
@@ -254,6 +286,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     // processed through a per-socket chain so ordering (stopping → stopped →
     // ack) is preserved despite the async DB work.
     let setupChain = Promise.resolve();
+    let usageChain = Promise.resolve();
     ws.on("message", (raw: RawData) => {
       if (nodeId === null) return;
       const text = Buffer.isBuffer(raw)
@@ -294,13 +327,23 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
           .catch(() =>
             enqueuePending(currentId, "bench-done", { runId: frame.runId, status: frame.status, result: frame.result ?? null, error: frame.error }),
           );
-      } else if (
-        frame.type === "setup-ack" ||
-        frame.type === "setup-event" ||
-        frame.type === "setup-log" ||
-        frame.type === "setup-validate-result"
-      ) {
+      } else if (frame.type === "setup-ack" || frame.type === "setup-event" || frame.type === "setup-log" || frame.type === "setup-validate-result") {
         setupChain = setupChain.then(() => routeSetupFrame(frame, currentId)).catch(() => {});
+      } else if (frame.type === "usage-batch") {
+        // Serialized per connection so acks reach the agent in send order.
+        const events = frame.events;
+        usageChain = usageChain
+          .then(async () => {
+            const ok = await deps.usageEvents.onBatch(currentId, events);
+            if (!ok) return;
+            // Live view + feed: one frame per captured request, post-insert.
+            const serverTimeMs = Date.now();
+            for (const request of events) {
+              deps.sse.send({ type: "usage", serverTimeMs, nodeId: currentId, request });
+            }
+            sendMsg({ type: "usage-batch-ack", ids: events.map((e) => e.id) });
+          })
+          .catch(() => {});
       }
     });
 

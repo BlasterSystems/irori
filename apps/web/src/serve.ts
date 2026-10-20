@@ -12,17 +12,9 @@ import type { NodeInfo } from "@irori/core";
  */
 
 export type { SetupInfo, SetupTransfer, TransferStage } from "@irori/core";
-export type SetupCreateInput = {
-  name: string;
-  kind: "single" | "cluster";
-  model: string;
-  port: number;
-  headNodeId: string;
-  nodes: Array<{ nodeId: string; role: "worker" }>;
-  scriptStart: string;
-  scriptStop: string;
-  env: { modelName: boolean; port: boolean; extraArgs: string; modelPath: boolean };
-};
+import type { SetupCreateInput as CoreSetupCreateInput } from "@irori/core";
+export type { SetupCreateInput } from "@irori/core";
+type SetupCreateInput = CoreSetupCreateInput;
 
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { headers: { accept: "application/json" }, signal });

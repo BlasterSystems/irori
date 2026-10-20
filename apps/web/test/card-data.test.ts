@@ -70,11 +70,11 @@ describe("computeCardData", () => {
     expect(offline.statusText).toBe("offline");
   });
 
-  it("formats cpu, memory and gpu rows in importance order (GPU → CPU → MEM)", () => {
+  it("formats cpu, memory and gpu rows in importance order (GPU → CPU → MEM → PKG)", () => {
     const card = computeCardData(nodeFixture(), SNAPSHOT);
     expect(card.hasSnapshot).toBe(true);
-    expect(card.rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem"]);
-    const [gpu, cpu, mem] = card.rows;
+    expect(card.rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem", "pkg"]);
+    const [gpu, cpu, mem, pkg] = card.rows;
     expect(cpu?.line).toBe("18%");
     expect(cpu?.tempC).toBe(62);
     expect(mem?.line).toBe("96.0 / 127.0 GB");
@@ -83,6 +83,11 @@ describe("computeCardData", () => {
     expect(gpu?.line).toBe("NVIDIA GB10 · 34% · 42.1 / 127.0 GB");
     expect(gpu?.tempC).toBe(61);
     expect(gpu?.barPct).toBe(34);
+    // package power scaled against the documented GB10 SOC TDP (140 W)
+    expect(pkg?.label).toBe("PKG");
+    expect(pkg?.line).toBe("41 W");
+    expect(pkg?.barPct).toBeCloseTo((41 / 140) * 100);
+    expect(pkg?.tempC).toBeNull();
   });
 
   it("omits unreadable segments instead of printing nulls", () => {
@@ -122,8 +127,8 @@ describe("computeCardData", () => {
     expect(card.rows[0]?.label).toBe("DISK");
     expect(card.rows[0]?.line).toBe("11.6 TB / 18.1 TB");
     expect(card.rows[0]?.barPct).toBeCloseTo((11_603_944_087_552 / 18_108_599_115_776) * 100);
-    // sparks keep GPU/CPU/MEM and surface disk only via the ≥80% chip
-    expect(computeCardData(nodeFixture(), { ...SNAPSHOT, storage }).rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem"]);
+    // sparks surface package power + disk after MEM (overview mockup round 5)
+    expect(computeCardData(nodeFixture(), { ...SNAPSHOT, storage }).rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem", "pkg", "disk"]);
   });
 
   it("omits the disk row when a NAS has no readable storage", () => {
