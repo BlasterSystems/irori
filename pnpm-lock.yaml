@@ -38,6 +38,9 @@ importers:
       '@irori/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@irori/proxy':
+        specifier: workspace:*
+        version: link:../../packages/proxy
       undici:
         specifier: ^7.16.0
         version: 7.30.1
@@ -154,6 +157,19 @@ importers:
       drizzle-kit:
         specifier: ^0.31.4
         version: 0.31.11
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@24.19.2)(vite@7.3.7(@types/node@24.19.2)(tsx@4.23.15))
+
+  packages/proxy:
+    dependencies:
+      '@irori/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

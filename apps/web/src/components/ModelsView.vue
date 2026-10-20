@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes } from "../api";
-import type { NodeInfo } from "@irori/core";
+import { pickStoreNode, type NodeInfo } from "@irori/core";
 import {
   cancelJob,
   createJob,
+  downloadStatusChip,
+  enqueueDownload,
+  fetchDownloadQueue,
   fetchJob,
   fetchModelsPage,
   fetchPlacement,
   formatGiB,
   jobStatusChip,
   placementChip,
+  removeDownload,
+  retryDownload,
+  type DownloadQueueEntry,
   type JobDetail,
   type JobView,
   type ModelsPage,
@@ -66,9 +72,9 @@ function onSortToggle(): void {
   void load();
 }
 
-/** First online node whose agent can reach the NAS store (nasRoot set). */
+/** Store node for hygiene verbs and the modal banner (NAS-preferred, IRI-014). */
 const nodes = ref<NodeInfo[]>([]);
-const storeNode = computed(() => nodes.value.find((n) => n.online && n.nasRoot !== null)?.id ?? null);
+const storeNode = computed(() => pickStoreNode(nodes.value)?.id ?? null);
 
 onMounted(() => {
   void fetchNodes()
@@ -79,6 +85,7 @@ onMounted(() => {
       /* registry unavailable: download modal surfaces "no model-ops node" */
     });
   void load();
+  void refreshQueue();
 });
 
 /** Maintenance verbs for the hygiene popover: kind → label; destructive ones ghosted. */
@@ -98,22 +105,86 @@ function runHygiene(kind: string, perModel: boolean): void {
   void runJob(nodeId, kind, perModel ? { name: selected.value ?? undefined } : {});
 }
 
+/**
+ * IRI-014: adding a download ALWAYS queues (POST /api/v1/downloads); the
+ * server picks the store node (NAS-preferred) and drains pending entries as
+ * one batch when it is idle. An immediately-dispatched entry opens the job
+ * drawer like before; a pending one waits in the queue panel.
+ */
 async function submitDownload(): Promise<void> {
-  const nodeId = storeNode.value;
   const source = downloadSource.value.trim();
-  if (nodeId === null || source.length === 0) return;
+  if (source.length === 0) return;
   downloadBusy.value = true;
   downloadError.value = null;
   try {
-    const name = downloadName.value.trim() || source.split("/").pop() || source;
-    const jobView = await createJob(nodeId, "download-queue", { downloads: [{ source, name }], jobs: downloadJobs.value });
+    const entry = await enqueueDownload({
+      source,
+      name: downloadName.value.trim() || undefined,
+      jobs: downloadJobs.value,
+    });
     downloadOpen.value = false;
-    await openJob(jobView.id);
+    downloadSource.value = "";
+    downloadName.value = "";
+    void refreshQueue();
+    if (entry.status === "running" && entry.jobId !== null) await openJob(entry.jobId);
   } catch (err) {
     downloadError.value = err instanceof Error ? err.message : String(err);
   } finally {
     downloadBusy.value = false;
   }
+}
+
+/** Download queue panel state (IRI-014). */
+const downloadQueueEntries = ref<DownloadQueueEntry[]>([]);
+const queueError = ref<string | null>(null);
+let queuePoll: ReturnType<typeof setInterval> | undefined;
+
+function queueHasActive(entries: DownloadQueueEntry[]): boolean {
+  return entries.some((e) => e.status === "pending" || e.status === "running");
+}
+
+async function refreshQueue(): Promise<void> {
+  try {
+    const entries = await fetchDownloadQueue();
+    downloadQueueEntries.value = entries;
+    queueError.value = null;
+    // Poll only while something is queued/running; terminal states are static.
+    if (queueHasActive(entries) && queuePoll === undefined) {
+      queuePoll = setInterval(() => {
+        if (!queueHasActive(downloadQueueEntries.value)) {
+          clearInterval(queuePoll);
+          queuePoll = undefined;
+          return;
+        }
+        void refreshQueue();
+      }, 2000);
+    }
+  } catch (err) {
+    queueError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function removeEntry(id: string): Promise<void> {
+  try {
+    await removeDownload(id);
+    await refreshQueue();
+  } catch (err) {
+    queueError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function retryEntry(id: string): Promise<void> {
+  try {
+    const entry = await retryDownload(id);
+    await refreshQueue();
+    if (entry.status === "running" && entry.jobId !== null) await openJob(entry.jobId);
+  } catch (err) {
+    queueError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+function openBatch(jobId: string): void {
+  void openJob(jobId);
 }
 
 let debounce: ReturnType<typeof setTimeout> | undefined;
@@ -190,6 +261,7 @@ async function openJob(id: string): Promise<void> {
     if (job.value === null) return;
     if (job.value.job.status === "succeeded" || job.value.job.status === "failed" || job.value.job.status === "canceled") {
       clearInterval(jobPoll);
+      void refreshQueue(); // a settled download batch changes the queue rows
       return;
     }
     const pollSeq = jobSeq;
@@ -213,6 +285,7 @@ function closeJob(): void {
 onBeforeUnmount(() => {
   clearTimeout(debounce);
   clearInterval(jobPoll);
+  clearInterval(queuePoll);
 });
 </script>
 
@@ -237,7 +310,7 @@ onBeforeUnmount(() => {
         <button class="btn btn--secondary btn--sm" @click="onSortToggle">
           {{ sort === "recent" ? "Recently added ↓" : "Name A–Z" }}
         </button>
-        <button class="btn btn--primary btn--sm" :disabled="storeNode === null" @click="downloadOpen = true">Download from HF…</button>
+        <button class="btn btn--primary btn--sm" @click="downloadOpen = true">Download from HF…</button>
       </div>
     </div>
 
@@ -268,6 +341,43 @@ onBeforeUnmount(() => {
       <span class="mono faint">page {{ modelsPage.page }} / {{ totalPages }}</span>
       <button class="btn btn--secondary btn--sm" :disabled="page >= totalPages" @click="go(1)">Next →</button>
     </div>
+
+    <!-- IRI-014 download queue: adds always queue; the NAS drains when idle -->
+    <section
+      v-if="downloadQueueEntries.length > 0 || queueError !== null"
+      class="card"
+      style="margin-top: 14px; padding: 12px"
+      aria-label="Download queue"
+    >
+      <div class="row row--between">
+        <h3>Download queue</h3>
+        <span class="stat__sub faint">queued adds dispatch to the NAS store node when idle</span>
+      </div>
+      <p v-if="queueError" class="banner banner--warn">{{ queueError }}</p>
+      <table v-if="downloadQueueEntries.length > 0" class="hytable">
+        <thead>
+          <tr><th>Model</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="e in downloadQueueEntries" :key="e.id">
+            <td class="mono">{{ e.name }} <span class="mono faint">· {{ e.source }}</span></td>
+            <td>
+              <span class="chip" :class="downloadStatusChip(e.status).cls">{{ downloadStatusChip(e.status).label }}</span>
+              <span v-if="e.error" class="mono faint"> {{ e.error }}</span>
+            </td>
+            <td class="num">
+              <button v-if="e.jobId !== null" class="btn btn--secondary btn--sm" @click="openBatch(e.jobId)">Job</button>
+              <button
+                v-if="e.status === 'failed' || e.status === 'canceled'"
+                class="btn btn--secondary btn--sm"
+                @click="retryEntry(e.id)"
+              >Retry</button>
+              <button v-if="e.status !== 'running'" class="btn btn--ghost btn--sm" @click="removeEntry(e.id)">Remove</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <!-- Model detail drawer: placement + job actions -->
     <div v-if="selected !== null" class="drawer-scrim" @click.self="closeDetail">
@@ -356,35 +466,35 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <!-- Download from HF modal: queues a download-queue job on the model-ops node -->
+    <!-- Download from HF modal: ALWAYS queues via POST /downloads; server picks the NAS-preferred store node -->
     <div v-if="downloadOpen" class="drawer-scrim" @click.self="downloadOpen = false">
       <section class="card drawer" aria-label="Download from Hugging Face">
         <div class="card__head">
           <h3>Download from HF to NAS</h3>
           <button class="btn btn--secondary btn--sm" @click="downloadOpen = false">Close</button>
         </div>
-        <p v-if="storeNode === null" class="banner banner--warn">No online model-ops node (node with the NAS root mounted).</p>
-        <template v-else>
-          <div class="field">
-            <label class="stat__sub" for="dl-source">Hugging Face repo (owner/model)</label>
-            <input id="dl-source" v-model="downloadSource" class="input mono" type="text" placeholder="unsloth/GLM-5.3-Flash-EXL3" />
-          </div>
-          <div class="field">
-            <label class="stat__sub" for="dl-name">Store name (optional, defaults to repo name)</label>
-            <input id="dl-name" v-model="downloadName" class="input mono" type="text" placeholder="" />
-          </div>
-          <div class="field">
-            <label class="stat__sub" for="dl-jobs">Parallel jobs</label>
-            <input id="dl-jobs" v-model.number="downloadJobs" class="input" type="number" min="1" max="16" />
-          </div>
-          <p v-if="downloadError" class="banner banner--warn">{{ downloadError }}</p>
-          <div class="row row--between">
-            <span class="stat__sub faint">Resumable · preflighted · companion files included</span>
-            <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadSource.trim().length === 0" @click="submitDownload">
-              {{ downloadBusy ? "Queueing…" : "Queue download" }}
-            </button>
-          </div>
-        </template>
+        <p v-if="storeNode === null" class="banner banner--warn">
+          No online model-ops node (node with the NAS root mounted) — adds queue until one is online.
+        </p>
+        <div class="field">
+          <label class="stat__sub" for="dl-source">Hugging Face repo (owner/model)</label>
+          <input id="dl-source" v-model="downloadSource" class="input mono" type="text" placeholder="unsloth/GLM-5.3-Flash-EXL3" />
+        </div>
+        <div class="field">
+          <label class="stat__sub" for="dl-name">Store name (optional, defaults to repo name)</label>
+          <input id="dl-name" v-model="downloadName" class="input mono" type="text" placeholder="" />
+        </div>
+        <div class="field">
+          <label class="stat__sub" for="dl-jobs">Parallel jobs</label>
+          <input id="dl-jobs" v-model.number="downloadJobs" class="input" type="number" min="1" max="16" />
+        </div>
+        <p v-if="downloadError" class="banner banner--warn">{{ downloadError }}</p>
+        <div class="row row--between">
+          <span class="stat__sub faint">Always queued · dispatched to the NAS when idle · resumable · companion files included</span>
+          <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadSource.trim().length === 0" @click="submitDownload">
+            {{ downloadBusy ? "Queueing…" : "Add to queue" }}
+          </button>
+        </div>
       </section>
     </div>
   </div>

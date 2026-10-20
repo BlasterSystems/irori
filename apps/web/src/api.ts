@@ -2,11 +2,24 @@ import {
   type AnalyticsResponse,
   LLM_BACKENDS,
   nodeInfoSchema,
+  sseEventSchema,
+  usageErrorsResponseSchema,
+  usageModelsResponseSchema,
+  usageOverviewResponseSchema,
+  usageRequestRowSchema,
+  usageRequestsResponseSchema,
+  USAGE_RANGES,
   type LlmBackend,
   type LlmPortSnapshot,
   type NodeCreatePayload,
   type NodeInfo,
   type NodePatchPayload,
+  type SseEvent,
+  type UsageErrorsResponse,
+  type UsageModelsResponse,
+  type UsageOverviewResponse,
+  type UsageRequestRow,
+  type UsageRequestsResponse,
 } from "@irori/core";
 
 /** Registry entries carry the node's configured probe ports (M3); older
@@ -579,4 +592,118 @@ export async function setWeeklySafePass(nodeId: string, enabled: boolean): Promi
   if (!res.ok) throw new Error(`PUT /api/v1/nodes/${nodeId}/hygiene failed: HTTP ${res.status}`);
   const body: unknown = await res.json();
   return (typeof body === "object" && body !== null ? body : {}) as CleanupState["prevention"];
+}
+
+// ─── IRI-013: overview event feed ───────────────────────────────────────────
+
+/** Feed history for a freshly loaded page; unknown frames are dropped. */
+export async function fetchEventsRecent(limit = 200, signal?: AbortSignal): Promise<SseEvent[]> {
+  const res = await fetch(`/api/v1/events/recent?limit=${limit}`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/events/recent failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("GET /api/v1/events/recent: expected an object");
+  }
+  const events = (body as { events?: unknown }).events;
+  if (!Array.isArray(events)) return [];
+  return events.flatMap((e) => {
+    const parsed = sseEventSchema.safeParse(e);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+// ---- M8: usage capture (ADR-0008) ----
+
+export type UsageRangeName = (typeof USAGE_RANGES)[number];
+
+function rangeQuery(range: UsageRangeName, extra: Record<string, string> = {}): string {
+  const params = new URLSearchParams({ range, ...extra });
+  return params.toString();
+}
+
+export async function fetchUsageOverview(
+  range: UsageRangeName,
+  opts: { nodeId?: string; model?: string; signal?: AbortSignal } = {},
+): Promise<UsageOverviewResponse> {
+  const extra: Record<string, string> = {};
+  if (opts.nodeId !== undefined) extra.nodeId = opts.nodeId;
+  if (opts.model !== undefined) extra.model = opts.model;
+  const res = await fetch(`/api/v1/usage/overview?${rangeQuery(range, extra)}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/overview failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageOverviewResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/overview: unexpected shape");
+  return parsed.data;
+}
+
+export async function fetchUsageRequests(
+  range: UsageRangeName,
+  opts: { nodeId?: string; model?: string; errorOnly?: boolean; sig?: string; status?: number; page?: number; limit?: number; signal?: AbortSignal } = {},
+): Promise<UsageRequestsResponse> {
+  const extra: Record<string, string> = {};
+  if (opts.nodeId !== undefined) extra.nodeId = opts.nodeId;
+  if (opts.model !== undefined) extra.model = opts.model;
+  if (opts.errorOnly === true) extra.errors = "1";
+  if (opts.sig !== undefined) extra.sig = opts.sig;
+  if (opts.status !== undefined) extra.status = String(opts.status);
+  if (opts.page !== undefined) extra.page = String(opts.page);
+  if (opts.limit !== undefined) extra.limit = String(opts.limit);
+  const res = await fetch(`/api/v1/usage/requests?${rangeQuery(range, extra)}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/requests failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageRequestsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/requests: unexpected shape");
+  return parsed.data;
+}
+
+export async function fetchUsageRequest(id: string, signal?: AbortSignal): Promise<UsageRequestRow | null> {
+  const res = await fetch(`/api/v1/usage/requests/${encodeURIComponent(id)}`, {
+    headers: { accept: "application/json" },
+    signal,
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET /api/v1/usage/requests/${id} failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageRequestRowSchema.safeParse(body);
+  if (!parsed.success) throw new Error(`GET /api/v1/usage/requests/${id}: unexpected shape`);
+  return parsed.data;
+}
+
+export async function fetchUsageErrors(
+  range: UsageRangeName,
+  opts: { nodeId?: string; model?: string; signal?: AbortSignal } = {},
+): Promise<UsageErrorsResponse> {
+  const extra: Record<string, string> = {};
+  if (opts.nodeId !== undefined) extra.nodeId = opts.nodeId;
+  if (opts.model !== undefined) extra.model = opts.model;
+  const res = await fetch(`/api/v1/usage/errors?${rangeQuery(range, extra)}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/errors failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageErrorsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/errors: unexpected shape");
+  return parsed.data;
+}
+
+export async function fetchUsageModels(
+  range: UsageRangeName,
+  opts: { nodeId?: string; signal?: AbortSignal } = {},
+): Promise<UsageModelsResponse> {
+  const res = await fetch(`/api/v1/usage/models?${rangeQuery(range, opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {})}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/models failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageModelsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/models: unexpected shape");
+  return parsed.data;
 }

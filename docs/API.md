@@ -2,7 +2,34 @@
 
 Endpoint inventory lives in `SPEC.md` §6; this file records the behavioral
 guarantees callers rely on, kept current when behavior changes. Last updated
-by the M7 batch (adversarial-review fixes + analytics/hygiene).
+2026-10-20 (M8 usage capture).
+
+## Usage capture (M8, ADR-0008)
+
+- `GET /api/v1/usage/overview|requests|errors|models?range=` — ranges
+  `1h|24h|7d|30d|90d` (same enum as analytics); unknown range → `400`;
+  degraded DB → `503`. Shared filters: `nodeId` (uuid), `model`.
+  `requests` adds `errors=1`, `sig=<errorSig>`, `status`, `page`,
+  `limit` (1–200, default 50); a row's full record is
+  `GET /api/v1/usage/requests/:id` (404 unknown).
+- Overview/models series read the watermark-guarded `usage_buckets`
+  (hour for 1h/24h/7d, day for 30d/90d) keyed on **server ingest time**
+  (`received_at`); the requests list and detail read raw `llm_requests`
+  (90 d retention; buckets 1 y).
+- Every captured request is also an SSE `usage` event (`{serverTimeMs,
+  nodeId, request}`) sent after the durable insert; the events feed keeps
+  them (only heartbeat/snapshot/llm are excluded).
+- Agent sync: `usage-batch` frames (≤500 events) insert with
+  `ON CONFLICT (id) DO NOTHING` and are answered with
+  `usage-batch-ack {ids}` **only after** a successful insert — a failed or
+  degraded insert sends no ack, and the agent's SQLite buffer redelivers.
+  Redelivery is a no-op by UUID (exactly-once).
+- Setups: `captureProxy` on create/patch flips the head's engine port to the
+  agent's capture proxy. Flagged setups get **no `PORT` env from the
+  server** — the agent binds the declared port and injects a fresh loopback
+  engine port as `$PORT` at spawn (the start script must honor it). Health
+  probes and LLM probes target `127.0.0.1:<port>` and work through the
+  proxy unchanged; unflagged setups are byte-identical to before.
 
 ## Analytics (M7)
 

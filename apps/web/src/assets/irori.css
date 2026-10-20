@@ -74,7 +74,7 @@ button { font: inherit; color: inherit; }
 .muted { color: var(--muted); } .faint { color: var(--faint); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-.page { flex: 1 0 auto; padding: var(--space-5) 0 var(--space-7); }
+.page { flex: 1 0 auto; min-width: 0; padding: var(--space-5) 0 var(--space-7); }
 .foot { position: sticky; bottom: 0; z-index: 5;
   background: color-mix(in oklch, var(--paper) 90%, transparent); backdrop-filter: blur(8px);
   border-top: 1px solid var(--border); }
@@ -82,6 +82,9 @@ button { font: inherit; color: inherit; }
 .pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
 .pagehead p { margin: var(--space-1) 0 0; color: var(--muted); font-size: 14px; }
 .cols { display: grid; gap: var(--space-3); }
+/* Grid items may shrink below content (charts/tables in cells must not
+ * force page-level horizontal overflow on narrow viewports). */
+.cols > * { min-width: 0; }
 .cols-2 { grid-template-columns: repeat(2, 1fr); }
 .cols-3 { grid-template-columns: repeat(3, 1fr); }
 .cols-4 { grid-template-columns: repeat(4, 1fr); }
@@ -274,7 +277,7 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
     mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 28px), transparent); }
   .nav::-webkit-scrollbar { display: none; }
   .nav a { flex: none; display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; }
-  .container { padding: 0 16px; }
+  .container { padding: 0 16px; margin: 0; }
   .foot__in { min-height: 40px; padding-bottom: env(safe-area-inset-bottom); }
   .pagehead { flex-direction: column; align-items: flex-start; gap: var(--space-3); }
   .pagehead > .row { flex-wrap: wrap; width: 100%; }

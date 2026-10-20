@@ -6,6 +6,7 @@ import cleanupDrawerSource from "../src/components/CleanupDrawer.vue?raw";
 import lensChartSource from "../src/components/LensChart.vue?raw";
 import sparklineSource from "../src/components/Sparkline.vue?raw";
 import analyticsViewSource from "../src/components/AnalyticsView.vue?raw";
+import modelsViewSource from "../src/components/ModelsView.vue?raw";
 import llmPanelSource from "../src/components/LlmPanel.vue?raw";
 
 // vitest's css pipeline returns "" for *.css?raw — read the stylesheet directly.
@@ -55,6 +56,23 @@ it("irori.css ships the shared drawer chrome and the temp accent", () => {
   ]) {
     expect(cssSource).toContain(rule);
   }
+});
+
+it("ModelsView always queues downloads and shows the queue panel (IRI-014)", () => {
+  for (const token of [
+    "enqueueDownload({", // adds go through POST /downloads, never a direct node job
+    "Download queue",
+    "downloadStatusChip(e.status)",
+    "retryEntry(e.id)",
+    "removeEntry(e.id)",
+    "Add to queue",
+    "pickStoreNode(nodes.value)", // NAS-preferred store node (shared core policy)
+    "clearInterval(queuePoll)",
+  ]) {
+    expect(modelsViewSource).toContain(token);
+  }
+  // The legacy immediate-start path must be gone.
+  expect(modelsViewSource).not.toContain('createJob(nodeId, "download-queue"');
 });
 
 it("charts show a hover tooltip; call sites pass unit formatters", () => {

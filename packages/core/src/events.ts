@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmEventSchema, type LlmEvent } from "./llm.js";
+import { usageRequestSchema } from "./usage.js";
 
 export type { LlmEvent };
 
@@ -78,6 +79,36 @@ export const benchEventSchema = z.object({
     .nullable(),
 });
 
+/** Terminal job settlement (M4/M5 jobs) — one frame per settled job. */
+export const jobEventSchema = z.object({
+  type: z.literal("job"),
+  serverTimeMs: z.number(),
+  nodeId: z.string().uuid(),
+  jobId: z.string().uuid(),
+  kind: z.string(),
+  status: z.enum(["succeeded", "failed", "canceled"]),
+  exitCode: z.number().int().nullable(),
+  durationMs: z.number().nullable(),
+});
+
+/** GPU throttle-reason set changed for one card — computed server-side from
+ *  consecutive snapshot diffs; `active` empty means the last reason cleared. */
+export const thermalEventSchema = z.object({
+  type: z.literal("thermal"),
+  serverTimeMs: z.number(),
+  nodeId: z.string().uuid(),
+  gpuIndex: z.number().int().nonnegative(),
+  active: z.array(z.string()),
+});
+
+/** One captured LLM request (M8) — sent after durable Postgres insert. */
+export const usageEventSchema = z.object({
+  type: z.literal("usage"),
+  serverTimeMs: z.number(),
+  nodeId: z.string().uuid(),
+  request: usageRequestSchema,
+});
+
 export const sseEventSchema = z.discriminatedUnion("type", [
   snapshotEventSchema,
   nodeStatusEventSchema,
@@ -86,6 +117,9 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   setupStateEventSchema,
   setupTransferEventSchema,
   benchEventSchema,
+  jobEventSchema,
+  thermalEventSchema,
+  usageEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;
@@ -95,3 +129,6 @@ export type SseEvent = z.infer<typeof sseEventSchema>;
 export type SetupStateEvent = z.infer<typeof setupStateEventSchema>;
 export type SetupTransferEvent = z.infer<typeof setupTransferEventSchema>;
 export type BenchEvent = z.infer<typeof benchEventSchema>;
+export type JobEvent = z.infer<typeof jobEventSchema>;
+export type ThermalEvent = z.infer<typeof thermalEventSchema>;
+export type UsageEvent = z.infer<typeof usageEventSchema>;

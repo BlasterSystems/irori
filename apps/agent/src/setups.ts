@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
 import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { join } from "node:path";
@@ -34,7 +35,19 @@ export interface SetupDriverDeps {
   /** modelctl binary for `path --local` (MODEL_PATH resolution). */
   modelctlPath: string;
   events: SetupDriverEvents;
+  /** M8 capture proxy hooks (ADR-0008 §7); absent = capture unsupported. */
+  capture?: SetupCaptureHooks;
   log?: (message: string) => void;
+}
+
+/** Agent-side capture proxy control surface (injected for tests). */
+export interface SetupCaptureHooks {
+  /** Binds `listenPort` → loopback `targetPort`; throws on bind failure. */
+  start(setupId: string, listenPort: number, targetPort: number): Promise<void>;
+  /** Closes the listener; idempotent, never throws. */
+  stop(setupId: string): Promise<void>;
+  /** Routes a proxy log line into the setup's log ring. */
+  log(setupId: string, line: string): void;
 }
 
 const LOG_RING_LINES = 1000;
@@ -52,6 +65,9 @@ interface DriverRecord {
   pgid: number | null;
   startedAt: number;
   logPath: string;
+  /** M8: bound proxy port and the loopback engine port behind it. */
+  proxyPort: number | null;
+  enginePort: number | null;
 }
 
 interface RingEntry {
@@ -78,6 +94,18 @@ function isExecutable(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Ephemeral free loopback port for the engine behind the capture proxy. */
+async function pickFreeLoopbackPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const port = (server.address() as { port: number }).port;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
 }
 
 export class SetupDriver {
@@ -111,6 +139,19 @@ export class SetupDriver {
         // resumes on the next start.
         this.records.set(record.setupId, record);
         kept.push(record);
+        if (record.proxyPort !== null && record.enginePort !== null && this.deps.capture !== undefined) {
+          void this.deps.capture
+            .start(record.setupId, record.proxyPort, record.enginePort)
+            .then(() =>
+              this.deps.capture?.log(record.setupId, `driver: capture proxy re-attached :${record.proxyPort} → 127.0.0.1:${record.enginePort}`),
+            )
+            .catch((err: unknown) =>
+              this.deps.capture?.log(
+                record.setupId,
+                `driver: capture proxy re-attach failed on :${record.proxyPort} (${err instanceof Error ? err.message : String(err)})`,
+              ),
+            );
+        }
         this.deps.events.onEvent(record.setupId, {
           runId: record.runId,
           state: "running",
@@ -132,6 +173,11 @@ export class SetupDriver {
     }
     this.persist(kept);
     this.pruneRunLogs();
+  }
+
+  /** Public log route for capture-proxy lifecycle lines (M8). */
+  pushSetupLog(setupId: string, line: string): void {
+    this.pushLog(setupId, line);
   }
 
   /** Per-run log files grow with engine stdout — keep the newest few per setup. */
@@ -187,6 +233,7 @@ export class SetupDriver {
     scriptStop: string,
     env: Record<string, string>,
     modelPathName: string | null,
+    capture: { proxyPort: number } | null = null,
   ): Promise<{ ok: boolean; error: string | null }> {
     const existing = this.records.get(setupId);
     if (existing && (this.children.has(setupId) || (existing.pgid !== null && groupAlive(existing.pgid)))) {
@@ -211,6 +258,23 @@ export class SetupDriver {
       finalEnv.MODEL_PATH = resolved;
     }
 
+    // Capture mode: bind the proxy BEFORE spawn; the engine gets a fresh
+    // loopback port via $PORT (the documented contract for flagged setups).
+    let enginePort: number | null = null;
+    if (capture !== null) {
+      if (this.deps.capture === undefined) {
+        return { ok: false, error: "capture requested but this agent has no capture proxy support" };
+      }
+      enginePort = await pickFreeLoopbackPort();
+      try {
+        await this.deps.capture.start(setupId, capture.proxyPort, enginePort);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `capture proxy bind failed on :${capture.proxyPort} — ${message}` };
+      }
+      finalEnv.PORT = String(enginePort);
+    }
+
     const logPath = join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`);
     const child = spawn(scriptStart, [], {
       detached: true,
@@ -227,10 +291,15 @@ export class SetupDriver {
       pgid: child.pid ?? null, // detached → the child leads its own group
       startedAt: Date.now(),
       logPath,
+      proxyPort: capture !== null ? capture.proxyPort : null,
+      enginePort,
     };
     this.records.set(setupId, record);
     this.children.set(setupId, child);
     this.persist([...this.records.values()]);
+    if (capture !== null) {
+      this.pushLog(setupId, `driver: capture proxy :${capture.proxyPort} → 127.0.0.1:${enginePort} (requests captured, engine on loopback)`);
+    }
 
     const stream = createWriteStream(logPath, { flags: "a" });
     this.streams.set(setupId, stream);
@@ -245,7 +314,7 @@ export class SetupDriver {
       this.pushLog(setupId, `driver: spawn failed: ${err.message}`);
       this.finish(setupId, null, `spawn failed: ${err.message}`);
     });
-    child.on("exit", (code) => {
+    child.on("exit", async (code) => {
       if (this.stopping.has(setupId)) return; // stop() reports the outcome
       this.pushLog(setupId, `driver: start script exited with code ${code ?? "null"}`);
       // exit 0 → the script completed (blocking or daemonizing); nonzero is a
@@ -268,6 +337,7 @@ export class SetupDriver {
         this.persist([...this.records.values()]);
         return;
       }
+      await this.stopCaptureProxy(setupId, record.proxyPort);
       this.finish(setupId, code, `start script exited with code ${code}`);
     });
 
@@ -354,6 +424,7 @@ export class SetupDriver {
     }
 
     this.stopping.delete(setupId);
+    await this.stopCaptureProxy(setupId, record.proxyPort);
     this.finish(setupId, null, stopError);
     this.deps.events.onEvent(setupId, {
       runId: record.runId,
@@ -364,6 +435,17 @@ export class SetupDriver {
       error: stopError,
     });
     return stopError === null ? { ok: true, error: null } : { ok: false, error: stopError };
+  }
+
+  /** Closes the capture proxy for a setup (idempotent, fail-open). */
+  private async stopCaptureProxy(setupId: string, proxyPort: number | null): Promise<void> {
+    if (proxyPort === null || this.deps.capture === undefined) return;
+    try {
+      await this.deps.capture.stop(setupId);
+      this.pushLog(setupId, `driver: capture proxy closed (:${proxyPort})`);
+    } catch (err) {
+      this.pushLog(setupId, `driver: capture proxy stop failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /** Waits for the recorded group to die; TERM→KILL fallback when still alive. */

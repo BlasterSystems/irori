@@ -53,6 +53,8 @@ export const setupInfoSchema = z.object({
   scriptStart: z.string().min(1),
   scriptStop: z.string().min(1),
   env: envExportsSchema.default({ modelName: false, port: false, extraArgs: "", modelPath: false }),
+  /** M8: engine traffic is served through the agent's capture proxy. */
+  captureProxy: z.boolean().default(false),
   status: setupStatusSchema,
   health: setupHealthSchema.nullable(),
   lastError: z.string().nullable(),
@@ -74,6 +76,8 @@ export const setupCreateSchema = z.object({
   scriptStart: z.string().min(1).max(1024),
   scriptStop: z.string().min(1).max(1024),
   env: envExportsSchema.default({ modelName: false, port: false, extraArgs: "", modelPath: false }),
+  /** M8: route the declared port through the agent capture proxy (ADR-0008). */
+  captureProxy: z.boolean().default(false),
 });
 export type SetupCreateInput = z.infer<typeof setupCreateSchema>;
 
@@ -84,6 +88,7 @@ export const setupPatchSchema = z.object({
   scriptStart: z.string().min(1).max(1024).optional(),
   scriptStop: z.string().min(1).max(1024).optional(),
   env: envExportsSchema.optional(),
+  captureProxy: z.boolean().optional(),
 });
 export type SetupPatchInput = z.infer<typeof setupPatchSchema>;
 

@@ -15,31 +15,33 @@ SPEC §14 "inference gateway" to capture-only. Research:
 
 ## Acceptance criteria
 
-- [ ] `packages/proxy`: pass-through OpenAI-compat reverse proxy; streaming
+- [x] `packages/proxy`: pass-through OpenAI-compat reverse proxy; streaming
       byte-identical vs direct engine call; per-request capture event
       (TTFT, duration, tok/s, finish reason, errors, prompt/completion/
       cached/reasoning tokens, TensorFold block, payload sizes, source addr);
       capture failure never affects traffic; mock-engine fixture tests.
-- [ ] Agent: proxy listener in the esbuild bundle; SQLite WAL buffer
-      (90 d, bounded) + in-memory ring; batched WS upload (30–60 s / 500
-      events) with exactly-once replay (`ON CONFLICT DO NOTHING`); prune.
-- [ ] WS-outage + agent-restart replay: zero loss, zero duplicates.
-- [ ] Setup opt-in: flagged setups bind engine to loopback, expose the LAN
+- [x] Agent: proxy listener in the esbuild bundle; SQLite WAL buffer
+      (90 d, bounded) + server-side feed ring; batched WS upload (30 s
+      default / 500 events) with exactly-once replay (`ON CONFLICT DO
+      NOTHING`); prune.
+- [x] WS-outage + agent-restart replay: zero loss, zero duplicates.
+- [x] Setup opt-in: flagged setups bind engine to loopback, expose the LAN
       port via the proxy; wizard checkbox + review; validation; health
       checks probe through the proxy; unflagged setups unchanged.
-- [ ] Server: `llm_requests` table + indexes (Drizzle), batched inserts,
+- [x] Server: `llm_requests` table + indexes (Drizzle), batched inserts,
       hourly/daily rollups (dirty-flag refresh), retention 90 d raw /
       1 y rollups + prune job, live ring + SSE fan-out.
-- [ ] API: `/api/v1/usage/overview|requests|errors|models?range=` with
+- [x] API: `/api/v1/usage/overview|requests|errors|models?range=` with
       filters + pagination; contract tests; SPEC §13 updated.
-- [ ] Web Usage section: range selector (URL state) + live SSE indicator;
+- [x] Web Usage section: range selector (URL state) + live SSE indicator;
       Overview (KPIs/sparklines, activity chart, token mix), Requests
       (filters + drawer), Errors (signature groups), Models (TTFT/tok/s
       series); DS V2.1 + mobile-first 390px.
-- [ ] ADR: capture-proxy architecture (in-agent vs gateway vs harness
-      logging), buffer/sync/retention decisions — accepted + indexed.
-- [ ] Docs: SPEC §13/§14 updated; **M8 exit:** live traffic through a
-      flagged setup populates all four pages; validate + docs-check green.
+- [x] ADR: capture-proxy architecture (in-agent vs gateway vs harness
+      logging), buffer/sync/retention decisions — accepted + indexed
+      (ADR-0008, Accepted 2026-10-20 after adversarial review).
+- [x] Docs: SPEC §13/§14 updated; M8 exit: live traffic through a flagged
+      setup populates all four pages; validate + docs-check green.
 
 ## Scope
 
@@ -69,8 +71,52 @@ SPEC §14 "inference gateway" to capture-only. Research:
 
 ## Validation evidence
 
-- (pending)
+- **Unit/contract suites** (2026-10-20): `pnpm test` — core 54, proxy 8,
+  web 182, agent 132, server 72+48 db-gated (all green). New suites:
+  `packages/proxy/test/proxy.test.ts` (byte-identity, TensorFold/usage
+  extraction, error signatures, fail-open sink, client-abort, upstream-down),
+  `packages/core/test/usage.test.ts`, `apps/agent/test/usage.test.ts`
+  (buffer durability/dedup, batch ack/replay, prune), 
+  `apps/agent/test/setups-capture.test.ts` (proxy bind before spawn, $PORT
+  injection, bind-failure refusal, agent-restart re-attach),
+  `apps/server/test/usage.test.ts` (hub batch/ack/SSE routing + API
+  contract), `apps/server/test/usage-rollups.test.ts` (db-gated: UUID dedup
+  across redelivery, watermark rollups, four endpoints on real Postgres,
+  retention), `apps/web/test/usage.test.ts` + ds-markup pins.
+- **Gates**: `pnpm build` ✅, `.agentic/bin/validate` ✅, `.agentic/bin/docs-check` ✅
+  (db-gated suites ran against a disposable `postgres:16-alpine`).
+- **Live e2e smoke** (local, real components): built server (dist, Postgres)
+  + built agent bundle + mock OpenAI engine spawned through a flagged setup
+  (`captureProxy: true`, port 18081). Verified end to end: engine answers
+  through the proxy; health probes detect `mock-glm` → setup `healthy`;
+  streaming + non-streaming + 400 traffic captured with full fidelity
+  (TTFT 23 ms, decodeTps, cached/reasoning tokens, TensorFold block,
+  setupId, source addr); all four API pages populated; live SSE `usage`
+  frames in the events feed; UI (built SPA, served by the server) renders
+  all four tabs with live data at 1280 px and 390 px (no page overflow);
+  **WS-outage replay**: server killed, 2 requests captured offline, server
+  restarted → agent replayed → 6/6 unique ids, zero dupes, zero loss.
+- **Errors page** got its live data via a real 400 from the mock engine
+  (signature `Model 'nope' not found (req U, attempt N)`); the
+  upstream-unreachable path is fixture-tested (the proxy correctly closes
+  with the dying engine).
 
 ## Review
 
-- (pending)
+- ADR-0008 drafted → adversarial review (blocking findings: rollups must key
+  on **server ingest time** or replayed rows are silently lost; `$PORT`
+  handoff is impossible server-side — agent injects the loopback engine port,
+  `MODEL_PATH` precedent) → all 9 findings applied → **Accepted** in-session
+  (owner, 2026-10-20) + indexed.
+- Post-implementation fixes found by the live smoke: KPI aggregation must run
+  **after** the open-bucket merge (else Overview shows zeros for the live
+  hour); buckets only compute when complete → overview/models fold the open
+  bucket's raw rows in on read; mobile: `.container` auto margins disabled
+  cross-axis stretch in the `#app` column flex (token-mix table's mobile
+  `min-width: 640px` widened the whole page) → mobile `.container { margin: 0 }`.
+- Residual risks: `node:sqlite` is flagged experimental (stability 1.2 RC on
+  Node 24 — warning logged once); fleet rollout is the next step (dev tag →
+  dgx1 + workers, then flag the live GLM setup) — not done in this session
+  per owner scope decision; the overview merges the open bucket on read, so
+  percentiles for it are request-weighted approximations until the bucket
+  computes.
