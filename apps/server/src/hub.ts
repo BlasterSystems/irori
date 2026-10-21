@@ -337,9 +337,13 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
             const ok = await deps.usageEvents.onBatch(currentId, events);
             if (!ok) return;
             // Live view + feed: one frame per captured request, post-insert.
+            // IR-52: body bytes stay server-side — the browser gets metadata.
             const serverTimeMs = Date.now();
             for (const request of events) {
-              deps.sse.send({ type: "usage", serverTimeMs, nodeId: currentId, request });
+              const live = request.parts.length
+                ? { ...request, parts: request.parts.map(({ gz: _gz, ...meta }) => meta) }
+                : request;
+              deps.sse.send({ type: "usage", serverTimeMs, nodeId: currentId, request: live });
             }
             sendMsg({ type: "usage-batch-ack", ids: events.map((e) => e.id) });
           })

@@ -44,6 +44,7 @@ function row(overrides: Partial<UsageRequestRow> = {}): UsageRequestRow {
     reqBytes: 100,
     resBytes: 200,
     sourceAddr: "127.0.0.1",
+    parts: [],
     receivedAtMs: 1_700_000_000_000,
     ...overrides,
   };

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { sql } from "drizzle-orm";
 import request from "supertest";
 import type { Express } from "express";
@@ -170,5 +171,80 @@ d("usage store (postgres)", () => {
     const result = await runUsageRetention(store, 90, 365);
     expect(result.raw).toBe(0); // nothing older than 90 d yet
     expect(result.hour).toBe(0);
+  });
+
+  it("stores deduped parts with refcounts; redelivery never double-counts (IR-52)", async () => {
+    const store = createUsageStore(handle!.db);
+    const mk = (content: string): UsageRequest["parts"][number] => {
+      const canonical = Buffer.from(content, "utf8");
+      return {
+        hash: createHash("sha256").update(canonical).digest("hex"),
+        kind: "message",
+        role: "user",
+        index: 0,
+        bytes: canonical.length,
+        gz: gzipSync(canonical).toString("base64"),
+        truncated: false,
+      };
+    };
+    // Content-addressed hashing means repeated runs would otherwise accrue
+    // refcounts on identical bytes — make fixture content unique per run.
+    const run = randomUUID().slice(0, 8);
+    const shared = mk(`shared prefix bytes ${run}`);
+    const batch = [
+      usageRequest({ parts: [shared, mk(`turn one ${run}`)], ts: Date.now() - 60_000 }),
+      usageRequest({ parts: [shared, mk(`turn two ${run}`)], ts: Date.now() - 50_000 }),
+    ];
+    const inserted = await store.insertBatch(nodeId, batch);
+    expect(inserted).toBe(2);
+
+    const parts = await handle!.db.execute(
+      sql`select hash, refcount, bytes, truncated from llm_parts where hash in (${shared.hash}, ${batch[0]!.parts[1]!.hash}, ${batch[1]!.parts[1]!.hash})`,
+    );
+    const byHash = new Map((parts as unknown as Array<{ hash: string; refcount: number; bytes: number; truncated: boolean }>).map((r) => [r.hash, r]));
+    expect(byHash.get(shared.hash)?.refcount).toBe(2); // shared by both rows
+    expect(byHash.get(batch[0]!.parts[1]!.hash)?.refcount).toBe(1);
+    expect(byHash.get(batch[1]!.parts[1]!.hash)?.refcount).toBe(1);
+    const joinIds = sql.join(batch.map((b) => sql`${b.id}`), sql`, `);
+    const joins = await handle!.db.execute(sql`select count(*)::int as n from llm_request_parts where request_id in (${joinIds})`);
+    expect(Number((joins as unknown as Array<{ n: number }>)[0]?.n)).toBe(4);
+
+    // Replay: no new rows, refcounts unchanged.
+    expect(await store.insertBatch(nodeId, batch)).toBe(0);
+    const after = await handle!.db.execute(sql`select refcount from llm_parts where hash = ${shared.hash}`);
+    expect(Number((after as unknown as Array<{ refcount: number }>)[0]?.refcount)).toBe(2);
+  });
+
+  it("prunes parts with their owning rows (refcount release, IR-52)", async () => {
+    const store = createUsageStore(handle!.db);
+    const mk = (content: string): UsageRequest["parts"][number] => {
+      const canonical = Buffer.from(content, "utf8");
+      return {
+        hash: createHash("sha256").update(canonical).digest("hex"),
+        kind: "message",
+        role: "user",
+        index: 0,
+        bytes: canonical.length,
+        gz: gzipSync(canonical).toString("base64"),
+        truncated: false,
+      };
+    };
+    const run = randomUUID().slice(0, 8);
+    const doomedShared = mk(`doomed shared body ${run}`);
+    const survivor = mk(`survivor body ${run}`);
+    const old = [usageRequest({ parts: [doomedShared, mk("old extra")] }), usageRequest({ parts: [doomedShared] })];
+    await store.insertBatch(nodeId, old);
+    await store.insertBatch(nodeId, [usageRequest({ parts: [survivor] })]);
+    // Age only the doomed batch's rows (91 d — older than the 90 d cutoff).
+    const past = new Date(Date.now() - 91 * 86_400_000);
+    const doomedIds = sql.join(old.map((r) => sql`${r.id}`), sql`, `);
+    await handle!.db.execute(sql`update llm_requests set received_at = ${past.toISOString()}::timestamptz where id in (${doomedIds})`);
+
+    const pruned = await store.pruneRaw(new Date(Date.now() - 90 * 86_400_000));
+    expect(pruned).toBe(2);
+    const gone = await handle!.db.execute(sql`select count(*)::int as n from llm_parts where hash = ${doomedShared.hash}`);
+    expect(Number((gone as unknown as Array<{ n: number }>)[0]?.n)).toBe(0); // refcount 2 → 0 → deleted
+    const kept = await handle!.db.execute(sql`select refcount from llm_parts where hash = ${survivor.hash}`);
+    expect(Number((kept as unknown as Array<{ refcount: number }>)[0]?.refcount)).toBe(1); // untouched
   });
 });

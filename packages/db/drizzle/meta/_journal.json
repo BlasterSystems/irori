@@ -85,6 +85,13 @@
       "when": 1792503785083,
       "tag": "0011_download_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792597720798,
+      "tag": "0012_breezy_mantis",
+      "breakpoints": true
     }
   ]
 }

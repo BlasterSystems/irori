@@ -2,9 +2,11 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { UsageBuffer, parsePending } from "../src/usage-buffer.js";
 import { UsageSync } from "../src/usage-sync.js";
-import { usageRequestSchema, type UsageRequest } from "@irori/core";
+import { usagePartWireSchema, usageRequestSchema, type UsagePartWire, type UsageRequest } from "@irori/core";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -48,6 +50,25 @@ function request(overrides: Partial<UsageRequest> = {}): UsageRequest {
   });
 }
 
+/** IR-52 fixture: a content-addressed part plus the canonical bytes it holds. */
+function makePart(content: string, overrides: Partial<Omit<UsagePartWire, "gz">> = {}): UsagePartWire {
+  const canonical = Buffer.from(content, "utf8");
+  return usagePartWireSchema.parse({
+    hash: createHash("sha256").update(canonical).digest("hex"),
+    kind: "message",
+    role: "user",
+    index: 0,
+    bytes: canonical.length,
+    gz: gzipSync(canonical).toString("base64"),
+    truncated: false,
+    ...overrides,
+  });
+}
+
+function decoded(part: UsagePartWire): string {
+  return gunzipSync(Buffer.from(part.gz, "base64")).toString("utf8");
+}
+
 describe("UsageBuffer", () => {
   it("persists across reopenings and dedupes by id", () => {
     const dir = makeDir();
@@ -89,6 +110,81 @@ describe("UsageBuffer", () => {
     // A cutoff in the future (negative keep days) deletes everything.
     buf.prune(-1, 200);
     expect(buf.count()).toBe(0);
+  });
+
+  it("stores parts content-addressed, dedupes them, and re-attaches gz", () => {
+    const dir = makeDir();
+    const buf = new UsageBuffer(dir);
+    const shared = makePart("{\"role\":\"system\",\"content\":\"shared prefix\"}", { index: 0 });
+    const only1 = makePart("turn one body", { index: 1 });
+    const only2 = makePart("turn two body", { index: 1 });
+    buf.add(request({ parts: [shared, only1] }));
+    buf.add(request({ parts: [shared, only2] }));
+    const batch = buf.takeBatch(10);
+    expect(batch).toHaveLength(2);
+    const first = parsePending(batch[0]!);
+    const second = parsePending(batch[1]!);
+    expect(first?.parts).toHaveLength(2);
+    expect(second?.parts).toHaveLength(2);
+    // gz survived the round trip and decodes to the canonical bytes.
+    expect(decoded(first!.parts[0]!)).toBe("{\"role\":\"system\",\"content\":\"shared prefix\"}");
+    expect(decoded(first!.parts[1]!)).toBe("turn one body");
+    expect(decoded(second!.parts[1]!)).toBe("turn two body");
+    // Same hash → same bytes → deduped store.
+    expect(first!.parts[0]!.hash).toBe(second!.parts[0]!.hash);
+    buf.close();
+  });
+
+  it("never re-counts refs on duplicate adds and frees parts with their rows", () => {
+    const dir = makeDir();
+    const buf = new UsageBuffer(dir);
+    const part = makePart("body bytes", { index: 0 });
+    const event = request({ parts: [part] });
+    buf.add(event);
+    buf.add(event); // duplicate capture id — refs must not double
+    expect(buf.count()).toBe(1);
+    buf.remove([event.id]);
+    const batch = buf.takeBatch(10);
+    expect(batch).toHaveLength(0); // row gone → part has no refs → nothing re-attaches
+    // A part shared by two rows survives the first removal.
+    buf.add(request({ parts: [part] }));
+    buf.add(request({ parts: [part] }));
+    const pairs = buf.takeBatch(10);
+    expect(pairs).toHaveLength(2);
+    buf.remove([pairs[0]!.id]);
+    const remaining = buf.takeBatch(10);
+    expect(remaining).toHaveLength(1);
+    expect(decoded(parsePending(remaining[0]!)!.parts[0]!)).toBe("body bytes");
+    buf.close();
+  });
+
+  it("releases part refs for rows dropped by prune", () => {
+    const dir = makeDir();
+    const buf = new UsageBuffer(dir);
+    buf.add(request({ parts: [makePart("dropped with its row", { index: 0 })] }));
+    buf.add(request({ parts: [makePart("kept", { index: 0 })] }));
+    buf.prune(90, 1); // cap-drop the oldest row
+    const batch = buf.takeBatch(10);
+    expect(batch).toHaveLength(1);
+    expect(decoded(parsePending(batch[0]!)!.parts[0]!)).toBe("kept");
+    buf.close();
+  });
+
+  it("byte-budgets batches: oversized singletons travel alone", () => {
+    const dir = makeDir();
+    const buf = new UsageBuffer(dir);
+    const big = makePart("x".repeat(10_000), { index: 0 });
+    buf.add(request({ parts: [big] }));
+    buf.add(request({ parts: [makePart("small", { index: 0 })] }));
+    // Budget smaller than the first event's parts: it still travels (alone).
+    const first = buf.takeBatch(10, 1_000);
+    expect(first).toHaveLength(1);
+    expect(parsePending(first[0]!)!.parts[0]!.bytes).toBe(10_000);
+    buf.remove(first.map((r) => r.id)); // ack frees the head; oldest-first resumes
+    const second = buf.takeBatch(10, 1_000);
+    expect(second).toHaveLength(1);
+    expect(decoded(parsePending(second[0]!)!.parts[0]!)).toBe("small");
+    buf.close();
   });
 });
 

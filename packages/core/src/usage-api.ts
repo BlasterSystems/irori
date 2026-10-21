@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { usageRequestSchema } from "./usage.js";
+import { usagePartMetaSchema, usageRequestSchema } from "./usage.js";
 
 /**
  * Usage API contracts (M8): server → browser response shapes for the four
@@ -38,6 +38,8 @@ export const usageRequestRowSchema = usageRequestSchema.extend({
   nodeId: z.string().uuid(),
   /** Server receive time (bucketing key). */
   receivedAtMs: z.number(),
+  /** Stored part metadata (no gz); empty until retention stores bodies. */
+  parts: z.array(usagePartMetaSchema).default([]),
 });
 
 export type UsageRequestRow = z.infer<typeof usageRequestRowSchema>;

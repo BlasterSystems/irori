@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmEventSchema, type LlmEvent } from "./llm.js";
-import { usageRequestSchema } from "./usage.js";
+import { usagePartMetaSchema, usageRequestSchema } from "./usage.js";
 
 export type { LlmEvent };
 
@@ -101,12 +101,13 @@ export const thermalEventSchema = z.object({
   active: z.array(z.string()),
 });
 
-/** One captured LLM request (M8) — sent after durable Postgres insert. */
+/** One captured LLM request (M8) — sent after durable Postgres insert. IR-52:
+ *  the live frame carries part metadata only; body bytes stay server-side. */
 export const usageEventSchema = z.object({
   type: z.literal("usage"),
   serverTimeMs: z.number(),
   nodeId: z.string().uuid(),
-  request: usageRequestSchema,
+  request: usageRequestSchema.extend({ parts: z.array(usagePartMetaSchema).default([]) }),
 });
 
 export const sseEventSchema = z.discriminatedUnion("type", [

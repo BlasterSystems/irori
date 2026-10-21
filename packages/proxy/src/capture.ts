@@ -1,5 +1,13 @@
-import { randomUUID } from "node:crypto";
-import { CAPTURED_ENDPOINT_RE, normalizeErrorSignature, usageRequestSchema, type UsageRequest } from "@irori/core";
+import { randomUUID, createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
+import {
+  CAPTURED_ENDPOINT_RE,
+  normalizeErrorSignature,
+  usageRequestSchema,
+  type BodyRetention,
+  type UsagePartWire,
+  type UsageRequest,
+} from "@irori/core";
 
 /**
  * Passive capture state (ADR-0008): observes a request/response pair and
@@ -18,7 +26,12 @@ export interface CaptureInit {
   port: number;
   endpoint: string;
   sourceAddr: string | null;
+  /** IR-52 body retention: null = off (no body bytes stored). */
+  retention: BodyRetention | null;
 }
+
+/** Parts stored per request are folded into a marker past this (schema cap is 8192). */
+const MAX_PARTS_PER_REQUEST = 8192;
 
 export interface CaptureFinish {
   status: number | null;
@@ -49,6 +62,12 @@ export class Capture {
   private engineMeta: Record<string, unknown> | null = null;
   private sseLine: Buffer = Buffer.alloc(0);
   private sseOverflow = false;
+  /** IR-52 response assembly: streamed deltas and non-streaming messages unify. */
+  private contentText = "";
+  private reasoningText = "";
+  private readonly toolCalls = new Map<number, { id: string | null; name: string; args: string }>();
+  /** Bounded raw error body (≤16 KiB) for the `error` part when retention is on. */
+  private errorBodyRaw: string | null = null;
 
   constructor(init: CaptureInit) {
     this.init = init;
@@ -155,6 +174,17 @@ export class Capture {
       if (choice === null || typeof choice !== "object") continue;
       const c = choice as Record<string, unknown>;
       if (typeof c.finish_reason === "string") this.finishReason = c.finish_reason;
+      // Streaming deltas and the non-streaming `message` share one shape for
+      // content/reasoning/tool_calls — assemble both into the response part.
+      const piece = c.delta !== null && typeof c.delta === "object"
+        ? (c.delta as Record<string, unknown>)
+        : c.message !== null && typeof c.message === "object"
+          ? (c.message as Record<string, unknown>)
+          : null;
+      if (piece === null) continue;
+      if (typeof piece.content === "string") this.contentText += piece.content;
+      if (typeof piece.reasoning_content === "string") this.reasoningText += piece.reasoning_content;
+      if (Array.isArray(piece.tool_calls)) this.observeToolCallFragments(piece.tool_calls);
       if (c.delta !== null && typeof c.delta === "object") {
         const delta = c.delta as Record<string, unknown>;
         const hasContent =
@@ -168,6 +198,28 @@ export class Capture {
           }
           this.lastDeltaAtMs = atMs;
         }
+      }
+    }
+  }
+
+  /** Reassembles streamed `tool_calls` fragments by index (name/args concat). */
+  private observeToolCallFragments(fragments: unknown[]): void {
+    for (const fragment of fragments) {
+      if (fragment === null || typeof fragment !== "object") continue;
+      const f = fragment as Record<string, unknown>;
+      const index = typeof f.index === "number" && Number.isInteger(f.index) && f.index >= 0 ? f.index : 0;
+      let entry = this.toolCalls.get(index);
+      if (entry === undefined) {
+        entry = { id: null, name: "", args: "" };
+        this.toolCalls.set(index, entry);
+      }
+      if (typeof f.id === "string" && f.id.length > 0 && entry.id === null) entry.id = f.id;
+      const fn = f.function !== null && typeof f.function === "object"
+        ? (f.function as Record<string, unknown>)
+        : null;
+      if (fn !== null) {
+        if (typeof fn.name === "string") entry.name += fn.name;
+        if (typeof fn.arguments === "string") entry.args += fn.arguments;
       }
     }
   }
@@ -191,11 +243,13 @@ export class Capture {
     if (this.error === null) this.error = message.slice(0, 2000);
   }
 
-  /** Non-2xx: try to lift `error.message` from a bounded JSON error body. */
+  /** Non-2xx: keep a bounded copy of the error body and lift `error.message`. */
   observeErrorBody(body: Buffer): void {
     if (this.status === null || this.status < 400) return;
+    const bounded = body.subarray(0, 16_384);
+    if (this.errorBodyRaw === null) this.errorBodyRaw = bounded.toString("utf8");
     try {
-      const parsed: unknown = JSON.parse(body.subarray(0, 16_384).toString("utf8"));
+      const parsed: unknown = JSON.parse(bounded.toString("utf8"));
       const message =
         parsed !== null &&
         typeof parsed === "object" &&
@@ -269,10 +323,132 @@ export class Capture {
       reqBytes: this.reqBytes,
       resBytes: this.resBytes,
       sourceAddr: this.init.sourceAddr,
+      parts: this.buildParts(),
     };
     // Capture must never produce an invalid event — drop, don't throw.
     const parsed = usageRequestSchema.safeParse(request);
     return parsed.success ? parsed.data : null;
+  }
+
+  /**
+   * IR-52 body decomposition: canonical JSON per message/prompt/input, the
+   * assembled assistant response, the error body, plus a marker when the
+   * body cap omitted messages. Best-effort — any failure returns what was
+   * built so far (never loses the native event).
+   */
+  private buildParts(): UsagePartWire[] {
+    const retention = this.init.retention;
+    if (retention === null || !this.captured) return [];
+    try {
+      const parts: UsagePartWire[] = [];
+      const partCap = retention.partCapBytes;
+      let storedBytes = 0;
+      let omitted = 0;
+      let omittedBytes = 0;
+      // Hashes/gzips one canonical value; partCap cuts oversize content into a
+      // UTF-8-safe JSON wrapper so stored bytes always parse.
+      const encode = (kind: UsagePartWire["kind"], role: string | null, value: unknown, maxBytes: number, originalBytes: number): void => {
+        if (parts.length >= MAX_PARTS_PER_REQUEST) {
+          omitted += 1;
+          omittedBytes += originalBytes;
+          return;
+        }
+        let content = Buffer.from(JSON.stringify(value), "utf8");
+        let truncated = false;
+        const cap = Math.min(partCap, Math.max(1, maxBytes));
+        if (content.length > cap) {
+          truncated = true;
+          const text = content.toString("utf8");
+          const perChar = Math.max(1, content.length / Math.max(1, text.length));
+          let chars = Math.max(0, Math.floor(cap / perChar));
+          while (Buffer.byteLength(text.slice(0, chars), "utf8") > cap) chars -= 1;
+          content = Buffer.from(
+            JSON.stringify({ irori_truncated: true, original_bytes: content.length, prefix: text.slice(0, chars) }),
+            "utf8",
+          );
+        }
+        parts.push({
+          hash: createHash("sha256").update(content).digest("hex"),
+          kind,
+          role,
+          index: parts.length,
+          bytes: originalBytes,
+          gz: gzipSync(content).toString("base64"),
+          truncated,
+        });
+      };
+
+      const obj = this.reqJson as Record<string, unknown> | null;
+      const messages = obj !== null && Array.isArray(obj.messages) ? obj.messages : null;
+      // Omissions are marked IN POSITION (ordinal fidelity for reconstruction):
+      // a marker is emitted where consecutive messages were dropped, so the
+      // reader sees exactly where stored content resumes.
+      let pendingOmitted = 0;
+      let pendingOmittedBytes = 0;
+      const flushOmissions = (): void => {
+        if (pendingOmitted === 0) return;
+        encode(
+          "marker",
+          null,
+          { irori_body_truncated: true, omitted_messages: pendingOmitted, omitted_bytes: pendingOmittedBytes },
+          partCap,
+          0,
+        );
+        pendingOmitted = 0;
+        pendingOmittedBytes = 0;
+      };
+      if (messages !== null) {
+        for (const message of messages) {
+          if (message === null || typeof message !== "object") continue;
+          const canonical = Buffer.from(JSON.stringify(message), "utf8");
+          if (storedBytes + canonical.length > retention.bodyCapBytes) {
+            pendingOmitted += 1;
+            pendingOmittedBytes += canonical.length;
+            continue;
+          }
+          flushOmissions();
+          storedBytes += canonical.length;
+          const role = typeof (message as Record<string, unknown>).role === "string"
+            ? ((message as Record<string, unknown>).role as string)
+            : null;
+          encode("message", role, message, retention.bodyCapBytes - storedBytes + canonical.length, canonical.length);
+        }
+      } else if (obj !== null && "prompt" in obj) {
+        encode("prompt", null, obj.prompt, retention.bodyCapBytes, Buffer.byteLength(JSON.stringify(obj.prompt ?? null)));
+      } else if (obj !== null && "input" in obj) {
+        encode("input", null, obj.input, retention.bodyCapBytes, Buffer.byteLength(JSON.stringify(obj.input ?? null)));
+      }
+      pendingOmitted += omitted; // part-limit omissions fold into the tail marker
+      pendingOmittedBytes += omittedBytes;
+      flushOmissions();
+      // Response part: the assembled assistant message (streamed deltas or the
+      // non-streaming `message` object) — the final turn of the conversation.
+      if (this.contentText !== "" || this.reasoningText !== "" || this.toolCalls.size > 0) {
+        const assembled: Record<string, unknown> = { role: "assistant", content: this.contentText };
+        if (this.reasoningText !== "") assembled.reasoning_content = this.reasoningText;
+        if (this.toolCalls.size > 0) {
+          assembled.tool_calls = [...this.toolCalls.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([, call]) => {
+              const wire: Record<string, unknown> = { type: "function", function: { name: call.name, arguments: call.args } };
+              if (call.id !== null) wire.id = call.id;
+              return wire;
+            });
+        }
+        encode("response", "assistant", assembled, partCap, Buffer.byteLength(JSON.stringify(assembled)));
+      } else if (this.errorBodyRaw !== null) {
+        let value: unknown;
+        try {
+          value = JSON.parse(this.errorBodyRaw);
+        } catch {
+          value = { raw: this.errorBodyRaw };
+        }
+        encode("error", null, value, partCap, Buffer.byteLength(this.errorBodyRaw));
+      }
+      return parts;
+    } catch {
+      return [];
+    }
   }
 }
 
