@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { join } from "node:path";
+import type { BodyRetention } from "@irori/core";
 
 /**
  * Setup supervision on the agent (M5, SPEC §7 + ADR-0003): one start/stop
@@ -42,8 +43,9 @@ export interface SetupDriverDeps {
 
 /** Agent-side capture proxy control surface (injected for tests). */
 export interface SetupCaptureHooks {
-  /** Binds `listenPort` → loopback `targetPort`; throws on bind failure. */
-  start(setupId: string, listenPort: number, targetPort: number): Promise<void>;
+  /** Binds `listenPort` → loopback `targetPort`; throws on bind failure.
+   *  `retention` (IR-52) opts the proxy into body capture; null = off. */
+  start(setupId: string, listenPort: number, targetPort: number, retention: BodyRetention | null): Promise<void>;
   /** Closes the listener; idempotent, never throws. */
   stop(setupId: string): Promise<void>;
   /** Routes a proxy log line into the setup's log ring. */
@@ -68,6 +70,8 @@ interface DriverRecord {
   /** M8: bound proxy port and the loopback engine port behind it. */
   proxyPort: number | null;
   enginePort: number | null;
+  /** IR-52: retention caps the proxy was started with (re-attach restores). */
+  retention: BodyRetention | null;
 }
 
 interface RingEntry {
@@ -141,7 +145,7 @@ export class SetupDriver {
         kept.push(record);
         if (record.proxyPort !== null && record.enginePort !== null && this.deps.capture !== undefined) {
           void this.deps.capture
-            .start(record.setupId, record.proxyPort, record.enginePort)
+            .start(record.setupId, record.proxyPort, record.enginePort, record.retention ?? null)
             .then(() =>
               this.deps.capture?.log(record.setupId, `driver: capture proxy re-attached :${record.proxyPort} → 127.0.0.1:${record.enginePort}`),
             )
@@ -233,7 +237,7 @@ export class SetupDriver {
     scriptStop: string,
     env: Record<string, string>,
     modelPathName: string | null,
-    capture: { proxyPort: number } | null = null,
+    capture: { proxyPort: number; retention: BodyRetention | null } | null = null,
   ): Promise<{ ok: boolean; error: string | null }> {
     const existing = this.records.get(setupId);
     if (existing && (this.children.has(setupId) || (existing.pgid !== null && groupAlive(existing.pgid)))) {
@@ -267,7 +271,7 @@ export class SetupDriver {
       }
       enginePort = await pickFreeLoopbackPort();
       try {
-        await this.deps.capture.start(setupId, capture.proxyPort, enginePort);
+        await this.deps.capture.start(setupId, capture.proxyPort, enginePort, capture.retention ?? null);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { ok: false, error: `capture proxy bind failed on :${capture.proxyPort} — ${message}` };
@@ -293,6 +297,7 @@ export class SetupDriver {
       logPath,
       proxyPort: capture !== null ? capture.proxyPort : null,
       enginePort,
+      retention: capture !== null ? capture.retention ?? null : null,
     };
     this.records.set(setupId, record);
     this.children.set(setupId, child);

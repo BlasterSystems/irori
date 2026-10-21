@@ -4,6 +4,7 @@ import {
   agentMsgSchema,
   agentServerMsgSchema,
   isAgentSupported,
+  MAX_USAGE_FRAME_BYTES,
   type AgentServerMsg,
   type BenchDoneMsg,
   type BenchProgressMsg,
@@ -107,7 +108,7 @@ export interface AgentHub {
  * node's probe assignments and role-derived llm cadence.
  */
 export function createAgentHub(deps: AgentHubDeps): AgentHub {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_USAGE_FRAME_BYTES });
   const onlineNodes = new Set<string>();
   const nodeSockets = new Map<string, WebSocket>();
   const lastMarkedAt = new Map<string, number>();
@@ -337,9 +338,13 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
             const ok = await deps.usageEvents.onBatch(currentId, events);
             if (!ok) return;
             // Live view + feed: one frame per captured request, post-insert.
+            // IR-52: body bytes stay server-side — the browser gets metadata.
             const serverTimeMs = Date.now();
             for (const request of events) {
-              deps.sse.send({ type: "usage", serverTimeMs, nodeId: currentId, request });
+              const live = request.parts.length
+                ? { ...request, parts: request.parts.map(({ gz: _gz, ...meta }) => meta) }
+                : request;
+              deps.sse.send({ type: "usage", serverTimeMs, nodeId: currentId, request: live });
             }
             sendMsg({ type: "usage-batch-ack", ids: events.map((e) => e.id) });
           })

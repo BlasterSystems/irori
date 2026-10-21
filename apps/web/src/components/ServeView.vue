@@ -258,6 +258,8 @@ interface WizardState {
   envModelPath: boolean;
   /** M8: route traffic through the agent capture proxy (ADR-0008). */
   capture: boolean;
+  /** IR-52: store deduped request/response bodies (needs capture). */
+  retain: boolean;
 }
 
 const wizard = ref<WizardState>({
@@ -275,6 +277,7 @@ const wizard = ref<WizardState>({
   extraArgs: "",
   envModelPath: true,
   capture: false,
+  retain: false,
 });
 
 function openWizard(from?: SetupInfo): void {
@@ -301,6 +304,7 @@ function openWizard(from?: SetupInfo): void {
     w.extraArgs = from.env.extraArgs;
     w.envModelPath = from.env.modelPath;
     w.capture = from.captureProxy === true;
+    w.retain = from.bodyRetention === true;
   } else {
     w.envModelName = false;
     w.envPort = true;
@@ -308,6 +312,7 @@ function openWizard(from?: SetupInfo): void {
     w.extraArgs = "";
     w.envModelPath = true;
     w.capture = false;
+    w.retain = false;
   }
   w.model = from?.model ?? "";
   loadModelChoices("");
@@ -320,6 +325,7 @@ function firstHeadId(): string {
 
 /** ADR-0008 §7: capture setups pre-fill EXTRA_ARGS with a loopback-bind hint. */
 function onCaptureToggle(): void {
+  if (!wizard.value.capture) wizard.value.retain = false;
   if (wizard.value.capture && !wizard.value.envExtraArgs && wizard.value.extraArgs.trim().length === 0) {
     wizard.value.envExtraArgs = true;
     wizard.value.extraArgs = "--host 127.0.0.1";
@@ -454,6 +460,7 @@ function wizardInput(): SetupCreateInput {
       modelPath: w.envModelPath,
     },
     captureProxy: w.capture,
+    bodyRetention: w.retain,
   };
 }
 
@@ -627,7 +634,7 @@ function fmtGiB(bytes: number | null): string {
             <dt>port</dt><dd>{{ selected.port }}</dd>
             <dt>start</dt><dd class="mono">{{ selected.scriptStart }}</dd>
             <dt>stop</dt><dd class="mono">{{ selected.scriptStop }}</dd>
-            <dt>env</dt><dd>{{ [selected.env.modelName ? "MODEL_NAME" : null, selected.env.port && !selected.captureProxy ? "PORT" : null, selected.env.extraArgs !== "" ? "EXTRA_ARGS" : null, selected.env.modelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}{{ selected.captureProxy ? " · capture on" : "" }}</dd>
+            <dt>env</dt><dd>{{ [selected.env.modelName ? "MODEL_NAME" : null, selected.env.port && !selected.captureProxy ? "PORT" : null, selected.env.extraArgs !== "" ? "EXTRA_ARGS" : null, selected.env.modelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}{{ selected.captureProxy ? " · capture on" : "" }}{{ selected.bodyRetention ? " · bodies kept" : "" }}</dd>
           </dl>
 
           <div>
@@ -727,6 +734,7 @@ function fmtGiB(bytes: number | null): string {
                 <label class="pick" :class="{ 'is-on': wizard.envExtraArgs }"><input v-model="wizard.envExtraArgs" type="checkbox" /> EXTRA_ARGS</label>
                 <input v-if="wizard.envExtraArgs" v-model="wizard.extraArgs" class="input mono" placeholder="--thinking --vision …" />
                 <label class="pick" :class="{ 'is-on': wizard.capture }"><input v-model="wizard.capture" type="checkbox" @change="onCaptureToggle" /> Capture usage (M8) <span class="stat__sub">serves the engine on loopback; the agent proxies the LAN port and records per-request usage. The start script must honor $PORT.</span></label>
+                <label v-if="wizard.capture" class="pick" :class="{ 'is-on': wizard.retain }"><input v-model="wizard.retain" type="checkbox" /> Keep bodies (IR-52) <span class="stat__sub">stores gzip-deduplicated request/response bodies on the server for chat reconstruction; capped per body and per part.</span></label>
               </div>
             </div>
           </div>
@@ -772,7 +780,7 @@ function fmtGiB(bytes: number | null): string {
             <dt>model</dt><dd class="mono">{{ wizard.model }}</dd>
             <dt>port</dt><dd>{{ wizardPort }} · probed for health (/v1/models with the model id) · timeout 15 m</dd>
             <dt>scripts</dt><dd class="mono">{{ wizard.scriptStart }} · {{ wizard.scriptStop }} <span class="faint">(re-validated at every start)</span></dd>
-            <dt>env</dt><dd>{{ [wizard.envModelName ? "MODEL_NAME" : null, wizard.envPort || wizard.capture ? "PORT" : null, wizard.envExtraArgs && wizard.extraArgs !== "" ? "EXTRA_ARGS" : null, wizard.envModelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}<template v-if="wizard.capture"> · capture on ($PORT is the loopback engine port)</template></dd>
+            <dt>env</dt><dd>{{ [wizard.envModelName ? "MODEL_NAME" : null, wizard.envPort || wizard.capture ? "PORT" : null, wizard.envExtraArgs && wizard.extraArgs !== "" ? "EXTRA_ARGS" : null, wizard.envModelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}<template v-if="wizard.capture"> · capture on ($PORT is the loopback engine port)</template><template v-if="wizard.retain"> · bodies kept</template></dd>
             <dt>log</dt><dd>streamed into telemetry (ring + persisted run log)</dd>
           </dl>
         </section>
