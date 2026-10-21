@@ -98,7 +98,7 @@ describe("SetupDriver capture lifecycle", () => {
     const start = script(h.dir, "start.sh", `echo $PORT > ${portFile}\nsleep 30`);
     const stop = script(h.dir, "stop.sh", "true");
 
-    const result = await h.driver.start(ID, RUN, start, stop, { PORT: "8081" }, null, { proxyPort: 9099 });
+    const result = await h.driver.start(ID, RUN, start, stop, { PORT: "8081" }, null, { proxyPort: 9099, retention: null });
     expect(result.ok).toBe(true);
     await waitFor(() => existsSync(portFile));
     const enginePort = Number.parseInt(readFileSync(portFile, "utf8").trim(), 10);
@@ -124,7 +124,7 @@ describe("SetupDriver capture lifecycle", () => {
     const start = script(h.dir, "start.sh", "sleep 30");
     const stop = script(h.dir, "stop.sh", "true");
 
-    const result = await h.driver.start(ID, RUN, start, stop, {}, null, { proxyPort: 9099 });
+    const result = await h.driver.start(ID, RUN, start, stop, {}, null, { proxyPort: 9099, retention: null });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("capture proxy bind failed");
     expect(result.error).toContain("EADDRINUSE");
@@ -147,7 +147,7 @@ describe("SetupDriver capture lifecycle", () => {
       ID, RUN,
       start,
       script(h.dir, "stop.sh", "true"),
-      { PORT: "8081" }, null, { proxyPort: 9100 },
+      { PORT: "8081" }, null, { proxyPort: 9100, retention: null },
     );
     expect(result.ok).toBe(true); // spawn accepted; failure arrives async
     // The stop is idempotent: node may emit BOTH 'error' and 'exit' for a
@@ -164,7 +164,7 @@ describe("SetupDriver capture lifecycle", () => {
     const h = makeHarness(hooks);
     const start = script(h.dir, "start.sh", "sleep 30");
     const stop = script(h.dir, "stop.sh", "true");
-    const result = await h.driver.start(ID, RUN, start, stop, {}, null, { proxyPort: 9101 });
+    const result = await h.driver.start(ID, RUN, start, stop, {}, null, { proxyPort: 9101, retention: null });
     expect(result.ok).toBe(true);
 
     // A fresh driver on the same state dir re-attaches to the live group.
