@@ -79,6 +79,9 @@ importers:
         specifier: ^8.18.3
         version: 8.22.0
     devDependencies:
+      '@irori/proxy':
+        specifier: workspace:*
+        version: link:../../packages/proxy
       '@types/express':
         specifier: ^5.0.3
         version: 5.0.6
