@@ -76,5 +76,14 @@ d("agent-update jobs (db integration)", () => {
     await db.delete(jobs).where(eq(jobs.id, bad.id));
 
     await expect(service.settleAgentUpdate(nodeId, "0.3.0")).resolves.toBe("none");
+
+    // IR-68: a job created without expectedVersion (the generic jobs
+    // endpoint's old shape) must settle FAILED on hello instead of pending
+    // forever and blocking the node's single-active slot.
+    const malformed = await service.create(nodeId, "agent-update", {});
+    await expect(service.settleAgentUpdate(nodeId, "0.3.0")).resolves.toBe("succeeded");
+    const malformedDone = await service.get(malformed.id);
+    expect(malformedDone!.status).toBe("failed");
+    expect(malformedDone!.output.at(-1)!.line).toContain("expectedVersion");
   });
 });

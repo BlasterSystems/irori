@@ -471,13 +471,21 @@ export function createApp(deps: AppDeps): Express {
   app.post("/api/v1/nodes/:id/jobs", async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const body = req.body as { kind?: unknown; params?: unknown };
+    if (typeof body?.kind !== "string") return res.status(400).json({ error: "kind is required" });
+    // agent-update MUST go through the dedicated endpoint: it injects
+    // expectedVersion (without which the job can never settle and blocks
+    // the node forever) and runs the version/setup guards.
+    if (body.kind === "agent-update") {
+      return res.status(400).json({
+        error: "agent-update must use POST /api/v1/nodes/:id/agent-update",
+      });
+    }
     const jobs = deps.getJobs();
     if (jobs === null) return res.status(503).json({ error: "database unavailable" });
     const store = requireStore(res);
     if (!store) return;
     if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
-    const body = req.body as { kind?: unknown; params?: unknown };
-    if (typeof body?.kind !== "string") return res.status(400).json({ error: "kind is required" });
     const params = (body.params ?? {}) as Record<string, unknown>;
     try {
       const job = await jobs.create(id, body.kind, params);
