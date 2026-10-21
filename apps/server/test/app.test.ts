@@ -7,7 +7,7 @@ import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore, makeSnapshot } from "./helpers.js";
 
-function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean> } = {}) {
+function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown } = {}) {
   const fake = makeFakeStore();
   const online = new Set<string>();
   const deps: AppDeps = {
@@ -19,6 +19,7 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
     rings: createRings(),
     sse: createSseHub({ heartbeatMs: 0 }),
     getHub: () => ({ online: () => online }),
+    getJobs: opts.jobs === undefined ? () => null : () => (opts.jobs as never),
     version: "test",
     tag: null,
     staticDir: null,
@@ -57,6 +58,15 @@ describe("app", () => {
     expect(typeof res.body.token).toBe("string");
     const node = nodeInfoSchema.parse(res.body.node);
     expect(node).toMatchObject({ name: "spark1", kind: "spark", role: "head", enabled: true, online: false });
+
+    // IR-68: agent-update must go through the dedicated endpoint - the
+    // generic one cannot inject expectedVersion, so the job would never
+    // settle and would block the node's single-active slot forever.
+    const bad = await request(app)
+      .post(`/api/v1/nodes/${node.id}/jobs`)
+      .send({ kind: "agent-update", params: {} });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toContain("/agent-update");
   });
 
   it("rejects invalid create payloads with 400", async () => {

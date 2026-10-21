@@ -367,11 +367,35 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?:
         typeof row.params === "object" && row.params !== null && typeof (row.params as { expectedVersion?: unknown }).expectedVersion === "string"
           ? (row.params as { expectedVersion: string }).expectedVersion
           : null;
+      // No expectedVersion → the job was created malformed (via the generic
+      // jobs endpoint). It can NEVER be confirmed, so settle it failed on
+      // this hello - that frees the node's single-active slot immediately.
+      if (expected === null) {
+        const finishedAt = new Date();
+        await db
+          .update(jobs)
+          .set({ status: "failed", exitCode: null, finishedAt })
+          .where(and(eq(jobs.id, row.id), inArray(jobs.status, [...ACTIVE])));
+        await db.insert(jobOutput).values({
+          jobId: row.id,
+          seq: MAX_OUTPUT_LINES,
+          line: "error: malformed agent-update job (missing expectedVersion) - created via the generic jobs endpoint; use POST /api/v1/nodes/:id/agent-update",
+        });
+        onSettled?.({
+          nodeId,
+          jobId: row.id,
+          kind: "agent-update",
+          status: "failed",
+          exitCode: null,
+          durationMs: row.startedAt !== null ? finishedAt.getTime() - row.startedAt.getTime() : null,
+        });
+        return "succeeded";
+      }
       // Mismatch → leave running: either the update is still in flight (an
       // old agent blip-reconnected) or the new bundle failed to boot (the
       // reaper's grace window settles that). Only an exact match proves the
       // update took.
-      if (expected === null || compareVersions(agentVersion, expected) !== 0) return "pending";
+      if (compareVersions(agentVersion, expected) !== 0) return "pending";
       const finishedAt = new Date();
       await db
         .update(jobs)
