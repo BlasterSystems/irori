@@ -584,6 +584,35 @@ export const llmRequestParts = pgTable(
 );
 
 /**
+ * Per-request tool attribution (IR-54): computed at ingest from wire capture,
+ * retention-independent. One row per (request, tool) merging both sides —
+ * the response's tool calls (calls/argsChars/completion share) and the
+ * request's role:"tool" results (resultChars/errors/prompt share). Shares
+ * are largest-remainder splits of the request's own totals, so they sum to it.
+ */
+export const llmRequestTools = pgTable(
+  "llm_request_tools",
+  {
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => llmRequests.id, { onDelete: "cascade" }),
+    /** Tool name as reassembled from the wire; "unknown" when unresolved. */
+    tool: text("tool").notNull(),
+    /** The request's model — attribution by model dimension. */
+    model: text("model"),
+    /** Tool calls in this row's RESPONSE. */
+    calls: integer("calls").notNull().default(0),
+    /** role:"tool" results in this row's REQUEST flagged as errors. */
+    errors: integer("errors").notNull().default(0),
+    argsChars: integer("args_chars").notNull().default(0),
+    resultChars: integer("result_chars").notNull().default(0),
+    promptTokens: integer("prompt_tokens").notNull().default(0),
+    completionTokens: integer("completion_tokens").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.requestId, t.tool] }), index("llm_request_tools_tool_idx").on(t.tool, t.model)],
+);
+
+/**
  * Pre-aggregated usage buckets (M8): hourly/daily rollups of `llm_requests`
  * per (node, model), watermark-guarded like snapshotBuckets. Model "" is the
  * unknown-model row (request without a parseable model). Retention 1 y.

@@ -10,10 +10,11 @@ import {
   fetchUsageOverview,
   fetchUsageRequest,
   fetchUsageRequests,
+  fetchUsageTools,
   type UsageRangeName,
 } from "../api";
 import { live } from "../live";
-import { parseUsageHash, usageHashFor, agentGroupKey, agentGroupLabel, agentGroupSource, clientLabel, retryText, type UsageTab, USAGE_TABS } from "../usage";
+import { parseUsageHash, usageHashFor, agentGroupKey, agentGroupLabel, agentGroupSource, clientLabel, retryText, toolRowKey, type UsageTab, USAGE_TABS } from "../usage";
 import {
   activityCharts,
   errorGroupRows,
@@ -42,6 +43,7 @@ import type {
   UsageOverviewResponse,
   UsageRequestRow,
   UsageRequestsResponse,
+  UsageToolsResponse,
 } from "@irori/core";
 import LensChart from "./LensChart.vue";
 
@@ -67,6 +69,7 @@ const requests = ref<UsageRequestsResponse | null>(null);
 const errors = ref<UsageErrorsResponse | null>(null);
 const models = ref<UsageModelsResponse | null>(null);
 const agents = ref<UsageAgentsResponse | null>(null);
+const tools = ref<UsageToolsResponse | null>(null);
 
 /** IR-55 client filters (requests tab) + identity manager drawer state. */
 const projectFilter = ref("");
@@ -179,6 +182,10 @@ async function load(): Promise<void> {
       const data = await fetchUsageAgents(range.value);
       if (seq !== loadSeq) return;
       agents.value = data;
+    } else if (tab.value === "tools") {
+      const data = await fetchUsageTools(range.value);
+      if (seq !== loadSeq) return;
+      tools.value = data;
     } else {
       const data = await fetchUsageModels(range.value);
       if (seq !== loadSeq) return;
@@ -477,6 +484,43 @@ const liveAgeText = computed(() => {
           </table>
         </div>
       </section>
+    </template>
+
+    <!-- Tools: attribution from wire payloads (IR-54) -->
+    <template v-else-if="tab === 'tools'">
+      <section class="card" style="margin-top: var(--space-4)">
+        <div class="card__head"><h3 style="font-size: 15px">Tool attribution</h3><span class="mono faint">{{ range }} · token shares sum to the attributed requests' totals</span></div>
+        <div class="card__body card__body--flush">
+          <table class="table">
+            <thead>
+              <tr><th>Tool</th><th>Model</th><th>Calls</th><th>Errors</th><th>Args chars</th><th>Result chars</th><th>Prompt share</th><th>Completion share</th><th>Last seen</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="t in tools?.tools ?? []" :key="toolRowKey(t)">
+                <td class="mono">{{ t.tool === "unknown" ? "(unresolved)" : t.tool }}</td>
+                <td class="mono">{{ t.model ?? "(unknown)" }}</td>
+                <td class="mono">{{ fmtCount(t.calls) }}</td>
+                <td class="mono">{{ fmtCount(t.errors) }}</td>
+                <td class="mono">{{ fmtCount(t.argsChars) }}</td>
+                <td class="mono">{{ fmtCount(t.resultChars) }}</td>
+                <td class="mono">{{ fmtTokens(t.promptTokens) }}</td>
+                <td class="mono">{{ fmtTokens(t.completionTokens) }}</td>
+                <td class="mono">{{ fmtTimeIso(t.lastSeenMs) }}</td>
+              </tr>
+              <tr v-if="(tools?.tools.length ?? 0) === 0"><td colspan="9" class="faint">No tool usage captured in this range.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div v-if="(tools?.series.length ?? 0) > 0" class="cols cols-2" style="margin-top: var(--space-4)">
+        <section v-for="s in tools!.series" :key="s.tool" class="card">
+          <div class="card__head"><h3 style="font-size: 15px">Tokens — {{ s.tool }}</h3><span class="mono faint">prompt + completion share</span></div>
+          <div class="card__body">
+            <LensChart :chart="usageChart(s.points.map((p) => ({ t: p.t, value: p.tokens })), 680, 140)" unit="tok" aria-label="Attributed tokens per bucket" :format="(v: number) => fmtTokens(v)" :time-format="fmtBucketShort" />
+          </div>
+        </section>
+      </div>
     </template>
 
     <!-- Models: aggregates + per-model series -->
