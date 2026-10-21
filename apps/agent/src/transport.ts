@@ -105,6 +105,7 @@ export class AgentTransport {
     scriptStop: string,
     env: Record<string, string>,
     modelPathName: string | null,
+    capture: { proxyPort: number } | null,
   ) => Promise<{ ok: boolean; error: string | null }>;
   private readonly onSetupStop?: (setupId: string, gracefulMs: number) => Promise<{ ok: boolean; error: string | null }>;
   private readonly onSetupStatus?: (setupId: string) => void;
