@@ -1,7 +1,12 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { usageRequestSchema, type UsageRequest, type UsagePartWire } from "@irori/core";
+import {
+  USAGE_BATCH_PART_BUDGET_BYTES,
+  usageRequestSchema,
+  type UsageRequest,
+  type UsagePartWire,
+} from "@irori/core";
 
 /**
  * Durable node-local usage buffer (M8, ADR-0008 §3): SQLite WAL in the agent
@@ -10,12 +15,10 @@ import { usageRequestSchema, type UsageRequest, type UsagePartWire } from "@iror
  *
  * IR-52: body parts live in a content-addressed `pending_parts` table (sha256
  * → gz blob, refcounted by referencing rows); `pending` rows carry only part
- * metadata + the hash list. Batching is byte-budgeted so one frame stays
- * bounded no matter how large retained bodies are.
+ * metadata + the hash list — never the bytes. Batching is budgeted on the
+ * ATTACHED base64 sizes so no frame can exceed the hub's WS limit (a single
+ * worst-case event fits the budget and travels alone).
  */
-
-/** Max sum of ORIGINAL part bytes attached to one upload frame. */
-export const USAGE_BATCH_PART_BUDGET_BYTES = 24 * 1024 * 1024;
 
 /** Cap on the parts store itself (gz bytes); oldest unreferenced parts evict. */
 const PART_STORE_BYTES_CAP = 256 * 1024 * 1024;
@@ -86,18 +89,25 @@ export class UsageBuffer {
     );
   }
 
-  /** Durable insert; duplicate ids are a no-op — parts are never re-counted. */
+  /**
+   * Durable insert; duplicate ids are a no-op — parts are never re-counted.
+   * The payload stores part METADATA only (the gz bytes live once in
+   * pending_parts), so the buffer does not double-store bodies. Multi-statement
+   * and therefore transactional: a torn state must not leak refcounts.
+   */
   add(event: UsageRequest): void {
+    const metas: PartMeta[] = event.parts.map(({ gz: _gz, ...meta }) => meta);
     if (event.parts.length === 0) {
-      this.stmtAdd.run(event.id, Date.now(), JSON.stringify(event), null);
+      this.stmtAdd.run(event.id, Date.now(), JSON.stringify({ ...event, parts: [] }), null);
       return;
     }
-    const metas: PartMeta[] = event.parts.map(({ gz: _gz, ...meta }) => meta);
-    const result = this.stmtAdd.run(event.id, Date.now(), JSON.stringify(event), JSON.stringify(metas));
-    if (result.changes === 0) return; // duplicate capture id — exactly-once
-    for (const part of event.parts) {
-      this.stmtPartUpsert.run(part.hash, Buffer.from(part.gz, "base64"), part.bytes, Date.now());
-    }
+    this.transaction(() => {
+      const result = this.stmtAdd.run(event.id, Date.now(), JSON.stringify({ ...event, parts: metas }), JSON.stringify(metas));
+      if (result.changes === 0) return; // duplicate capture id — exactly-once
+      for (const part of event.parts) {
+        this.stmtPartUpsert.run(part.hash, Buffer.from(part.gz, "base64"), part.bytes, Date.now());
+      }
+    });
   }
 
   count(): number {
@@ -108,29 +118,26 @@ export class UsageBuffer {
   /**
    * Oldest-first batch with gz re-attached from the parts store (rows stay
    * until remove() — crash-safe redelivery). `partBudgetBytes` bounds the sum
-   * of original part bytes attached to the frame; an event whose first part
-   * already exceeds the budget still travels alone (progress guarantee).
+   * of ATTACHED base64 part sizes (the wire cost, not the original size); an
+   * event exceeding the whole budget still travels alone (progress
+   * guarantee) and is itself bounded by the capture caps.
    */
   takeBatch(limit: number, partBudgetBytes = USAGE_BATCH_PART_BUDGET_BYTES): PendingRow[] {
     const rows = this.stmtTake.all(limit) as unknown as Array<PendingRow & { part_hashes: string | null }>;
     const out: PendingRow[] = [];
     let budget = partBudgetBytes;
     for (const row of rows) {
-      let event: UsageRequest;
+      let parsed: UsageRequest;
+      let metas: PartMeta[] = [];
       try {
-        event = JSON.parse(row.payload) as UsageRequest;
+        parsed = JSON.parse(row.payload) as UsageRequest;
+        metas = row.part_hashes === null ? [] : (JSON.parse(row.part_hashes) as PartMeta[]);
       } catch {
         this.remove([row.id]); // unparsable row — drop, capture never blocks
         continue;
       }
-      let metas: PartMeta[] = [];
-      try {
-        metas = row.part_hashes === null ? [] : (JSON.parse(row.part_hashes) as PartMeta[]);
-      } catch {
-        metas = [];
-      }
       const attached: UsagePartWire[] = [];
-      let eventBytes = 0;
+      let eventBase64 = 0;
       let complete = true;
       for (const meta of metas) {
         const found = this.stmtPartGet.get(meta.hash) as { gz: Uint8Array } | undefined;
@@ -138,30 +145,34 @@ export class UsageBuffer {
           complete = false; // store drift — drop the row rather than send a hole
           break;
         }
-        attached.push({ ...meta, gz: Buffer.from(found.gz).toString("base64") });
-        eventBytes += meta.bytes;
+        const gz = Buffer.from(found.gz);
+        attached.push({ ...meta, gz: gz.toString("base64") });
+        eventBase64 += gz.length;
       }
       if (!complete) {
         this.remove([row.id]);
         continue;
       }
-      if (out.length > 0 && budget - eventBytes < 0) continue; // fits a later frame
-      budget -= eventBytes;
-      event.parts = attached;
-      out.push({ id: row.id, payload: JSON.stringify(event) });
+      if (out.length > 0 && budget - eventBase64 < 0) continue; // fits a later frame
+      budget -= eventBase64;
+      parsed.parts = attached;
+      out.push({ id: row.id, payload: JSON.stringify(parsed) });
     }
     return out;
   }
 
   remove(ids: string[]): void {
-    for (const id of ids) {
-      const hashes = this.partHashesFor(id);
-      this.stmtRemove.run(id);
-      for (const hash of hashes) {
-        this.stmtPartDecrement.run(hash);
-        this.stmtPartDeleteEmpty.run(hash);
+    if (ids.length === 0) return;
+    this.transaction(() => {
+      for (const id of ids) {
+        const hashes = this.partHashesFor(id);
+        this.stmtRemove.run(id);
+        for (const hash of hashes) {
+          this.stmtPartDecrement.run(hash);
+          this.stmtPartDeleteEmpty.run(hash);
+        }
       }
-    }
+    });
   }
 
   private partHashesFor(id: string): string[] {
@@ -183,25 +194,39 @@ export class UsageBuffer {
    * oldest unreferenced parts.
    */
   prune(keepDays: number, maxRows: number): void {
-    const ageDeleted = this.db.prepare("DELETE FROM pending WHERE inserted_at < ? RETURNING part_hashes").all(
-      Date.now() - keepDays * 86_400_000,
-    ) as unknown as Array<{ part_hashes: string | null }>;
-    const capDeleted = this.db
-      .prepare("DELETE FROM pending WHERE id NOT IN (SELECT id FROM pending ORDER BY inserted_at DESC, id DESC LIMIT ?) RETURNING part_hashes")
-      .all(maxRows) as unknown as Array<{ part_hashes: string | null }>;
-    for (const row of [...ageDeleted, ...capDeleted]) {
-      let metas: PartMeta[] = [];
-      try {
-        metas = row.part_hashes === null ? [] : (JSON.parse(row.part_hashes) as PartMeta[]);
-      } catch {
-        metas = [];
+    this.transaction(() => {
+      const ageDeleted = this.db.prepare("DELETE FROM pending WHERE inserted_at < ? RETURNING part_hashes").all(
+        Date.now() - keepDays * 86_400_000,
+      ) as unknown as Array<{ part_hashes: string | null }>;
+      const capDeleted = this.db
+        .prepare("DELETE FROM pending WHERE id NOT IN (SELECT id FROM pending ORDER BY inserted_at DESC, id DESC LIMIT ?) RETURNING part_hashes")
+        .all(maxRows) as unknown as Array<{ part_hashes: string | null }>;
+      for (const row of [...ageDeleted, ...capDeleted]) {
+        let metas: PartMeta[] = [];
+        try {
+          metas = row.part_hashes === null ? [] : (JSON.parse(row.part_hashes) as PartMeta[]);
+        } catch {
+          metas = [];
+        }
+        for (const meta of metas) {
+          this.stmtPartDecrement.run(meta.hash);
+          this.stmtPartDeleteEmpty.run(meta.hash);
+        }
       }
-      for (const meta of metas) {
-        this.stmtPartDecrement.run(meta.hash);
-        this.stmtPartDeleteEmpty.run(meta.hash);
-      }
+      this.sweepParts();
+    });
+  }
+
+  /** BEGIN IMMEDIATE … COMMIT/ROLLBACK around a multi-statement mutation. */
+  private transaction(fn: () => void): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      fn();
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
     }
-    this.sweepParts();
   }
 
   /** Evicts oldest unreferenced parts until the store is under its byte cap. */

@@ -325,8 +325,13 @@ export class Capture {
       sourceAddr: this.init.sourceAddr,
       parts: this.buildParts(),
     };
-    // Capture must never produce an invalid event — drop, don't throw.
-    const parsed = usageRequestSchema.safeParse(request);
+    // Capture must never produce an invalid event — drop, don't throw. A
+    // parts problem must not cost the native fields either: retry without
+    // them (retention is best-effort by contract).
+    let parsed = usageRequestSchema.safeParse(request);
+    if (!parsed.success && request.parts.length > 0) {
+      parsed = usageRequestSchema.safeParse({ ...request, parts: [] });
+    }
     return parsed.success ? parsed.data : null;
   }
 
@@ -343,27 +348,27 @@ export class Capture {
       const parts: UsagePartWire[] = [];
       const partCap = retention.partCapBytes;
       let storedBytes = 0;
-      let omitted = 0;
-      let omittedBytes = 0;
       // Hashes/gzips one canonical value; partCap cuts oversize content into a
       // UTF-8-safe JSON wrapper so stored bytes always parse.
-      const encode = (kind: UsagePartWire["kind"], role: string | null, value: unknown, maxBytes: number, originalBytes: number): void => {
-        if (parts.length >= MAX_PARTS_PER_REQUEST) {
-          omitted += 1;
-          omittedBytes += originalBytes;
-          return;
-        }
+      const encode = (kind: UsagePartWire["kind"], role: string | null, value: unknown, maxBytes: number, originalBytes: number): boolean => {
+        if (parts.length >= MAX_PARTS_PER_REQUEST) return false;
         let content = Buffer.from(JSON.stringify(value), "utf8");
         let truncated = false;
         const cap = Math.min(partCap, Math.max(1, maxBytes));
         if (content.length > cap) {
           truncated = true;
           const text = content.toString("utf8");
-          const perChar = Math.max(1, content.length / Math.max(1, text.length));
-          let chars = Math.max(0, Math.floor(cap / perChar));
-          while (Buffer.byteLength(text.slice(0, chars), "utf8") > cap) chars -= 1;
+          // Binary-search the longest UTF-8-safe prefix that fits the cap —
+          // the loop must be O(log n) on the agent's main loop (ADR-0010 §4).
+          let lo = 0;
+          let hi = text.length;
+          while (lo < hi) {
+            const mid = Math.ceil((lo + hi + 1) / 2);
+            if (Buffer.byteLength(text.slice(0, mid), "utf8") <= cap) lo = mid;
+            else hi = mid - 1;
+          }
           content = Buffer.from(
-            JSON.stringify({ irori_truncated: true, original_bytes: content.length, prefix: text.slice(0, chars) }),
+            JSON.stringify({ irori_truncated: true, original_bytes: content.length, prefix: text.slice(0, lo) }),
             "utf8",
           );
         }
@@ -376,6 +381,7 @@ export class Capture {
           gz: gzipSync(content).toString("base64"),
           truncated,
         });
+        return true;
       };
 
       const obj = this.reqJson as Record<string, unknown> | null;
@@ -387,13 +393,14 @@ export class Capture {
       let pendingOmittedBytes = 0;
       const flushOmissions = (): void => {
         if (pendingOmitted === 0) return;
-        encode(
+        const stored = encode(
           "marker",
           null,
           { irori_body_truncated: true, omitted_messages: pendingOmitted, omitted_bytes: pendingOmittedBytes },
           partCap,
           0,
         );
+        if (!stored) return; // part limit reached — the tail marker carries the count
         pendingOmitted = 0;
         pendingOmittedBytes = 0;
       };
@@ -408,9 +415,8 @@ export class Capture {
           }
           flushOmissions();
           storedBytes += canonical.length;
-          const role = typeof (message as Record<string, unknown>).role === "string"
-            ? ((message as Record<string, unknown>).role as string)
-            : null;
+          const roleValue = (message as Record<string, unknown>).role;
+          const role = typeof roleValue === "string" && roleValue.length > 0 && roleValue.length <= 40 ? roleValue : null;
           encode("message", role, message, retention.bodyCapBytes - storedBytes + canonical.length, canonical.length);
         }
       } else if (obj !== null && "prompt" in obj) {
@@ -418,9 +424,7 @@ export class Capture {
       } else if (obj !== null && "input" in obj) {
         encode("input", null, obj.input, retention.bodyCapBytes, Buffer.byteLength(JSON.stringify(obj.input ?? null)));
       }
-      pendingOmitted += omitted; // part-limit omissions fold into the tail marker
-      pendingOmittedBytes += omittedBytes;
-      flushOmissions();
+      flushOmissions(); // trailing omissions (nothing stored after them)
       // Response part: the assembled assistant message (streamed deltas or the
       // non-streaming `message` object) — the final turn of the conversation.
       if (this.contentText !== "" || this.reasoningText !== "" || this.toolCalls.size > 0) {

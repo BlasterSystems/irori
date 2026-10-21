@@ -2,7 +2,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { createHash, randomBytes } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { UsageBuffer, parsePending } from "../src/usage-buffer.js";
 import { UsageSync } from "../src/usage-sync.js";
@@ -170,20 +171,37 @@ describe("UsageBuffer", () => {
     buf.close();
   });
 
-  it("byte-budgets batches: oversized singletons travel alone", () => {
+  it("byte-budgets batches on attached base64: oversized singletons travel alone", () => {
     const dir = makeDir();
     const buf = new UsageBuffer(dir);
-    const big = makePart("x".repeat(10_000), { index: 0 });
-    buf.add(request({ parts: [big] }));
+    // Incompressible content: its base64 gz exceeds the small test budget.
+    const entropy = randomBytes(3072).toString("base64");
+    buf.add(request({ parts: [makePart(entropy, { index: 0 })] }));
     buf.add(request({ parts: [makePart("small", { index: 0 })] }));
-    // Budget smaller than the first event's parts: it still travels (alone).
     const first = buf.takeBatch(10, 1_000);
     expect(first).toHaveLength(1);
-    expect(parsePending(first[0]!)!.parts[0]!.bytes).toBe(10_000);
+    expect(parsePending(first[0]!)!.parts[0]!.bytes).toBe(Buffer.byteLength(entropy));
     buf.remove(first.map((r) => r.id)); // ack frees the head; oldest-first resumes
     const second = buf.takeBatch(10, 1_000);
     expect(second).toHaveLength(1);
     expect(decoded(parsePending(second[0]!)!.parts[0]!)).toBe("small");
+    buf.close();
+  });
+
+  it("stores metadata-only payloads: body bytes live once in the parts store", () => {
+    const dir = makeDir();
+    const buf = new UsageBuffer(dir);
+    const part = makePart("body bytes that must not duplicate");
+    buf.add(request({ parts: [part] }));
+    const probe = new DatabaseSync(join(dir, "usage-buffer.db"));
+    const row = probe.prepare("SELECT payload, part_hashes FROM pending").get() as { payload: string; part_hashes: string };
+    probe.close();
+    expect(row.payload.includes(part.gz)).toBe(false); // no double-store
+    expect(row.payload).toContain(part.hash);
+    expect(row.part_hashes).toContain(part.hash);
+    // The batch re-attaches the bytes exactly once.
+    const batch = buf.takeBatch(10);
+    expect(decoded(parsePending(batch[0]!)!.parts[0]!)).toBe("body bytes that must not duplicate");
     buf.close();
   });
 });

@@ -250,4 +250,26 @@ describe("body retention (IR-52)", () => {
       expect(canonical(errorPart!)).toEqual({ error: { message: "Model 'nope' not found" } });
     });
   });
+
+  it("never loses the native event to a malformed message role", async () => {
+    await withProxy({ bodyCapBytes: 1024 * 1024, partCapBytes: 1024 * 1024 }, async (post, next) => {
+      const done = next();
+      // Empty and over-length roles must coerce to null, not drop the event.
+      await post(
+        JSON.stringify({
+          model: "m",
+          stream: false,
+          messages: [
+            { role: "", content: "empty role" },
+            { role: "x".repeat(80), content: "over-length role" },
+          ],
+        }),
+      );
+      const e = await done;
+      expect(e.promptTokens).toBe(10); // native capture survived
+      expect(e.parts.map((p) => p.kind)).toEqual(["message", "message", "response"]);
+      expect(e.parts[0]?.role).toBeNull();
+      expect(e.parts[1]?.role).toBeNull();
+    });
+  });
 });

@@ -19,7 +19,7 @@ export const usagePartWireSchema = z.object({
   hash: z.string().regex(/^[0-9a-f]{64}$/),
   kind: z.enum(["message", "prompt", "input", "response", "error", "marker"]),
   /** OpenAI message role for `message` parts; null otherwise. */
-  role: z.string().min(1).nullable().default(null),
+  role: z.string().min(1).max(40).nullable().default(null),
   index: z.number().int().nonnegative(),
   /** Original (uncompressed) byte length of the canonical part content. */
   bytes: z.number().int().nonnegative(),
@@ -84,6 +84,21 @@ export type UsageRequest = z.infer<typeof usageRequestSchema>;
 
 /** Hard cap per upload frame — matches the owner decision (30–60 s / 500). */
 export const MAX_USAGE_BATCH = 500;
+
+/**
+ * WS receive limit on the hub for agent frames (IR-52: retained bodies make
+ * batches large; the agent's part budget stays under this with margin).
+ */
+export const MAX_USAGE_FRAME_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Per-frame budget on the SUM of attached part bytes (base64 gz, IR-52).
+ * Worst single event (16 MiB body cap + 2×4 MiB response/error parts,
+ * incompressible) ≈ 32 MiB base64 — fits under both the budget and the hub
+ * frame limit, so a singleton always travels and no batch can poison the
+ * connection with an oversized frame.
+ */
+export const USAGE_BATCH_PART_BUDGET_BYTES = 48 * 1024 * 1024;
 
 /** Agent → server: one batch of captured requests (≤ MAX_USAGE_BATCH). */
 export const usageBatchMsgSchema = z.object({

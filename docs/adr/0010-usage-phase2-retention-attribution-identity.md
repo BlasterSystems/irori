@@ -86,11 +86,16 @@ Option 2, with these invariants:
    one statement; parts die with their owning rows (90 d raw retention).
 4. **Node buffer mirrors the model (IR-52).** `pending_parts` in the agent's
    SQLite (hash PK, gz BLOB, refcounted by referencing rows); pending rows
-   carry only part metadata + a hash list. Batches re-attach gz at send time
-   under a 24 MiB original-bytes budget (an oversized singleton still travels
-   alone — no starvation). Ack removes rows and releases refs; age/cap prune
-   does the same; the parts store itself is byte-capped (256 MiB, oldest
-   unreferenced evicted). Cap-drop may orphan content server-side
+   carry only part metadata + a hash list — body bytes are stored once.
+   Batches re-attach gz at send time under a budget on the ATTACHED base64
+   sizes (48 MiB against the hub's 64 MiB WS receive limit
+   `MAX_USAGE_FRAME_BYTES`); a single worst-case event (16 MiB body + 2×4 MiB
+   response/error caps, incompressible ≈ 32 MiB base64) fits both, so a
+   singleton always travels and no frame can poison the connection. Ack
+   removes rows and releases refs; age/cap prune does the same; the parts
+   store itself is byte-capped (256 MiB, oldest unreferenced evicted).
+   Buffer mutations are transactional (BEGIN IMMEDIATE) so a crash cannot
+   strand refcounts. Cap-drop may orphan content server-side
    (reconstruction shows a gap) — accepted, matching ADR-0008 §3 expendable
    buffers. gzipSync runs on the agent main loop; caps bound the worst-case
    block (≈ tens of ms at default caps, homelab scale).

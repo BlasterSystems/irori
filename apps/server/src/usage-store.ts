@@ -620,9 +620,8 @@ export function createUsageStore(db: Db): UsageStore {
           returning p.hash
         )
         select
-          (select count(*) from doomed)::int as requests,
-          (select count(*) from llm_parts where refcount <= 0)::int as parts_dropped
-      `)) as unknown as Array<{ requests: number; parts_dropped: number }>;
+          (select count(*) from doomed)::int as requests
+      `)) as unknown as Array<{ requests: number }>;
       const row = result[0];
       await db.execute(sql`delete from llm_parts where refcount <= 0`);
       return row !== undefined ? Number(row.requests) : 0;
