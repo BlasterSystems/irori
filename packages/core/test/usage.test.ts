@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   CAPTURED_ENDPOINT_RE,
+  IRORI_AGENT_TYPE_HEADER,
+  IRORI_CLIENT_HEADER,
+  IRORI_PROJECT_HEADER,
   MAX_USAGE_BATCH,
+  iroriIdentityFromHeaders,
   normalizeErrorSignature,
+  parseIroriRetryHeader,
   usageBatchAckMsgSchema,
   usageBatchMsgSchema,
   usageRequestSchema,
@@ -77,5 +82,78 @@ describe("usage contracts", () => {
     expect(CAPTURED_ENDPOINT_RE.test("/metrics")).toBe(false);
     expect(CAPTURED_ENDPOINT_RE.test("/health")).toBe(false);
     expect(CAPTURED_ENDPOINT_RE.test("/slots")).toBe(false);
+  });
+
+  it("parses X-Irori-* identity headers with bounds (IR-55)", () => {
+    const full = iroriIdentityFromHeaders({
+      [IRORI_PROJECT_HEADER]: "  irori  ",
+      [IRORI_AGENT_TYPE_HEADER]: "subagent",
+      [IRORI_CLIENT_HEADER]: "omp",
+    });
+    expect(full).toEqual({ clientName: "omp", clientProject: "irori", clientAgentType: "subagent" });
+    // Invalid agent type and over-length values fall back to null, never throw.
+    const bad = iroriIdentityFromHeaders({
+      [IRORI_AGENT_TYPE_HEADER]: "rootkit",
+      [IRORI_CLIENT_HEADER]: "x".repeat(500),
+      [IRORI_PROJECT_HEADER]: "",
+    });
+    expect(bad).toEqual({ clientName: null, clientProject: null, clientAgentType: null });
+    expect(iroriIdentityFromHeaders({})).toEqual({ clientName: null, clientProject: null, clientAgentType: null });
+    expect(iroriIdentityFromHeaders({ [IRORI_PROJECT_HEADER]: ["a", "b"] }).clientProject).toBe("a");
+  });
+
+  it("parses the X-Irori-Retry contract (IR-55)", () => {
+    expect(parseIroriRetryHeader("attempt=3;kind=auto-retry;status=recovered;superseded-by=resp_9")).toEqual({
+      attempt: 3,
+      kind: "auto-retry",
+      status: "recovered",
+      supersededBy: "resp_9",
+    });
+    expect(parseIroriRetryHeader("attempt=2")).toEqual({ attempt: 2, kind: null, status: null, supersededBy: null });
+    expect(parseIroriRetryHeader("junk;;attempt=nope")).toEqual({ attempt: null, kind: null, status: null, supersededBy: null });
+    expect(parseIroriRetryHeader(undefined)).toEqual({ attempt: null, kind: null, status: null, supersededBy: null });
+    expect(parseIroriRetryHeader("a=1".repeat(400)).attempt).toBeNull(); // over-length header ignored
+  });
+
+  it("carries client identity fields on the ingest event", () => {
+    const parsed = usageRequestSchema.parse({
+      id: "00000000-0000-4000-8000-000000000003",
+      ts: 1,
+      port: 8081,
+      endpoint: "/v1/chat/completions",
+      reqBytes: 0,
+      resBytes: 0,
+      clientName: "omp",
+      clientProject: "irori",
+      clientAgentType: "main",
+      clientKeyHash: "a".repeat(64),
+      retryAttempt: 1,
+      retryKind: "auto-retry",
+      retryStatus: "recovered",
+      retrySupersededBy: "resp_1",
+    });
+    expect(parsed.clientAgentType).toBe("main");
+    expect(() =>
+      usageRequestSchema.parse({
+        id: "00000000-0000-4000-8000-000000000004",
+        ts: 1,
+        port: 8081,
+        endpoint: "/v1/chat/completions",
+        reqBytes: 0,
+        resBytes: 0,
+        clientAgentType: "intruder",
+      }),
+    ).toThrow();
+    expect(() =>
+      usageRequestSchema.parse({
+        id: "00000000-0000-4000-8000-000000000005",
+        ts: 1,
+        port: 8081,
+        endpoint: "/v1/chat/completions",
+        reqBytes: 0,
+        resBytes: 0,
+        clientKeyHash: "not-a-hash",
+      }),
+    ).toThrow();
   });
 });

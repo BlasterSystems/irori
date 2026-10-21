@@ -141,9 +141,59 @@ export const usageModelsResponseSchema = z.object({
 
 export type UsageModelsResponse = z.infer<typeof usageModelsResponseSchema>;
 
+/** One client-identity group of the Agents view (raw-row aggregation, IR-55). */
+export const usageAgentGroupSchema = z.object({
+  project: z.string().nullable(),
+  agentType: z.enum(["main", "subagent"]).nullable(),
+  name: z.string().nullable(),
+  /** sha256 fingerprint when an issued key matched; null otherwise. */
+  keyHash: z.string().nullable(),
+  /** Source addresses seen for this identity (fallback label when unnamed). */
+  sourceAddrs: z.array(z.string()),
+  requests: z.number().int(),
+  errors: z.number().int(),
+  promptTokens: z.number(),
+  completionTokens: z.number(),
+  totalTokens: z.number(),
+  lastSeenMs: z.number(),
+});
+
+export type UsageAgentGroup = z.infer<typeof usageAgentGroupSchema>;
+
+export const usageAgentsResponseSchema = z.object({
+  range: usageRangeSchema,
+  groups: z.array(usageAgentGroupSchema),
+  /** True when high cardinality exceeded the 200-group cap. */
+  truncated: z.boolean().default(false),
+});
+
+export type UsageAgentsResponse = z.infer<typeof usageAgentsResponseSchema>;
+
+/** One issued client identity (IR-55) — the key itself is never listed. */
+export const clientIdentityInfoSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  project: z.string().nullable(),
+  agentType: z.enum(["main", "subagent"]).nullable(),
+  /** sha256 fingerprint of the issued key; null for header-only identities. */
+  keyHash: z.string().nullable(),
+  createdAtMs: z.number().int(),
+});
+export type ClientIdentityInfo = z.infer<typeof clientIdentityInfoSchema>;
+
+export const usageClientsResponseSchema = z.object({ clients: z.array(clientIdentityInfoSchema) });
+export type UsageClientsResponse = z.infer<typeof usageClientsResponseSchema>;
+
+/** Creation response — carries the plaintext key exactly once. */
+export const clientIdentityCreatedSchema = clientIdentityInfoSchema.extend({ key: z.string().min(1) });
+export type ClientIdentityCreated = z.infer<typeof clientIdentityCreatedSchema>;
+
 /** Common filters across the usage endpoints. */
 export interface UsageFilters {
   range: UsageRange;
   nodeId?: string;
   model?: string;
+  /** IR-55 client dimensions (raw-row filters; bucket models ignore them). */
+  project?: string;
+  agentType?: "main" | "subagent";
 }

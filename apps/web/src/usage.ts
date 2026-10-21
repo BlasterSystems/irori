@@ -1,5 +1,5 @@
 import { sparklinePath } from "./sparkline";
-import type { UsageEvent, UsageErrorsResponse, UsageModelsResponse, UsageOverviewResponse, UsageRequestRow, UsageRequestsResponse } from "@irori/core";
+import type { UsageAgentGroup, UsageEvent, UsageErrorsResponse, UsageModelsResponse, UsageOverviewResponse, UsageRequestRow, UsageRequestsResponse } from "@irori/core";
 import type { LensChart } from "./analytics";
 
 /**
@@ -7,7 +7,7 @@ import type { LensChart } from "./analytics";
  * URL state, chart geometry, table cell mappers. DOM-free and unit-tested.
  */
 
-export const USAGE_TABS = ["overview", "requests", "errors", "models"] as const;
+export const USAGE_TABS = ["overview", "requests", "errors", "agents", "models"] as const;
 export type UsageTab = (typeof USAGE_TABS)[number];
 
 export const USAGE_RANGE_TABS: Array<{ value: UsageOverviewResponse["range"]; label: string }> = [
@@ -200,4 +200,43 @@ export function modelSeries(series: UsageModelsResponse["series"], model: string
 /** Requests response → table rows (already newest first from the API). */
 export function requestRows(res: UsageRequestsResponse): UsageRequestRow[] {
   return res.rows;
+}
+
+/* ── IR-55: client identity display ──────────────────────────────────────── */
+
+/** Stable v-for key for an agent group row. */
+export function agentGroupKey(group: UsageAgentGroup): string {
+  return `${group.keyHash ?? group.sourceAddrs[0] ?? "unknown"}-${group.agentType ?? "u"}-${group.project ?? "p"}-${group.name ?? "n"}`;
+}
+
+/** Label for one agent group: identity name, else project, else source IP. */
+export function agentGroupLabel(group: UsageAgentGroup): string {
+  if (group.name !== null) return group.name;
+  if (group.project !== null) return group.project;
+  return group.sourceAddrs[0] ?? "unidentified";
+}
+
+/** Secondary line for an agent group: what backs the label. */
+export function agentGroupSource(group: UsageAgentGroup): string {
+  if (group.name !== null) return group.keyHash !== null ? "issued key" : group.project ?? "header-declared";
+  if (group.project !== null) return "header-declared";
+  return "source IP fallback";
+}
+
+/** Compact client label for a request row (identity, else source IP). */
+export function clientLabel(row: Pick<UsageRequestRow, "clientName" | "clientProject" | "sourceAddr">): string {
+  if (row.clientName !== null) return row.clientName;
+  if (row.clientProject !== null) return row.clientProject;
+  return row.sourceAddr ?? "unidentified";
+}
+
+/** One-line retry lineage for the request drawer ("attempt N · status"). */
+export function retryText(row: Pick<UsageRequestRow, "retryAttempt" | "retryKind" | "retryStatus" | "retrySupersededBy">): string | null {
+  if (row.retryAttempt === null && row.retryKind === null && row.retryStatus === null && row.retrySupersededBy === null) return null;
+  const parts: string[] = [];
+  if (row.retryAttempt !== null) parts.push(`attempt ${row.retryAttempt}`);
+  if (row.retryKind !== null) parts.push(row.retryKind);
+  if (row.retryStatus !== null) parts.push(row.retryStatus);
+  if (row.retrySupersededBy !== null) parts.push(`supersedes ${row.retrySupersededBy}`);
+  return parts.join(" · ");
 }

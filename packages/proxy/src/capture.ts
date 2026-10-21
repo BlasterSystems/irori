@@ -3,11 +3,15 @@ import { gzipSync } from "node:zlib";
 import {
   CAPTURED_ENDPOINT_RE,
   normalizeErrorSignature,
+  parseIroriRetryHeader,
   usageRequestSchema,
   type BodyRetention,
+  type ClientIdentityFields,
+  type RetryLineage,
   type UsagePartWire,
   type UsageRequest,
 } from "@irori/core";
+import { bearerKeyHash } from "./identity.js";
 
 /**
  * Passive capture state (ADR-0008): observes a request/response pair and
@@ -28,6 +32,12 @@ export interface CaptureInit {
   sourceAddr: string | null;
   /** IR-52 body retention: null = off (no body bytes stored). */
   retention: BodyRetention | null;
+  /** IR-55: header-declared client identity (client-asserted, bounded). */
+  identity: ClientIdentityFields;
+  /** IR-55: sha256 hex of the presented bearer token; null when absent. */
+  keyHash: string | null;
+  /** IR-55: parsed X-Irori-Retry lineage; null fields when not reported. */
+  retry: RetryLineage;
 }
 
 /** Parts stored per request are folded into a marker past this (schema cap is 8192). */
@@ -324,6 +334,14 @@ export class Capture {
       resBytes: this.resBytes,
       sourceAddr: this.init.sourceAddr,
       parts: this.buildParts(),
+      clientName: this.init.identity.clientName,
+      clientProject: this.init.identity.clientProject,
+      clientAgentType: this.init.identity.clientAgentType,
+      clientKeyHash: this.init.keyHash,
+      retryAttempt: this.init.retry.attempt,
+      retryKind: this.init.retry.kind,
+      retryStatus: this.init.retry.status,
+      retrySupersededBy: this.init.retry.supersededBy,
     };
     // Capture must never produce an invalid event — drop, don't throw. A
     // parts problem must not cost the native fields either: retry without

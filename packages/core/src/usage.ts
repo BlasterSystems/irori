@@ -34,6 +34,10 @@ export type UsagePartWire = z.infer<typeof usagePartWireSchema>;
 export const usagePartMetaSchema = usagePartWireSchema.omit({ gz: true });
 export type UsagePartMeta = z.infer<typeof usagePartMetaSchema>;
 
+/** IR-55 client agent axis (main vs subagent, OMP-parity). */
+export const clientAgentTypeSchema = z.enum(["main", "subagent"]);
+export type ClientAgentType = z.infer<typeof clientAgentTypeSchema>;
+
 /**
  * LLM usage capture (M8, ADR-0008): one per-request record from the agent's
  * capture proxy. Native wire fields always; optional body parts when the
@@ -78,9 +82,97 @@ export const usageRequestSchema = z.object({
   sourceAddr: z.string().min(1).nullable().default(null),
   /** IR-52: stored body parts; empty when retention is off or nothing parsed. */
   parts: z.array(usagePartWireSchema).max(8192).default([]),
+  /** IR-55 client identity (resolved server-side): header-declared then key-mapped. */
+  clientName: z.string().min(1).max(200).nullable().default(null),
+  clientProject: z.string().min(1).max(200).nullable().default(null),
+  clientAgentType: clientAgentTypeSchema.nullable().default(null),
+  /** sha256 hex of the presented bearer token; raw keys are never stored. */
+  clientKeyHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
+  /** IR-55 retry lineage (X-Irori-Retry header contract). */
+  retryAttempt: z.number().int().nonnegative().max(1_000_000).nullable().default(null),
+  retryKind: z.string().min(1).max(120).nullable().default(null),
+  retryStatus: z.string().min(1).max(120).nullable().default(null),
+  retrySupersededBy: z.string().min(1).max(120).nullable().default(null),
 });
 
 export type UsageRequest = z.infer<typeof usageRequestSchema>;
+
+/* ── Client identity (IR-55): identification, not auth (ADR-0010 §8) ──────── */
+
+/** Documented identity headers a cooperating client may send. */
+export const IRORI_PROJECT_HEADER = "x-irori-project";
+export const IRORI_AGENT_TYPE_HEADER = "x-irori-agent-type";
+export const IRORI_CLIENT_HEADER = "x-irori-client";
+/** Retry lineage: `attempt=<n>;kind=<kind>;status=<status>;superseded-by=<id>`. */
+export const IRORI_RETRY_HEADER = "x-irori-retry";
+
+export interface ClientIdentityFields {
+  clientName: string | null;
+  clientProject: string | null;
+  clientAgentType: ClientAgentType | null;
+}
+
+const HEADER_VALUE_CAP = 200;
+
+function headerValue(headers: Record<string, string | string[] | undefined>, name: string): string | null {
+  const raw = headers[name];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= HEADER_VALUE_CAP ? trimmed : null;
+}
+
+/**
+ * Header-declared identity (bounded, client-asserted). `null` fields fall
+ * back to the key-mapped identity, then the source-IP label in the UI.
+ */
+export function iroriIdentityFromHeaders(headers: Record<string, string | string[] | undefined>): ClientIdentityFields {
+  const agentType = headerValue(headers, IRORI_AGENT_TYPE_HEADER);
+  const project = headerValue(headers, IRORI_PROJECT_HEADER);
+  const name = headerValue(headers, IRORI_CLIENT_HEADER);
+  const agentParsed = clientAgentTypeSchema.safeParse(agentType);
+  return {
+    clientName: name,
+    clientProject: project,
+    clientAgentType: agentParsed.success ? agentParsed.data : null,
+  };
+}
+
+export interface RetryLineage {
+  attempt: number | null;
+  kind: string | null;
+  status: string | null;
+  supersededBy: string | null;
+}
+
+/** Parses the `X-Irori-Retry` contract; null/empty → no lineage reported. */
+export function parseIroriRetryHeader(value: string | string[] | undefined): RetryLineage {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > 500) {
+    return { attempt: null, kind: null, status: null, supersededBy: null };
+  }
+  const fields: RetryLineage = { attempt: null, kind: null, status: null, supersededBy: null };
+  for (const pair of raw.split(";")) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const key = pair.slice(0, eq).trim();
+    const val = pair.slice(eq + 1).trim().slice(0, 120);
+    if (val.length === 0) continue;
+    if (key === "attempt") {
+      const attempt = Number.parseInt(val, 10);
+      // int4-safe cap: an unbounded attempt would fail the llm_requests
+      // insert and poison the agent's redelivery loop (IR-55 review).
+      if (Number.isInteger(attempt) && attempt >= 0 && attempt <= 1_000_000) fields.attempt = attempt;
+    } else if (key === "kind") {
+      fields.kind = val;
+    } else if (key === "status") {
+      fields.status = val;
+    } else if (key === "superseded-by") {
+      fields.supersededBy = val;
+    }
+  }
+  return fields;
+}
 
 /** Hard cap per upload frame — matches the owner decision (30–60 s / 500). */
 export const MAX_USAGE_BATCH = 500;
