@@ -367,7 +367,7 @@ reported in every snapshot; upgrade = re-run install.
 | Jobs | `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel` |
 | Cleanup | `GET /api/v1/nodes/:id/cleanup/audit`, `POST /api/v1/nodes/:id/cleanup` (dry_run default) |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
-| Usage | `GET /api/v1/usage/{overview,requests,errors,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008) |
+| Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
 | Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, WS `/agent-ws` |
 
@@ -376,10 +376,17 @@ reported in every snapshot; upgrade = re-run install.
 - **Shipped (M8):** usage **capture** only — the deferred "inference gateway"
   is rescoped per the IRI-009 research brief: an in-agent pass-through proxy
   records usage; no routing, fallbacks, or auth (no gateway features).
-- **Deferred (not in v1):** gateway features proper (request routing,
-  fallbacks, per-client auth/keys), request/body retention + chats
-  reconstruction, tool attribution, client identity, retry lineage (all
-  phase-2, IR-51), alert notifications, Prometheus export, PWA/mobile,
+- **Shipped (usage phase 2, IR-51 epic / ADR-0010):** opt-in body retention
+  (`Keep bodies` per flagged setup, content-addressed gzip parts, refcounted,
+  16/4 MiB caps, parts die with their owning rows), chats reconstruction
+  (`#/chats`: prefix-chained sessions, compaction markers, byte-exact images,
+  tool blocks), tool attribution from the wire (per request sums exact,
+  `unknown` fallback), client identity (issued keys fingerprinted sha256 at
+  the proxy; `X-Irori-Project` / `X-Irori-Agent-Type` / `X-Irori-Client`
+  headers; `X-Irori-Retry` lineage; source-IP fallback labels). Body bytes
+  are served only by the chats endpoints; browsers receive metadata.
+- **Deferred (not shipped):** gateway features proper (request routing,
+  fallbacks), alert notifications, Prometheus export, PWA/mobile,
   health-findings rules engine, prompt showcase, auto-discovery of Sparks,
   recipe git-drift tracking (setups re-validate script existence at start
   instead).

@@ -4,6 +4,35 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — Usage phase 2: retention, chats, tools, client identity
+
+### Added
+
+- **Opt-in body retention** (IR-52, ADR-0010): per-setup `Keep bodies` flag
+  (Serve wizard) with global caps (settings key `usage_body_retention`,
+  defaults 16 MiB body / 4 MiB part); the capture proxy decomposes bodies
+  into sha256-addressed gzip parts (deduped across turns, in-position
+  truncation markers), the agent buffer stores bytes once and batches under
+  the WS frame limit, and Postgres `llm_parts`/`llm_request_parts` refcount
+  parts so they die with their owning rows (migration 0012).
+- **Chats** (IR-53): read-time session chaining (client key + 30-min gap +
+  prefix-hash extension; broken chain + >50% input drop marks `compacted`)
+  and reconstruction of exactly what the model saw — `#/chats` renders
+  sessions per client/day with byte-exact images, collapsed tool blocks and
+  truncation/compaction markers; retention-off shows guidance instead of
+  errors.
+- **Tool attribution** (IR-54): `tool_call` deltas reassembled by index and
+  `role:"tool"` results lifted at capture time (retention-independent);
+  ingest attributes tokens largest-remainder per (request, tool) so shares
+  sum exactly to request totals; `unknown` fallback for unresolved ids;
+  Tools tab with per-tool×model table + top-8 token series (migration 0014).
+- **Client identity** (IR-55): issued per-client keys (fingerprinted sha256
+  at the proxy, shown once), `X-Irori-Project`/`X-Irori-Agent-Type`/
+  `X-Irori-Client` headers, `X-Irori-Retry` lineage contract; issued keys
+  win over self-declared headers, unidentified clients stay visible by
+  source IP; Agents tab + Client keys manager; project/agent-type filters
+  on Requests (migration 0013).
+
 ## [0.3.0] — Agent onboarding, usage capture, download queue & overview
 
 ### Added
