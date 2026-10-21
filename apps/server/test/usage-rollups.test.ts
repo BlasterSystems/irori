@@ -321,4 +321,58 @@ d("usage store (postgres)", () => {
     expect(fallback).toMatchObject({ requests: 1, totalTokens: 10 });
     await clients.remove(identity.id);
   });
+
+  it("attributes parallel tool calls with exact token sums (IR-54)", async () => {
+    const store = createUsageStore(handle!.db);
+    const run = randomUUID().slice(0, 8);
+    // Turn 1: parallel tool calls in the streamed response.
+    const turn1 = usageRequest({
+      completionTokens: 100,
+      promptTokens: 120,
+      ts: Date.now() - 30_000,
+      respTools: [
+        { id: `call_a_${run}`, name: "get_weather", argsChars: 10 },
+        { id: `call_b_${run}`, name: "get_time", argsChars: 6 },
+      ],
+    });
+    // Turn 2: the follow-up request carries role:"tool" results.
+    const turn2 = usageRequest({
+      promptTokens: 210,
+      completionTokens: 5,
+      ts: Date.now() - 20_000,
+      toolResults: [
+        { callId: `call_a_${run}`, resultChars: 40, error: false },
+        { callId: `call_b_${run}`, resultChars: 22, error: true },
+        { callId: `call_z_${run}`, resultChars: 18, error: false }, // never seen → unknown
+      ],
+    });
+    await store.insertBatch(nodeId, [turn1, turn2]);
+
+    const toolRows = await handle!.db.execute(sql`
+      select t.request_id::text as rid, t.tool, t.model, t.calls, t.errors, t.args_chars, t.result_chars,
+             t.prompt_tokens, t.completion_tokens
+      from llm_request_tools t where t.request_id in (${sql.join([sql`${turn1.id}`, sql`${turn2.id}`], sql`, `)})
+      order by t.request_id, t.tool
+    `);
+    const list = toolRows as unknown as Array<{ rid: string; tool: string; calls: number; errors: number; args_chars: number; result_chars: number; prompt_tokens: number; completion_tokens: number }>;
+    // Turn 1 (response side): 100 completion tokens split 10:6 → 63 + 37.
+    const t1 = list.filter((r) => r.rid === turn1.id);
+    expect(t1.find((r) => r.tool === "get_weather")).toMatchObject({ calls: 1, args_chars: 10, completion_tokens: 63 });
+    expect(t1.find((r) => r.tool === "get_time")).toMatchObject({ calls: 1, args_chars: 6, completion_tokens: 37 });
+    expect(t1.reduce((s, r) => s + r.completion_tokens, 0)).toBe(100); // sums to the request total
+    // Turn 2 (request side): names resolved through the ring; unknown fallback.
+    // 210 prompt tokens split by result chars 40:22:18 → 105 / 58 / 47.
+    const t2 = list.filter((r) => r.rid === turn2.id);
+    expect(t2.find((r) => r.tool === "get_weather")).toMatchObject({ result_chars: 40, errors: 0, prompt_tokens: 105 });
+    expect(t2.find((r) => r.tool === "get_time")).toMatchObject({ result_chars: 22, errors: 1, prompt_tokens: 58 });
+    expect(t2.find((r) => r.tool === "unknown")).toMatchObject({ result_chars: 18, errors: 0, prompt_tokens: 47 });
+    expect(t2.reduce((s, r) => s + r.prompt_tokens, 0)).toBe(210);
+
+    // Read model aggregates per (tool, model) and serves a series.
+    const view = await store.tools({ range: "1h", nodeId });
+    const weather = view.tools.find((t) => t.tool === "get_weather");
+    expect(weather).toMatchObject({ calls: 1, argsChars: 10, resultChars: 40, promptTokens: 105, completionTokens: 63 });
+    expect(view.tools.find((t) => t.tool === "unknown")).toBeDefined();
+    expect(view.series.find((s) => s.tool === "get_weather")?.points.length).toBeGreaterThan(0);
+  });
 });

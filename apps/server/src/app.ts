@@ -406,6 +406,14 @@ export function createApp(deps: AppDeps): Express {
     res.json(await usage.agents(filters));
   });
 
+  app.get("/api/v1/usage/tools", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    res.json(await usage.tools(filters));
+  });
+
   app.get("/api/v1/usage/clients", async (_req, res) => {
     const clients = requireUsageClients(res);
     if (clients === null) return;

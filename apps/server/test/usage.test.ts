@@ -8,6 +8,7 @@ import { createAgentHub, type AgentHubDeps } from "../src/hub.js";
 import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import type { UsageStore } from "../src/usage-store.js";
+import { splitTokens } from "../src/usage-store.js";
 import { type UsageClients, type ClientIdentityInfo } from "../src/usage-clients.js";
 import { listen, makeFakeStore, makeSseSpy, nextMessage, opened } from "./helpers.js";
 
@@ -167,6 +168,7 @@ function fakeUsageStore(): { store: UsageStore; calls: Array<{ method: string; a
     errorGroups: track("errorGroups", () => ({ range: "24h", groups: [] })),
     models: track("models", () => ({ range: "24h", models: [], series: [] })),
     agents: track("agents", () => ({ range: "24h", groups: [] })),
+    tools: track("tools", () => ({ range: "24h", tools: [], series: [] })),
     pruneRaw: track("pruneRaw", () => 0),
     pruneBuckets: track("pruneBuckets", () => 0),
   } as unknown as UsageStore;
@@ -265,6 +267,17 @@ describe("usage API", () => {
     const app = makeAppWithUsage(store);
     const res = await request(app).get("/api/v1/usage/requests/not-a-uuid");
     expect(res.status).toBe(400);
+  });
+});
+
+describe("tool attribution splits (IR-54)", () => {
+  it("splits by weight with exact sums (largest remainder)", () => {
+    expect(splitTokens(100, [10, 6])).toEqual([63, 37]); // 62.5/37.5, tie → first
+    expect(splitTokens(10, [1, 1, 1])).toEqual([4, 3, 3]);
+    expect(splitTokens(100, [0, 0])).toEqual([50, 50]); // equal split on no signal
+    expect(splitTokens(0, [5, 5])).toEqual([0, 0]);
+    expect(splitTokens(7, [1])).toEqual([7]);
+    expect(splitTokens(5, [])).toEqual([]);
   });
 });
 

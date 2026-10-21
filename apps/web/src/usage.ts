@@ -7,7 +7,7 @@ import type { LensChart } from "./analytics";
  * URL state, chart geometry, table cell mappers. DOM-free and unit-tested.
  */
 
-export const USAGE_TABS = ["overview", "requests", "errors", "agents", "models"] as const;
+export const USAGE_TABS = ["overview", "requests", "errors", "agents", "tools", "models"] as const;
 export type UsageTab = (typeof USAGE_TABS)[number];
 
 export const USAGE_RANGE_TABS: Array<{ value: UsageOverviewResponse["range"]; label: string }> = [
@@ -207,6 +207,11 @@ export function requestRows(res: UsageRequestsResponse): UsageRequestRow[] {
 /** Stable v-for key for an agent group row. */
 export function agentGroupKey(group: UsageAgentGroup): string {
   return `${group.keyHash ?? group.sourceAddrs[0] ?? "unknown"}-${group.agentType ?? "u"}-${group.project ?? "p"}-${group.name ?? "n"}`;
+}
+
+/** Stable v-for key for a (tool × model) attribution row. */
+export function toolRowKey(row: { tool: string; model: string | null }): string {
+  return `${row.tool}-${row.model ?? "unknown"}`;
 }
 
 /** Label for one agent group: identity name, else project, else source IP. */
