@@ -8,6 +8,7 @@ import { createDbHandle, createNodeStore, settings, type DbHandle } from "@irori
 import { usageRequestSchema, type UsageRequest } from "@irori/core";
 import { createUsageRollupEngine, USAGE_ROLLUP_WATERMARK_KEY } from "../src/usage-rollups.js";
 import { createUsageStore } from "../src/usage-store.js";
+import { createUsageClients } from "../src/usage-clients.js";
 import { runUsageRetention } from "../src/retention.js";
 import { createApp } from "../src/app.js";
 import { createRings } from "../src/rings.js";
@@ -246,5 +247,56 @@ d("usage store (postgres)", () => {
     expect(Number((gone as unknown as Array<{ n: number }>)[0]?.n)).toBe(0); // refcount 2 → 0 → deleted
     const kept = await handle!.db.execute(sql`select refcount from llm_parts where hash = ${survivor.hash}`);
     expect(Number((kept as unknown as Array<{ refcount: number }>)[0]?.refcount)).toBe(1); // untouched
+  });
+
+  it("resolves issued keys over self-declared headers (IR-55)", async () => {
+    const clients = createUsageClients(handle!.db);
+    const identity = await clients.create({ name: "omp", project: "irori", agentType: "main" });
+    const keyHash = createHash("sha256").update(identity.key, "utf8").digest("hex");
+    const store = createUsageStore(handle!.db);
+
+    // Key-mapped identity fills every dimension; headers only fill gaps.
+    await store.insertBatch(nodeId, [
+      usageRequest({ clientKeyHash: keyHash, ts: Date.now() - 40_000 }),
+      usageRequest({ clientKeyHash: keyHash, clientProject: "header-project", clientAgentType: "subagent", totalTokens: 90, ts: Date.now() - 30_000 }),
+      // Unknown key + header-declared identity still attributes (client-asserted).
+      usageRequest({ clientKeyHash: "c".repeat(64), clientProject: "header-only", clientName: "codex", ts: Date.now() - 20_000 }),
+      // Unidentified: source-IP fallback only.
+      usageRequest({ ts: Date.now() - 10_000, sourceAddr: "192.168.1.50" }),
+    ]);
+    const rows = await store.requests({ range: "1h", page: 1, limit: 10 });
+    // Event 1 (150 tokens): key-mapped only → full identity from the registry.
+    const keyOnly = rows.rows.filter((r) => r.clientKeyHash === keyHash && r.totalTokens === 150);
+    expect(keyOnly).toHaveLength(1);
+    expect(keyOnly[0]).toMatchObject({ clientName: "omp", clientProject: "irori", clientAgentType: "main" });
+    // Event 2 (90 tokens): the issued key wins over the header-declared
+    // project/agentType — both resolve to the registry identity.
+    const mixed = rows.rows.filter((r) => r.clientKeyHash === keyHash && r.totalTokens === 90);
+    expect(mixed).toHaveLength(1);
+    expect(mixed[0]).toMatchObject({ clientProject: "irori", clientAgentType: "main" });
+    const headerOnly = rows.rows.filter((r) => r.clientKeyHash === "c".repeat(64));
+    expect(headerOnly[0]).toMatchObject({ clientProject: "header-only", clientName: "codex" });
+    const bare = rows.rows.filter((r) => r.sourceAddr === "192.168.1.50");
+    expect(bare).toHaveLength(1);
+    expect(bare[0]!.clientKeyHash).toBeNull();
+    expect(bare[0]!.clientProject).toBeNull();
+  });
+
+  it("groups the agents view across identified and fallback clients (IR-55)", async () => {
+    const clients = createUsageClients(handle!.db);
+    const identity = await clients.create({ name: "omp", project: "irori", agentType: "main" });
+    const keyHash = createHash("sha256").update(identity.key, "utf8").digest("hex");
+    const store = createUsageStore(handle!.db);
+    await store.insertBatch(nodeId, [
+      usageRequest({ clientKeyHash: keyHash, totalTokens: 100 }),
+      usageRequest({ clientKeyHash: keyHash, totalTokens: 50, error: "boom", errorSig: "boom", status: 500 }),
+      usageRequest({ sourceAddr: "10.0.0.9", totalTokens: 10 }),
+    ]);
+    const agents = await store.agents({ range: "1h", nodeId });
+    const identified = agents.groups.find((g) => g.keyHash === keyHash);
+    expect(identified).toMatchObject({ name: "omp", project: "irori", agentType: "main", requests: 2, errors: 1, totalTokens: 150 });
+    const fallback = agents.groups.find((g) => g.keyHash === null && (g.sourceAddrs ?? []).includes("10.0.0.9"));
+    expect(fallback).toMatchObject({ requests: 1, totalTokens: 10 });
+    await clients.remove(identity.id);
   });
 });

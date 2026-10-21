@@ -1,20 +1,26 @@
 import {
   type AnalyticsResponse,
+  clientIdentityCreatedSchema,
   LLM_BACKENDS,
   nodeInfoSchema,
   sseEventSchema,
+  usageAgentsResponseSchema,
+  usageClientsResponseSchema,
   usageErrorsResponseSchema,
   usageModelsResponseSchema,
   usageOverviewResponseSchema,
   usageRequestRowSchema,
   usageRequestsResponseSchema,
   USAGE_RANGES,
+  type ClientIdentityCreated,
   type LlmBackend,
   type LlmPortSnapshot,
   type NodeCreatePayload,
   type NodeInfo,
   type NodePatchPayload,
   type SseEvent,
+  type UsageAgentsResponse,
+  type UsageClientsResponse,
   type UsageErrorsResponse,
   type UsageModelsResponse,
   type UsageOverviewResponse,
@@ -641,7 +647,7 @@ export async function fetchUsageOverview(
 
 export async function fetchUsageRequests(
   range: UsageRangeName,
-  opts: { nodeId?: string; model?: string; errorOnly?: boolean; sig?: string; status?: number; page?: number; limit?: number; signal?: AbortSignal } = {},
+  opts: { nodeId?: string; model?: string; errorOnly?: boolean; sig?: string; status?: number; project?: string; agentType?: string; page?: number; limit?: number; signal?: AbortSignal } = {},
 ): Promise<UsageRequestsResponse> {
   const extra: Record<string, string> = {};
   if (opts.nodeId !== undefined) extra.nodeId = opts.nodeId;
@@ -649,6 +655,8 @@ export async function fetchUsageRequests(
   if (opts.errorOnly === true) extra.errors = "1";
   if (opts.sig !== undefined) extra.sig = opts.sig;
   if (opts.status !== undefined) extra.status = String(opts.status);
+  if (opts.project !== undefined) extra.project = opts.project;
+  if (opts.agentType !== undefined) extra.agentType = opts.agentType;
   if (opts.page !== undefined) extra.page = String(opts.page);
   if (opts.limit !== undefined) extra.limit = String(opts.limit);
   const res = await fetch(`/api/v1/usage/requests?${rangeQuery(range, extra)}`, {
@@ -706,4 +714,46 @@ export async function fetchUsageModels(
   const parsed = usageModelsResponseSchema.safeParse(body);
   if (!parsed.success) throw new Error("GET /api/v1/usage/models: unexpected shape");
   return parsed.data;
+}
+
+export async function fetchUsageAgents(
+  range: UsageRangeName,
+  opts: { nodeId?: string; signal?: AbortSignal } = {},
+): Promise<UsageAgentsResponse> {
+  const res = await fetch(`/api/v1/usage/agents?${rangeQuery(range, opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {})}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/agents failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageAgentsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/agents: unexpected shape");
+  return parsed.data;
+}
+
+export async function fetchUsageClients(signal?: AbortSignal): Promise<UsageClientsResponse> {
+  const res = await fetch(`/api/v1/usage/clients`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/clients failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageClientsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/clients: unexpected shape");
+  return parsed.data;
+}
+
+export async function createUsageClient(input: { name: string; project?: string; agentType?: string }): Promise<ClientIdentityCreated> {
+  const res = await fetch(`/api/v1/usage/clients`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(`POST /api/v1/usage/clients failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = clientIdentityCreatedSchema.safeParse(body);
+  if (!parsed.success) throw new Error("POST /api/v1/usage/clients: unexpected shape");
+  return parsed.data;
+}
+
+export async function deleteUsageClient(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/usage/clients/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`DELETE /api/v1/usage/clients failed: HTTP ${res.status}`);
 }

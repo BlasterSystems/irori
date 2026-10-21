@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
 /** Body-retention caps (IR-52): the agent truncates stored bodies at these. */
@@ -137,17 +136,6 @@ export function iroriIdentityFromHeaders(headers: Record<string, string | string
     clientProject: project,
     clientAgentType: agentParsed.success ? agentParsed.data : null,
   };
-}
-
-/** sha256 hex of the presented bearer token — the raw key is never stored. */
-export function bearerKeyHash(headers: Record<string, string | string[] | undefined>): string | null {
-  const raw = headers.authorization;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof value !== "string") return null;
-  const match = /^Bearer\s+(.+)$/i.exec(value.trim());
-  const token = match?.[1]?.trim();
-  if (token === undefined || token.length === 0) return null;
-  return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
 export interface RetryLineage {

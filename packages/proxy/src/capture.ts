@@ -2,7 +2,6 @@ import { randomUUID, createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import {
   CAPTURED_ENDPOINT_RE,
-  bearerKeyHash,
   normalizeErrorSignature,
   parseIroriRetryHeader,
   usageRequestSchema,
@@ -12,6 +11,7 @@ import {
   type UsagePartWire,
   type UsageRequest,
 } from "@irori/core";
+import { bearerKeyHash } from "./identity.js";
 
 /**
  * Passive capture state (ADR-0008): observes a request/response pair and

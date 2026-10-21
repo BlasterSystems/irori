@@ -158,12 +158,33 @@ export const usageAgentGroupSchema = z.object({
   lastSeenMs: z.number(),
 });
 
+export type UsageAgentGroup = z.infer<typeof usageAgentGroupSchema>;
+
 export const usageAgentsResponseSchema = z.object({
   range: usageRangeSchema,
   groups: z.array(usageAgentGroupSchema),
 });
 
 export type UsageAgentsResponse = z.infer<typeof usageAgentsResponseSchema>;
+
+/** One issued client identity (IR-55) — the key itself is never listed. */
+export const clientIdentityInfoSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  project: z.string().nullable(),
+  agentType: z.enum(["main", "subagent"]).nullable(),
+  /** sha256 fingerprint of the issued key; null for header-only identities. */
+  keyHash: z.string().nullable(),
+  createdAtMs: z.number().int(),
+});
+export type ClientIdentityInfo = z.infer<typeof clientIdentityInfoSchema>;
+
+export const usageClientsResponseSchema = z.object({ clients: z.array(clientIdentityInfoSchema) });
+export type UsageClientsResponse = z.infer<typeof usageClientsResponseSchema>;
+
+/** Creation response — carries the plaintext key exactly once. */
+export const clientIdentityCreatedSchema = clientIdentityInfoSchema.extend({ key: z.string().min(1) });
+export type ClientIdentityCreated = z.infer<typeof clientIdentityCreatedSchema>;
 
 /** Common filters across the usage endpoints. */
 export interface UsageFilters {
