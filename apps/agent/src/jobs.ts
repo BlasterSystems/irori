@@ -24,12 +24,21 @@ const AGENT_UPDATE_SCRIPT = [
   'BASE="${BASE%/agent-ws}"',
   'BASE="${BASE%/}"',
   'echo "[irori] updating agent bundle from $BASE"',
-  'curl -fsSL --max-time 300 "$BASE/agent/irori-agent.mjs" -o /opt/irori/irori-agent.mjs.new',
-  "node --check /opt/irori/irori-agent.mjs.new",
+  // The transient unit gets the manager's default PATH — the agent's pinned
+  // node (/opt/irori/node/bin, node 24) is NOT on it, and the system node may
+  // be too old. Prefer the pinned binary, fall back to PATH.
+  'NODE_BIN="/opt/irori/node/bin/node"',
+  'if [ ! -x "$NODE_BIN" ]; then NODE_BIN="$(command -v node)"; fi',
+  '[ -n "$NODE_BIN" ] || { echo "no node binary found for the syntax check"; exit 1; }',
+  // Check under a .mjs name: node --key refuses the ".new" extension
+  // (ERR_UNKNOWN_FILE_EXTENSION), and a failed check must leave the old
+  // bundle in place — the download only lands on the final name after it.
+  'curl -fsSL --max-time 300 "$BASE/agent/irori-agent.mjs" -o /opt/irori/.irori-agent.check.mjs',
+  '"$NODE_BIN" --check /opt/irori/.irori-agent.check.mjs',
   "if [ -f /opt/irori/irori-agent.mjs ]; then",
   "  cp -f /opt/irori/irori-agent.mjs /opt/irori/irori-agent.mjs.bak",
   "fi",
-  "mv -f /opt/irori/irori-agent.mjs.new /opt/irori/irori-agent.mjs",
+  "mv -f /opt/irori/.irori-agent.check.mjs /opt/irori/irori-agent.mjs",
   'echo "[irori] bundle replaced — restarting irori-agent"',
   "systemctl restart irori-agent.service",
 ].join("\n");
