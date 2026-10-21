@@ -1,6 +1,7 @@
 # ADR-0009: Server-side download queue and NAS-preferred store placement
 
-- **Status:** Proposed
+- **Status:** Accepted
+- **Accepted:** 2026-10-21 — owner approval after the IRI-014/IRI-015 review loops (queue + NAS placement implemented and verified; the output-drift risk is closed by modelctl v0.21.0 `queue --json`, with the line parser kept as fallback for older pins)
 - **Date:** 2026-10-20
 - **Decision owners:** operator
 - **Scope:** Model downloads, jobs subsystem, model-ops node selection
