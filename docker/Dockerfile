@@ -9,6 +9,7 @@ RUN corepack enable
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/db/package.json packages/db/
+COPY packages/proxy/package.json packages/proxy/
 COPY apps/server/package.json apps/server/
 COPY apps/agent/package.json apps/agent/
 COPY apps/web/package.json apps/web/
@@ -16,7 +17,7 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
-RUN pnpm --filter @irori/core --filter @irori/db --filter @irori/server --filter @irori/agent --filter @irori/web build
+RUN pnpm --filter @irori/core --filter @irori/db --filter @irori/proxy --filter @irori/server --filter @irori/agent --filter @irori/web build
 
 # --- server role -----------------------------------------------------------
 FROM node:24-alpine AS server
