@@ -535,7 +535,6 @@ export const clientIdentities = pgTable(
     keyHash: text("key_hash").unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("client_identities_key_idx").on(t.keyHash)],
 );
 
 /**

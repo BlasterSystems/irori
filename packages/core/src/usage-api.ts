@@ -163,6 +163,8 @@ export type UsageAgentGroup = z.infer<typeof usageAgentGroupSchema>;
 export const usageAgentsResponseSchema = z.object({
   range: usageRangeSchema,
   groups: z.array(usageAgentGroupSchema),
+  /** True when high cardinality exceeded the 200-group cap. */
+  truncated: z.boolean().default(false),
 });
 
 export type UsageAgentsResponse = z.infer<typeof usageAgentsResponseSchema>;

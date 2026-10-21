@@ -282,6 +282,28 @@ d("usage store (postgres)", () => {
     expect(bare[0]!.clientProject).toBeNull();
   });
 
+  it("resolves a key issued after its misses were cached (TTL invalidation, IR-55)", async () => {
+    const clients = createUsageClients(handle!.db);
+    const store = createUsageStore(handle!.db);
+    const run = randomUUID().slice(0, 8);
+    const key = `irn_${run}`;
+    const keyHash = createHash("sha256").update(key, "utf8").digest("hex");
+    const addr = `10.6.${run.length % 200}.4`;
+    // 1) Unknown key: the resolver caches the miss.
+    await store.insertBatch(nodeId, [usageRequest({ clientKeyHash: keyHash, sourceAddr: addr })]);
+    let rows = await store.requests({ range: "1h", page: 1, limit: 5 });
+    expect(rows.rows.find((r) => r.clientKeyHash === keyHash)?.clientName).toBeNull();
+    // 2) Identity created afterwards invalidates the cache → next batch resolves.
+    await handle!.db.execute(sql`delete from client_identities where name = 'late-key'`); // shared-DB reruns
+    await clients.create({ name: "late-key", project: "irori", agentType: "subagent" });
+    // (create() generated its own key; point the registry at the client's key.)
+    await handle!.db.execute(sql`update client_identities set key_hash = ${keyHash} where name = 'late-key'`);
+    await store.insertBatch(nodeId, [usageRequest({ clientKeyHash: keyHash, sourceAddr: addr, totalTokens: 77 })]);
+    rows = await store.requests({ range: "1h", page: 1, limit: 5 });
+    const late = rows.rows.find((r) => r.totalTokens === 77);
+    expect(late).toMatchObject({ clientName: "late-key", clientProject: "irori", clientAgentType: "subagent" });
+  });
+
   it("groups the agents view across identified and fallback clients (IR-55)", async () => {
     const clients = createUsageClients(handle!.db);
     const identity = await clients.create({ name: "omp", project: "irori", agentType: "main" });

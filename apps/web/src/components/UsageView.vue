@@ -201,6 +201,7 @@ onMounted(() => {
   tab.value = parsed.tab;
   range.value = parsed.range as UsageRangeName;
   window.addEventListener("hashchange", onHashChange);
+  void loadClients(); // project filter options (IR-55)
   void load();
 });
 
@@ -212,6 +213,8 @@ watch([tab, range, errorOnly, statusFilter, projectFilter, agentTypeFilter], () 
   page.value = 1;
   sigFilter.value = tab.value === "requests" ? sigFilter.value : null;
   drawer.value = null;
+  clientsOpen.value = false; // a one-time key must never linger across tabs
+  issuedKey.value = null;
   syncHash();
   void load();
 });

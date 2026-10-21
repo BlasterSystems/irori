@@ -89,7 +89,7 @@ export const usageRequestSchema = z.object({
   /** sha256 hex of the presented bearer token; raw keys are never stored. */
   clientKeyHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().default(null),
   /** IR-55 retry lineage (X-Irori-Retry header contract). */
-  retryAttempt: z.number().int().nonnegative().nullable().default(null),
+  retryAttempt: z.number().int().nonnegative().max(1_000_000).nullable().default(null),
   retryKind: z.string().min(1).max(120).nullable().default(null),
   retryStatus: z.string().min(1).max(120).nullable().default(null),
   retrySupersededBy: z.string().min(1).max(120).nullable().default(null),
@@ -160,7 +160,9 @@ export function parseIroriRetryHeader(value: string | string[] | undefined): Ret
     if (val.length === 0) continue;
     if (key === "attempt") {
       const attempt = Number.parseInt(val, 10);
-      if (Number.isInteger(attempt) && attempt >= 0) fields.attempt = attempt;
+      // int4-safe cap: an unbounded attempt would fail the llm_requests
+      // insert and poison the agent's redelivery loop (IR-55 review).
+      if (Number.isInteger(attempt) && attempt >= 0 && attempt <= 1_000_000) fields.attempt = attempt;
     } else if (key === "kind") {
       fields.kind = val;
     } else if (key === "status") {

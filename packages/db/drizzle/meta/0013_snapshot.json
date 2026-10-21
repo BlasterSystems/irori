@@ -1,5 +1,5 @@
 {
-  "id": "d7f0c188-12f5-46df-90dd-a2878a249a59",
+  "id": "74a73982-fd50-4cbe-984a-fa00a84dbfba",
   "prevId": "94105187-5607-4e24-93cf-f7bcbd90bf20",
   "version": "7",
   "dialect": "postgresql",
@@ -338,23 +338,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "client_identities_key_idx": {
-          "name": "client_identities_key_idx",
-          "columns": [
-            {
-              "expression": "key_hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {

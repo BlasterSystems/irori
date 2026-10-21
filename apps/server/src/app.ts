@@ -432,8 +432,9 @@ export function createApp(deps: AppDeps): Express {
         agentType: body.agentType === "main" || body.agentType === "subagent" ? body.agentType : null,
       });
       res.status(201).json(created);
-    } catch (err) {
-      res.status(400).json({ error: err instanceof Error ? err.message : "identity creation failed" });
+    } catch {
+      // Validation already answered 400 above; everything else is a server fault.
+      res.status(500).json({ error: "identity creation failed" });
     }
   });
 

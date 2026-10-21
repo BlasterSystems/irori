@@ -644,12 +644,15 @@ export function createUsageStore(db: Db): UsageStore {
         where ${where}
         group by 1, 2, 3, 4, 5
         order by sum(coalesce(r.total_tokens, 0)) desc, max(r.received_at) desc
-        limit 200
+        limit 201
       `);
+      const truncated = rows.length > 200;
+      const visible = truncated ? rows.slice(0, 200) : rows;
       const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
       return {
         range,
-        groups: rows.map((r) => {
+        truncated,
+        groups: visible.map((r) => {
           const fallback = str(r.fallback_addr);
           const addrs = ((r.source_addrs as Array<string | null> | null) ?? []).filter((a): a is string => typeof a === "string" && a.length > 0);
           return {
