@@ -1,5 +1,5 @@
 import { and, desc, eq, lt, sql, type SQL } from "drizzle-orm";
-import { llmParts, llmRequestParts, llmRequests, usageBuckets } from "@irori/db";
+import { llmParts, llmRequestParts, llmRequestTools, llmRequests, usageBuckets } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
   usageRequestSchema,
@@ -14,9 +14,123 @@ import {
   type UsageRequest,
   type UsageRequestRow,
   type UsageRequestsResponse,
+  type UsageToolsResponse,
 } from "@irori/core";
 import type { Granularity } from "./rollups.js";
 import { resolveIdentities } from "./usage-identity.js";
+
+/* ── IR-54: tool attribution ─────────────────────────────────────────────── */
+
+/**
+ * callId → tool name ring from observed responses (bounded). A server
+ * restart forgets it: unresolved results attribute to "unknown" (documented
+ * ADR-0010 §7) — attribution never blocks or errors.
+ */
+const TOOL_NAME_RING_CAP = 50_000;
+const toolNameRing = new Map<string, string>();
+
+function rememberToolCall(id: string, name: string): void {
+  if (toolNameRing.size >= TOOL_NAME_RING_CAP) {
+    for (const key of toolNameRing.keys()) {
+      toolNameRing.delete(key);
+      if (toolNameRing.size < TOOL_NAME_RING_CAP - 10_000) break;
+    }
+  }
+  toolNameRing.set(id, name);
+}
+
+/**
+ * Largest-remainder split of `total` across `weights` — the shares sum to
+ * the total exactly (IR-54 acceptance). Zero weights → equal split.
+ */
+export function splitTokens(total: number, weights: number[]): number[] {
+  const n = weights.length;
+  if (n === 0) return [];
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (total <= 0) return weights.map(() => 0);
+  if (sum <= 0) {
+    const base = Math.floor(total / n);
+    const out = weights.map(() => base);
+    let rest = total - base * n;
+    for (let i = 0; rest > 0; i = (i + 1) % n, rest -= 1) out[i]! += 1;
+    return out;
+  }
+  const exact = weights.map((w) => (w * total) / sum);
+  const out = exact.map((v) => Math.floor(v));
+  let rest = total - out.reduce((a, b) => a + b, 0);
+  const order = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (const { i } of order) {
+    if (rest <= 0) break;
+    out[i]! += 1;
+    rest -= 1;
+  }
+  return out;
+}
+
+interface ToolAttr {
+  tool: string;
+  model: string | null;
+  calls: number;
+  errors: number;
+  argsChars: number;
+  resultChars: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+/** Merges one event's response-calls and request-results into (tool) rows. */
+function attributeTools(e: UsageRequest): ToolAttr[] {
+  const rows = new Map<string, ToolAttr>();
+  const row = (tool: string): ToolAttr => {
+    let r = rows.get(tool);
+    if (r === undefined) {
+      r = { tool, model: e.model, calls: 0, errors: 0, argsChars: 0, resultChars: 0, promptTokens: 0, completionTokens: 0 };
+      rows.set(tool, r);
+    }
+    return r;
+  };
+
+  // Request side first: results refer to calls made in EARLIER responses.
+  const byCall = new Map<string, { resultChars: number; errors: number }>();
+  for (const result of e.toolResults) {
+    const name = toolNameRing.get(result.callId) ?? "unknown";
+    const agg = byCall.get(name) ?? { resultChars: 0, errors: 0 };
+    agg.resultChars += result.resultChars;
+    if (result.error) agg.errors += 1;
+    byCall.set(name, agg);
+  }
+  const promptShares = splitTokens(e.promptTokens ?? 0, [...byCall.values()].map((v) => v.resultChars));
+  for (const [name, agg] of byCall) {
+    const r = row(name);
+    r.resultChars += agg.resultChars;
+    r.errors += agg.errors;
+  }
+  for (const [i, name] of [...byCall.keys()].entries()) {
+    row(name).promptTokens += promptShares[i] ?? 0;
+  }
+
+  // Response side: per-call entries grouped by name; completion tokens split
+  // by assembled args length; ids remembered for the NEXT request's results.
+  const byName = new Map<string, { calls: number; argsChars: number }>();
+  for (const call of e.respTools) {
+    const agg = byName.get(call.name) ?? { calls: 0, argsChars: 0 };
+    agg.calls += 1;
+    agg.argsChars += call.argsChars;
+    byName.set(call.name, agg);
+    if (call.id !== null) rememberToolCall(call.id, call.name);
+  }
+  const completionShares = splitTokens(e.completionTokens ?? 0, [...byName.values()].map((v) => v.argsChars));
+  for (const [i, name] of [...byName.keys()].entries()) {
+    const agg = byName.get(name)!;
+    const r = row(name);
+    r.calls += agg.calls;
+    r.argsChars += agg.argsChars;
+    r.completionTokens += completionShares[i] ?? 0;
+  }
+  return [...rows.values()];
+}
 
 /**
  * Usage persistence + read models (M8, ADR-0008 §4/§6). Durable inserts are
@@ -37,6 +151,8 @@ export interface UsageStore {
   models(filters: UsageFilters): Promise<UsageModelsResponse>;
   /** Client-identity groups over raw rows (IR-55 Agents view). */
   agents(filters: UsageFilters): Promise<UsageAgentsResponse>;
+  /** Tool attribution table + top-tool token series (IR-54 Tools view). */
+  tools(filters: UsageFilters): Promise<UsageToolsResponse>;
   /** Deletes raw requests older than `olderThan`; returns the deleted count. */
   pruneRaw(olderThan: Date): Promise<number>;
   /** Deletes usage buckets of one granularity older than `keepDays`. */
@@ -277,6 +393,13 @@ export function createUsageStore(db: Db): UsageStore {
             });
           if (joinRows.length > 0) await tx.insert(llmRequestParts).values(joinRows).onConflictDoNothing();
         });
+      }
+      // IR-54: attribute tool usage for NEW rows only (replays are no-ops).
+      const toolRows = parsedEvents
+        .filter((e) => insertedIds.has(e.id) && (e.respTools.length > 0 || e.toolResults.length > 0))
+        .flatMap((e) => attributeTools(e).map((row) => ({ ...row, requestId: e.id })));
+      if (toolRows.length > 0) {
+        await db.insert(llmRequestTools).values(toolRows).onConflictDoNothing();
       }
       return inserted.length;
     },
@@ -619,10 +742,12 @@ export function createUsageStore(db: Db): UsageStore {
       };
     },
 
-    async agents({ range, nodeId }) {
+    async agents({ range, nodeId, project, agentType }) {
       const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
       const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`];
       if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
+      if (project !== undefined) conds.push(sql`r.client_project = ${project}`);
+      if (agentType !== undefined) conds.push(sql`r.client_agent_type = ${agentType}`);
       const where = sql.join(conds, sql` and `);
       // Identified rows group by their resolved identity; rows with none group
       // per source address (the fallback label, IR-55).
@@ -669,6 +794,72 @@ export function createUsageStore(db: Db): UsageStore {
             lastSeenMs: new Date(String(r.last_seen)).getTime(),
           };
         }),
+      };
+    },
+
+    async tools({ range, nodeId, model, project, agentType }) {
+      const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
+      const granularity = usageGranularity(range);
+      const bucket = sql.raw(`'${granularity === "day" ? "day" : "hour"}'`);
+      const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`];
+      if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
+      if (model !== undefined) conds.push(sql`r.model = ${model}`);
+      if (project !== undefined) conds.push(sql`r.client_project = ${project}`);
+      if (agentType !== undefined) conds.push(sql`r.client_agent_type = ${agentType}`);
+      const where = sql.join(conds, sql` and `);
+
+      const rows = await db.execute(sql`
+        select t.tool, t.model,
+               sum(t.calls)::int as calls, sum(t.errors)::int as errors,
+               sum(t.args_chars)::int as args_chars, sum(t.result_chars)::int as result_chars,
+               sum(t.prompt_tokens)::int as prompt_tokens, sum(t.completion_tokens)::int as completion_tokens,
+               max(r.received_at) as last_seen
+        from llm_request_tools t
+        join llm_requests r on r.id = t.request_id
+        where ${where}
+        group by t.tool, t.model
+        order by sum(t.prompt_tokens + t.completion_tokens) desc, max(r.received_at) desc
+        limit 100
+      `);
+
+      // Token series for the top 8 DISTINCT tools by attributed tokens.
+      const topTools = [...new Set((rows as unknown as Array<{ tool: string }>).map((r) => r.tool))].slice(0, 8);
+      let series: UsageToolsResponse["series"] = [];
+      if (topTools.length > 0) {
+        const toolList = sql.join(topTools.map((tool) => sql`${tool}`), sql`, `);
+        const seriesRows = await db.execute(sql`
+          select t.tool, date_trunc(${bucket}, r.received_at) as t,
+                 sum(t.prompt_tokens + t.completion_tokens)::int as tokens
+          from llm_request_tools t
+          join llm_requests r on r.id = t.request_id
+          where ${where} and t.tool in (${toolList})
+          group by t.tool, 2
+          order by 2
+        `);
+        const byTool = new Map<string, Array<{ t: string; tokens: number }>>();
+        for (const r of seriesRows as unknown as Array<{ tool: string; t: string; tokens: number }>) {
+          const list = byTool.get(r.tool) ?? [];
+          list.push({ t: new Date(r.t).toISOString(), tokens: Number(r.tokens) });
+          byTool.set(r.tool, list);
+        }
+        series = [...byTool.entries()].map(([tool, points]) => ({ tool, points }));
+      }
+
+      const int = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : 0);
+      return {
+        range,
+        tools: (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
+          tool: String(r.tool),
+          model: typeof r.model === "string" && r.model.length > 0 ? r.model : null,
+          calls: int(r.calls),
+          errors: int(r.errors),
+          argsChars: int(r.args_chars),
+          resultChars: int(r.result_chars),
+          promptTokens: int(r.prompt_tokens),
+          completionTokens: int(r.completion_tokens),
+          lastSeenMs: new Date(String(r.last_seen)).getTime(),
+        })),
+        series,
       };
     },
 
@@ -747,6 +938,8 @@ function rowToRequest(raw: Record<string, unknown>): UsageRequestRow {
     resBytes: int(raw.resBytes) ?? 0,
     sourceAddr: str(raw.sourceAddr),
     parts: [],
+    respTools: [],
+    toolResults: [],
     clientKeyHash: str(raw.clientKeyHash),
     clientName: str(raw.clientName),
     clientProject: str(raw.clientProject),

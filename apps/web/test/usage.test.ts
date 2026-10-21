@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   activityCharts,
+  agentGroupKey,
+  agentGroupLabel,
+  agentGroupSource,
+  clientLabel,
   errorGroupRows,
   fmtBucketShort,
   fmtDurationMs,
@@ -9,6 +13,7 @@ import {
   mergeLiveRequest,
   parseUsageHash,
   requestTier,
+  retryText,
   statusText,
   tierChipClass,
   tokenMix,
@@ -16,7 +21,7 @@ import {
   usageChart,
   usageHashFor,
 } from "../src/usage";
-import type { UsageEvent, UsageRequestRow } from "@irori/core";
+import type { UsageAgentGroup, UsageEvent, UsageRequestRow } from "@irori/core";
 
 function row(overrides: Partial<UsageRequestRow> = {}): UsageRequestRow {
   return {
@@ -53,6 +58,8 @@ function row(overrides: Partial<UsageRequestRow> = {}): UsageRequestRow {
     retryKind: null,
     retryStatus: null,
     retrySupersededBy: null,
+    respTools: [],
+    toolResults: [],
     receivedAtMs: 1_700_000_000_000,
     ...overrides,
   };
@@ -66,6 +73,41 @@ describe("usage formatters", () => {
     expect(fmtTokens(12_345)).toBe("12k");
     expect(fmtTokens(3_400_000)).toBe("3.4M");
     expect(fmtTokens(null)).toBe("—");
+  });
+
+  it("labels clients with source-IP fallback (IR-55)", () => {
+    expect(clientLabel({ clientName: "omp", clientProject: "irori", sourceAddr: "10.0.0.1" })).toBe("omp");
+    expect(clientLabel({ clientName: null, clientProject: "irori", sourceAddr: "10.0.0.1" })).toBe("irori");
+    expect(clientLabel({ clientName: null, clientProject: null, sourceAddr: "10.0.0.1" })).toBe("10.0.0.1");
+    expect(clientLabel({ clientName: null, clientProject: null, sourceAddr: null })).toBe("unidentified");
+    expect(retryText({ retryAttempt: 2, retryKind: "auto-retry", retryStatus: "recovered", retrySupersededBy: "resp_1" })).toBe(
+      "attempt 2 · auto-retry · recovered · supersedes resp_1",
+    );
+    expect(retryText({ retryAttempt: null, retryKind: null, retryStatus: null, retrySupersededBy: null })).toBeNull();
+  });
+
+  it("labels and keys agent groups (IR-55)", () => {
+    const group = (over: Partial<UsageAgentGroup>): UsageAgentGroup => ({
+      project: null,
+      agentType: "main",
+      name: null,
+      keyHash: null,
+      sourceAddrs: ["10.0.0.2"],
+      requests: 1,
+      errors: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      lastSeenMs: 0,
+      ...over,
+    });
+    expect(agentGroupLabel(group({ name: "omp" }))).toBe("omp");
+    expect(agentGroupLabel(group({ name: null, project: "irori" }))).toBe("irori");
+    expect(agentGroupLabel(group({ name: null, project: null, sourceAddrs: ["10.0.0.2"] }))).toBe("10.0.0.2");
+    expect(agentGroupSource(group({ name: "omp", keyHash: "a".repeat(64) }))).toBe("issued key");
+    expect(agentGroupSource(group({ name: "omp", keyHash: null }))).toBe("header-declared");
+    expect(agentGroupSource(group({ name: null, project: null }))).toBe("source IP fallback");
+    expect(agentGroupKey(group({ keyHash: "b".repeat(64) }))).toContain("b".repeat(64));
   });
 
   it("formats durations, rates and buckets", () => {

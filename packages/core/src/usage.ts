@@ -38,6 +38,28 @@ export type UsagePartMeta = z.infer<typeof usagePartMetaSchema>;
 export const clientAgentTypeSchema = z.enum(["main", "subagent"]);
 export type ClientAgentType = z.infer<typeof clientAgentTypeSchema>;
 
+/* ── Tool attribution (IR-54): capture-time, retention-independent ───────── */
+
+/** One tool call reassembled from the response's streamed tool_call deltas. */
+export const respToolSchema = z.object({
+  /** Engine call id; null when the engine never sent one (attribution keys on name). */
+  id: z.string().min(1).max(200).nullable().default(null),
+  name: z.string().min(1).max(200),
+  /** Assembled arguments length (chars) — the completion-token weight. */
+  argsChars: z.number().int().nonnegative(),
+});
+export type RespTool = z.infer<typeof respToolSchema>;
+
+/** One role:"tool" result lifted from a subsequent request body. */
+export const toolResultSchema = z.object({
+  callId: z.string().min(1).max(200),
+  /** Result content length (chars) — the prompt-token weight. */
+  resultChars: z.number().int().nonnegative(),
+  /** Best-effort: JSON content with an "error" property or "Error…" prefix. */
+  error: z.boolean().default(false),
+});
+export type ToolResult = z.infer<typeof toolResultSchema>;
+
 /**
  * LLM usage capture (M8, ADR-0008): one per-request record from the agent's
  * capture proxy. Native wire fields always; optional body parts when the
@@ -93,6 +115,10 @@ export const usageRequestSchema = z.object({
   retryKind: z.string().min(1).max(120).nullable().default(null),
   retryStatus: z.string().min(1).max(120).nullable().default(null),
   retrySupersededBy: z.string().min(1).max(120).nullable().default(null),
+  /** IR-54: tool calls reassembled from the response wire (per call). */
+  respTools: z.array(respToolSchema).max(128).default([]),
+  /** IR-54: role:"tool" results observed in this request's body. */
+  toolResults: z.array(toolResultSchema).max(512).default([]),
 });
 
 export type UsageRequest = z.infer<typeof usageRequestSchema>;

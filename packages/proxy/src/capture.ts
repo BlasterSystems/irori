@@ -8,6 +8,7 @@ import {
   type BodyRetention,
   type ClientIdentityFields,
   type RetryLineage,
+  type ToolResult,
   type UsagePartWire,
   type UsageRequest,
 } from "@irori/core";
@@ -21,6 +22,21 @@ import { bearerKeyHash } from "./identity.js";
 
 /** OpenAI-compat detection: a body that parses and carries any of these keys. */
 const OPENAI_BODY_KEYS = ["model", "messages", "prompt", "input"] as const;
+
+/**
+ * IR-54 best-effort tool-error detection on a role:"tool" content: a JSON
+ * object carrying a truthy `error` property (Go-style success payloads with
+ * `"error": null` are NOT errors), or a string starting with "Error". Never
+ * throws.
+ */
+function detectToolError(content: unknown): boolean {
+  if (typeof content === "string") return /^error\b/i.test(content.slice(0, 64).trimStart());
+  if (content !== null && typeof content === "object" && !Array.isArray(content)) {
+    const err = (content as Record<string, unknown>).error;
+    return err !== null && err !== undefined && err !== "" && err !== false;
+  }
+  return false;
+}
 
 /** Bounded SSE line re-assembly: bigger lines are treated as unparseable. */
 const MAX_SSE_LINE_BYTES = 1024 * 1024;
@@ -78,6 +94,8 @@ export class Capture {
   private readonly toolCalls = new Map<number, { id: string | null; name: string; args: string }>();
   /** Bounded raw error body (≤16 KiB) for the `error` part when retention is on. */
   private errorBodyRaw: string | null = null;
+  /** IR-54: role:"tool" results lifted from the request body (always, not just when retained). */
+  private toolResults: ToolResult[] = [];
 
   constructor(init: CaptureInit) {
     this.init = init;
@@ -124,6 +142,7 @@ export class Capture {
       this.reqJson = obj;
       if (typeof obj.model === "string" && obj.model.length > 0) this.model = obj.model;
       this.stream = obj.stream === true;
+      this.extractToolResults(obj);
     } catch {
       // Not JSON → not captured; forwarding is unaffected.
     } finally {
@@ -133,6 +152,26 @@ export class Capture {
 
   get isCaptured(): boolean {
     return this.captured;
+  }
+
+  /**
+   * IR-54: lifts role:"tool" results from the request snapshot. Works with
+   * retention OFF — the attribution only needs counts, never stored bytes.
+   */
+  private extractToolResults(obj: Record<string, unknown>): void {
+    const messages = Array.isArray(obj.messages) ? obj.messages : null;
+    if (messages === null) return;
+    for (const message of messages) {
+      if (message === null || typeof message !== "object") continue;
+      const m = message as Record<string, unknown>;
+      if (m.role !== "tool") continue;
+      const callId = typeof m.tool_call_id === "string" && m.tool_call_id.length > 0 && m.tool_call_id.length <= 200 ? m.tool_call_id : null;
+      if (callId === null) continue;
+      const content = m.content;
+      const text = typeof content === "string" ? content : content === null || content === undefined ? "" : JSON.stringify(content);
+      this.toolResults.push({ callId, resultChars: text.length, error: detectToolError(content) });
+      if (this.toolResults.length >= 512) return; // schema cap — stop counting
+    }
   }
 
   /** Tee one response chunk (also used for size counting on skipped requests). */
@@ -194,7 +233,9 @@ export class Capture {
       if (piece === null) continue;
       if (typeof piece.content === "string") this.contentText += piece.content;
       if (typeof piece.reasoning_content === "string") this.reasoningText += piece.reasoning_content;
-      if (Array.isArray(piece.tool_calls)) this.observeToolCallFragments(piece.tool_calls);
+      // Streamed fragments carry `index`; a non-streaming message's parallel
+      // calls do not — slot each at the next free index so calls never merge.
+      if (Array.isArray(piece.tool_calls)) this.observeToolCallFragments(piece.tool_calls, piece === c.delta);
       if (c.delta !== null && typeof c.delta === "object") {
         const delta = c.delta as Record<string, unknown>;
         const hasContent =
@@ -213,11 +254,16 @@ export class Capture {
   }
 
   /** Reassembles streamed `tool_calls` fragments by index (name/args concat). */
-  private observeToolCallFragments(fragments: unknown[]): void {
+  private observeToolCallFragments(fragments: unknown[], isDelta: boolean): void {
     for (const fragment of fragments) {
       if (fragment === null || typeof fragment !== "object") continue;
       const f = fragment as Record<string, unknown>;
-      const index = typeof f.index === "number" && Number.isInteger(f.index) && f.index >= 0 ? f.index : 0;
+      const index =
+        typeof f.index === "number" && Number.isInteger(f.index) && f.index >= 0
+          ? f.index
+          : isDelta
+            ? 0
+            : this.toolCalls.size;
       let entry = this.toolCalls.get(index);
       if (entry === undefined) {
         entry = { id: null, name: "", args: "" };
@@ -342,6 +388,11 @@ export class Capture {
       retryKind: this.init.retry.kind,
       retryStatus: this.init.retry.status,
       retrySupersededBy: this.init.retry.supersededBy,
+      respTools: [...this.toolCalls.values()]
+        .filter((c) => c.name.length > 0 && c.name.length <= 200)
+        .slice(0, 128)
+        .map((c) => ({ id: c.id !== null && c.id.length <= 200 ? c.id : null, name: c.name, argsChars: c.args.length })),
+      toolResults: this.toolResults,
     };
     // Capture must never produce an invalid event — drop, don't throw. A
     // parts problem must not cost the native fields either: retry without

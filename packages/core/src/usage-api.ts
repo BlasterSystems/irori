@@ -169,6 +169,30 @@ export const usageAgentsResponseSchema = z.object({
 
 export type UsageAgentsResponse = z.infer<typeof usageAgentsResponseSchema>;
 
+/** One (tool × model) attribution row of the Tools view (IR-54). */
+export const usageToolRowSchema = z.object({
+  tool: z.string(),
+  model: z.string().nullable(),
+  calls: z.number().int(),
+  errors: z.number().int(),
+  argsChars: z.number().int(),
+  resultChars: z.number().int(),
+  /** Attributed shares (largest-remainder of the owning requests' totals). */
+  promptTokens: z.number().int(),
+  completionTokens: z.number().int(),
+  lastSeenMs: z.number(),
+});
+export type UsageToolRow = z.infer<typeof usageToolRowSchema>;
+
+export const usageToolSeriesPointSchema = z.object({ t: z.string(), tokens: z.number().int() });
+export const usageToolsResponseSchema = z.object({
+  range: usageRangeSchema,
+  tools: z.array(usageToolRowSchema),
+  /** Token series for the top tools (tokens = prompt + completion shares). */
+  series: z.array(z.object({ tool: z.string(), points: z.array(usageToolSeriesPointSchema) })),
+});
+export type UsageToolsResponse = z.infer<typeof usageToolsResponseSchema>;
+
 /** One issued client identity (IR-55) — the key itself is never listed. */
 export const clientIdentityInfoSchema = z.object({
   id: z.string().uuid(),

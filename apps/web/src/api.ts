@@ -11,6 +11,7 @@ import {
   usageOverviewResponseSchema,
   usageRequestRowSchema,
   usageRequestsResponseSchema,
+  usageToolsResponseSchema,
   USAGE_RANGES,
   type ClientIdentityCreated,
   type LlmBackend,
@@ -26,6 +27,7 @@ import {
   type UsageOverviewResponse,
   type UsageRequestRow,
   type UsageRequestsResponse,
+  type UsageToolsResponse,
 } from "@irori/core";
 
 /** Registry entries carry the node's configured probe ports (M3); older
@@ -728,6 +730,24 @@ export async function fetchUsageAgents(
   const body: unknown = await res.json();
   const parsed = usageAgentsResponseSchema.safeParse(body);
   if (!parsed.success) throw new Error("GET /api/v1/usage/agents: unexpected shape");
+  return parsed.data;
+}
+
+export async function fetchUsageTools(
+  range: UsageRangeName,
+  opts: { nodeId?: string; model?: string; signal?: AbortSignal } = {},
+): Promise<UsageToolsResponse> {
+  const extra: Record<string, string> = {};
+  if (opts.nodeId !== undefined) extra.nodeId = opts.nodeId;
+  if (opts.model !== undefined) extra.model = opts.model;
+  const res = await fetch(`/api/v1/usage/tools?${rangeQuery(range, extra)}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/tools failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageToolsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/tools: unexpected shape");
   return parsed.data;
 }
 
