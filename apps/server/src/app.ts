@@ -8,6 +8,7 @@ import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
 import type { UsageStore } from "./usage-store.js";
+import type { UsageClients } from "./usage-clients.js";
 import { type LlmHistoryResponse } from "./llm-history.js";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
@@ -99,6 +100,8 @@ export interface AppDeps {
   getCleanup: () => CleanupService | null;
   /** Null while degraded: usage routes answer 503 (M8). */
   getUsage: () => UsageStore | null;
+  /** Null while degraded: client-identity routes answer 503 (IR-55). */
+  getUsageClients: () => UsageClients | null;
   /** Null while degraded: download-queue routes answer 503 (IRI-014). */
   getDownloads: () => DownloadQueueService | null;
   dbHealthy: () => Promise<boolean>;
@@ -328,12 +331,14 @@ export function createApp(deps: AppDeps): Express {
     if (usage === null) res.status(503).json({ error: "database unavailable" });
     return usage;
   };
-  const usageFilters = (req: Request): { range: UsageRange; nodeId?: string; model?: string } | null => {
+  const usageFilters = (req: Request): { range: UsageRange; nodeId?: string; model?: string; project?: string; agentType?: "main" | "subagent" } | null => {
     const range = usageRangeSchema.safeParse(req.query.range);
     if (!range.success) return null;
     const nodeId = typeof req.query.nodeId === "string" && UUID_RE.test(req.query.nodeId) ? req.query.nodeId : undefined;
     const model = typeof req.query.model === "string" && req.query.model.length > 0 && req.query.model.length <= 300 ? req.query.model : undefined;
-    return { range: range.data, nodeId, model };
+    const project = typeof req.query.project === "string" && req.query.project.length > 0 && req.query.project.length <= 200 ? req.query.project : undefined;
+    const agentType = req.query.agentType === "main" || req.query.agentType === "subagent" ? req.query.agentType : undefined;
+    return { range: range.data, nodeId, model, project, agentType };
   };
 
   app.get("/api/v1/usage/overview", async (req, res) => {
@@ -384,6 +389,62 @@ export function createApp(deps: AppDeps): Express {
     const filters = usageFilters(req);
     if (filters === null) return res.status(400).json({ error: "unknown range" });
     res.json(await usage.models(filters));
+  });
+
+  // ---- IR-55: client identity ----
+  const requireUsageClients = (res: Response): UsageClients | null => {
+    const clients = deps.getUsageClients();
+    if (clients === null) res.status(503).json({ error: "database unavailable" });
+    return clients;
+  };
+
+  app.get("/api/v1/usage/agents", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    res.json(await usage.agents(filters));
+  });
+
+  app.get("/api/v1/usage/clients", async (_req, res) => {
+    const clients = requireUsageClients(res);
+    if (clients === null) return;
+    res.json({ clients: await clients.list() });
+  });
+
+  app.post("/api/v1/usage/clients", async (req, res) => {
+    const clients = requireUsageClients(res);
+    if (clients === null) return;
+    const body = req.body as { name?: unknown; project?: unknown; agentType?: unknown };
+    if (typeof body.name !== "string" || body.name.trim().length === 0) {
+      return res.status(400).json({ error: "name is required" });
+    }
+    if (body.project !== undefined && body.project !== null && (typeof body.project !== "string" || body.project.length > 200)) {
+      return res.status(400).json({ error: "project must be a string of at most 200 chars" });
+    }
+    if (body.agentType !== undefined && body.agentType !== null && body.agentType !== "main" && body.agentType !== "subagent") {
+      return res.status(400).json({ error: "agentType must be main or subagent" });
+    }
+    try {
+      const created = await clients.create({
+        name: body.name,
+        project: typeof body.project === "string" ? body.project : null,
+        agentType: body.agentType === "main" || body.agentType === "subagent" ? body.agentType : null,
+      });
+      res.status(201).json(created);
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : "identity creation failed" });
+    }
+  });
+
+  app.delete("/api/v1/usage/clients/:id", async (req, res) => {
+    const clients = requireUsageClients(res);
+    if (clients === null) return;
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid identity id" });
+    const removed = await clients.remove(id);
+    if (!removed) return res.status(404).json({ error: "identity not found" });
+    res.json({ ok: true });
   });
 
   // ---- M7: cleanup drawer (SPEC §11.6) ----

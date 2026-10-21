@@ -5,6 +5,7 @@ import {
   usageRequestSchema,
   usageGranularity,
   usageRangeMs,
+  type UsageAgentsResponse,
   type UsageErrorsResponse,
   type UsageFilters,
   type UsageModelsResponse,
@@ -15,6 +16,7 @@ import {
   type UsageRequestsResponse,
 } from "@irori/core";
 import type { Granularity } from "./rollups.js";
+import { resolveIdentities } from "./usage-identity.js";
 
 /**
  * Usage persistence + read models (M8, ADR-0008 §4/§6). Durable inserts are
@@ -33,6 +35,8 @@ export interface UsageStore {
   requestById(id: string): Promise<UsageRequestRow | null>;
   errorGroups(filters: UsageFilters): Promise<UsageErrorsResponse>;
   models(filters: UsageFilters): Promise<UsageModelsResponse>;
+  /** Client-identity groups over raw rows (IR-55 Agents view). */
+  agents(filters: UsageFilters): Promise<UsageAgentsResponse>;
   /** Deletes raw requests older than `olderThan`; returns the deleted count. */
   pruneRaw(olderThan: Date): Promise<number>;
   /** Deletes usage buckets of one granularity older than `keepDays`. */
@@ -176,8 +180,14 @@ export function createUsageStore(db: Db): UsageStore {
       for (const event of events) {
         const parsed = usageRequestSchema.safeParse(event);
         if (!parsed.success) continue; // malformed frames never block the rest
-        const e = parsed.data;
-        parsedEvents.push(e);
+        parsedEvents.push(parsed.data);
+      }
+      if (parsedEvents.length === 0) return 0;
+      // IR-55: resolve issued-key identities once per batch; header-declared
+      // fields fill what the key match does not set (ADR-0010 §8).
+      const identities = await resolveIdentities(db, [...new Set(parsedEvents.map((e) => e.clientKeyHash).filter((h): h is string => h !== null))]);
+      for (const e of parsedEvents) {
+        const mapped = e.clientKeyHash !== null ? identities.get(e.clientKeyHash) ?? null : null;
         rows.push({
           id: e.id,
           nodeId,
@@ -203,9 +213,16 @@ export function createUsageStore(db: Db): UsageStore {
           reqBytes: e.reqBytes,
           resBytes: e.resBytes,
           sourceAddr: e.sourceAddr,
+          clientKeyHash: e.clientKeyHash,
+          clientName: e.clientName ?? mapped?.name ?? null,
+          clientProject: e.clientProject ?? mapped?.project ?? null,
+          clientAgentType: e.clientAgentType ?? mapped?.agentType ?? null,
+          retryAttempt: e.retryAttempt,
+          retryKind: e.retryKind,
+          retryStatus: e.retryStatus,
+          retrySupersededBy: e.retrySupersededBy,
         });
       }
-      if (rows.length === 0) return 0;
       const inserted = await db
         .insert(llmRequests)
         .values(rows)
@@ -404,7 +421,7 @@ export function createUsageStore(db: Db): UsageStore {
       return { range, granularity, kpis, series, tokenMix };
     },
 
-    async requests({ range, nodeId, model, page, limit, errorOnly, sig, status }) {
+    async requests({ range, nodeId, model, project, agentType, page, limit, errorOnly, sig, status }) {
       const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
       const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`];
       if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
@@ -412,6 +429,8 @@ export function createUsageStore(db: Db): UsageStore {
       if (errorOnly === true) conds.push(sql`(r.error is not null or r.status >= 400)`);
       if (sig !== undefined) conds.push(sql`r.error_sig = ${sig}`);
       if (status !== undefined) conds.push(sql`r.status = ${status}`);
+      if (project !== undefined) conds.push(sql`r.client_project = ${project}`);
+      if (agentType !== undefined) conds.push(sql`r.client_agent_type = ${agentType}`);
       const where = sql.join(conds, sql` and `);
 
       const totalRows = await db.execute(sql`select count(*)::int as total from llm_requests r where ${where}`);
@@ -426,7 +445,12 @@ export function createUsageStore(db: Db): UsageStore {
           r.cached_tokens as "cachedTokens", r.reasoning_tokens as "reasoningTokens",
           r.total_tokens as "totalTokens", r.engine_meta as "engineMeta",
           r.req_bytes as "reqBytes", r.res_bytes as "resBytes",
-          r.source_addr as "sourceAddr", r.received_at as "receivedAt"
+          r.source_addr as "sourceAddr",
+          r.client_key_hash as "clientKeyHash", r.client_name as "clientName",
+          r.client_project as "clientProject", r.client_agent_type as "clientAgentType",
+          r.retry_attempt as "retryAttempt", r.retry_kind as "retryKind",
+          r.retry_status as "retryStatus", r.retry_superseded_by as "retrySupersededBy",
+          r.received_at as "receivedAt"
         from llm_requests r
         where ${where}
         order by r.received_at desc
@@ -595,6 +619,56 @@ export function createUsageStore(db: Db): UsageStore {
       };
     },
 
+    async agents({ range, nodeId }) {
+      const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
+      const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`];
+      if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
+      const where = sql.join(conds, sql` and `);
+      // Identified rows group by their resolved identity; rows with none group
+      // per source address (the fallback label, IR-55).
+      const rows = await db.execute(sql`
+        select
+          r.client_project as project, r.client_agent_type as agent_type,
+          r.client_name as name, r.client_key_hash as key_hash,
+          case when r.client_key_hash is null and r.client_name is null
+                    and r.client_project is null and r.client_agent_type is null
+               then r.source_addr else null end as fallback_addr,
+          count(*)::int as requests,
+          count(*) filter (where r.error is not null or r.status >= 400)::int as errors,
+          coalesce(sum(r.prompt_tokens), 0)::float8 as prompt_tokens,
+          coalesce(sum(r.completion_tokens), 0)::float8 as completion_tokens,
+          coalesce(sum(r.total_tokens), 0)::float8 as total_tokens,
+          max(r.received_at) as last_seen,
+          array_remove(array_agg(distinct r.source_addr), null) as source_addrs
+        from llm_requests r
+        where ${where}
+        group by 1, 2, 3, 4, 5
+        order by sum(coalesce(r.total_tokens, 0)) desc, max(r.received_at) desc
+        limit 200
+      `);
+      const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+      return {
+        range,
+        groups: rows.map((r) => {
+          const fallback = str(r.fallback_addr);
+          const addrs = ((r.source_addrs as Array<string | null> | null) ?? []).filter((a): a is string => typeof a === "string" && a.length > 0);
+          return {
+            project: str(r.project),
+            agentType: r.agent_type === "main" || r.agent_type === "subagent" ? r.agent_type : null,
+            name: str(r.name),
+            keyHash: str(r.key_hash),
+            sourceAddrs: fallback !== null && !addrs.includes(fallback) ? [...addrs, fallback] : addrs,
+            requests: Number(r.requests),
+            errors: Number(r.errors),
+            promptTokens: Number(r.prompt_tokens ?? 0),
+            completionTokens: Number(r.completion_tokens ?? 0),
+            totalTokens: Number(r.total_tokens ?? 0),
+            lastSeenMs: new Date(String(r.last_seen)).getTime(),
+          };
+        }),
+      };
+    },
+
     async pruneRaw(olderThan) {
       // IR-52: parts die with their owning rows — delete requests, release
       // their part references, then drop parts whose refcount hit zero.
@@ -670,6 +744,14 @@ function rowToRequest(raw: Record<string, unknown>): UsageRequestRow {
     resBytes: int(raw.resBytes) ?? 0,
     sourceAddr: str(raw.sourceAddr),
     parts: [],
+    clientKeyHash: str(raw.clientKeyHash),
+    clientName: str(raw.clientName),
+    clientProject: str(raw.clientProject),
+    clientAgentType: raw.clientAgentType === "main" || raw.clientAgentType === "subagent" ? raw.clientAgentType : null,
+    retryAttempt: int(raw.retryAttempt),
+    retryKind: str(raw.retryKind),
+    retryStatus: str(raw.retryStatus),
+    retrySupersededBy: str(raw.retrySupersededBy),
     receivedAtMs: dateMs(raw.receivedAt),
   };
 }

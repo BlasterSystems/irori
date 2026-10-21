@@ -1,6 +1,11 @@
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { Capture, MAX_BODY_PARSE_BYTES, MAX_RESPONSE_PARSE_BYTES } from "./capture.js";
+import {
+  bearerKeyHash,
+  iroriIdentityFromHeaders,
+  parseIroriRetryHeader,
+} from "@irori/core";
 import type { BodyRetention, UsageRequest } from "@irori/core";
 
 /**
@@ -142,6 +147,9 @@ export class CaptureProxy {
           endpoint: (req.url ?? "").split("?")[0] ?? "/",
           sourceAddr: req.socket.remoteAddress ?? null,
           retention: this.opts.retention,
+          identity: iroriIdentityFromHeaders(req.headers),
+          keyHash: bearerKeyHash(req.headers),
+          retry: parseIroriRetryHeader(req.headers["x-irori-retry"]),
         })
       : null;
 
