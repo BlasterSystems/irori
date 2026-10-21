@@ -1,6 +1,7 @@
 # ADR-0007: Hub-served agent artifacts and hub-driven updates
 
-- **Status:** Proposed
+- **Status:** Accepted
+- **Accepted:** 2026-10-21 — owner approval after production proof: the hub-served self-update loop executed successfully across all four fleet nodes (DGX-1/2/3 + NAS) repeatedly on 2026-10-21, including version gates, transient-unit semantics and hello-driven settlement
 - **Date:** 2026-10-19
 - **Decision owners:** Bruno Pires
 - **Scope:** Agent onboarding artifacts, agent update path, server image contents, job-kind surface

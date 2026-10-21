@@ -4,7 +4,7 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
-## [0.3.0] — Agent onboarding & hub-driven updates
+## [0.3.0] — Agent onboarding, usage capture, download queue & overview
 
 ### Added
 
@@ -19,14 +19,63 @@ All notable changes to Irori are recorded here. Format follows
   job settles from the node's next hello. Busy nodes (active job, running
   bench or setup) and agents older than 0.3.0 are refused — the latter get
   the install one-liner once.
+- **LLM usage capture** (IRI-009 / IR-42…50, ADR-0008): opt-in per-setup
+  pass-through capture proxy (`packages/proxy`) — byte-identical streaming,
+  fail-open passive tee with backpressure; agent-side SQLite WAL buffer +
+  batched WS sync (exactly-once by UUID, ack-driven deletion); Postgres
+  `llm_requests` + ingest-time buckets with watermark-guarded hourly/daily
+  rollups; retention 90 d raw / 1 y buckets; `/api/v1/usage/*` read API; the
+  four Usage pages (Overview, Requests, Errors, Models) with URL-hash ranges
+  and live SSE.
+- **Overview v1** (IRI-013 / IR-59…62): fleet landing page with lens segment,
+  head hero 6-stat serving grid, power card, NAS card and the all-in-one
+  telemetry feed (bounded recent-events ring + `GET /api/v1/events/recent` +
+  new `job-done`/`thermal` SSE emitters); worker PKG power row and
+  disk-warn cleanup chip.
+- **Server-side download queue + NAS placement** (IRI-014 / IR-63, ADR-0009):
+  adding a download always queues (durable `download_queue` table, migration
+  0011) — no more 409 dead-ends; pending entries drain as one
+  `download-queue` batch on the NAS-preferred store node (shared
+  `pickStoreNode` policy), dispatched on enqueue/settle/reaper tick/boot;
+  per-entry reconcile from modelctl output; retry reuses published objects;
+  web queue panel.
+- **Bulk download modal** (IRI-015 / IR-64): paste one `owner/model` per line
+  → deduped editable rows → one atomic batch (`POST /api/v1/downloads`
+  `{downloads, jobs}`, 1–50, any invalid entry rejects all); the server-side
+  reconcile prefers modelctl's `queue --json` results document (modelctl
+  ≥ 0.21.0) with the terminal-line parser as fallback.
 - `GET /api/v1/version` plus agent-version drift chips on the nodes list and
   drill-down with an Update action.
+- `docs/CONFIGURATION.md`: the env surface for server, agent, and web.
 
 ### Changed
 
 - `SPEC.md` §13 corrected to the shipped routes (removed the never-built
   `/:id/install-agent`, the wrong rotate path and the nonexistent
   `POST /api/v1/nodes/:id/test`).
+- Agent modelctl pin default raised to 0.21.3; the `modelctl-install` job
+  force-installs the pinned tag and hard-gates the installed version.
+- Dev deploy tags move to `dev-<version>-<n>` (IR-67); historical tags keep
+  their names.
+
+### Fixed
+
+- **Fleet self-update defects** (all found live during the 2026-10-21
+  rollout): `systemd-run` argv `$`-expansion ate the update script's shell
+  expansions (`--expand-environment=no`); the install job's `PATH` export
+  degraded under the HOME-less agent unit (`/root/.local/bin`); the update
+  syntax check moved to a `.mjs`-named file with the agent's pinned node.
+- **Unresolvable agent-update jobs** (IR-68): the generic
+  `POST /api/v1/nodes/:id/jobs` endpoint rejects `agent-update` (400, use the
+  dedicated endpoint); `settleAgentUpdate` settles malformed jobs failed on
+  hello instead of blocking the node forever.
+- Capture proxy: response backpressure (upstream pauses when the client
+  stops draining); capture-proxy leak on spawn failure (failed setup event
+  now emitted); transport field typed for the `capture` param.
+- Download queue: orphaned running rows (node deleted mid-batch) settle
+  failed instead of wedging; concurrent remove no longer echoes undefined
+  entries; usage-sync flush wrapped (agent crash guard).
+- Docker image builds `@irori/proxy` (the agent bundle failed to resolve it).
 
 ## [0.2.0] — M7 Analytics, disk hygiene & packaging
 
