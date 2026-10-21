@@ -30,8 +30,8 @@ describe("agent-update job (IRI-012)", () => {
 
     const script = argv.at(-1)!;
     expect(script).toContain("curl -fsSL --max-time 300");
-    expect(script).toContain('"$BASE/agent/irori-agent.mjs"');
-    expect(script).toContain("node --check");
+    expect(script).toContain('"$NODE_BIN" --check /opt/irori/.irori-agent.check.mjs');
+    expect(script).toContain('NODE_BIN="/opt/irori/node/bin/node"');
     expect(script).toContain("irori-agent.mjs.bak");
     // The restart severs the pipe: nothing may write after it.
     expect(script.trimEnd().endsWith("systemctl restart irori-agent.service")).toBe(true);
