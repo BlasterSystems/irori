@@ -18,8 +18,29 @@ beforeAll(async () => {
     let raw = "";
     req.on("data", (c: Buffer) => (raw += c.toString("utf8")));
     req.on("end", () => {
-      const body = JSON.parse(raw) as { fixture?: "calls" };
+      const body = JSON.parse(raw) as { fixture?: "calls" | "calls-nonstream" };
       res.writeHead(200, { "content-type": "application/json" });
+      if (body.fixture === "calls-nonstream") {
+        // Non-streaming parallel calls: no `index` — each must slot separately.
+        res.end(
+          JSON.stringify({
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  { id: "call_na", type: "function", function: { name: "get_weather", arguments: "{\"city\":\"SF\"}" } },
+                  { id: "call_nb", type: "function", function: { name: "get_time", arguments: "{\"tz\":\"UTC\"}" } },
+                ],
+              },
+              finish_reason: "tool_calls",
+            }],
+            usage: { prompt_tokens: 50, completion_tokens: 8, total_tokens: 58 },
+          }),
+        );
+        return;
+      }
       if (body.fixture === "calls") {
         // Parallel tool calls: fragments arrive interleaved across indices.
         const chunks = [
@@ -103,6 +124,19 @@ describe("tool attribution capture (IR-54)", () => {
         { id: "call_b", name: "get_time", argsChars: `{"tz":"UTC"}`.length },
       ]);
       expect(e.toolResults).toEqual([]);
+    });
+  });
+
+  it("keeps non-streaming parallel tool calls distinct (no index field)", async () => {
+    await withProxy(async (post, next) => {
+      const done = next();
+      await post(JSON.stringify({ model: "m", stream: false, fixture: "calls-nonstream", messages: [] }));
+      const e = await done;
+      expect(e.respTools).toEqual([
+        { id: "call_na", name: "get_weather", argsChars: 13 },
+        { id: "call_nb", name: "get_time", argsChars: 12 },
+      ]);
+      expect(e.finishReason).toBe("tool_calls");
     });
   });
 

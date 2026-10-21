@@ -291,6 +291,10 @@ describe("client identity API (IR-55)", () => {
     expect((await request(app).get("/api/v1/usage/requests?range=24h&agentType=weird")).status).toBe(200);
     const agentsCall = calls.find((c) => c.method === "agents");
     expect(agentsCall).toBeDefined();
+    expect((await request(app).get("/api/v1/usage/tools?range=24h&model=GLM")).status).toBe(200);
+    expect((await request(app).get("/api/v1/usage/tools?range=24h&project=irori&agentType=main")).status).toBe(200);
+    expect(calls.filter((c) => c.method === "tools")).toHaveLength(2);
+    expect(calls.find((c) => c.method === "tools" && c.args !== null && typeof c.args === "object" && "project" in (c.args as object))).toBeDefined();
     const requestsCalls = calls.filter((c) => c.method === "requests");
     expect(requestsCalls[0]).toMatchObject({ args: expect.objectContaining({ project: "irori", agentType: "subagent" }) });
     // The ignored agentType never reaches the store as a filter value.

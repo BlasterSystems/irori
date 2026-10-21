@@ -742,10 +742,12 @@ export function createUsageStore(db: Db): UsageStore {
       };
     },
 
-    async agents({ range, nodeId }) {
+    async agents({ range, nodeId, project, agentType }) {
       const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
       const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`];
       if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
+      if (project !== undefined) conds.push(sql`r.client_project = ${project}`);
+      if (agentType !== undefined) conds.push(sql`r.client_agent_type = ${agentType}`);
       const where = sql.join(conds, sql` and `);
       // Identified rows group by their resolved identity; rows with none group
       // per source address (the fallback label, IR-55).
@@ -795,13 +797,15 @@ export function createUsageStore(db: Db): UsageStore {
       };
     },
 
-    async tools({ range, nodeId, model }) {
+    async tools({ range, nodeId, model, project, agentType }) {
       const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
       const granularity = usageGranularity(range);
       const bucket = sql.raw(`'${granularity === "day" ? "day" : "hour"}'`);
       const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`];
       if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
       if (model !== undefined) conds.push(sql`r.model = ${model}`);
+      if (project !== undefined) conds.push(sql`r.client_project = ${project}`);
+      if (agentType !== undefined) conds.push(sql`r.client_agent_type = ${agentType}`);
       const where = sql.join(conds, sql` and `);
 
       const rows = await db.execute(sql`
@@ -818,8 +822,8 @@ export function createUsageStore(db: Db): UsageStore {
         limit 100
       `);
 
-      // Token series for the top 8 tools by attributed tokens.
-      const topTools = (rows as unknown as Array<{ tool: string }>).slice(0, 8).map((r) => r.tool);
+      // Token series for the top 8 DISTINCT tools by attributed tokens.
+      const topTools = [...new Set((rows as unknown as Array<{ tool: string }>).map((r) => r.tool))].slice(0, 8);
       let series: UsageToolsResponse["series"] = [];
       if (topTools.length > 0) {
         const toolList = sql.join(topTools.map((tool) => sql`${tool}`), sql`, `);
