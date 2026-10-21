@@ -75,7 +75,7 @@ describe("buildCommand", () => {
     expect(shell).toBe("bash");
     expect(argv[0]).toBe("bash");
     // Pinned release tag + PATH export + enforced minimum version.
-    expect(argv[2]).toContain('export PATH="$HOME/.local/bin:$PATH"');
+    expect(argv[2]).toContain('export PATH="/root/.local/bin:$PATH"');
     expect(argv[2]).toContain('uv tool install --force "git+https://github.com/piresbruno/modelctl@v0.20.1"');
     expect(argv[2]).toContain("sort -V");
     expect(() => buildCommand("modelctl-install", {}, { ...ctx, pin: "not-semver" })).toThrow(CommandBuildError);
