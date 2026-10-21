@@ -1,7 +1,7 @@
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { Capture, MAX_BODY_PARSE_BYTES, MAX_RESPONSE_PARSE_BYTES } from "./capture.js";
-import type { UsageRequest } from "@irori/core";
+import type { BodyRetention, UsageRequest } from "@irori/core";
 
 /**
  * Capture proxy (M8, ADR-0008): a raw byte pipe in front of a loopback
@@ -35,6 +35,8 @@ export interface CaptureProxyOptions {
   onEvent: (request: UsageRequest) => void;
   maxBodyBytes?: number;
   maxParseBytes?: number;
+  /** IR-52 body retention caps; null/absent = retention off (v1 behavior). */
+  retention?: BodyRetention | null;
   log?: (message: string) => void;
 }
 
@@ -47,6 +49,7 @@ export class CaptureProxy {
     onEvent: (request: UsageRequest) => void;
     maxBodyBytes: number;
     maxParseBytes: number;
+    retention: BodyRetention | null;
     log: (message: string) => void;
   };
   private server: Server | null = null;
@@ -61,6 +64,7 @@ export class CaptureProxy {
       onEvent: options.onEvent,
       maxBodyBytes: options.maxBodyBytes ?? MAX_BODY_PARSE_BYTES,
       maxParseBytes: options.maxParseBytes ?? MAX_RESPONSE_PARSE_BYTES,
+      retention: options.retention ?? null,
       log: options.log ?? (() => {}),
     };
   }
@@ -137,6 +141,7 @@ export class CaptureProxy {
           port: boundPort,
           endpoint: (req.url ?? "").split("?")[0] ?? "/",
           sourceAddr: req.socket.remoteAddress ?? null,
+          retention: this.opts.retention,
         })
       : null;
 

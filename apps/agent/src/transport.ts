@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, AgentServerMsg, BenchType, HardwareSnapshot, LlmPortSnapshot, ServerMsg, UsageRequest } from "@irori/core";
+import type { AgentMsg, AgentServerMsg, BenchType, BodyRetention, HardwareSnapshot, LlmPortSnapshot, ServerMsg, UsageRequest } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -64,7 +64,7 @@ export interface AgentTransportOptions {
     scriptStop: string,
     env: Record<string, string>,
     modelPathName: string | null,
-    capture: { proxyPort: number } | null,
+    capture: { proxyPort: number; retention: BodyRetention | null } | null,
   ) => Promise<{ ok: boolean; error: string | null }>;
   onSetupStop?: (setupId: string, gracefulMs: number) => Promise<{ ok: boolean; error: string | null }>;
   onSetupStatus?: (setupId: string) => void;
@@ -105,7 +105,7 @@ export class AgentTransport {
     scriptStop: string,
     env: Record<string, string>,
     modelPathName: string | null,
-    capture: { proxyPort: number } | null,
+    capture: { proxyPort: number; retention: BodyRetention | null } | null,
   ) => Promise<{ ok: boolean; error: string | null }>;
   private readonly onSetupStop?: (setupId: string, gracefulMs: number) => Promise<{ ok: boolean; error: string | null }>;
   private readonly onSetupStatus?: (setupId: string) => void;

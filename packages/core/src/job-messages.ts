@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { catalogModelSchema } from "./catalog.js";
 import { benchProgressMsgSchema, benchDoneMsgSchema } from "./bench.js";
-import { usageBatchMsgSchema } from "./usage.js";
+import { usageBatchMsgSchema, bodyRetentionSchema } from "./usage.js";
 
 /** Server → agent: run one job (one active per node enforced by the server). */
 export const jobRequestMsgSchema = z.object({
@@ -61,10 +61,12 @@ export const setupStartMsgSchema = z.object({
   /** When set, the agent resolves MODEL_PATH via `modelctl path --local`. */
   modelPathName: z.string().nullable().default(null),
   /** M8 capture proxy: the agent binds this port and forwards to a loopback
-   *  engine port it picks (injected as $PORT at spawn — ADR-0008 §7). */
+   *  engine port it picks (injected as $PORT at spawn — ADR-0008 §7). IR-52:
+   *  `retention` opts this setup's proxy into content-addressed body capture. */
   capture: z
     .object({
       proxyPort: z.number().int().positive(),
+      retention: bodyRetentionSchema.nullable().default(null),
     })
     .nullable()
     .default(null),

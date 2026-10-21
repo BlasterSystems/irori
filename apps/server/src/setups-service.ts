@@ -25,6 +25,7 @@ import { nodes, setupRuns, setups, setupTransfers, type Db, type NodeRecord } fr
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import type { JobsService } from "./jobs-service.js";
+import { readBodyRetention } from "./usage-retention.js";
 
 /**
  * Serving setups (M5, SPEC §7): CRUD + start/stop orchestration through the
@@ -128,6 +129,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       scriptStop: row.scriptStop,
       env: envExportsSchema.parse(row.env),
       captureProxy: row.captureProxy === true,
+      bodyRetention: row.bodyRetention === true,
       status: row.status,
       health: row.health,
       lastError: row.lastError,
@@ -366,6 +368,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
           scriptStop: input.scriptStop,
           env: input.env,
           captureProxy: input.captureProxy,
+          bodyRetention: input.bodyRetention,
         })
         .returning();
       if (!row) throw new Error("setup insert returned no row");
@@ -385,6 +388,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         ...(patch.scriptStop !== undefined ? { scriptStop: patch.scriptStop } : {}),
         ...(patch.env !== undefined ? { env: patch.env } : {}),
         ...(patch.captureProxy !== undefined ? { captureProxy: patch.captureProxy } : {}),
+        ...(patch.bodyRetention !== undefined ? { bodyRetention: patch.bodyRetention } : {}),
       });
       if (patch.port !== undefined && patch.port !== row.port) {
         await ensurePortAssigned(row.headNodeId, patch.port);
@@ -432,7 +436,10 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         scriptStop: row.scriptStop,
         env,
         modelPathName: envCfg.modelPath ? row.model : null,
-        capture: row.captureProxy === true ? { proxyPort: row.port } : null,
+        capture:
+          row.captureProxy === true
+            ? { proxyPort: row.port, retention: row.bodyRetention === true ? await readBodyRetention(deps.db) : null }
+            : null,
       });
       if (!sent) {
         await deps.db.update(setupRuns).set({ status: "failed", endedAt: new Date() }).where(eq(setupRuns.id, runId));

@@ -82,13 +82,14 @@ async function run(): Promise<void> {
   // M8 capture proxy hooks: one listener per running flagged setup (ADR-0008).
   const proxies = new Map<string, CaptureProxy>();
   const captureHooks: SetupCaptureHooks = {
-    start: async (setupId, listenPort, targetPort) => {
+    start: async (setupId, listenPort, targetPort, retention) => {
       await captureHooks.stop(setupId);
       const proxy = new CaptureProxy({
         listenPort,
         targetHost: "127.0.0.1",
         targetPort,
         setupId,
+        retention,
         onEvent: (request) => {
           try {
             buffer.add(request);

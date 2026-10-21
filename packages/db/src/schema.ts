@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   bigserial,
+  customType,
   doublePrecision,
   index,
   integer,
@@ -16,6 +17,13 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+/** Postgres bytea ↔ Node Buffer (postgres-js driver, IR-52 body parts). */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const nodeKind = pgEnum("node_kind", ["spark", "gpu-host", "nas"]);
 export const nodeRole = pgEnum("node_role", ["head", "worker", "standalone"]);
@@ -284,6 +292,8 @@ export const setups = pgTable(
     env: jsonb("env").notNull().default(sql`'{}'::jsonb`),
     /** M8: engine traffic served through the agent capture proxy (ADR-0008). */
     captureProxy: boolean("capture_proxy").notNull().default(false),
+    /** IR-52: store deduped request/response bodies for captured requests. */
+    bodyRetention: boolean("body_retention").notNull().default(false),
     status: setupStatusEnum("status").notNull().default("stopped"),
     health: setupHealthEnum("health"),
     lastError: text("last_error"),
@@ -491,6 +501,52 @@ export const llmRequests = pgTable(
     index("llm_requests_model_idx").on(t.model, t.receivedAt),
     index("llm_requests_sig_idx").on(t.errorSig, t.receivedAt),
   ],
+);
+
+/**
+ * Content-addressed body parts (IR-52): sha256-addressed gzip blobs referenced
+ * by `llm_request_parts`. `refcount` counts referencing join rows; the prune
+ * job decrements when owning `llm_requests` rows age out and deletes parts at
+ * zero — deduped bodies die with their owning rows. Retention mirrors raw
+ * requests (90 d from first store).
+ */
+export const llmParts = pgTable(
+  "llm_parts",
+  {
+    /** sha256 hex of the canonical (uncompressed) part content. */
+    hash: text("hash").primaryKey(),
+    /** Original (uncompressed) byte length. */
+    bytes: integer("bytes").notNull(),
+    /** gzip(canonical bytes). */
+    gz: bytea("gz").notNull(),
+    /** True when partCapBytes cut the canonical content at capture. */
+    truncated: boolean("truncated").notNull().default(false),
+    /** Number of `llm_request_parts` rows referencing this part. */
+    refcount: integer("refcount").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("llm_parts_created_idx").on(t.createdAt)],
+);
+
+/** Ordered part references per captured request (IR-52). */
+export const llmRequestParts = pgTable(
+  "llm_request_parts",
+  {
+    requestId: uuid("request_id")
+      .notNull()
+      .references(() => llmRequests.id, { onDelete: "cascade" }),
+    /** Ordinal within the request's stored part sequence. */
+    ordinal: integer("ordinal").notNull(),
+    hash: text("hash").notNull(),
+    /** core usagePartWireSchema kinds: message|prompt|input|response|error|marker. */
+    kind: text("kind").notNull(),
+    /** OpenAI message role for `message` parts; null otherwise. */
+    role: text("role"),
+    /** Original (uncompressed) byte length of the part content. */
+    bytes: integer("bytes").notNull(),
+    truncated: boolean("truncated").notNull().default(false),
+  },
+  (t) => [primaryKey({ columns: [t.requestId, t.ordinal] }), index("llm_request_parts_hash_idx").on(t.hash)],
 );
 
 /**

@@ -1,5 +1,5 @@
 import { and, desc, eq, lt, sql, type SQL } from "drizzle-orm";
-import { llmRequests, usageBuckets } from "@irori/db";
+import { llmParts, llmRequestParts, llmRequests, usageBuckets } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
   usageRequestSchema,
@@ -172,10 +172,12 @@ export function createUsageStore(db: Db): UsageStore {
     async insertBatch(nodeId, events) {
       if (events.length === 0) return 0;
       const rows = [];
+      const parsedEvents: UsageRequest[] = [];
       for (const event of events) {
         const parsed = usageRequestSchema.safeParse(event);
         if (!parsed.success) continue; // malformed frames never block the rest
         const e = parsed.data;
+        parsedEvents.push(e);
         rows.push({
           id: e.id,
           nodeId,
@@ -209,6 +211,56 @@ export function createUsageStore(db: Db): UsageStore {
         .values(rows)
         .onConflictDoNothing()
         .returning({ id: llmRequests.id });
+      const insertedIds = new Set(inserted.map((r) => r.id));
+      // IR-52: content-addressed parts — only for rows that are NEW, so a
+      // redelivered batch never double-counts refcounts (exactly-once holds).
+      const joinRows: Array<{
+        requestId: string;
+        ordinal: number;
+        hash: string;
+        kind: string;
+        role: string | null;
+        bytes: number;
+        truncated: boolean;
+      }> = [];
+      const partRefs = new Map<string, { refcount: number; bytes: number; gz: Buffer; truncated: boolean }>();
+      for (const event of parsedEvents) {
+        if (!insertedIds.has(event.id) || event.parts.length === 0) continue;
+        for (const [ordinal, part] of event.parts.entries()) {
+          joinRows.push({
+            requestId: event.id,
+            ordinal,
+            hash: part.hash,
+            kind: part.kind,
+            role: part.role,
+            bytes: part.bytes,
+            truncated: part.truncated,
+          });
+          const known = partRefs.get(part.hash);
+          if (known !== undefined) {
+            known.refcount += 1;
+          } else {
+            partRefs.set(part.hash, {
+              refcount: 1,
+              bytes: part.bytes,
+              gz: Buffer.from(part.gz, "base64"),
+              truncated: part.truncated,
+            });
+          }
+        }
+      }
+      if (partRefs.size > 0) {
+        await db.transaction(async (tx) => {
+          await tx
+            .insert(llmParts)
+            .values([...partRefs.entries()].map(([hash, ref]) => ({ hash, ...ref })))
+            .onConflictDoUpdate({
+              target: llmParts.hash,
+              set: { refcount: sql`${llmParts.refcount} + excluded.refcount` },
+            });
+          if (joinRows.length > 0) await tx.insert(llmRequestParts).values(joinRows).onConflictDoNothing();
+        });
+      }
       return inserted.length;
     },
 
@@ -544,8 +596,35 @@ export function createUsageStore(db: Db): UsageStore {
     },
 
     async pruneRaw(olderThan) {
-      const deleted = await db.delete(llmRequests).where(lt(llmRequests.receivedAt, olderThan)).returning({ id: llmRequests.id });
-      return deleted.length;
+      // IR-52: parts die with their owning rows — delete requests, release
+      // their part references, then drop parts whose refcount hit zero.
+      const result = (await db.execute(sql`
+        with doomed as (
+          delete from llm_requests
+          where received_at < ${olderThan.toISOString()}::timestamptz
+          returning id
+        ),
+        refs as (
+          delete from llm_request_parts
+          where request_id in (select id from doomed)
+          returning hash
+        ),
+        tally as (
+          select hash, count(*)::int as refs from refs group by hash
+        ),
+        decremented as (
+          update llm_parts p
+          set refcount = p.refcount - t.refs
+          from tally t
+          where p.hash = t.hash
+          returning p.hash
+        )
+        select
+          (select count(*) from doomed)::int as requests
+      `)) as unknown as Array<{ requests: number }>;
+      const row = result[0];
+      await db.execute(sql`delete from llm_parts where refcount <= 0`);
+      return row !== undefined ? Number(row.requests) : 0;
     },
 
     async pruneBuckets(granularity, keepDays) {
@@ -590,6 +669,7 @@ function rowToRequest(raw: Record<string, unknown>): UsageRequestRow {
     reqBytes: int(raw.reqBytes) ?? 0,
     resBytes: int(raw.resBytes) ?? 0,
     sourceAddr: str(raw.sourceAddr),
+    parts: [],
     receivedAtMs: dateMs(raw.receivedAt),
   };
 }

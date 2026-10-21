@@ -55,6 +55,8 @@ export const setupInfoSchema = z.object({
   env: envExportsSchema.default({ modelName: false, port: false, extraArgs: "", modelPath: false }),
   /** M8: engine traffic is served through the agent's capture proxy. */
   captureProxy: z.boolean().default(false),
+  /** IR-52: store (deduped) request/response bodies for captured requests. */
+  bodyRetention: z.boolean().default(false),
   status: setupStatusSchema,
   health: setupHealthSchema.nullable(),
   lastError: z.string().nullable(),
@@ -78,6 +80,8 @@ export const setupCreateSchema = z.object({
   env: envExportsSchema.default({ modelName: false, port: false, extraArgs: "", modelPath: false }),
   /** M8: route the declared port through the agent capture proxy (ADR-0008). */
   captureProxy: z.boolean().default(false),
+  /** IR-52: store deduped request/response bodies (requires captureProxy). */
+  bodyRetention: z.boolean().default(false),
 });
 export type SetupCreateInput = z.infer<typeof setupCreateSchema>;
 
@@ -89,6 +93,7 @@ export const setupPatchSchema = z.object({
   scriptStop: z.string().min(1).max(1024).optional(),
   env: envExportsSchema.optional(),
   captureProxy: z.boolean().optional(),
+  bodyRetention: z.boolean().optional(),
 });
 export type SetupPatchInput = z.infer<typeof setupPatchSchema>;
 
