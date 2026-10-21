@@ -8,6 +8,7 @@ import { createAgentHub, type AgentHubDeps } from "../src/hub.js";
 import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import type { UsageStore } from "../src/usage-store.js";
+import { type UsageClients, type ClientIdentityInfo } from "../src/usage-clients.js";
 import { listen, makeFakeStore, makeSseSpy, nextMessage, opened } from "./helpers.js";
 
 const cleanups: Array<() => void> = [];
@@ -165,13 +166,42 @@ function fakeUsageStore(): { store: UsageStore; calls: Array<{ method: string; a
     requestById: track("requestById", () => null),
     errorGroups: track("errorGroups", () => ({ range: "24h", groups: [] })),
     models: track("models", () => ({ range: "24h", models: [], series: [] })),
+    agents: track("agents", () => ({ range: "24h", groups: [] })),
     pruneRaw: track("pruneRaw", () => 0),
     pruneBuckets: track("pruneBuckets", () => 0),
   } as unknown as UsageStore;
   return { store, calls };
 }
 
-function makeAppWithUsage(usage: UsageStore | null) {
+function fakeUsageClients(): { clients: UsageClients; identities: ClientIdentityInfo[] } {
+  const identities: ClientIdentityInfo[] = [
+    { id: "00000000-0000-4000-8000-0000000000c1", name: "omp", project: "irori", agentType: "main", keyHash: "a".repeat(64), createdAtMs: 1 },
+  ];
+  const clients: UsageClients = {
+    list: async () => identities,
+    create: async (input) => {
+      const created: ClientIdentityInfo = {
+        id: `00000000-0000-4000-8000-${String(identities.length + 1).padStart(12, "0")}`,
+        name: input.name,
+        project: input.project ?? null,
+        agentType: input.agentType ?? null,
+        keyHash: "b".repeat(64),
+        createdAtMs: 2,
+      };
+      identities.push(created);
+      return { ...created, key: "irn_issued_once" };
+    },
+    remove: async (id) => {
+      const i = identities.findIndex((x) => x.id === id);
+      if (i === -1) return false;
+      identities.splice(i, 1);
+      return true;
+    },
+  };
+  return { clients, identities };
+}
+
+function makeAppWithUsage(usage: UsageStore | null, clients: UsageClients | null = null) {
   const fake = makeFakeStore();
   const deps: AppDeps = {
     getStore: () => fake.store,
@@ -184,6 +214,8 @@ function makeAppWithUsage(usage: UsageStore | null) {
     getAnalytics: () => null,
     getCleanup: () => null,
     getUsage: () => usage,
+    getUsageClients: () => clients,
+    getDownloads: () => null,
     dbHealthy: async () => true,
     rings: createRings(),
     sse: createSseHub({ heartbeatMs: 0 }),
@@ -233,5 +265,49 @@ describe("usage API", () => {
     const app = makeAppWithUsage(store);
     const res = await request(app).get("/api/v1/usage/requests/not-a-uuid");
     expect(res.status).toBe(400);
+  });
+});
+
+describe("client identity API (IR-55)", () => {
+  it("serves the agents view and forwards client filters", async () => {
+    const { store, calls } = fakeUsageStore();
+    const app = makeAppWithUsage(store);
+    expect((await request(app).get("/api/v1/usage/agents?range=24h")).status).toBe(200);
+    expect((await request(app).get("/api/v1/usage/requests?range=24h&project=irori&agentType=subagent")).status).toBe(200);
+    // Unknown agent types are ignored (no 400 — a v1 view cannot regress).
+    expect((await request(app).get("/api/v1/usage/requests?range=24h&agentType=weird")).status).toBe(200);
+    const agentsCall = calls.find((c) => c.method === "agents");
+    expect(agentsCall).toBeDefined();
+    const requestsCalls = calls.filter((c) => c.method === "requests");
+    expect(requestsCalls[0]).toMatchObject({ args: expect.objectContaining({ project: "irori", agentType: "subagent" }) });
+    // The ignored agentType never reaches the store as a filter value.
+    expect(requestsCalls.at(-1)).toMatchObject({ args: expect.objectContaining({ agentType: undefined, project: undefined }) });
+  });
+
+  it("manages client identities (list, create with one-time key, delete)", async () => {
+    const { clients, identities } = fakeUsageClients();
+    const app = makeAppWithUsage(fakeUsageStore().store, clients);
+    const listed = await request(app).get("/api/v1/usage/clients");
+    expect(listed.status).toBe(200);
+    expect(listed.body.clients).toHaveLength(1);
+
+    const created = await request(app).post("/api/v1/usage/clients").send({ name: "codex", project: "carrigo", agentType: "subagent" });
+    expect(created.status).toBe(201);
+    expect(created.body.key).toBe("irn_issued_once"); // shown exactly once
+    expect(created.body.keyHash).toHaveLength(64);
+    expect(identities).toHaveLength(2);
+
+    expect((await request(app).post("/api/v1/usage/clients").send({ name: "" })).status).toBe(400);
+    expect((await request(app).post("/api/v1/usage/clients").send({ name: "x", agentType: "nope" })).status).toBe(400);
+
+    const removed = await request(app).delete(`/api/v1/usage/clients/${identities[0]!.id}`);
+    expect(removed.status).toBe(200);
+    expect((await request(app).delete("/api/v1/usage/clients/00000000-0000-4000-8000-000000000099")).status).toBe(404);
+  });
+
+  it("answers 503 for identity routes while degraded", async () => {
+    const app = makeAppWithUsage(fakeUsageStore().store, null);
+    expect((await request(app).get("/api/v1/usage/clients")).status).toBe(503);
+    expect((await request(app).post("/api/v1/usage/clients").send({ name: "x" })).status).toBe(503);
   });
 });

@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
+  createUsageClient,
+  deleteUsageClient,
+  fetchUsageAgents,
+  fetchUsageClients,
   fetchUsageErrors,
   fetchUsageModels,
   fetchUsageOverview,
@@ -9,7 +13,7 @@ import {
   type UsageRangeName,
 } from "../api";
 import { live } from "../live";
-import { parseUsageHash, usageHashFor, type UsageTab, USAGE_TABS } from "../usage";
+import { parseUsageHash, usageHashFor, agentGroupKey, agentGroupLabel, agentGroupSource, clientLabel, retryText, type UsageTab, USAGE_TABS } from "../usage";
 import {
   activityCharts,
   errorGroupRows,
@@ -30,6 +34,9 @@ import {
   usageChart,
 } from "../usage";
 import type {
+  ClientIdentityCreated,
+  ClientIdentityInfo,
+  UsageAgentsResponse,
   UsageErrorsResponse,
   UsageModelsResponse,
   UsageOverviewResponse,
@@ -59,6 +66,70 @@ const overview = ref<UsageOverviewResponse | null>(null);
 const requests = ref<UsageRequestsResponse | null>(null);
 const errors = ref<UsageErrorsResponse | null>(null);
 const models = ref<UsageModelsResponse | null>(null);
+const agents = ref<UsageAgentsResponse | null>(null);
+
+/** IR-55 client filters (requests tab) + identity manager drawer state. */
+const projectFilter = ref("");
+const agentTypeFilter = ref("");
+const clientsOpen = ref(false);
+const clients = ref<ClientIdentityInfo[]>([]);
+const newIdentityName = ref("");
+const newIdentityProject = ref("");
+const newIdentityAgentType = ref<"" | "main" | "subagent">("");
+const issuedKey = ref<{ name: string; key: string } | null>(null);
+const clientsBusy = ref(false);
+const clientsError = ref<string | null>(null);
+
+async function loadClients(): Promise<void> {
+  try {
+    clients.value = (await fetchUsageClients()).clients;
+    clientsError.value = null;
+  } catch (err) {
+    clientsError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function submitIdentity(): Promise<void> {
+  if (newIdentityName.value.trim().length === 0 || clientsBusy.value) return;
+  clientsBusy.value = true;
+  clientsError.value = null;
+  try {
+    const created: ClientIdentityCreated = await createUsageClient({
+      name: newIdentityName.value.trim(),
+      project: newIdentityProject.value.trim().length > 0 ? newIdentityProject.value.trim() : undefined,
+      agentType: newIdentityAgentType.value === "" ? undefined : newIdentityAgentType.value,
+    });
+    issuedKey.value = { name: created.name, key: created.key };
+    newIdentityName.value = "";
+    newIdentityProject.value = "";
+    newIdentityAgentType.value = "";
+    await loadClients();
+  } catch (err) {
+    clientsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    clientsBusy.value = false;
+  }
+}
+
+async function removeIdentity(id: string): Promise<void> {
+  clientsBusy.value = true;
+  try {
+    await deleteUsageClient(id);
+    await loadClients();
+  } catch (err) {
+    clientsError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    clientsBusy.value = false;
+  }
+}
+
+function openClients(): void {
+  clientsOpen.value = true;
+  issuedKey.value = null;
+  void loadClients();
+}
+
+const knownProjects = computed(() => [...new Set(clients.value.map((c) => c.project).filter((p): p is string => p !== null))]);
 
 /** Requests filters (page resets on change). */
 const errorOnly = ref(false);
@@ -93,6 +164,8 @@ async function load(): Promise<void> {
         errorOnly: errorOnly.value || undefined,
         sig: sigFilter.value ?? undefined,
         status: status !== undefined && Number.isFinite(status) ? status : undefined,
+        project: projectFilter.value.length > 0 ? projectFilter.value : undefined,
+        agentType: agentTypeFilter.value.length > 0 ? (agentTypeFilter.value as "main" | "subagent") : undefined,
         page: page.value,
         limit: PAGE_SIZE,
       });
@@ -102,6 +175,10 @@ async function load(): Promise<void> {
       const data = await fetchUsageErrors(range.value);
       if (seq !== loadSeq) return;
       errors.value = data;
+    } else if (tab.value === "agents") {
+      const data = await fetchUsageAgents(range.value);
+      if (seq !== loadSeq) return;
+      agents.value = data;
     } else {
       const data = await fetchUsageModels(range.value);
       if (seq !== loadSeq) return;
@@ -124,6 +201,7 @@ onMounted(() => {
   tab.value = parsed.tab;
   range.value = parsed.range as UsageRangeName;
   window.addEventListener("hashchange", onHashChange);
+  void loadClients(); // project filter options (IR-55)
   void load();
 });
 
@@ -131,10 +209,12 @@ onUnmounted(() => {
   window.removeEventListener("hashchange", onHashChange);
 });
 
-watch([tab, range, errorOnly, statusFilter], () => {
+watch([tab, range, errorOnly, statusFilter, projectFilter, agentTypeFilter], () => {
   page.value = 1;
   sigFilter.value = tab.value === "requests" ? sigFilter.value : null;
   drawer.value = null;
+  clientsOpen.value = false; // a one-time key must never linger across tabs
+  issuedKey.value = null;
   syncHash();
   void load();
 });
@@ -295,6 +375,16 @@ const liveAgeText = computed(() => {
       <div class="toolbar row" style="margin-top: var(--space-4)">
         <label class="row" style="gap: 6px; font-size: 13px"><input v-model="errorOnly" type="checkbox" /> Errors only</label>
         <input v-model="statusFilter" class="input mono" style="max-width: 120px" placeholder="status e.g. 429" inputmode="numeric" aria-label="Filter by HTTP status" />
+        <select v-model="projectFilter" class="select" style="max-width: 180px" aria-label="Filter by project">
+          <option value="">all projects</option>
+          <option v-for="p in knownProjects" :key="p" :value="p">{{ p }}</option>
+        </select>
+        <select v-model="agentTypeFilter" class="select" style="max-width: 150px" aria-label="Filter by agent type">
+          <option value="">all agents</option>
+          <option value="main">main</option>
+          <option value="subagent">subagent</option>
+        </select>
+        <button class="btn btn--secondary btn--sm" @click="openClients">Client keys</button>
         <span v-if="sigFilter !== null" class="chip chip--accent">sig: {{ sigFilter.slice(0, 42) }}{{ sigFilter.length > 42 ? "…" : "" }} <button class="btn btn--ghost btn--sm" @click="sigFilter = null">clear</button></span>
         <span class="faint mono" style="font-size: 12px">{{ requests?.total ?? 0 }} requests</span>
       </div>
@@ -302,11 +392,12 @@ const liveAgeText = computed(() => {
         <div class="card__body card__body--flush">
           <table class="table">
             <thead>
-              <tr><th>Received</th><th>Model</th><th>Endpoint</th><th>Status</th><th>Duration</th><th>TTFT</th><th>tok/s</th><th>Prompt</th><th>Completion</th><th></th></tr>
+              <tr><th>Received</th><th>Client</th><th>Model</th><th>Endpoint</th><th>Status</th><th>Duration</th><th>TTFT</th><th>tok/s</th><th>Prompt</th><th>Completion</th><th></th></tr>
             </thead>
             <tbody>
               <tr v-for="row in mergedRows" :key="row.id">
                 <td class="mono">{{ fmtTimeIso(row.receivedAtMs) }}</td>
+                <td class="mono">{{ clientLabel(row) }}<template v-if="row.clientAgentType !== null"> · {{ row.clientAgentType }}</template></td>
                 <td class="mono">{{ row.model ?? "(unknown)" }}</td>
                 <td class="mono">{{ row.endpoint }}</td>
                 <td><span :class="['chip', tierChipClass(requestTier(row))]">{{ statusText(row) }}</span></td>
@@ -317,7 +408,7 @@ const liveAgeText = computed(() => {
                 <td class="mono">{{ fmtTokens(row.completionTokens) }}</td>
                 <td><button class="btn btn--ghost btn--sm" @click="openDrawer(row)">detail</button></td>
               </tr>
-              <tr v-if="mergedRows.length === 0"><td colspan="10" class="faint">No requests match.</td></tr>
+              <tr v-if="mergedRows.length === 0"><td colspan="11" class="faint">No requests match.</td></tr>
             </tbody>
           </table>
         </div>
@@ -327,6 +418,40 @@ const liveAgeText = computed(() => {
         <span class="mono faint">page {{ page }} / {{ totalPages }}</span>
         <button class="btn btn--secondary btn--sm" :disabled="page >= totalPages" @click="page = page + 1">Next ›</button>
       </div>
+    </template>
+
+    <!-- Agents: client identity groups (IR-55) -->
+    <template v-else-if="tab === 'agents'">
+      <section class="card" style="margin-top: var(--space-4)">
+        <div class="card__head">
+          <h3 style="font-size: 15px">Agents &amp; clients</h3>
+          <span class="row" style="gap: 8px">
+            <span class="mono faint">{{ range }}</span>
+            <button class="btn btn--secondary btn--sm" @click="openClients">Client keys</button>
+          </span>
+        </div>
+        <div class="card__body card__body--flush">
+          <table class="table">
+            <thead>
+              <tr><th>Client</th><th>Agent type</th><th>Project</th><th>Requests</th><th>Errors</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Last seen</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="g in agents?.groups ?? []" :key="agentGroupKey(g)">
+                <td class="mono">{{ agentGroupLabel(g) }}<div class="faint" style="font-size: 11px">{{ agentGroupSource(g) }}</div></td>
+                <td><span v-if="g.agentType !== null" :class="['chip', g.agentType === 'main' ? 'chip--accent' : 'chip--muted']">{{ g.agentType }}</span><span v-else class="faint">—</span></td>
+                <td class="mono">{{ g.project ?? "—" }}</td>
+                <td class="mono">{{ fmtCount(g.requests) }}</td>
+                <td class="mono">{{ fmtCount(g.errors) }}</td>
+                <td class="mono">{{ fmtTokens(g.promptTokens) }}</td>
+                <td class="mono">{{ fmtTokens(g.completionTokens) }}</td>
+                <td class="mono">{{ fmtTokens(g.totalTokens) }}</td>
+                <td class="mono">{{ fmtTimeIso(g.lastSeenMs) }}</td>
+              </tr>
+              <tr v-if="(agents?.groups.length ?? 0) === 0"><td colspan="9" class="faint">No captured traffic in this range. Unidentified clients appear here by source IP.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </template>
 
     <!-- Errors: signature groups -->
@@ -415,10 +540,60 @@ const liveAgeText = computed(() => {
             <tr><td class="faint">Tokens</td><td class="mono">prompt {{ fmtTokens(drawer.row.promptTokens) }} · completion {{ fmtTokens(drawer.row.completionTokens) }} · cached {{ fmtTokens(drawer.row.cachedTokens) }} · reasoning {{ fmtTokens(drawer.row.reasoningTokens) }} · total {{ fmtTokens(drawer.row.totalTokens) }}</td></tr>
             <tr><td class="faint">Payload sizes</td><td class="mono">req {{ fmtCount(drawer.row.reqBytes) }} B · res {{ fmtCount(drawer.row.resBytes) }} B</td></tr>
             <tr><td class="faint">Source</td><td class="mono">{{ drawer.row.sourceAddr ?? "—" }}</td></tr>
+            <tr><td class="faint">Client</td><td class="mono">{{ clientLabel(drawer.row) }}<template v-if="drawer.row.clientProject !== null"> · {{ drawer.row.clientProject }}</template><template v-if="drawer.row.clientAgentType !== null"> · {{ drawer.row.clientAgentType }}</template></td></tr>
+            <tr v-if="retryText(drawer.row) !== null"><td class="faint">Retry</td><td class="mono">{{ retryText(drawer.row) }}</td></tr>
             <tr><td class="faint">Node</td><td class="mono">{{ drawer.row.nodeId }}</td></tr>
           </tbody>
         </table>
         <pre v-if="detailJson !== null" class="log" style="margin-top: 10px; padding: 10px; font-size: 12px; white-space: pre-wrap">{{ detailJson }}</pre>
+      </aside>
+    </div>
+
+    <!-- Client keys drawer (IR-55): issue identification keys for clients -->
+    <div v-if="clientsOpen" class="drawer-scrim" @click.self="clientsOpen = false">
+      <aside class="drawer" role="dialog" aria-label="Client keys">
+        <div class="row row--between" style="margin-bottom: 10px">
+          <h3 style="font-size: 17px">Client keys</h3>
+          <button class="btn btn--ghost btn--sm" aria-label="Close client keys" @click="clientsOpen = false">✕</button>
+        </div>
+        <p class="faint" style="font-size: 12px">
+          Identification, not auth: a client presents its key as the bearer token (or sends <span class="mono">X-Irori-*</span> headers) and its
+          requests are attributed to the mapped project and agent type. Unidentified clients stay visible by source IP.
+        </p>
+
+        <div v-if="issuedKey !== null" class="card" style="margin-top: 10px; padding: 10px">
+          <p style="font-size: 13px; margin: 0 0 6px"><strong>{{ issuedKey.name }}</strong> — copy the key now; it is shown once:</p>
+          <code class="mono" style="font-size: 12px; word-break: break-all">{{ issuedKey.key }}</code>
+          <div style="margin-top: 6px"><button class="btn btn--secondary btn--sm" @click="issuedKey = null">done</button></div>
+        </div>
+
+        <div class="row" style="margin-top: 12px; gap: 6px; flex-wrap: wrap">
+          <input v-model="newIdentityName" class="input" style="max-width: 160px" placeholder="client name" aria-label="Client name" />
+          <input v-model="newIdentityProject" class="input" style="max-width: 160px" placeholder="project (optional)" aria-label="Project" />
+          <select v-model="newIdentityAgentType" class="select" style="max-width: 140px" aria-label="Agent type">
+            <option value="">agent type…</option>
+            <option value="main">main</option>
+            <option value="subagent">subagent</option>
+          </select>
+          <button class="btn btn--primary btn--sm" :disabled="clientsBusy || newIdentityName.trim().length === 0" @click="submitIdentity">Issue key</button>
+        </div>
+        <p v-if="clientsError !== null" class="faint" style="font-size: 12px" role="alert">{{ clientsError }}</p>
+
+        <table class="table" style="margin-top: 10px">
+          <thead>
+            <tr><th>Name</th><th>Project</th><th>Type</th><th>Key</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in clients" :key="c.id">
+              <td class="mono">{{ c.name }}</td>
+              <td class="mono">{{ c.project ?? "—" }}</td>
+              <td class="mono">{{ c.agentType ?? "—" }}</td>
+              <td class="mono faint" style="font-size: 11px">{{ c.keyHash === null ? "header-only" : `…${c.keyHash.slice(-8)}` }}</td>
+              <td><button class="btn btn--ghost btn--sm" :disabled="clientsBusy" @click="removeIdentity(c.id)">revoke</button></td>
+            </tr>
+            <tr v-if="clients.length === 0"><td colspan="5" class="faint">No identities issued yet.</td></tr>
+          </tbody>
+        </table>
       </aside>
     </div>
   </div>

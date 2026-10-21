@@ -16,6 +16,7 @@ import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
 import { runRetention, runLlmRetention, runUsageRetention } from "./retention.js";
 import { createUsageStore, type UsageStore } from "./usage-store.js";
+import { createUsageClients, type UsageClients } from "./usage-clients.js";
 import { createUsageRollupEngine } from "./usage-rollups.js";
 import { buildHistory } from "./history.js";
 import { buildLlmHistory } from "./llm-history.js";
@@ -75,6 +76,7 @@ const state: {
   analytics: AnalyticsService | null;
   cleanup: CleanupService | null;
   usage: UsageStore | null;
+  usageClients: UsageClients | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
 } = {
@@ -89,6 +91,7 @@ const state: {
   analytics: null,
   cleanup: null,
   usage: null,
+  usageClients: null,
   history: null,
   llmHistory: null,
 };
@@ -112,6 +115,7 @@ const app = createApp({
   getAnalytics: () => state.analytics,
   getCleanup: () => state.cleanup,
   getUsage: () => state.usage,
+  getUsageClients: () => state.usageClients,
   getHistory: () => state.history,
   getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
@@ -156,6 +160,8 @@ async function boot(): Promise<void> {
   // ack ride the hub frame chain; inserts are deduplicated by client UUID.
   const usageStore = createUsageStore(dbHandle.db);
   state.usage = usageStore;
+  // IR-55: client-identity registry (issued keys resolve at ingest).
+  state.usageClients = createUsageClients(dbHandle.db);
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).

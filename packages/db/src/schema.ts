@@ -494,13 +494,47 @@ export const llmRequests = pgTable(
     reqBytes: integer("req_bytes").notNull().default(0),
     resBytes: integer("res_bytes").notNull().default(0),
     sourceAddr: text("source_addr"),
+    /** IR-55 client identity (resolved at ingest: key match → header fill). */
+    clientKeyHash: text("client_key_hash"),
+    clientName: text("client_name"),
+    clientProject: text("client_project"),
+    clientAgentType: text("client_agent_type"),
+    /** IR-55 retry lineage (X-Irori-Retry header contract). */
+    retryAttempt: integer("retry_attempt"),
+    retryKind: text("retry_kind"),
+    retryStatus: text("retry_status"),
+    retrySupersededBy: text("retry_superseded_by"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("llm_requests_node_received_idx").on(t.nodeId, t.receivedAt),
     index("llm_requests_model_idx").on(t.model, t.receivedAt),
     index("llm_requests_sig_idx").on(t.errorSig, t.receivedAt),
+    index("llm_requests_client_idx").on(t.clientAgentType, t.receivedAt),
+    index("llm_requests_project_idx").on(t.clientProject, t.receivedAt),
+    index("llm_requests_key_idx").on(t.clientKeyHash, t.receivedAt),
   ],
+);
+
+/**
+ * Server-issued client identities (IR-55): homelab identification tags, not
+ * auth (ADR-0010 §8). The generated key is returned once at creation; only
+ * its sha256 is stored. A matched identity maps project/agent-type/name for
+ * any request presenting that bearer token.
+ */
+export const clientAgentTypeEnum = pgEnum("client_agent_type", ["main", "subagent"]);
+
+export const clientIdentities = pgTable(
+  "client_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    project: text("project"),
+    agentType: clientAgentTypeEnum("agent_type"),
+    /** sha256 hex of the issued key (unique; null = header-only identity). */
+    keyHash: text("key_hash").unique(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
 );
 
 /**
