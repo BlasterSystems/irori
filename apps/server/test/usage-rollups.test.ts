@@ -390,17 +390,27 @@ d("usage store (postgres)", () => {
         truncated: false,
       };
     };
-    const long = "x".repeat(4000);
     const addr = `10.${run.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 200}.2.2`;
-    const t1 = usageRequest({ promptTokens: 4000, ts: Date.now() - 30_000, sourceAddr: addr, parts: [mk("user", long)] });
-    // Compacted turn: same client, chain broken, input drops by >50%.
-    const t2 = usageRequest({ promptTokens: 900, ts: Date.now() - 20_000, sourceAddr: addr, parts: [mk("user", `summarized ${run}`)] });
+    const system = mk("system", `You are terse. ${run}`);
+    const long = "x".repeat(4000);
+    const t1 = usageRequest({ promptTokens: 4000, ts: Date.now() - 30_000, sourceAddr: addr, parts: [system, mk("user", long)] });
+    // Compacted turn: same client, same surviving first prompt (the lineage
+    // signal), chain broken, input drops by >50%.
+    const t2 = usageRequest({ promptTokens: 900, ts: Date.now() - 20_000, sourceAddr: addr, parts: [system, mk("user", `summarized ${run}`)] });
     await store.insertBatch(nodeId, [t1, t2]);
     const list = await chats.list({ range: "1h", nodeId });
     const session = list.sessions.find((s) => s.id === t1.id);
     expect(session).toBeDefined();
     expect(session!.requests).toBe(2); // same session
     expect(session!.compacted).toBe(true);
+
+    // A genuinely NEW conversation (different first prompt) splits instead.
+    const t3 = usageRequest({ promptTokens: 50, ts: Date.now() - 10_000, sourceAddr: addr, parts: [mk("user", `fresh start ${run}`)] });
+    await store.insertBatch(nodeId, [t3]);
+    const after = await chats.list({ range: "1h", nodeId });
+    const original = after.sessions.find((s) => s.id === t1.id);
+    expect(original!.requests).toBe(2); // t3 did not merge into it
+    expect(after.sessions.find((s) => s.id === t3.id)).toBeDefined();
   });
 
   it("reports captured-without-bodies guidance (IR-53)", async () => {

@@ -17,6 +17,9 @@ const selected = ref<ChatSession | null>(null);
 const detail = ref<ChatDetail | null>(null);
 const detailLoading = ref(false);
 const detailError = ref<string | null>(null);
+/** Superseded-response guard: only the latest load()/open() may land. */
+let loadSeq = 0;
+let openSeq = 0;
 
 const sessionLabel = (s: ChatSession): string => clientLabel({ clientName: s.clientName, clientProject: s.clientProject, sourceAddr: s.sourceAddrs[0] ?? null });
 
@@ -32,40 +35,47 @@ const dayGrouped = computed<Array<{ day: string; sessions: ChatSession[] }>>(() 
 });
 
 async function load(): Promise<void> {
+  const seq = ++loadSeq;
   loading.value = true;
   error.value = null;
   try {
     const data = await fetchChats(range.value);
+    if (seq !== loadSeq) return;
     chats.value = data;
     if (selected.value !== null && !data.sessions.some((s) => s.id === selected.value!.id)) {
       selected.value = null;
       detail.value = null;
     }
   } catch (err) {
+    if (seq !== loadSeq) return;
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
 }
 
 async function open(session: ChatSession): Promise<void> {
+  const seq = ++openSeq;
   selected.value = session;
   detailLoading.value = true;
   detailError.value = null;
   detail.value = null;
   try {
     const data = await fetchChat(session.id);
+    if (seq !== openSeq || selected.value?.id !== session.id) return;
     if (data === null) detailError.value = "conversation not found";
     else detail.value = data;
   } catch (err) {
+    if (seq !== openSeq || selected.value?.id !== session.id) return;
     detailError.value = err instanceof Error ? err.message : String(err);
   } finally {
-    detailLoading.value = false;
+    if (seq === openSeq) detailLoading.value = false;
   }
 }
 
 function syncHash(): void {
-  if (location.hash !== "#/chats") history.replaceState(null, "", "#/chats");
+  const next = `#/chats?range=${range.value}`;
+  if (location.hash !== next) history.replaceState(null, "", next);
 }
 
 onMounted(() => {

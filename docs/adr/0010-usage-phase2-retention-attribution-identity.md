@@ -104,12 +104,20 @@ Option 2, with these invariants:
    only by the Chats reconstruction endpoint (IR-53).
 6. **Sessions (IR-53) are computed on read.** Requests chain when the next
    request's stored part sequence extends the previous one (prefix chaining)
-   within the same client identity and a time-gap window; a broken chain with
-   a large input-token drop marks the boundary `compacted` instead of
-   splitting (OMP-style compaction). `tensorfold.sha256`/`token_sha` remain
-   advisory chaining signals in `engine_meta`. Reconstruction = last request's
-   parts + final response part; sessions without stored bodies surface an
-   "enable retention" empty state, never errors.
+   within the same client identity and a time-gap window measured on the
+   agent's `ts` (ingest time ties within one sync batch); a broken chain
+   whose FIRST message survives the previous session's first message and
+   whose input dropped by >50% marks the boundary `compacted` instead of
+   splitting (OMP-style compaction — the surviving system prompt is the
+   lineage signal; a different first message is a NEW conversation and
+   splits even when the input dropped). Residual heuristic: a new
+   conversation that begins with the byte-identical first message and
+   smaller input within the gap window is absorbed as `compacted` —
+   accepted without a client session signal (no `X-Irori-Session` today).
+   `tensorfold.sha256`/`token_sha` remain advisory chaining signals in
+   `engine_meta`. Reconstruction = last request's parts + final response
+   part; sessions without stored bodies surface an "enable retention"
+   empty state, never errors.
 7. **Tool attribution (IR-54) is capture-time, retention-independent.**
    `tool_call` deltas are reassembled by index (id/name/args concat);
    `role:"tool"` results are lifted from request bodies at capture (bounded

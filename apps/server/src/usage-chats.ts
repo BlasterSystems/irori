@@ -33,6 +33,8 @@ interface RequestRow {
   clientAgentType: string | null;
   promptTokens: number | null;
   totalTokens: number | null;
+  /** True when any stored part was truncated at capture. */
+  truncated: boolean;
   /** Ordered message-part hashes (kind = 'message'). */
   seq: string[];
 }
@@ -41,6 +43,7 @@ interface Session {
   id: string;
   startMs: number;
   lastMs: number;
+  lastTsMs: number;
   requests: number;
   messages: number;
   promptTokens: number | null;
@@ -52,6 +55,8 @@ interface Session {
   sourceAddrs: Set<string>;
   compacted: boolean;
   truncated: boolean;
+  /** First message hash of the session — the compaction lineage signal. */
+  firstHash: string | null;
   lastSeq: string[];
   lastPromptTokens: number | null;
   clientKey: string;
@@ -74,7 +79,7 @@ async function loadRequestRows(db: Db, range: UsageRange, nodeId: string | undef
   const rows = await db.execute(sql`
     select r.id, r.received_at, r.ts, r.model, r.endpoint, r.source_addr,
            r.client_key_hash, r.client_name, r.client_project, r.client_agent_type,
-           r.prompt_tokens, r.total_tokens,
+           r.prompt_tokens, r.total_tokens, bool_or(sp.truncated) as truncated,
            array_remove(array_agg(sp.hash order by sp.ordinal), null) as seq
     from llm_requests r
     join llm_request_parts sp on sp.request_id = r.id and sp.kind = 'message'
@@ -97,6 +102,7 @@ async function loadRequestRows(db: Db, range: UsageRange, nodeId: string | undef
     clientAgentType: r.client_agent_type === "main" || r.client_agent_type === "subagent" ? r.client_agent_type : null,
     promptTokens: int(r.prompt_tokens),
     totalTokens: int(r.total_tokens),
+    truncated: r.truncated === true,
     seq: Array.isArray(r.seq) ? (r.seq as string[]).filter((h): h is string => typeof h === "string") : [],
   }));
 }
@@ -109,6 +115,7 @@ function chainSessions(rows: RequestRow[]): Session[] {
       id: row.id,
       startMs: row.receivedMs,
       lastMs: row.receivedMs,
+      lastTsMs: row.tsMs,
       requests: 1,
       messages: row.seq.length,
       promptTokens: row.promptTokens,
@@ -119,30 +126,34 @@ function chainSessions(rows: RequestRow[]): Session[] {
       clientAgentType: row.clientAgentType,
       sourceAddrs: new Set(row.sourceAddr === null ? [] : [row.sourceAddr]),
       compacted: false,
-      truncated: false,
+      truncated: row.truncated,
+      firstHash: row.seq[0] ?? null,
       lastSeq: row.seq,
       lastPromptTokens: row.promptTokens,
-      clientKey: clientKey(row),
       lastRow: row,
+      clientKey: clientKey(row),
     };
     sessions.push(session);
     return session;
   };
   for (const row of rows) {
     const key = clientKey(row);
+    const timeGap = row.tsMs - (current?.lastTsMs ?? row.tsMs);
     if (
       current !== null &&
       current.clientKey === key &&
-      row.receivedMs - current.lastMs <= SESSION_GAP_MS &&
+      timeGap <= SESSION_GAP_MS &&
       isPrefix(current.lastSeq, row.seq)
     ) {
       current.lastMs = row.receivedMs;
+      current.lastTsMs = row.tsMs;
       current.requests += 1;
       current.messages = row.seq.length;
       current.promptTokens = row.promptTokens;
       current.totalTokens += row.totalTokens ?? 0;
       if (row.model !== null) current.models.add(row.model);
       if (row.sourceAddr !== null) current.sourceAddrs.add(row.sourceAddr);
+      current.truncated = current.truncated || row.truncated;
       current.lastSeq = row.seq;
       current.lastPromptTokens = row.promptTokens;
       current.lastRow = row;
@@ -151,20 +162,27 @@ function chainSessions(rows: RequestRow[]): Session[] {
     if (
       current !== null &&
       current.clientKey === key &&
-      row.receivedMs - current.lastMs <= SESSION_GAP_MS &&
+      timeGap <= SESSION_GAP_MS &&
+      current.firstHash !== null &&
+      row.seq[0] === current.firstHash && // compaction keeps the leading prompt (system)
       current.lastPromptTokens !== null &&
       row.promptTokens !== null &&
       row.promptTokens < current.lastPromptTokens * 0.5
     ) {
-      // Broken chain + large input drop = compaction boundary (IR-53).
+      // Broken prefix chain + large input drop + surviving first prompt =
+      // compaction boundary (IR-53): same session, marked `compacted`. A
+      // genuinely NEW conversation (different first message) splits even
+      // when the input dropped.
       current.compacted = true;
       current.lastMs = row.receivedMs;
+      current.lastTsMs = row.tsMs;
       current.requests += 1;
       current.messages = row.seq.length;
       current.promptTokens = row.promptTokens;
       current.totalTokens += row.totalTokens ?? 0;
       if (row.model !== null) current.models.add(row.model);
       if (row.sourceAddr !== null) current.sourceAddrs.add(row.sourceAddr);
+      current.truncated = current.truncated || row.truncated;
       current.lastSeq = row.seq;
       current.lastPromptTokens = row.promptTokens;
       current.lastRow = row;
@@ -231,13 +249,18 @@ export function createUsageChats(db: Db): UsageChats {
       `) as unknown as Array<{ received_at: string; client_key_hash: string | null; client_name: string | null; client_project: string | null; source_addr: string | null }>;
       if (anchor === undefined) return null;
       const anchorMs = new Date(anchor.received_at).getTime();
-      // Re-chain the client's traffic around the anchor, then find its session.
+      // Re-chain the client's traffic from the anchor back (retention bounds
+      // the forward side — no clip) and take its session's LAST request.
       const key = anchor.client_key_hash ?? anchor.client_name ?? anchor.client_project ?? anchor.source_addr;
       const sinceIso = new Date(Math.max(0, anchorMs - DETAIL_WINDOW_MS)).toISOString();
       const rows = await loadRequestRows(db, "90d", undefined, sinceIso);
-      const scoped = rows.filter((row) => row.receivedMs <= anchorMs + DETAIL_WINDOW_MS && clientKey(row) === (key ?? `addr:${anchor.source_addr ?? sessionId}`));
-      const session = chainSessions(scoped).find((s) => s.requests > 0 && scoped.some((row) => row.id === sessionId && row.receivedMs >= s.startMs && row.receivedMs <= s.lastMs));
-      const target = session !== undefined ? session.lastRow : scoped.find((row) => row.id === sessionId);
+      const scoped = rows.filter((row) => clientKey(row) === (key ?? `addr:${anchor.source_addr ?? sessionId}`));
+      const session = chainSessions(scoped).find((s) =>
+        scoped.some((row) => row.id === sessionId && row.receivedMs >= s.startMs && row.receivedMs <= s.lastMs),
+      );
+      // No session ⟹ the anchor has no stored message parts (chats need
+      // bodies — the caller gets a 404, mirroring the list's empty state).
+      const target = session?.lastRow;
       if (target === undefined) return null;
 
       const parts = await db.execute(sql`

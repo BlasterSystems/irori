@@ -212,11 +212,11 @@ d("phase-2 live smoke (proxy → buffer → ingest → API)", () => {
 
   it("serves chats, tools and agents from the captured traffic", async () => {
     const app = makeApp();
-    const chatsList = await request(app).get("/api/v1/usage/chats?range=1h");
+    const chatsList = await request(app).get(`/api/v1/usage/chats?range=1h&nodeId=${nodeId}`);
     expect(chatsList.status).toBe(200);
-    const session = chatsList.body.sessions.find((s: { sourceAddrs: string[] }) => s.sourceAddrs.includes("127.0.0.1"));
+    const session = chatsList.body.sessions.find((s: { clientName: string | null }) => s.clientName === "omp");
     expect(session).toBeDefined();
-    expect(session.requests).toBeGreaterThanOrEqual(2);
+    expect(session.requests).toBe(3);
 
     const detail = await request(app).get(`/api/v1/usage/chats/${session.id}`);
     expect(detail.status).toBe(200);
@@ -236,9 +236,9 @@ d("phase-2 live smoke (proxy → buffer → ingest → API)", () => {
     // Completion share: the only attributed tool carries the whole 9 tokens.
     expect(weather.completionTokens).toBe(9);
 
-    const agents = await request(app).get("/api/v1/usage/agents?range=1h");
+    const agents = await request(app).get(`/api/v1/usage/agents?range=1h&nodeId=${nodeId}`);
     expect(agents.status).toBe(200);
-    const group = agents.body.groups.find((g: { sourceAddrs: string[] }) => g.sourceAddrs.includes("127.0.0.1"));
+    const group = agents.body.groups.find((g: { clientName: string | null; name: string | null }) => g.name === "omp");
     expect(group).toMatchObject({ name: "omp", project: "irori", agentType: "main" });
   });
 
