@@ -98,7 +98,10 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       }
       const script = [
         "set -e",
-        'export PATH="$HOME/.local/bin:$PATH"',
+        // The agent unit sets no HOME (systemd default for root) — a $HOME
+        // export degrades to "/.local/bin" and uv is never found (exit 127).
+        // The uv installer itself lands in /root/.local/bin for the root agent.
+        'export PATH="/root/.local/bin:$PATH"',
         "command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh",
         `uv tool install --force "git+https://github.com/piresbruno/modelctl@v${ctx.pin}"`,
         `INSTALLED="$(modelctl --version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1)"`,
