@@ -9,6 +9,7 @@ import { usageRequestSchema, type UsageRequest } from "@irori/core";
 import { createUsageRollupEngine, USAGE_ROLLUP_WATERMARK_KEY } from "../src/usage-rollups.js";
 import { createUsageStore } from "../src/usage-store.js";
 import { createUsageClients } from "../src/usage-clients.js";
+import { createUsageChats } from "../src/usage-chats.js";
 import { runUsageRetention } from "../src/retention.js";
 import { createApp } from "../src/app.js";
 import { createRings } from "../src/rings.js";
@@ -320,6 +321,105 @@ d("usage store (postgres)", () => {
     const fallback = agents.groups.find((g) => g.keyHash === null && (g.sourceAddrs ?? []).includes("10.0.0.9"));
     expect(fallback).toMatchObject({ requests: 1, totalTokens: 10 });
     await clients.remove(identity.id);
+  });
+
+  it("chains a multi-turn session and reconstructs it with images and tools (IR-53)", async () => {
+    const store = createUsageStore(handle!.db);
+    const chats = createUsageChats(handle!.db);
+    const run = randomUUID().slice(0, 8);
+    const mk = (content: string): UsageRequest["parts"][number] => {
+      const canonical = Buffer.from(content, "utf8");
+      return {
+        hash: createHash("sha256").update(canonical).digest("hex"),
+        kind: "message",
+        role: "user",
+        index: 0,
+        bytes: canonical.length,
+        gz: gzipSync(canonical).toString("base64"),
+        truncated: false,
+      };
+    };
+    const system = `{"role":"system","content":"You are terse. ${run}"}`;
+    const user1 = `{"role":"user","content":[{"type":"text","text":"look at this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgo="}}]}`;
+    const assistant = `{"role":"assistant","content":"It is a red dot."}`;
+    const user2 = `{"role":"user","content":"and now the time?"}`;
+    const toolMsg = `{"role":"tool","tool_call_id":"call_x_${run}","content":"{\\"iso\\":\\"2026-10-21T18:00:00Z\\"}"}`;
+    const IMAGE_PART = mk(user1);
+    const SYSTEM_PART = mk(system);
+    const t1 = usageRequest({ ts: Date.now() - 40_000, sourceAddr: `10.${run.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 200}.1.1`, parts: [SYSTEM_PART, IMAGE_PART] });
+    const t2 = usageRequest({ ts: Date.now() - 30_000, sourceAddr: t1.sourceAddr!, parts: [SYSTEM_PART, IMAGE_PART, mk(assistant)] });
+    const t3 = usageRequest({
+      ts: Date.now() - 20_000,
+      sourceAddr: t1.sourceAddr!,
+      toolResults: [{ callId: `call_x_${run}`, resultChars: 30, error: false }],
+      parts: [SYSTEM_PART, IMAGE_PART, mk(assistant), mk(user2), mk(toolMsg)],
+    });
+    await store.insertBatch(nodeId, [t1, t2, t3]);
+
+    const list = await chats.list({ range: "1h", nodeId });
+    const session = list.sessions.find((s) => s.id === t1.id);
+    expect(session).toBeDefined();
+    expect(session!.requests).toBe(3);
+    expect(session!.messages).toBe(5); // last snapshot message count
+    expect(session!.totalTokens).toBe(150 * 3);
+    expect(session!.compacted).toBe(false);
+
+    const detail = await chats.detail(t1.id);
+    expect(detail).not.toBeNull();
+    expect(detail!.requests).toBe(3);
+    // Reconstruction renders the LAST request's snapshot + final response.
+    expect(detail!.turns.map((t) => t.role)).toEqual(["system", "user", "assistant", "user", "tool"]);
+    expect(detail!.turns[1]!.imageUrls).toEqual(["data:image/png;base64,iVBORw0KGgo="]);
+    expect(detail!.turns[1]!.text).toBe("look at this");
+    expect(detail!.turns[4]!.toolResult).toMatchObject({ callId: `call_x_${run}` });
+  });
+
+  it("marks compaction instead of splitting the session (IR-53)", async () => {
+    const store = createUsageStore(handle!.db);
+    const chats = createUsageChats(handle!.db);
+    const run = randomUUID().slice(0, 8);
+    const mk = (role: string, content: string): UsageRequest["parts"][number] => {
+      const canonical = Buffer.from(JSON.stringify({ role, content }), "utf8");
+      return {
+        hash: createHash("sha256").update(canonical).digest("hex"),
+        kind: "message",
+        role,
+        index: 0,
+        bytes: canonical.length,
+        gz: gzipSync(canonical).toString("base64"),
+        truncated: false,
+      };
+    };
+    const addr = `10.${run.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 200}.2.2`;
+    const system = mk("system", `You are terse. ${run}`);
+    const long = "x".repeat(4000);
+    const t1 = usageRequest({ promptTokens: 4000, ts: Date.now() - 30_000, sourceAddr: addr, parts: [system, mk("user", long)] });
+    // Compacted turn: same client, same surviving first prompt (the lineage
+    // signal), chain broken, input drops by >50%.
+    const t2 = usageRequest({ promptTokens: 900, ts: Date.now() - 20_000, sourceAddr: addr, parts: [system, mk("user", `summarized ${run}`)] });
+    await store.insertBatch(nodeId, [t1, t2]);
+    const list = await chats.list({ range: "1h", nodeId });
+    const session = list.sessions.find((s) => s.id === t1.id);
+    expect(session).toBeDefined();
+    expect(session!.requests).toBe(2); // same session
+    expect(session!.compacted).toBe(true);
+
+    // A genuinely NEW conversation (different first prompt) splits instead.
+    const t3 = usageRequest({ promptTokens: 50, ts: Date.now() - 10_000, sourceAddr: addr, parts: [mk("user", `fresh start ${run}`)] });
+    await store.insertBatch(nodeId, [t3]);
+    const after = await chats.list({ range: "1h", nodeId });
+    const original = after.sessions.find((s) => s.id === t1.id);
+    expect(original!.requests).toBe(2); // t3 did not merge into it
+    expect(after.sessions.find((s) => s.id === t3.id)).toBeDefined();
+  });
+
+  it("reports captured-without-bodies guidance (IR-53)", async () => {
+    const store = createUsageStore(handle!.db);
+    const chats = createUsageChats(handle!.db);
+    await store.insertBatch(nodeId, [usageRequest({ sourceAddr: "10.9.9.9" })]); // no parts (retention off)
+    const list = await chats.list({ range: "1h", nodeId });
+    expect(list.capturedWithoutBodies).toBeGreaterThan(0);
+    expect(list.sessions.find((s) => s.sourceAddrs.includes("10.9.9.9"))).toBeUndefined();
   });
 
   it("attributes parallel tool calls with exact token sums (IR-54)", async () => {

@@ -8,7 +8,8 @@ import BenchmarksView from "./components/BenchmarksView.vue";
 import AnalyticsView from "./components/AnalyticsView.vue";
 import OverviewView from "./components/OverviewView.vue";
 import UsageView from "./components/UsageView.vue";
-import { parseHash, usageHash, type Route } from "./router";
+import ChatsView from "./components/ChatsView.vue";
+import { parseHash, chatsHash, usageHash, type Route } from "./router";
 import { loadServerVersion, serverTag, serverVersion } from "./version";
 
 const { connected } = live;
@@ -70,6 +71,7 @@ onUnmounted(() => {
         <a href="#/serve" :class="{ 'is-active': route.view === 'serve' }" :aria-current="route.view === 'serve' ? 'page' : undefined">Serve</a>
         <a href="#/analytics" :class="{ 'is-active': route.view === 'analytics' }" :aria-current="route.view === 'analytics' ? 'page' : undefined">Analytics</a>
         <a :href="usageHash()" :class="{ 'is-active': route.view === 'usage' }" :aria-current="route.view === 'usage' ? 'page' : undefined">Usage</a>
+        <a :href="chatsHash()" :class="{ 'is-active': route.view === 'chats' }" :aria-current="route.view === 'chats' ? 'page' : undefined">Chats</a>
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
       </nav>
       <span v-if="connected" class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live<template v-if="ageText"> · {{ ageText }}</template></span>
@@ -87,6 +89,7 @@ onUnmounted(() => {
     <BenchmarksView v-else-if="route.view === 'benchmarks'" />
     <AnalyticsView v-else-if="route.view === 'analytics'" />
     <UsageView v-else-if="route.view === 'usage'" />
+    <ChatsView v-else-if="route.view === 'chats'" />
     <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />
     <OverviewView v-else />
   </main>

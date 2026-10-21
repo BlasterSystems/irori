@@ -17,6 +17,7 @@ import { createLlmStore, type LlmStore } from "./llm-store.js";
 import { runRetention, runLlmRetention, runUsageRetention } from "./retention.js";
 import { createUsageStore, type UsageStore } from "./usage-store.js";
 import { createUsageClients, type UsageClients } from "./usage-clients.js";
+import { createUsageChats, type UsageChats } from "./usage-chats.js";
 import { createUsageRollupEngine } from "./usage-rollups.js";
 import { buildHistory } from "./history.js";
 import { buildLlmHistory } from "./llm-history.js";
@@ -77,6 +78,7 @@ const state: {
   cleanup: CleanupService | null;
   usage: UsageStore | null;
   usageClients: UsageClients | null;
+  usageChats: UsageChats | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
 } = {
@@ -92,6 +94,7 @@ const state: {
   cleanup: null,
   usage: null,
   usageClients: null,
+  usageChats: null,
   history: null,
   llmHistory: null,
 };
@@ -116,6 +119,7 @@ const app = createApp({
   getCleanup: () => state.cleanup,
   getUsage: () => state.usage,
   getUsageClients: () => state.usageClients,
+  getUsageChats: () => state.usageChats,
   getHistory: () => state.history,
   getLlmHistory: () => state.llmHistory,
   dbHealthy: () => state.dbHealthy(),
@@ -162,6 +166,8 @@ async function boot(): Promise<void> {
   state.usage = usageStore;
   // IR-55: client-identity registry (issued keys resolve at ingest).
   state.usageClients = createUsageClients(dbHandle.db);
+  // IR-53: session chaining + reconstruction over stored bodies.
+  state.usageChats = createUsageChats(dbHandle.db);
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).

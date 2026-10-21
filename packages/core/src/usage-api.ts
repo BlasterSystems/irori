@@ -193,6 +193,70 @@ export const usageToolsResponseSchema = z.object({
 });
 export type UsageToolsResponse = z.infer<typeof usageToolsResponseSchema>;
 
+/* ── Chats: session reconstruction (IR-53, reads IR-52 bodies) ───────────── */
+
+/** One reconstructed conversation turn (from stored body parts). */
+export const chatTurnSchema = z.object({
+  requestId: z.string().uuid(),
+  kind: z.enum(["message", "response", "error", "marker"]),
+  role: z.string().nullable(),
+  /** Text content (or the stored truncation prefix). */
+  text: z.string().nullable(),
+  /** base64 data URLs (byte-exact as sent). */
+  imageUrls: z.array(z.string()),
+  toolCalls: z.array(z.object({ id: z.string().nullable(), name: z.string(), arguments: z.string() })),
+  toolResult: z.object({ callId: z.string(), error: z.boolean() }).nullable(),
+  truncated: z.boolean().default(false),
+  ts: z.number().int(),
+  model: z.string().nullable(),
+});
+export type ChatTurn = z.infer<typeof chatTurnSchema>;
+
+/** One chained session summary (list view). */
+export const chatSessionSchema = z.object({
+  /** First request of the session — the detail handle. */
+  id: z.string().uuid(),
+  startMs: z.number().int(),
+  lastMs: z.number().int(),
+  requests: z.number().int(),
+  /** Message turns in the final request snapshot. */
+  messages: z.number().int(),
+  promptTokens: z.number().int().nullable(),
+  totalTokens: z.number(),
+  models: z.array(z.string()),
+  clientName: z.string().nullable(),
+  clientProject: z.string().nullable(),
+  clientAgentType: z.enum(["main", "subagent"]).nullable(),
+  sourceAddrs: z.array(z.string()),
+  compacted: z.boolean(),
+  truncated: z.boolean(),
+});
+export type ChatSession = z.infer<typeof chatSessionSchema>;
+
+export const chatsResponseSchema = z.object({
+  range: usageRangeSchema,
+  sessions: z.array(chatSessionSchema),
+  /** Requests captured WITHOUT stored bodies in range — hints retention off. */
+  capturedWithoutBodies: z.number().int(),
+});
+export type ChatsResponse = z.infer<typeof chatsResponseSchema>;
+
+export const chatDetailSchema = z.object({
+  id: z.string().uuid(),
+  startMs: z.number().int(),
+  lastMs: z.number().int(),
+  requests: z.number().int(),
+  compacted: z.boolean(),
+  truncated: z.boolean(),
+  clientName: z.string().nullable(),
+  clientProject: z.string().nullable(),
+  clientAgentType: z.enum(["main", "subagent"]).nullable(),
+  sourceAddrs: z.array(z.string()),
+  models: z.array(z.string()),
+  turns: z.array(chatTurnSchema),
+});
+export type ChatDetail = z.infer<typeof chatDetailSchema>;
+
 /** One issued client identity (IR-55) — the key itself is never listed. */
 export const clientIdentityInfoSchema = z.object({
   id: z.string().uuid(),

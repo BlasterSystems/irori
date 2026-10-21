@@ -9,6 +9,7 @@ import { type CleanupService } from "./cleanup-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
+import type { UsageChats } from "./usage-chats.js";
 import { type LlmHistoryResponse } from "./llm-history.js";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
@@ -102,6 +103,8 @@ export interface AppDeps {
   getUsage: () => UsageStore | null;
   /** Null while degraded: client-identity routes answer 503 (IR-55). */
   getUsageClients: () => UsageClients | null;
+  /** Null while degraded: chats routes answer 503 (IR-53). */
+  getUsageChats: () => UsageChats | null;
   /** Null while degraded: download-queue routes answer 503 (IRI-014). */
   getDownloads: () => DownloadQueueService | null;
   dbHealthy: () => Promise<boolean>;
@@ -454,6 +457,31 @@ export function createApp(deps: AppDeps): Express {
     const removed = await clients.remove(id);
     if (!removed) return res.status(404).json({ error: "identity not found" });
     res.json({ ok: true });
+  });
+
+  // ---- IR-53: chats (session reconstruction from stored bodies) ----
+  const requireUsageChats = (res: Response): UsageChats | null => {
+    const chats = deps.getUsageChats();
+    if (chats === null) res.status(503).json({ error: "database unavailable" });
+    return chats;
+  };
+
+  app.get("/api/v1/usage/chats", async (req, res) => {
+    const chats = requireUsageChats(res);
+    if (chats === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    res.json(await chats.list(filters));
+  });
+
+  app.get("/api/v1/usage/chats/:id", async (req, res) => {
+    const chats = requireUsageChats(res);
+    if (chats === null) return;
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid chat id" });
+    const detail = await chats.detail(id);
+    if (detail === null) return res.status(404).json({ error: "chat not found" });
+    res.json(detail);
   });
 
   // ---- M7: cleanup drawer (SPEC §11.6) ----

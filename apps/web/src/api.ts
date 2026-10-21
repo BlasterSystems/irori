@@ -1,6 +1,8 @@
 import {
   type AnalyticsResponse,
   clientIdentityCreatedSchema,
+  chatDetailSchema,
+  chatsResponseSchema,
   LLM_BACKENDS,
   nodeInfoSchema,
   sseEventSchema,
@@ -14,6 +16,8 @@ import {
   usageToolsResponseSchema,
   USAGE_RANGES,
   type ClientIdentityCreated,
+  type ChatDetail,
+  type ChatsResponse,
   type LlmBackend,
   type LlmPortSnapshot,
   type NodeCreatePayload,
@@ -776,4 +780,29 @@ export async function createUsageClient(input: { name: string; project?: string;
 export async function deleteUsageClient(id: string): Promise<void> {
   const res = await fetch(`/api/v1/usage/clients/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`DELETE /api/v1/usage/clients failed: HTTP ${res.status}`);
+}
+
+export async function fetchChats(
+  range: UsageRangeName,
+  opts: { nodeId?: string; signal?: AbortSignal } = {},
+): Promise<ChatsResponse> {
+  const res = await fetch(`/api/v1/usage/chats?${rangeQuery(range, opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {})}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/chats failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = chatsResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/chats: unexpected shape");
+  return parsed.data;
+}
+
+export async function fetchChat(id: string, signal?: AbortSignal): Promise<ChatDetail | null> {
+  const res = await fetch(`/api/v1/usage/chats/${encodeURIComponent(id)}`, { headers: { accept: "application/json" }, signal });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET /api/v1/usage/chats/${id} failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = chatDetailSchema.safeParse(body);
+  if (!parsed.success) throw new Error(`GET /api/v1/usage/chats/${id}: unexpected shape`);
+  return parsed.data;
 }

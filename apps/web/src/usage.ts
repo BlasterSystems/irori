@@ -18,10 +18,11 @@ export const USAGE_RANGE_TABS: Array<{ value: UsageOverviewResponse["range"]; la
   { value: "90d", label: "90d" },
 ];
 
-/** Parses `#/usage?tab=&range=`; unknown values fall back to defaults. */
+/** Parses `#/usage?tab=&range=` and `#/chats?range=`; unknown values fall back. */
 export function parseUsageHash(hash: string): { tab: UsageTab; range: string } {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
-  const q = h.startsWith("/usage?") ? h.slice("/usage?".length) : "";
+  const isChats = h.startsWith("/chats?");
+  const q = h.startsWith("/usage?") ? h.slice("/usage?".length) : isChats ? h.slice("/chats?".length) : "";
   const params = new URLSearchParams(q);
   const tab = USAGE_TABS.includes(params.get("tab") as UsageTab) ? (params.get("tab") as UsageTab) : "overview";
   const range = USAGE_RANGE_TABS.some((r) => r.value === params.get("range")) ? params.get("range")! : "24h";
