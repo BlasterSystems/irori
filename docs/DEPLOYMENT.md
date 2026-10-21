@@ -16,7 +16,10 @@ Topology (corrected): the **deploy VM is LXC 106 `docker` = 10.20.30.9**
 new name (old paths redirect).
 
 Pipeline: `.github/workflows/cd-dev.yml` — trigger by pushing a `dev-*` tag
-(or run manually with a ref). It runs the full verify gate (typecheck, tests
+(convention `dev-<version>-<n>`, e.g. `dev-0.3.0-14` — next after
+`dev-0.3.0-dev.13`; only the `dev-*` prefix is load-bearing, nothing parses
+the rest, and historical tags keep their names) (or run manually with a ref).
+It runs the full verify gate (typecheck, tests
 against a real Postgres service, validate, docs-check) on GitHub runners, then
 deploys from the self-hosted runner on the runner VM (LXC 110):
 
