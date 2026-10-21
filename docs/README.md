@@ -11,5 +11,6 @@ Read only the document relevant to the current task.
 
 ## When needed
 
+- [Configuration](CONFIGURATION.md) — env surface for server, agent, and web.
 - [Platform support](PLATFORM_SUPPORT.md) — coding-agent capabilities and generated artifacts.
 - [Releasing](RELEASING.md) — Semantic Versioning, release validation, and Git tags.
