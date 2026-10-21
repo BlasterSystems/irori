@@ -42,6 +42,10 @@ export function buildAgentUpdateArgs(jobId: string, serverUrl: string): string[]
     "--collect",
     "--pipe",
     "--wait",
+    // systemd expands $-specifiers in transient-unit ExecStart argv against the
+    // unit env — the script's bash expansions (${BASE#ws://}, ${BASE%/…}) would
+    // be eaten to empty strings before bash ever ran. Ship the script verbatim.
+    "--expand-environment=no",
     `--unit=${unit}`,
     `--setenv=IRORI_SERVER_URL=${serverUrl}`,
     "bash",
