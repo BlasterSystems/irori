@@ -25,6 +25,7 @@ describe("agent-update job (IRI-012)", () => {
     expect(argv).toContain("--pipe");
     expect(argv).toContain("--wait");
     expect(argv.join(" ")).toContain("--unit=irori-agent-update-");
+    expect(argv).toContain("--expand-environment=no");
     expect(argv.join(" ")).toContain("--setenv=IRORI_SERVER_URL=ws://hub:3947/agent-ws");
 
     const script = argv.at(-1)!;
