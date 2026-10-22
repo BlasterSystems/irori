@@ -121,6 +121,14 @@ IRI-014: `packages/db` migration 0011 (`download_queue`), `download-queue-servic
 (dispatch/reconcile/cancel/retry/remove/recover), core policy tests, web chrome pins.
 Live verification: `doctor` job on the NAS node; browser smoke of the queue panel.
 
+IRI-016 (2026-10-22): `download_queue` gained nullable per-entry `quantization` and
+`mtp` columns (migration 0015); per-entry fields ride the existing batch decision
+unchanged (the agent YAML builder already supported them). The hub-side
+`GET /api/v1/hf-quants` read-only HF listing serves the modal's expand-quants flow and
+touches no store-mutation or node-selection rule. Task
+`tasks/IRI-016-gguf-multi-quant-mtp-downloads.md`; brief
+`docs/research/IRI-016-research-brief.md`.
+
 ## Revisit triggers
 
 - modelctl grows a persistent queue/daemon API → consider delegating the queue.
