@@ -62,7 +62,7 @@ d("download queue (db integration)", () => {
       inArray(downloadQueueTable.source, [
         "org/alpha", "org/beta", "org/gamma", "org/delta", "org/epsilon",
         "org/zeta", "org/eta", "org/theta", "org/iota", "org/juliet", "org/kappa", "org/lambda", "org/mike",
-        "org/november", "org/oscar", "org/papa", "org/quebec",
+        "org/november", "org/oscar", "org/papa", "org/quebec", "org/romeo",
       ]),
     );
     await db.delete(nodes).where(inArray(nodes.id, [NAS_ID, HEAD_ID, WORKER_ID])); // cascades jobs + job_output
@@ -231,6 +231,35 @@ d("download queue (db integration)", () => {
     });
     await settle(entries[0]!, "succeeded");
     expect((await rowFor(entries[1]!.id))?.status).toBe("succeeded");
+  });
+
+  it("persists and dispatches per-entry quantization/mtp with derived names (IRI-016)", async () => {
+    const entries = await queue.enqueueBatch({
+      downloads: [
+        { source: "org/quebec", quantization: "UD-Q4_K_XL" },
+        { source: "org/romeo", quantization: "bf16", mtp: "MTP/mtp-x.gguf" },
+      ],
+      jobs: 2,
+    });
+    // Same-repo quants can't collide: derived names carry the tag suffix.
+    expect(entries.map((e) => e.name)).toEqual(["quebec-UD-Q4_K_XL", "romeo-bf16"]);
+    expect(entries.map((e) => e.quantization)).toEqual(["UD-Q4_K_XL", "bf16"]);
+    expect(entries[0]!.mtp).toBeNull();
+    expect(entries[1]!.mtp).toBe("MTP/mtp-x.gguf");
+    const job = await jobsService.get(entries[0]!.jobId!);
+    expect(job?.params).toMatchObject({
+      downloads: [
+        { source: "org/quebec", name: "quebec-UD-Q4_K_XL", quantization: "UD-Q4_K_XL" },
+        { source: "org/romeo", name: "romeo-bf16", quantization: "bf16", mtp: "MTP/mtp-x.gguf" },
+      ],
+      jobs: 2,
+    });
+    await settle(entries[0]!, "failed");
+    const retried = await queue.retry(entries[0]!.id);
+    expect(retried.quantization).toBe("UD-Q4_K_XL"); // retry keeps the stored fields
+    // The retry re-dispatched the entry: settle it so later tests see an idle node.
+    expect(retried.status).toBe("running");
+    await settle(retried, "succeeded");
   });
 
   it("reconciles a failed batch from the modelctl queue --json results document", async () => {

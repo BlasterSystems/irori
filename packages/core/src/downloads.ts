@@ -13,6 +13,10 @@ export const downloadCreateSchema = z.object({
   source: z.string().trim().min(1).max(255),
   /** Store name; defaults to the repo tail (deriveDownloadName). */
   name: z.string().trim().min(1).max(128).optional(),
+  /** GGUF quantization substring (modelctl --quantization); absent = single/auto. */
+  quantization: z.string().trim().min(1).max(64).optional(),
+  /** Explicit MTP/draft companion path (modelctl --mtp); absent = modelctl auto-selects. */
+  mtp: z.string().trim().min(1).max(255).optional(),
   /** modelctl batch concurrency inside one dispatch (1–16). */
   jobs: z.number().int().min(1).max(16).default(4),
 });
@@ -25,7 +29,7 @@ export const DOWNLOAD_BATCH_MAX_ENTRIES = 50;
 /** Bulk submission (IRI-015): N entries + one batch concurrency value. */
 export const downloadBatchCreateSchema = z.object({
   downloads: z
-    .array(downloadCreateSchema.pick({ source: true, name: true }))
+    .array(downloadCreateSchema.pick({ source: true, name: true, quantization: true, mtp: true }))
     .min(1)
     .max(DOWNLOAD_BATCH_MAX_ENTRIES),
   jobs: z.number().int().min(1).max(16).default(4),
@@ -42,6 +46,9 @@ export const downloadQueueEntrySchema = z.object({
   id: z.string().uuid(),
   source: z.string(),
   name: z.string(),
+  // IRI-016: absent on pre-0015 server responses — nullish keeps old hubs parseable.
+  quantization: z.string().nullish(),
+  mtp: z.string().nullish(),
   status: downloadQueueStatusSchema,
   /** Batch job that carried this entry (null until dispatched). */
   jobId: z.string().uuid().nullable(),
@@ -61,9 +68,12 @@ export const downloadQueueResponseSchema = z.object({ entries: z.array(downloadQ
 export type DownloadQueueResponse = z.infer<typeof downloadQueueResponseSchema>;
 
 /** Store name fallback: the repo tail of `owner/model` (mirrors the old modal). */
-export function deriveDownloadName(source: string): string {
+/** IRI-016: a quantization tag appends `-{TAG}` so same-repo quants don't collide. */
+export function deriveDownloadName(source: string, quantization?: string): string {
   const tail = source.split("/").pop() ?? source;
-  return tail.trim().length > 0 ? tail.trim() : source;
+  const base = tail.trim().length > 0 ? tail.trim() : source;
+  const tag = quantization?.trim() ?? "";
+  return tag.length > 0 ? `${base}-${tag}` : base;
 }
 
 interface StoreNodeCandidate {

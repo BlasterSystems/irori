@@ -15,6 +15,8 @@ describe("buildQueueYaml", () => {
     const yaml = buildQueueYaml([
       { source: "Qwen/Qwen3-8B", name: "qwen3-8b-vllm", revision: "main" },
       { source: "org/model-GGUF", name: "m-q4", quantization: "Q4_K_M", runtime: "llama.cpp", mmproj: "mmproj-F16.gguf", force: true },
+      // IRI-016: explicit MTP/draft companion (subfolder path) rides through.
+      { source: "unsloth/gemma-4-31B-it-GGUF", name: "g31-q4", quantization: "UD-Q4_K_XL", mtp: "MTP/mtp-gemma-4-31B-it-Q8_0.gguf" },
     ]);
     expect(yaml).toContain("downloads:");
     expect(yaml).toContain('  - source: "Qwen/Qwen3-8B"');
@@ -24,6 +26,8 @@ describe("buildQueueYaml", () => {
     expect(yaml).toContain('    runtime: "llama.cpp"');
     expect(yaml).toContain('    mmproj: "mmproj-F16.gguf"');
     expect(yaml).toContain("    force: true");
+    expect(yaml).toContain('  - source: "unsloth/gemma-4-31B-it-GGUF"');
+    expect(yaml).toContain('    mtp: "MTP/mtp-gemma-4-31B-it-Q8_0.gguf"');
   });
 
   it("quotes scalars so newlines cannot inject extra entries", () => {

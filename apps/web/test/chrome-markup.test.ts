@@ -58,7 +58,7 @@ it("irori.css ships the shared drawer chrome and the temp accent", () => {
   }
 });
 
-it("ModelsView always queues downloads and shows the queue panel (IRI-014/015)", () => {
+it("ModelsView always queues downloads and shows the queue panel (IRI-014/015/016)", () => {
   for (const token of [
     "enqueueDownload({", // single-row path still goes through POST /downloads
     "enqueueDownloadsBatch({", // bulk path: ONE atomic submission
@@ -67,12 +67,20 @@ it("ModelsView always queues downloads and shows the queue panel (IRI-014/015)",
     "retryEntry(e.id)",
     "removeEntry(e.id)",
     "`Add ${downloadRows.length} to queue`",
+    '"Add to queue"', // IRI-016: no "Add 0 to queue" at zero rows
     "parsePaste()", // paste → editable rows
     "pickStoreNode(nodes.value)", // NAS-preferred store node (shared core policy)
     "clearInterval(queuePoll)",
+    // IRI-016: per-row quantization/mtp + expand-quants against the hub listing.
+    "fetchHfQuants(",
+    "openExpand(row)",
+    "expandAddable",
+    "dl-drawer", // modal spacing fix (brief §7)
   ]) {
     expect(modelsViewSource).toContain(token);
   }
+  // The dead unstyled table class is gone; DS .table everywhere.
+  expect(modelsViewSource).not.toContain("hytable");
   // The legacy immediate-start path must be gone.
   expect(modelsViewSource).not.toContain('createJob(nodeId, "download-queue"');
 });
