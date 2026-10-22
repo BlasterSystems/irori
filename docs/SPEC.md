@@ -200,7 +200,13 @@ flowchart LR
   parsed into editable rows — bulk submissions land as ONE `download_queue`
   batch (IRI-015) — with a persistent **queue panel** on the page (per-entry
   status/remove/retry); store hygiene (doctor/gc) a **popover** off the
-  status strip. No inline form walls.
+  status strip. No inline form walls. Multi-quant GGUF repos are
+  first-class (IRI-016): rows carry optional `quantization` (modelctl
+  substring selection) and `mtp` (explicit draft companion), and an
+  **Expand quants** flow lists a repo's quantizations from the hub
+  (`GET /api/v1/hf-quants`, grouped like modelctl) and expands the row into
+  one entry per selected quant (`{repo tail}-{TAG}` names); unselected
+  quantizations are never downloaded.
 
 ## 7. Serving orchestration
 

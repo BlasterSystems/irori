@@ -11,6 +11,7 @@ import { createEventFeed } from "./events-feed.js";
 import { createAgentHub, type AgentHub } from "./hub.js";
 import { createJobsService, type JobSettledEvent, type JobsService } from "./jobs-service.js";
 import { createDownloadQueueService, type DownloadQueueService } from "./download-queue-service.js";
+import { createHfQuantsService } from "./hf-quants.js";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
@@ -126,6 +127,7 @@ const app = createApp({
   rings,
   sse,
   getHub: () => state.hub,
+  hfQuants: createHfQuantsService(),
   version,
   tag: gitTag,
   staticDir: existsSync(WEB_DIST) ? WEB_DIST : null,

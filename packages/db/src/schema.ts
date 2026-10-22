@@ -255,6 +255,10 @@ export const downloadQueue = pgTable(
     source: text("source").notNull(),
     /** Store name passed to modelctl (labels in batch output match this). */
     name: text("name").notNull(),
+    /** GGUF quantization substring for modelctl (--quantization); null = single/auto. */
+    quantization: text("quantization"),
+    /** Explicit MTP/draft companion path (modelctl --mtp); null = modelctl auto-selects. */
+    mtp: text("mtp"),
     status: downloadQueueStatusEnum("status").notNull().default("pending"),
     /** Batch job that carried the entry; null until first dispatch. */
     jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),

@@ -22,6 +22,7 @@ import {
   type DownloadQueueService,
 } from "./download-queue-service.js";
 import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
+import { HfQuantsError, type HfQuantsService } from "./hf-quants.js";
 import { planPlacement } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
@@ -107,6 +108,8 @@ export interface AppDeps {
   getUsageChats: () => UsageChats | null;
   /** Null while degraded: download-queue routes answer 503 (IRI-014). */
   getDownloads: () => DownloadQueueService | null;
+  /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
+  hfQuants: HfQuantsService;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   /** SSE hub; when wrapped in the IRI-013 recording feed it also serves /events/recent history. */
@@ -164,6 +167,20 @@ export function createApp(deps: AppDeps): Express {
 
   app.get("/api/v1/version", (_req, res) => {
     res.json({ version: deps.version, tag: deps.tag });
+  });
+
+  // IRI-016: GGUF quantization/companion listing for the download modal's
+  // expand-quants flow. Read-only proxy of the public HF API — no store, so
+  // it also answers while degraded. Upstream/validation failures map to
+  // HfQuantsError.status; anything else is a server fault.
+  app.get("/api/v1/hf-quants", async (req, res) => {
+    const repo = typeof req.query.repo === "string" ? req.query.repo.trim() : "";
+    try {
+      res.json(await deps.hfQuants.listQuants(repo));
+    } catch (err) {
+      if (err instanceof HfQuantsError) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
   });
 
   app.get("/api/v1/events", (_req, res) => {

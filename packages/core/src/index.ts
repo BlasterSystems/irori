@@ -7,6 +7,7 @@ export * from "./llm.js";
 export * from "./catalog.js";
 export * from "./jobs.js";
 export * from "./downloads.js";
+export * from "./hf-quants.js";
 export * from "./job-messages.js";
 export * from "./model-api.js";
 export * from "./setups.js";

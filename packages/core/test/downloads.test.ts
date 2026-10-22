@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveDownloadName, downloadBatchCreateSchema, downloadCreateSchema, pickStoreNode } from "../src/downloads.js";
+import { deriveDownloadName, downloadBatchCreateSchema, downloadCreateSchema, downloadQueueEntrySchema, pickStoreNode } from "../src/downloads.js";
 
 /** IRI-014 contracts: store-node policy, name fallback, payload validation. */
 
@@ -60,5 +60,41 @@ describe("download create contract", () => {
       }).success,
     ).toBe(false);
     expect(downloadBatchCreateSchema.safeParse({ downloads: [{ source: "" }] }).success).toBe(false);
+  });
+
+  it("passes quantization/mtp through both shapes and trims them (IRI-016)", () => {
+    const single = downloadCreateSchema.parse({ source: "unsloth/flint-GGUF", quantization: " UD-Q4_K_XL ", mtp: " MTP/mtp-x.gguf " });
+    expect(single.quantization).toBe("UD-Q4_K_XL");
+    expect(single.mtp).toBe("MTP/mtp-x.gguf");
+    const batch = downloadBatchCreateSchema.parse({
+      downloads: [{ source: "unsloth/flint-GGUF", quantization: "bf16" }, { source: "org/m" }],
+    });
+    expect(batch.downloads[0]).toMatchObject({ quantization: "bf16" });
+    expect(batch.downloads[1]).not.toHaveProperty("quantization");
+    // Whitespace-only values are rejected rather than leaking to the YAML.
+    expect(downloadCreateSchema.safeParse({ source: "org/m", quantization: "   " }).success).toBe(false);
+    // Absent fields stay optional (back-compat).
+    expect(downloadCreateSchema.safeParse({ source: "org/m" }).success).toBe(true);
+  });
+
+  it("suffixes quantization into derived store names (IRI-016)", () => {
+    expect(deriveDownloadName("unsloth/flint-GGUF", "UD-Q4_K_XL")).toBe("flint-GGUF-UD-Q4_K_XL");
+    expect(deriveDownloadName("unsloth/flint-GGUF", "  ")).toBe("flint-GGUF");
+    expect(deriveDownloadName("unsloth/flint-GGUF")).toBe("flint-GGUF");
+  });
+
+  it("parses pre-0016 queue responses without the new DTO fields", () => {
+    const old = {
+      id: "0b8b6f47-0b8b-4b0b-8b0b-0b8b6f470001",
+      source: "unsloth/flint-GGUF",
+      name: "flint-GGUF",
+      status: "pending",
+      jobId: null,
+      error: null,
+      createdAt: "2026-10-21T00:00:00.000Z",
+      updatedAt: "2026-10-21T00:00:00.000Z",
+    };
+    expect(downloadQueueEntrySchema.safeParse(old).success).toBe(true);
+    expect(downloadQueueEntrySchema.safeParse({ ...old, quantization: "bf16", mtp: null }).success).toBe(true);
   });
 });
