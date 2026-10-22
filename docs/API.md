@@ -33,16 +33,21 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 
 ## Download queue (IRI-014, ADR-0009)
 
-- `POST /api/v1/downloads` `{source, name?, jobs? (1–16, default 4)}` —
-  **always queues**: `202 {entry}` with the row in `pending` (or already
-  `running` when the store node was idle and the batch dispatched
-  immediately). Adding a download NEVER starts a one-off per-node job and
-  never returns 409. Invalid payload → `400`; degraded DB → `503`.
+- `POST /api/v1/downloads` `{source, name?, quantization?, mtp?, jobs?
+  (1–16, default 4)}` — **always queues**: `202 {entry}` with the row in
+  `pending` (or already `running` when the store node was idle and the batch
+  dispatched immediately). Adding a download NEVER starts a one-off per-node
+  job and never returns 409. Invalid payload → `400`; degraded DB → `503`.
+  IRI-016: `quantization` is the modelctl `--quantization` substring (GGUF
+  repos with several quants require it); `mtp` is an explicit draft
+  companion path (modelctl otherwise auto-selects the single root
+  `mtp-*.gguf`). A quantized entry without an explicit name derives
+  `{repo tail}-{TAG}`.
 - **Bulk form (IRI-015)**: `POST /api/v1/downloads`
-  `{downloads: [{source, name?}…] (1–50), jobs?}` → `202 {entries}` (same
-  per-row states). Atomic: any invalid entry rejects the whole submission
-  with `400` and nothing lands. Single-row bulk submissions are equivalent
-  to the single shape.
+  `{downloads: [{source, name?, quantization?, mtp?}…] (1–50), jobs?}` →
+  `202 {entries}` (same per-row states). Atomic: any invalid entry rejects
+  the whole submission with `400` and nothing lands. Single-row bulk
+  submissions are equivalent to the single shape.
 - The server picks the store node (`pickStoreNode`: `nas`-kind node with
   `nasRoot` first, then any online node with the store mounted). Pending
   entries drain as **one `download-queue` batch** on the idle node — drained
@@ -60,6 +65,19 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   otherwise; unmatched entries fail with "did not complete in the batch".
   Partial failure/cancel still triggers a catalog refresh. Retry is cheap:
   modelctl reuses published objects and resumes staging.
+
+## HF quantization listing (IRI-016)
+
+- `GET /api/v1/hf-quants?repo=owner/model` — read-only proxy of the public
+  HF API for the download modal's expand-quants flow. Returns
+  `{repo, modelCard, quants: [{tag, files, sharded, shards, bytes,
+  ambiguous}], companions: {mmproj: {candidates, default}, mtp: {candidates,
+  default}}}`. `tag` is a substring needle unique across the repo's GGUF
+  groups (pass it as `quantization`); `ambiguous` rows cannot be selected.
+  Companion `default` is modelctl's auto-pick (single f16 mmproj / single
+  root `mtp-*.gguf`); null means modelctl needs an explicit choice.
+  Errors: `400` invalid repo id, `404` missing/not public, `502` HF
+  unreachable or unusable response. No store required (works degraded).
 
 ## Analytics (M7)
 

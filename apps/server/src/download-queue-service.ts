@@ -85,6 +85,8 @@ export function toDownloadDto(row: Row): DownloadQueueEntry {
     id: row.id,
     source: row.source,
     name: row.name,
+    quantization: row.quantization,
+    mtp: row.mtp,
     status: row.status as DownloadQueueStatus,
     jobId: row.jobId,
     error: row.error,
@@ -146,7 +148,12 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
     const batchJobs = Math.max(...pending.map((r) => r.jobs));
     try {
       const job = await jobs.create(node.id, "download-queue", {
-        downloads: pending.map((r) => ({ source: r.source, name: r.name })),
+        downloads: pending.map((r) => ({
+          source: r.source,
+          name: r.name,
+          ...(r.quantization === null ? {} : { quantization: r.quantization }),
+          ...(r.mtp === null ? {} : { mtp: r.mtp }),
+        })),
         jobs: batchJobs,
       });
       await db
@@ -238,10 +245,16 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       if (!parsed.success) {
         throw new DownloadValidationError(parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
       }
-      const name = parsed.data.name ?? deriveDownloadName(parsed.data.source);
+      const name = parsed.data.name ?? deriveDownloadName(parsed.data.source, parsed.data.quantization);
       const [row] = await db
         .insert(downloadQueue)
-        .values({ source: parsed.data.source, name, jobs: parsed.data.jobs })
+        .values({
+          source: parsed.data.source,
+          name,
+          quantization: parsed.data.quantization,
+          mtp: parsed.data.mtp,
+          jobs: parsed.data.jobs,
+        })
         .returning();
       if (!row) throw new Error("download queue insert returned no row");
       await dispatchIfIdle();
@@ -261,7 +274,9 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
         .values(
           parsed.data.downloads.map((e) => ({
             source: e.source,
-            name: e.name ?? deriveDownloadName(e.source),
+            name: e.name ?? deriveDownloadName(e.source, e.quantization),
+            quantization: e.quantization,
+            mtp: e.mtp,
             jobs: parsed.data.jobs,
           })),
         )

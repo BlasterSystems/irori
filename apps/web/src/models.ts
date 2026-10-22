@@ -1,6 +1,7 @@
 import {
   downloadQueueEntrySchema,
   downloadQueueResponseSchema,
+  hfQuantsResultSchema,
   jobInfoSchema,
   jobKindSchema,
   modelsPageSchema,
@@ -9,6 +10,7 @@ import {
   type JobView,
   type ModelsPage,
   type PlacementResponse,
+  type HfQuantsResult,
 } from "@irori/core";
 
 /**
@@ -16,7 +18,7 @@ import {
  * parsed once at this boundary via the @irori/core contracts.
  */
 
-export type { DownloadQueueEntry, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse } from "@irori/core";
+export type { DownloadQueueEntry, HfQuantsResult, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse } from "@irori/core";
 
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });
@@ -93,7 +95,10 @@ async function errorFrom(res: Response): Promise<string> {
  * one-off job); it picks the store node (NAS-preferred) and drains pending
  * entries as one `download-queue` batch whenever that node is idle.
  */
-export async function enqueueDownload(input: { source: string; name?: string; jobs: number }, signal?: AbortSignal): Promise<DownloadQueueEntry> {
+export async function enqueueDownload(
+  input: { source: string; name?: string; quantization?: string; mtp?: string; jobs: number },
+  signal?: AbortSignal,
+): Promise<DownloadQueueEntry> {
   const res = await fetch("/api/v1/downloads", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -116,7 +121,7 @@ export async function fetchDownloadQueue(signal?: AbortSignal): Promise<Download
 
 /** IRI-015: queue N downloads in ONE atomic submission. */
 export async function enqueueDownloadsBatch(
-  input: { downloads: Array<{ source: string; name?: string }>; jobs: number },
+  input: { downloads: Array<{ source: string; name?: string; quantization?: string; mtp?: string }>; jobs: number },
   signal?: AbortSignal,
 ): Promise<DownloadQueueEntry[]> {
   const res = await fetch("/api/v1/downloads", {
@@ -135,6 +140,24 @@ export async function enqueueDownloadsBatch(
     entries.push(parsed.data);
   }
   return entries;
+}
+
+/**
+ * IRI-016: GGUF quantization/companion listing for the expand-quants flow.
+ * Server-side proxy of the HF API; errors surface with the server message.
+ */
+export async function fetchHfQuants(repo: string, signal?: AbortSignal): Promise<HfQuantsResult> {
+  const res = await fetch(`/api/v1/hf-quants?repo=${encodeURIComponent(repo)}`, { signal });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    if (typeof body === "object" && body !== null && "error" in body && typeof body.error === "string") {
+      throw new Error(body.error);
+    }
+    throw new Error(`GET /api/v1/hf-quants -> ${res.status}`);
+  }
+  const parsed = hfQuantsResultSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("malformed hf-quants response");
+  return parsed.data;
 }
 
 /** Removes a pending or terminal entry; the running batch must settle first. */

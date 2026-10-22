@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes } from "../api";
-import { pickStoreNode, type NodeInfo } from "@irori/core";
+import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo } from "@irori/core";
 import {
   cancelJob,
   createJob,
@@ -9,6 +9,7 @@ import {
   enqueueDownload,
   enqueueDownloadsBatch,
   fetchDownloadQueue,
+  fetchHfQuants,
   fetchJob,
   fetchModelsPage,
   fetchPlacement,
@@ -18,6 +19,7 @@ import {
   removeDownload,
   retryDownload,
   type DownloadQueueEntry,
+  type HfQuantsResult,
   type JobDetail,
   type JobView,
   type ModelsPage,
@@ -106,36 +108,123 @@ function runHygiene(kind: string, perModel: boolean): void {
 
 /**
  * IRI-015 paste+rows modal: a textarea takes one `owner/model` per line and
- * parses into editable rows (source + optional store name). Submit sends ONE
- * batch (`POST /downloads {downloads, jobs}`; a single row uses the
- * single-entry shape) — the server always queues and drains them as one
- * `download-queue` batch on the store node when it is idle.
+ * parses into editable rows (source + optional store name). IRI-016 adds the
+ * per-row GGUF `quantization`/`mtp` passthrough and an "Expand" flow that
+ * lists a repo's quantizations (hub HF-API listing) and replaces the row.
+ * Submit sends ONE batch (`POST /downloads {downloads, jobs}`; a single row
+ * uses the single-entry shape) — the server always queues and drains them as
+ * one `download-queue` batch on the store node when it is idle.
  */
 const downloadPaste = ref("");
 let rowIdCounter = 0;
-const downloadRows = ref<Array<{ id: number; source: string; name: string }>>([]);
+interface DownloadRow {
+  id: number;
+  source: string;
+  name: string;
+  /** modelctl --quantization substring; "" = single/auto. */
+  quantization: string;
+  /** Explicit MTP/draft companion; "" = modelctl auto-selects. */
+  mtp: string;
+}
+const downloadRows = ref<DownloadRow[]>([]);
+
+/** Rows are unique per (source, quantization) — same repo, several quants. */
+function rowKey(r: { source: string; quantization: string }): string {
+  return `${r.source.trim().toLowerCase()}|${r.quantization.trim().toLowerCase()}`;
+}
 
 function parsePaste(): void {
-  const seen = new Set(downloadRows.value.map((r) => r.source.trim().toLowerCase()));
+  const seen = new Set(downloadRows.value.map(rowKey));
   for (const raw of downloadPaste.value.split("\n")) {
     const line = raw.trim();
     if (line.length === 0 || line.startsWith("#")) continue;
-    const key = line.toLowerCase();
+    const key = `${line.toLowerCase()}|`;
     if (seen.has(key)) continue;
     seen.add(key);
     rowIdCounter += 1;
-    downloadRows.value.push({ id: rowIdCounter, source: line, name: "" });
+    downloadRows.value.push({ id: rowIdCounter, source: line, name: "", quantization: "", mtp: "" });
   }
   downloadPaste.value = "";
 }
 
 function removeRow(index: number): void {
+  if (expandRowId.value === downloadRows.value[index]?.id) closeExpand();
   downloadRows.value.splice(index, 1);
+}
+
+/** IRI-016 expand-quants state: one row at a time shows its repo's quantizations. */
+const expandRowId = ref<number | null>(null);
+const expandLoading = ref(false);
+const expandError = ref<string | null>(null);
+const expandListing = ref<HfQuantsResult | null>(null);
+const expandSelected = ref<Set<string>>(new Set());
+const expandMtp = ref("");
+
+async function openExpand(row: DownloadRow): Promise<void> {
+  expandRowId.value = row.id;
+  expandLoading.value = true;
+  expandError.value = null;
+  expandListing.value = null;
+  expandSelected.value = new Set();
+  expandMtp.value = "";
+  try {
+    expandListing.value = await fetchHfQuants(row.source.trim());
+    // Preselect modelctl's auto-companions only when it can auto-select.
+    const mtp = expandListing.value.companions.mtp;
+    expandMtp.value = mtp.default ?? "";
+  } catch (err) {
+    expandError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    expandLoading.value = false;
+  }
+}
+
+function closeExpand(): void {
+  expandRowId.value = null;
+  expandListing.value = null;
+  expandError.value = null;
+  expandSelected.value = new Set();
+}
+
+/** Selected, non-ambiguous rows the expansion would add. */
+const expandAddable = computed(() => {
+  if (expandListing.value === null) return 0;
+  return expandListing.value.quants.filter((q) => !q.ambiguous && expandSelected.value.has(q.tag)).length;
+});
+
+function toggleExpandTag(tag: string): void {
+  const next = new Set(expandSelected.value);
+  if (next.has(tag)) next.delete(tag);
+  else next.add(tag);
+  expandSelected.value = next;
+}
+
+/** Replaces the expanded row with one row per selected quantization (cap-aware). */
+function applyExpand(): void {
+  const index = downloadRows.value.findIndex((r) => r.id === expandRowId.value);
+  const listing = expandListing.value;
+  if (index === -1 || listing === null) return closeExpand();
+  const row = downloadRows.value[index]!;
+  const base = row.name.trim() || row.source.split("/").pop() || row.source;
+  const existing = new Set(downloadRows.value.filter((_, i) => i !== index).map(rowKey));
+  const additions: DownloadRow[] = [];
+  for (const q of listing.quants) {
+    if (q.ambiguous || !expandSelected.value.has(q.tag)) continue;
+    if (existing.has(`${row.source.trim().toLowerCase()}|${q.tag.toLowerCase()}`)) continue;
+    if (downloadRows.value.length - 1 + additions.length >= DOWNLOAD_BATCH_MAX_ENTRIES) {
+      expandError.value = `batch cap is ${DOWNLOAD_BATCH_MAX_ENTRIES} entries — the rest were not added`;
+      break;
+    }
+    rowIdCounter += 1;
+    additions.push({ id: rowIdCounter, source: row.source, name: `${base}-${q.tag}`, quantization: q.tag, mtp: expandMtp.value });
+  }
+  downloadRows.value.splice(index, 1, ...additions);
+  closeExpand();
 }
 
 async function submitDownload(): Promise<void> {
   const rows = downloadRows.value
-    .map((r) => ({ source: r.source.trim(), name: r.name.trim() }))
+    .map((r) => ({ source: r.source.trim(), name: r.name.trim(), quantization: r.quantization.trim(), mtp: r.mtp.trim() }))
     .filter((r) => r.source.length > 0);
   if (rows.length === 0) return;
   downloadBusy.value = true;
@@ -143,10 +232,24 @@ async function submitDownload(): Promise<void> {
   let entries: DownloadQueueEntry[];
   try {
     if (rows.length === 1) {
-      entries = [await enqueueDownload({ source: rows[0]!.source, name: rows[0]!.name || undefined, jobs: downloadJobs.value })];
+      const r = rows[0]!;
+      entries = [
+        await enqueueDownload({
+          source: r.source,
+          name: r.name || undefined,
+          quantization: r.quantization || undefined,
+          mtp: r.mtp || undefined,
+          jobs: downloadJobs.value,
+        }),
+      ];
     } else {
       entries = await enqueueDownloadsBatch({
-        downloads: rows.map((r) => ({ source: r.source, name: r.name || undefined })),
+        downloads: rows.map((r) => ({
+          source: r.source,
+          name: r.name || undefined,
+          quantization: r.quantization || undefined,
+          mtp: r.mtp || undefined,
+        })),
         jobs: downloadJobs.value,
       });
     }
@@ -353,7 +456,7 @@ onBeforeUnmount(() => {
       no models match — refresh the catalog from a model-ops node
     </p>
 
-    <table v-else-if="modelsPage !== null" class="hytable">
+    <table v-else-if="modelsPage !== null" class="table">
       <thead>
         <tr>
           <th>Name</th><th>Runtime</th><th>Repository</th><th class="num">Size</th>
@@ -387,7 +490,7 @@ onBeforeUnmount(() => {
         <span class="stat__sub faint">queued adds dispatch to the NAS store node when idle</span>
       </div>
       <p v-if="queueError" class="banner banner--warn">{{ queueError }}</p>
-      <table v-if="downloadQueueEntries.length > 0" class="hytable">
+      <table v-if="downloadQueueEntries.length > 0" class="table">
         <thead>
           <tr><th>Model</th><th>Status</th><th></th></tr>
         </thead>
@@ -426,7 +529,7 @@ onBeforeUnmount(() => {
             {{ formatGiB(placement.model.bytes) }} · from
             <span class="mono">{{ placement.model.name }}</span>
           </p>
-          <table class="hytable">
+          <table class="table">
             <thead>
               <tr><th>Node</th><th>Role</th><th>Action</th><th></th></tr>
             </thead>
@@ -499,9 +602,10 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <!-- Download from HF modal: ALWAYS queues via POST /downloads; server picks the NAS-preferred store node -->
+    <!-- Download from HF modal: ALWAYS queues via POST /downloads; server picks the NAS-preferred store node.
+         IRI-016: per-row quantization/mtp + expand-quants; dl-drawer fixes the DS spacing rhythm (F2/F3/F5). -->
     <div v-if="downloadOpen" class="drawer-scrim" @click.self="downloadOpen = false">
-      <section class="card drawer" aria-label="Download from Hugging Face">
+      <section class="card drawer dl-drawer" aria-label="Download from Hugging Face">
         <div class="card__head">
           <h3>Download from HF to NAS</h3>
           <button class="btn btn--secondary btn--sm" @click="downloadOpen = false">Close</button>
@@ -516,27 +620,85 @@ onBeforeUnmount(() => {
             v-model="downloadPaste"
             class="input mono"
             rows="3"
-            placeholder="unsloth/GLM-5.3-Flash-EXL3&#10;zai-org/Second-Model"
+            placeholder="unsloth/GLM-5.3-Flash-EXL3&#10;unsloth/flint-GGUF"
           ></textarea>
-          <button class="btn btn--secondary btn--sm" style="margin-top: 6px" :disabled="downloadPaste.trim().length === 0" @click="parsePaste">
+          <button class="btn btn--secondary btn--sm" :disabled="downloadPaste.trim().length === 0" @click="parsePaste">
             Parse rows
           </button>
         </div>
         <div class="field">
           <span class="stat__sub">Downloads to queue ({{ downloadRows.length }})</span>
-          <p v-if="downloadRows.length === 0" class="stat__sub faint" style="margin: 4px 0 0">
+          <p v-if="downloadRows.length === 0" class="stat__sub faint">
             Nothing parsed yet — paste repos above and parse, then tweak names before queueing.
           </p>
-          <table v-else class="hytable" style="margin-top: 4px">
+          <table v-else class="table">
             <thead>
-              <tr><th>Hugging Face repo</th><th>Store name (optional)</th><th></th></tr>
+              <tr><th>Hugging Face repo</th><th>Store name (optional)</th><th>Quantization (optional)</th><th></th></tr>
             </thead>
             <tbody>
-              <tr v-for="(row, index) in downloadRows" :key="row.id">
-                <td><input v-model="row.source" class="input mono" type="text" :aria-label="`Repo ${index + 1}`" /></td>
-                <td><input v-model="row.name" class="input mono" type="text" :placeholder="row.source.split('/').pop() || ''" :aria-label="`Store name ${index + 1}`" /></td>
-                <td><button class="btn btn--ghost btn--sm" :aria-label="`Remove ${row.source}`" @click="removeRow(index)">✕</button></td>
-              </tr>
+              <template v-for="(row, index) in downloadRows" :key="row.id">
+                <tr>
+                  <td><input v-model="row.source" class="input mono" type="text" :aria-label="`Repo ${index + 1}`" /></td>
+                  <td><input v-model="row.name" class="input mono" type="text" :placeholder="row.source.split('/').pop() || ''" :aria-label="`Store name ${index + 1}`" /></td>
+                  <td><input v-model="row.quantization" class="input mono" type="text" placeholder="e.g. UD-Q4_K_XL" :aria-label="`Quantization ${index + 1}`" /></td>
+                  <td class="row" style="justify-content: flex-end">
+                    <button class="btn btn--secondary btn--sm" :disabled="expandRowId === row.id" @click="openExpand(row)">Expand</button>
+                    <button class="btn btn--ghost btn--sm" :aria-label="`Remove ${row.source}`" @click="removeRow(index)">✕</button>
+                  </td>
+                </tr>
+                <tr v-if="expandRowId === row.id">
+                  <td colspan="4">
+                    <p v-if="expandLoading" class="stat__sub faint">Listing quantizations…</p>
+                    <template v-else>
+                      <p v-if="expandError" class="banner banner--warn">{{ expandError }}</p>
+                      <template v-if="expandListing !== null">
+                        <div class="row row--wrap">
+                          <button class="btn btn--ghost btn--sm" @click="expandSelected = new Set(expandListing.quants.filter((q) => !q.ambiguous).map((q) => q.tag))">All</button>
+                          <button class="btn btn--ghost btn--sm" @click="expandSelected = new Set()">None</button>
+                          <span v-if="expandListing.quants.length === 0" class="stat__sub faint">no GGUF model files found in this repo</span>
+                        </div>
+                        <div class="expand-grid">
+                          <label
+                            v-for="q in expandListing.quants"
+                            :key="q.tag"
+                            class="pick"
+                            :class="{ 'is-on': expandSelected.has(q.tag) }"
+                            :style="q.ambiguous ? 'opacity: .5' : ''"
+                          >
+                            <input
+                              type="checkbox"
+                              :checked="expandSelected.has(q.tag)"
+                              :disabled="q.ambiguous"
+                              @change="toggleExpandTag(q.tag)"
+                            />
+                            <span class="mono">{{ q.tag }}</span>
+                            <span class="stat__sub">{{ q.bytes === null ? "size n/a" : formatGiB(q.bytes) }}{{ q.sharded ? ` · ${q.shards} shards` : "" }}</span>
+                          </label>
+                        </div>
+                        <div class="field expand-companion">
+                          <label class="stat__sub" for="dl-mtp">MTP draft (companion)</label>
+                          <select id="dl-mtp" v-model="expandMtp" class="select">
+                            <option value="">Auto (modelctl default)</option>
+                            <option v-for="c in expandListing.companions.mtp.candidates" :key="c.path" :value="c.path">{{ c.path }}</option>
+                          </select>
+                          <span v-if="expandListing.companions.mtp.candidates.length > 1 && expandListing.companions.mtp.default === null" class="stat__sub faint">
+                            multiple MTP files — modelctl requires an explicit choice
+                          </span>
+                          <span v-if="expandListing.companions.mmproj.candidates.length > 1 && expandListing.companions.mmproj.default === null" class="stat__sub faint">
+                            multiple mmproj files without an f16 default — modelctl will refuse this entry
+                          </span>
+                        </div>
+                        <div class="row">
+                          <button class="btn btn--primary btn--sm" :disabled="expandAddable === 0" @click="applyExpand">
+                            Add {{ expandAddable }} row{{ expandAddable === 1 ? "" : "s" }}
+                          </button>
+                          <button class="btn btn--ghost btn--sm" @click="closeExpand">Cancel</button>
+                        </div>
+                      </template>
+                    </template>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -548,7 +710,7 @@ onBeforeUnmount(() => {
         <div class="row row--between">
           <span class="stat__sub faint">Always queued · dispatched to the NAS when idle · resumable · companion files included</span>
           <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadRows.length === 0" @click="submitDownload">
-            {{ downloadBusy ? "Queueing…" : `Add ${downloadRows.length} to queue` }}
+            {{ downloadBusy ? "Queueing…" : downloadRows.length > 0 ? `Add ${downloadRows.length} to queue` : "Add to queue" }}
           </button>
         </div>
       </section>
@@ -590,6 +752,28 @@ onBeforeUnmount(() => {
 }
 .num {
   text-align: right;
+}
+/* IRI-016 (brief §7): real DS rhythm between the modal's field groups, an
+   unstretched secondary action, and a proportional numeric input. */
+.dl-drawer {
+  display: grid;
+  gap: var(--space-3);
+}
+.dl-drawer .field > .btn {
+  justify-self: start;
+}
+.dl-drawer input[type="number"] {
+  max-width: 120px;
+}
+/* Expand-quants panel: dense two-column checkbox list + companion select. */
+.expand-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0;
+}
+.expand-companion {
+  margin-top: 8px;
 }
 @media (min-width: 721px) {
   .drawer-scrim {
