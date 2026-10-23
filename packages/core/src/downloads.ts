@@ -17,6 +17,8 @@ export const downloadCreateSchema = z.object({
   quantization: z.string().trim().min(1).max(64).optional(),
   /** Explicit MTP/draft companion path (modelctl --mtp); absent = modelctl auto-selects. */
   mtp: z.string().trim().min(1).max(255).optional(),
+  /** IRI-017: replace an existing manifest with different settings (modelctl per-entry force). */
+  force: z.boolean().optional(),
   /** modelctl batch concurrency inside one dispatch (1–16). */
   jobs: z.number().int().min(1).max(16).default(4),
 });
@@ -29,7 +31,7 @@ export const DOWNLOAD_BATCH_MAX_ENTRIES = 50;
 /** Bulk submission (IRI-015): N entries + one batch concurrency value. */
 export const downloadBatchCreateSchema = z.object({
   downloads: z
-    .array(downloadCreateSchema.pick({ source: true, name: true, quantization: true, mtp: true }))
+    .array(downloadCreateSchema.pick({ source: true, name: true, quantization: true, mtp: true, force: true }))
     .min(1)
     .max(DOWNLOAD_BATCH_MAX_ENTRIES),
   jobs: z.number().int().min(1).max(16).default(4),
@@ -49,6 +51,12 @@ export const downloadQueueEntrySchema = z.object({
   // IRI-016: absent on pre-0015 server responses — nullish keeps old hubs parseable.
   quantization: z.string().nullish(),
   mtp: z.string().nullish(),
+  /** IRI-017: per-entry manifest replace (modelctl force). */
+  force: z.boolean().nullish(),
+  /** IRI-017 progress (modelctl progress events; null until the pinned modelctl emits them). */
+  bytesDone: z.number().nullish(),
+  bytesTotal: z.number().nullish(),
+  speedBps: z.number().nullish(),
   status: downloadQueueStatusSchema,
   /** Batch job that carried this entry (null until dispatched). */
   jobId: z.string().uuid().nullable(),

@@ -680,7 +680,10 @@ export function createApp(deps: AppDeps): Express {
     const downloads = deps.getDownloads();
     if (downloads === null) return res.status(503).json({ error: "database unavailable" });
     try {
-      const entry = await downloads.retry(id);
+      // IRI-017: {force: true} opts the retry into manifest replacement.
+      const body = typeof req.body === "object" && req.body !== null ? req.body : {};
+      const force = (body as { force?: unknown }).force === true;
+      const entry = await downloads.retry(id, { force });
       res.json({ entry });
     } catch (err) {
       if (err instanceof DownloadNotFoundError) return res.status(404).json({ error: err.message });

@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes } from "../api";
+import { fetchSetups } from "../serve";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo } from "@irori/core";
 import {
+  armableNasDelete,
   cancelJob,
   createJob,
+  downloadBytesLine,
+  downloadProgressPct,
+  downloadSpeedView,
   downloadStatusChip,
   enqueueDownload,
   enqueueDownloadsBatch,
@@ -18,6 +23,7 @@ import {
   placementChip,
   removeDownload,
   retryDownload,
+  setupServingModel,
   type DownloadQueueEntry,
   type HfQuantsResult,
   type JobDetail,
@@ -38,6 +44,8 @@ const selected = ref<string | null>(null);
 const placement = ref<PlacementResponse | null>(null);
 const placementLoading = ref(false);
 const placementError = ref<string | null>(null);
+/** IRI-018: serving-setup advisory for the NAS delete flow (warnings never block). */
+const deleteSetupWarn = ref<string | null>(null);
 
 /** Download-from-HF modal state (paste + rows, IRI-015). */
 const downloadOpen = ref(false);
@@ -125,6 +133,8 @@ interface DownloadRow {
   quantization: string;
   /** Explicit MTP/draft companion; "" = modelctl auto-selects. */
   mtp: string;
+  /** IRI-017: replace an existing manifest with different settings (modelctl force). */
+  force: boolean;
 }
 const downloadRows = ref<DownloadRow[]>([]);
 
@@ -142,7 +152,7 @@ function parsePaste(): void {
     if (seen.has(key)) continue;
     seen.add(key);
     rowIdCounter += 1;
-    downloadRows.value.push({ id: rowIdCounter, source: line, name: "", quantization: "", mtp: "" });
+    downloadRows.value.push({ id: rowIdCounter, source: line, name: "", quantization: "", mtp: "", force: false });
   }
   downloadPaste.value = "";
 }
@@ -216,7 +226,7 @@ function applyExpand(): void {
       break;
     }
     rowIdCounter += 1;
-    additions.push({ id: rowIdCounter, source: row.source, name: `${base}-${q.tag}`, quantization: q.tag, mtp: expandMtp.value });
+    additions.push({ id: rowIdCounter, source: row.source, name: `${base}-${q.tag}`, quantization: q.tag, mtp: expandMtp.value, force: false });
   }
   downloadRows.value.splice(index, 1, ...additions);
   closeExpand();
@@ -224,7 +234,7 @@ function applyExpand(): void {
 
 async function submitDownload(): Promise<void> {
   const rows = downloadRows.value
-    .map((r) => ({ source: r.source.trim(), name: r.name.trim(), quantization: r.quantization.trim(), mtp: r.mtp.trim() }))
+    .map((r) => ({ source: r.source.trim(), name: r.name.trim(), quantization: r.quantization.trim(), mtp: r.mtp.trim(), force: r.force }))
     .filter((r) => r.source.length > 0);
   if (rows.length === 0) return;
   downloadBusy.value = true;
@@ -239,6 +249,7 @@ async function submitDownload(): Promise<void> {
           name: r.name || undefined,
           quantization: r.quantization || undefined,
           mtp: r.mtp || undefined,
+          force: r.force || undefined,
           jobs: downloadJobs.value,
         }),
       ];
@@ -249,6 +260,7 @@ async function submitDownload(): Promise<void> {
           name: r.name || undefined,
           quantization: r.quantization || undefined,
           mtp: r.mtp || undefined,
+          force: r.force || undefined,
         })),
         jobs: downloadJobs.value,
       });
@@ -309,14 +321,38 @@ async function removeEntry(id: string): Promise<void> {
   }
 }
 
-async function retryEntry(id: string): Promise<void> {
+async function retryEntry(id: string, force = false): Promise<void> {
   try {
-    const entry = await retryDownload(id);
+    const entry = await retryDownload(id, force);
     await refreshQueue();
     if (entry.status === "running" && entry.jobId !== null) await openJob(entry.jobId);
   } catch (err) {
     queueError.value = err instanceof Error ? err.message : String(err);
   }
+}
+
+/** IRI-018: row-level delete entry point — dry-run on the store node; the arm
+ *  lives in the job drawer once the same dry-run has succeeded. */
+async function startNasDelete(name: string): Promise<void> {
+  const nodeId = storeNode.value;
+  if (nodeId === null) return;
+  deleteSetupWarn.value = null;
+  // Advisory only — never delays the dry-run dispatch.
+  void fetchSetups()
+    .then((rows) => {
+      deleteSetupWarn.value = setupServingModel(rows, name);
+    })
+    .catch(() => {});
+  await runJob(nodeId, "nas-delete", { name });
+}
+
+/** IRI-018: the drawer's succeeded nas-delete job → armable target (same node + name by construction). */
+const armableDelete = computed(() => armableNasDelete(job.value?.job ?? null));
+
+async function armNasDelete(): Promise<void> {
+  const target = armableDelete.value;
+  if (target === null) return;
+  await runJob(target.nodeId, "nas-delete-apply", { name: target.name });
 }
 
 function openBatch(jobId: string): void {
@@ -351,7 +387,15 @@ async function openModel(name: string): Promise<void> {
   selected.value = name;
   placement.value = null;
   placementError.value = null;
+  deleteSetupWarn.value = null;
   placementLoading.value = true;
+  // IRI-018: advisory only — a serving setup that references this model.
+  void fetchSetups()
+    .then((rows) => {
+      if (seq !== placementSeq) return;
+      deleteSetupWarn.value = setupServingModel(rows, name);
+    })
+    .catch(() => {});
   try {
     const res = await fetchPlacement(name);
     if (seq !== placementSeq) return; // a newer drawer opened meanwhile
@@ -369,6 +413,7 @@ function closeDetail(): void {
   selected.value = null;
   placement.value = null;
   placementError.value = null;
+  deleteSetupWarn.value = null;
 }
 
 async function runJob(nodeId: string, kind: string, params: Record<string, unknown>): Promise<void> {
@@ -397,6 +442,12 @@ async function openJob(id: string): Promise<void> {
     if (job.value === null) return;
     if (job.value.job.status === "succeeded" || job.value.job.status === "failed" || job.value.job.status === "canceled") {
       clearInterval(jobPoll);
+      // A settled delete changes the store catalog — the hub's catalog-request
+      // round-trip is async, so refetch now and once more after it lands.
+      if (job.value.job.kind === "nas-delete" || job.value.job.kind === "nas-delete-apply") {
+        void load();
+        setTimeout(() => void load(), 5000);
+      }
       void refreshQueue(); // a settled download batch changes the queue rows
       return;
     }
@@ -416,6 +467,7 @@ function closeJob(): void {
   jobSeq++; // an in-flight openJob must not repopulate the closed drawer
   job.value = null;
   jobError.value = null;
+  deleteSetupWarn.value = null;
 }
 
 onBeforeUnmount(() => {
@@ -459,7 +511,7 @@ onBeforeUnmount(() => {
     <table v-else-if="modelsPage !== null" class="table">
       <thead>
         <tr>
-          <th>Name</th><th>Runtime</th><th>Repository</th><th class="num">Size</th>
+          <th>Name</th><th>Runtime</th><th>Repository</th><th class="num">Size</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -468,6 +520,14 @@ onBeforeUnmount(() => {
           <td><span class="chip">{{ m.runtime }}</span></td>
           <td class="mono faint">{{ m.repository }}</td>
           <td class="num mono">{{ formatGiB(m.bytes) }}</td>
+          <td @click.stop>
+            <button
+              v-if="storeNode !== null"
+              class="btn btn--ghost btn--sm"
+              :aria-label="`Delete ${m.name} from NAS`"
+              @click="startNasDelete(m.name)"
+            >Delete from NAS…</button>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -500,6 +560,13 @@ onBeforeUnmount(() => {
             <td>
               <span class="chip" :class="downloadStatusChip(e.status).cls">{{ downloadStatusChip(e.status).label }}</span>
               <span v-if="e.error" class="mono faint"> {{ e.error }}</span>
+              <div v-if="downloadProgressPct(e) !== null || downloadBytesLine(e) !== null" class="dlbar-row">
+                <div v-if="downloadProgressPct(e) !== null" class="dlbar" role="progressbar" :aria-valuenow="downloadProgressPct(e) ?? 0" aria-valuemin="0" aria-valuemax="100">
+                  <div class="dlbar__fill" :class="`dlbar__fill--${downloadSpeedView(e)?.bucket ?? 'slow'}`" :style="{ width: `${downloadProgressPct(e)}%` }"></div>
+                </div>
+                <span class="stat__sub mono">{{ downloadProgressPct(e) !== null ? `${downloadProgressPct(e)}% ·` : "" }} {{ downloadBytesLine(e) }}</span>
+                <span v-if="downloadSpeedView(e)" class="dlbar__speed" :class="`dlbar__speed--${downloadSpeedView(e)!.bucket}`">{{ downloadSpeedView(e)!.label }}</span>
+              </div>
             </td>
             <td class="num">
               <button v-if="e.jobId !== null" class="btn btn--secondary btn--sm" @click="openBatch(e.jobId)">Job</button>
@@ -508,6 +575,12 @@ onBeforeUnmount(() => {
                 class="btn btn--secondary btn--sm"
                 @click="retryEntry(e.id)"
               >Retry</button>
+              <button
+                v-if="e.status === 'failed' || e.status === 'canceled'"
+                class="btn btn--ghost btn--sm"
+                title="Retry, replacing an existing manifest with different settings (modelctl force)"
+                @click="retryEntry(e.id, true)"
+              >Retry with force</button>
               <button v-if="e.status !== 'running'" class="btn btn--ghost btn--sm" @click="removeEntry(e.id)">Remove</button>
             </td>
           </tr>
@@ -563,7 +636,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
           <p class="stat__sub faint">
-            Sync/push jobs stream output below · destructive deletes are armed via a second apply job
+            Sync/push jobs stream output below · destructive deletes arm from the succeeded dry-run's job drawer
           </p>
           <details class="hygiene">
             <summary class="stat__sub">Store maintenance…</summary>
@@ -594,7 +667,14 @@ onBeforeUnmount(() => {
           <button class="btn btn--secondary btn--sm" @click="closeJob">Close</button>
         </div>
         <p v-if="jobError" class="banner banner--warn">{{ jobError }}</p>
+        <p v-if="job.job.kind === 'nas-delete' && deleteSetupWarn !== null" class="banner banner--warn">
+          Setup "{{ deleteSetupWarn }}" serves this model — deleting breaks its next start (advisory, never blocks).
+        </p>
         <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
+        <div v-if="armableDelete" class="row row--between">
+          <span class="stat__sub faint">Dry run succeeded — arming removes the reference, staging, and now-unreferenced objects.</span>
+          <button class="btn btn--danger btn--sm" @click="armNasDelete">Arm delete (APPLY)</button>
+        </div>
         <div v-if="job.job.status === 'running' || job.job.status === 'queued'" class="row row--between">
           <span class="faint">streaming…</span>
           <button class="btn btn--danger btn--sm" @click="cancelJob(job.job.id)">Cancel job</button>
@@ -633,7 +713,7 @@ onBeforeUnmount(() => {
           </p>
           <table v-else class="table">
             <thead>
-              <tr><th>Hugging Face repo</th><th>Store name (optional)</th><th>Quantization (optional)</th><th></th></tr>
+              <tr><th>Hugging Face repo</th><th>Store name (optional)</th><th>Quantization (optional)</th><th title="Replace an existing manifest with different settings (modelctl force)">Force</th><th></th></tr>
             </thead>
             <tbody>
               <template v-for="(row, index) in downloadRows" :key="row.id">
@@ -641,13 +721,21 @@ onBeforeUnmount(() => {
                   <td><input v-model="row.source" class="input mono" type="text" :aria-label="`Repo ${index + 1}`" /></td>
                   <td><input v-model="row.name" class="input mono" type="text" :placeholder="row.source.split('/').pop() || ''" :aria-label="`Store name ${index + 1}`" /></td>
                   <td><input v-model="row.quantization" class="input mono" type="text" placeholder="e.g. UD-Q4_K_XL" :aria-label="`Quantization ${index + 1}`" /></td>
+                  <td>
+                    <input
+                      v-model="row.force"
+                      type="checkbox"
+                      :aria-label="`Force ${index + 1}`"
+                      title="Replace an existing manifest with different settings (modelctl force)"
+                    />
+                  </td>
                   <td class="row" style="justify-content: flex-end">
                     <button class="btn btn--secondary btn--sm" :disabled="expandRowId === row.id" @click="openExpand(row)">Expand</button>
                     <button class="btn btn--ghost btn--sm" :aria-label="`Remove ${row.source}`" @click="removeRow(index)">✕</button>
                   </td>
                 </tr>
                 <tr v-if="expandRowId === row.id">
-                  <td colspan="4">
+                  <td colspan="5">
                     <p v-if="expandLoading" class="stat__sub faint">Listing quantizations…</p>
                     <template v-else>
                       <p v-if="expandError" class="banner banner--warn">{{ expandError }}</p>
@@ -764,6 +852,42 @@ onBeforeUnmount(() => {
 }
 .dl-drawer input[type="number"] {
   max-width: 120px;
+}
+/* IRI-017: per-row download progress. Width/color transitions animate speed
+   changes smoothly; disabled under prefers-reduced-motion (DS pulse rule). */
+.dlbar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dlbar {
+  flex: 1;
+  max-width: 260px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border, #333);
+  overflow: hidden;
+}
+.dlbar__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.6s ease, background-color 0.6s ease;
+}
+.dlbar__fill--slow { background: var(--warning); }
+.dlbar__fill--ok { background: var(--accent); }
+.dlbar__fill--fast { background: var(--success); }
+.dlbar__speed {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: color 0.6s ease;
+}
+.dlbar__speed--slow { color: var(--warning); }
+.dlbar__speed--ok { color: var(--accent); }
+.dlbar__speed--fast { color: var(--success); }
+@media (prefers-reduced-motion: reduce) {
+  .dlbar__fill, .dlbar__speed { transition: none; }
 }
 /* Expand-quants panel: dense two-column checkbox list + companion select. */
 .expand-grid {

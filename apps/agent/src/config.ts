@@ -29,6 +29,8 @@ export interface AgentConfig {
   usageFlushMs: number;
   /** IRORI_USAGE_MAX_ROWS — hard cap on buffered usage rows (drop-oldest). */
   usageMaxRows: number;
+  /** IRORI_HF_TOKEN — optional HF token handed to modelctl as HF_TOKEN (gated/private repos). */
+  hfToken: string;
 }
 
 export const DEFAULT_SERVER_URL = "ws://127.0.0.1:3947/agent-ws";
@@ -83,7 +85,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const usageMaxRowsRaw = Number.parseInt(env.IRORI_USAGE_MAX_ROWS?.trim() ?? "", 10);
   const usageMaxRows = Number.isFinite(usageMaxRowsRaw) && usageMaxRowsRaw > 0 ? usageMaxRowsRaw : 200_000;
 
-  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows };
+  const hfToken = env.IRORI_HF_TOKEN?.trim() ?? "";
+
+  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows, hfToken };
 }
 
 /** Parse "host:port,host:port" (a bare "port" probes 127.0.0.1). */

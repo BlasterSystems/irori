@@ -96,7 +96,7 @@ async function errorFrom(res: Response): Promise<string> {
  * entries as one `download-queue` batch whenever that node is idle.
  */
 export async function enqueueDownload(
-  input: { source: string; name?: string; quantization?: string; mtp?: string; jobs: number },
+  input: { source: string; name?: string; quantization?: string; mtp?: string; force?: boolean; jobs: number },
   signal?: AbortSignal,
 ): Promise<DownloadQueueEntry> {
   const res = await fetch("/api/v1/downloads", {
@@ -121,7 +121,7 @@ export async function fetchDownloadQueue(signal?: AbortSignal): Promise<Download
 
 /** IRI-015: queue N downloads in ONE atomic submission. */
 export async function enqueueDownloadsBatch(
-  input: { downloads: Array<{ source: string; name?: string; quantization?: string; mtp?: string }>; jobs: number },
+  input: { downloads: Array<{ source: string; name?: string; quantization?: string; mtp?: string; force?: boolean }>; jobs: number },
   signal?: AbortSignal,
 ): Promise<DownloadQueueEntry[]> {
   const res = await fetch("/api/v1/downloads", {
@@ -166,9 +166,12 @@ export async function removeDownload(id: string): Promise<void> {
   if (!res.ok && res.status !== 204) throw new Error(await errorFrom(res));
 }
 
-/** Re-queues a failed/canceled entry; the server drains when idle. */
-export async function retryDownload(id: string): Promise<DownloadQueueEntry> {
-  const res = await fetch(`/api/v1/downloads/${encodeURIComponent(id)}/retry`, { method: "POST" });
+/** Re-queues a failed/canceled entry; the server drains when idle. IRI-017: force=true opts into manifest replacement. */
+export async function retryDownload(id: string, force = false): Promise<DownloadQueueEntry> {
+  const res = await fetch(`/api/v1/downloads/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+    ...(force ? { headers: { "content-type": "application/json" }, body: JSON.stringify({ force: true }) } : {}),
+  });
   if (!res.ok) throw new Error(await errorFrom(res));
   const body: unknown = await res.json().catch(() => null);
   const raw = typeof body === "object" && body !== null && "entry" in body ? body.entry : undefined;
@@ -190,6 +193,44 @@ export function downloadStatusChip(status: DownloadQueueEntry["status"]): { labe
     default:
       return { label: status, cls: "chip--accent" };
   }
+}
+
+/** Pure: 0–100 progress for a running entry; null when bytes are unknown. */
+export function downloadProgressPct(e: DownloadQueueEntry): number | null {
+  if (e.status !== "running" || e.bytesDone === null || e.bytesDone === undefined) return null;
+  if (e.bytesTotal === null || e.bytesTotal === undefined || e.bytesTotal <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((e.bytesDone / e.bytesTotal) * 100)));
+}
+
+/** Pure: human speed label + animation bucket (drives the bar/speed color); null when unknown. Speed is shown in bits (network convention: Mb/s). */
+export function downloadSpeedView(e: DownloadQueueEntry): { label: string; bucket: "slow" | "ok" | "fast" } | null {
+  if (e.status !== "running" || e.speedBps === null || e.speedBps === undefined) return null;
+  const mbps = (e.speedBps * 8) / 1_000_000;
+  const label =
+    mbps >= 1000 ? `${(mbps / 1000).toFixed(1)} Gb/s` : mbps >= 1 ? `${Math.round(mbps)} Mb/s` : `${Math.max(1, Math.round((e.speedBps * 8) / 1000))} kb/s`;
+  const bucket = mbps >= 1000 ? "fast" : mbps >= 100 ? "ok" : "slow";
+  return { label, bucket };
+}
+
+/** Pure: human bytes line ("12.3 GiB / 45.6 GiB") for a running entry; null when unknown. */
+export function downloadBytesLine(e: DownloadQueueEntry): string | null {
+  if (e.status !== "running" || e.bytesDone === null || e.bytesDone === undefined) return null;
+  if (e.bytesTotal === null || e.bytesTotal === undefined || e.bytesTotal <= 0) return formatGiB(e.bytesDone);
+  return `${formatGiB(e.bytesDone)} / ${formatGiB(e.bytesTotal)}`;
+}
+
+/** Pure: a SUCCEEDED nas-delete job → the (nodeId, name) its arm may target; null otherwise (IRI-018). */
+export function armableNasDelete(
+  job: { kind: string; status: string; nodeId: string; params: Record<string, unknown> } | null | undefined,
+): { nodeId: string; name: string } | null {
+  if (job === null || job === undefined || job.kind !== "nas-delete" || job.status !== "succeeded") return null;
+  const name = job.params["name"];
+  return typeof name === "string" && name.length > 0 ? { nodeId: job.nodeId, name } : null;
+}
+
+/** Pure: name of the first serving setup that references the model (delete advisory); null when none (IRI-018). */
+export function setupServingModel(setups: Array<{ name: string; model: string }>, model: string): string | null {
+  return setups.find((s) => s.model === model)?.name ?? null;
 }
 
 /**
