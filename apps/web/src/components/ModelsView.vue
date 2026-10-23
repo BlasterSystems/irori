@@ -7,8 +7,12 @@ import {
   armableNasDelete,
   cancelJob,
   createJob,
+  downloadBatchTotals,
   downloadBytesLine,
+  downloadJobSummary,
   downloadProgressPct,
+  downloadRowActions,
+  downloadSpeedLabel,
   downloadSpeedView,
   downloadStatusChip,
   enqueueDownload,
@@ -18,6 +22,7 @@ import {
   fetchJob,
   fetchModelsPage,
   fetchPlacement,
+  formatEta,
   formatGiB,
   jobStatusChip,
   placementChip,
@@ -87,6 +92,7 @@ const nodes = ref<NodeInfo[]>([]);
 const storeNode = computed(() => pickStoreNode(nodes.value)?.id ?? null);
 
 onMounted(() => {
+  document.addEventListener("click", onDocClick); // IRI-020: row-menu click-away
   void fetchNodes()
     .then((rows) => {
       nodes.value = rows;
@@ -332,6 +338,143 @@ async function retryEntry(id: string, force = false): Promise<void> {
   }
 }
 
+/** IRI-020: per-row ⋯ menu (catalog + queue) and the shared confirm modal. */
+interface RowMenu {
+  kind: "catalog" | "queue";
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+}
+const rowMenu = ref<RowMenu | null>(null);
+const rowMenuEntry = computed(() =>
+  rowMenu.value?.kind === "queue" ? downloadQueueEntries.value.find((e) => e.id === rowMenu.value?.id) ?? null : null,
+);
+const rowMenuItems = computed(() => {
+  const m = rowMenu.value;
+  if (m === null) return [];
+  if (m.kind === "catalog") {
+    return [
+      { act: "details", label: "Details…" },
+      { act: "delete", label: "Delete from NAS…" },
+    ];
+  }
+  const e = rowMenuEntry.value;
+  if (e === null) return [];
+  return downloadRowActions(e.status, e.jobId !== null);
+});
+
+function openRowMenu(kind: "catalog" | "queue", id: string, name: string, ev: MouseEvent): void {
+  const rect = (ev.currentTarget as HTMLElement | null)?.getBoundingClientRect();
+  rowMenu.value = { kind, id, name, x: Math.max(8, (rect?.right ?? 0) - 210), y: (rect?.bottom ?? 0) + 6 };
+}
+
+function onDocClick(ev: MouseEvent): void {
+  const t = ev.target as HTMLElement | null;
+  if (rowMenu.value !== null && t !== null && !t.closest(".rowpop") && !t.closest(".rowopts")) rowMenu.value = null;
+}
+
+interface ConfirmAction {
+  title: string;
+  body: string;
+  danger: string;
+  run: () => Promise<void> | void;
+}
+const confirmState = ref<ConfirmAction | null>(null);
+const confirmBusy = ref(false);
+
+function confirmAction(a: ConfirmAction): void {
+  confirmState.value = a;
+}
+
+async function runConfirm(): Promise<void> {
+  const a = confirmState.value;
+  if (a === null || confirmBusy.value) return;
+  confirmBusy.value = true;
+  try {
+    await a.run();
+  } finally {
+    confirmBusy.value = false;
+    confirmState.value = null;
+  }
+}
+
+function runRowMenu(act: string): void {
+  const m = rowMenu.value;
+  rowMenu.value = null;
+  if (m === null) return;
+  if (m.kind === "catalog") {
+    if (act === "details") void openModel(m.name);
+    else if (act === "delete") {
+      confirmAction({
+        title: `Delete ${m.name} from the NAS?`,
+        body: "Runs a dry-run delete plan first — the destructive APPLY is armed from the succeeded dry-run's job drawer. NAS is never written outside modelctl.",
+        danger: "Plan delete (dry run)",
+        run: () => startNasDelete(m.name),
+      });
+    }
+    return;
+  }
+  const e = downloadQueueEntries.value.find((x) => x.id === m.id);
+  if (e === undefined) return;
+  if (act === "job") {
+    if (e.jobId !== null) void openJob(e.jobId);
+  } else if (act === "retry") {
+    void retryEntry(e.id);
+  } else if (act === "retry-force") {
+    confirmAction({
+      title: `Retry ${e.name} with force?`,
+      body: "Replaces an existing manifest with the current settings (modelctl force). Already-published objects stay referenced.",
+      danger: "Retry with force",
+      run: async () => {
+        await retryEntry(e.id, true);
+      },
+    });
+  } else if (act === "remove") {
+    confirmAction({
+      title: `Remove ${e.name} from the queue?`,
+      body: "The entry leaves the download queue. A running download is not interrupted; published objects stay on the NAS.",
+      danger: "Remove",
+      run: async () => {
+        await removeEntry(e.id);
+      },
+    });
+  } else if (act === "cancel-job" && e.jobId !== null) {
+    const jobId = e.jobId;
+    confirmAction({
+      title: `Cancel the download of ${e.name}?`,
+      body: "Stops the modelctl child for this entry; resumable staging is kept.",
+      danger: "Cancel job",
+      run: async () => {
+        await cancelJob(jobId);
+        await refreshQueue();
+      },
+    });
+  }
+}
+
+/** IRI-020: batch totals strip — hidden until any row carries size/speed data. */
+const queueTotals = computed(() => downloadBatchTotals(downloadQueueEntries.value));
+const showQueueTotals = computed(() => downloadQueueEntries.value.some((e) => e.bytesTotal != null || e.speedBps != null));
+const queueTotalsText = computed(() => {
+  const t = queueTotals.value;
+  const parts: string[] = [];
+  if (t.pct !== null) parts.push(`${t.pct}%`);
+  if (t.bytesTotal > 0) parts.push(`${formatGiB(t.bytesDone)} / ${formatGiB(t.bytesTotal)}`);
+  if (t.speedBps !== null) parts.push(`${downloadSpeedLabel(t.speedBps).label} combined`);
+  if (t.etaSeconds !== null) parts.push(`eta ${formatEta(t.etaSeconds)}`);
+  return parts.join(" · ");
+});
+const queueTotalsBucket = computed(() => (queueTotals.value.speedBps !== null ? downloadSpeedLabel(queueTotals.value.speedBps).bucket : "ok"));
+
+/** IRI-020: the open drawer's download-queue batch rows → collapsed summary. */
+const jobBatchEntries = computed(() => {
+  const j = job.value?.job;
+  if (j === undefined || j.kind !== "download-queue") return [];
+  return downloadQueueEntries.value.filter((e) => e.jobId === j.id);
+});
+const jobSummaryText = computed(() => (jobBatchEntries.value.length > 0 ? downloadJobSummary(jobBatchEntries.value) : ""));
+
 /** IRI-018: row-level delete entry point — dry-run on the store node; the arm
  *  lives in the job drawer once the same dry-run has succeeded. */
 async function startNasDelete(name: string): Promise<void> {
@@ -366,10 +509,6 @@ async function armNasDelete(): Promise<void> {
   const target = armableDelete.value;
   if (target === null) return;
   await runJob(target.nodeId, "nas-delete-apply", { name: target.name });
-}
-
-function openBatch(jobId: string): void {
-  void openJob(jobId);
 }
 
 let debounce: ReturnType<typeof setTimeout> | undefined;
@@ -469,6 +608,7 @@ async function openJob(id: string): Promise<void> {
       return;
     }
     const pollSeq = jobSeq;
+    if (job.value.job.kind === "download-queue") void refreshQueue(); // IRI-020: keep the drawer summary live
     try {
       const next = await fetchJob(job.value.job.id);
       if (pollSeq !== jobSeq) return;
@@ -487,6 +627,7 @@ function closeJob(): void {
 }
 
 onBeforeUnmount(() => {
+  document.removeEventListener("click", onDocClick);
   clearTimeout(debounce);
   clearTimeout(deleteReloadTimer);
   clearInterval(jobPoll);
@@ -528,22 +669,23 @@ onBeforeUnmount(() => {
     <table v-else-if="modelsPage !== null" class="table">
       <thead>
         <tr>
-          <th>Name</th><th>Runtime</th><th>Repository</th><th class="num">Size</th><th></th>
+          <th>Model</th><th class="num">Size</th><th></th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="m in modelsPage.models" :key="m.name" class="is-clickable" @click="openModel(m.name)">
-          <td class="mono">{{ m.name }}</td>
-          <td><span class="chip">{{ m.runtime }}</span></td>
-          <td class="mono faint">{{ m.repository }}</td>
+          <td>
+            <strong>{{ m.name }}</strong>
+            <div class="mono faint">{{ m.repository }}</div>
+          </td>
           <td class="num mono">{{ formatGiB(m.bytes) }}</td>
           <td @click.stop>
             <button
               v-if="storeNode !== null"
-              class="btn btn--ghost btn--sm"
-              :aria-label="`Delete ${m.name} from NAS`"
-              @click="startNasDelete(m.name)"
-            >Delete from NAS…</button>
+              class="btn btn--ghost btn--sm rowopts"
+              :aria-label="`Actions for ${m.name}`"
+              @click="openRowMenu('catalog', m.name, m.name, $event)"
+            >⋯</button>
           </td>
         </tr>
       </tbody>
@@ -567,16 +709,22 @@ onBeforeUnmount(() => {
         <span class="stat__sub faint">queued adds dispatch to the NAS store node when idle</span>
       </div>
       <p v-if="queueError" class="banner banner--warn">{{ queueError }}</p>
+      <div v-if="showQueueTotals" class="dlbar-row" style="margin: 8px 0 2px; max-width: none">
+        <span class="stat__sub mono" style="flex: none">batch</span>
+        <div class="dlbar dlbar--agg" role="progressbar" :aria-valuenow="queueTotals.pct ?? 0" aria-valuemin="0" aria-valuemax="100">
+          <div class="dlbar__fill" :class="`dlbar__fill--${queueTotalsBucket}`" :style="{ width: `${queueTotals.pct ?? 0}%` }"></div>
+        </div>
+        <span class="stat__sub mono">{{ queueTotalsText }}</span>
+      </div>
       <table v-if="downloadQueueEntries.length > 0" class="table">
         <thead>
           <tr><th>Model</th><th>Status</th><th></th></tr>
         </thead>
         <tbody>
           <tr v-for="e in downloadQueueEntries" :key="e.id">
-            <td class="mono">{{ e.name }} <span class="mono faint">· {{ e.source }}</span></td>
             <td>
-              <span class="chip" :class="downloadStatusChip(e.status).cls">{{ downloadStatusChip(e.status).label }}</span>
-              <span v-if="e.error" class="mono faint"> {{ e.error }}</span>
+              <strong>{{ e.name }}</strong>
+              <div class="mono faint">{{ e.source }}</div>
               <div v-if="downloadProgressPct(e) !== null || downloadBytesLine(e) !== null" class="dlbar-row">
                 <div v-if="downloadProgressPct(e) !== null" class="dlbar" role="progressbar" :aria-valuenow="downloadProgressPct(e) ?? 0" aria-valuemin="0" aria-valuemax="100">
                   <div class="dlbar__fill" :class="`dlbar__fill--${downloadSpeedView(e)?.bucket ?? 'slow'}`" :style="{ width: `${downloadProgressPct(e)}%` }"></div>
@@ -585,20 +733,15 @@ onBeforeUnmount(() => {
                 <span v-if="downloadSpeedView(e)" class="dlbar__speed" :class="`dlbar__speed--${downloadSpeedView(e)!.bucket}`">{{ downloadSpeedView(e)!.label }}</span>
               </div>
             </td>
-            <td class="num">
-              <button v-if="e.jobId !== null" class="btn btn--secondary btn--sm" @click="openBatch(e.jobId)">Job</button>
-              <button
-                v-if="e.status === 'failed' || e.status === 'canceled'"
-                class="btn btn--secondary btn--sm"
-                @click="retryEntry(e.id)"
-              >Retry</button>
-              <button
-                v-if="e.status === 'failed' || e.status === 'canceled'"
-                class="btn btn--ghost btn--sm"
-                title="Retry, replacing an existing manifest with different settings (modelctl force)"
-                @click="retryEntry(e.id, true)"
-              >Retry with force</button>
-              <button v-if="e.status !== 'running'" class="btn btn--ghost btn--sm" @click="removeEntry(e.id)">Remove</button>
+            <td>
+              <span v-if="e.error !== null && e.error !== ''" class="tip" tabindex="0">
+                <span class="chip" :class="downloadStatusChip(e.status).cls">{{ downloadStatusChip(e.status).label }}</span>
+                <span class="tip__box" role="tooltip">{{ e.error }}</span>
+              </span>
+              <span v-else class="chip" :class="downloadStatusChip(e.status).cls">{{ downloadStatusChip(e.status).label }}</span>
+            </td>
+            <td class="num" style="width: 44px">
+              <button class="btn btn--ghost btn--sm rowopts" :aria-label="`Actions for ${e.name}`" @click="openRowMenu('queue', e.id, e.name, $event)">⋯</button>
             </td>
           </tr>
         </tbody>
@@ -687,7 +830,15 @@ onBeforeUnmount(() => {
         <p v-if="jobDeleteName !== null && deleteSetupWarn?.name === jobDeleteName" class="banner banner--warn">
           Setup "{{ deleteSetupWarn!.setup }}" serves this model — deleting breaks its next start (advisory, never blocks).
         </p>
-        <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
+        <template v-if="job.job.kind === 'download-queue' && jobSummaryText !== ''">
+          <pre class="joblog mono">{{ jobSummaryText }}</pre>
+          <details class="rawlog">
+            <summary class="stat__sub">raw modelctl output — collapsed (one line per entry, refreshed in place)</summary>
+            <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
+          </details>
+          <p class="stat__sub faint">summary from the download queue (IR 71 progress fields) · raw output stays in the job record</p>
+        </template>
+        <pre v-else class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
         <div v-if="armableDelete" class="row row--between">
           <span class="stat__sub faint">Dry run succeeded — arming removes the reference, staging, and now-unreferenced objects.</span>
           <button class="btn btn--danger btn--sm" @click="armNasDelete">Arm delete (APPLY)</button>
@@ -820,6 +971,29 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </div>
+
+    <!-- IRI-020: per-row actions menu (catalog + queue); closes on any outside click -->
+    <div v-if="rowMenu !== null" class="rowpop" role="menu" :aria-label="`Actions for ${rowMenu.name}`" :style="{ top: `${rowMenu.y}px`, left: `${rowMenu.x}px` }">
+      <button v-for="it in rowMenuItems" :key="it.act" class="btn btn--ghost btn--sm menu-item" @click="runRowMenu(it.act)">{{ it.label }}</button>
+    </div>
+
+    <!-- IRI-020: shared confirmation for destructive actions (queue + catalog) -->
+    <div v-if="confirmState !== null" class="drawer-scrim" @click.self="confirmState = null">
+      <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="confirmState.title">
+        <div class="card__head">
+          <h3>{{ confirmState.title }}</h3>
+          <button class="btn btn--secondary btn--sm" @click="confirmState = null">Close</button>
+        </div>
+        <p class="stat__sub" style="margin: 0">{{ confirmState.body }}</p>
+        <div class="row row--between">
+          <span class="stat__sub faint">nothing destructive runs until you confirm</span>
+          <div class="row">
+            <button class="btn btn--secondary btn--sm" @click="confirmState = null">Cancel</button>
+            <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -915,6 +1089,67 @@ onBeforeUnmount(() => {
 }
 .expand-companion {
   margin-top: 8px;
+}
+/* IRI-020: per-row actions menu, shared confirm modal, error tooltip, and the
+   aggregate batch bar. Menu/tooltip sit below the drawer scrim z-index. */
+.rowpop {
+  position: fixed;
+  z-index: 30;
+  width: 210px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border-strong, #666);
+  border-radius: 4px;
+}
+.rowpop .menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+}
+.rowpop .menu-item:hover {
+  background: var(--surface-2, rgba(127, 127, 127, 0.15));
+}
+.confirm-card {
+  width: min(520px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.tip {
+  position: relative;
+  display: inline-block;
+}
+.tip__box {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  display: none;
+  width: 420px;
+  max-width: 80vw;
+  background: var(--surface, #111);
+  border: 1px solid var(--border-strong, #666);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.tip:hover .tip__box,
+.tip:focus-within .tip__box {
+  display: block;
+}
+.dlbar--agg {
+  max-width: none;
+  height: 6px;
 }
 @media (min-width: 721px) {
   .drawer-scrim {
