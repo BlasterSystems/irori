@@ -213,4 +213,30 @@ describe("agent hub", () => {
     expect(hellos).toEqual([{ nodeId: created.id, agentVersion: "0.1.0" }]);
     ws.close();
   });
+
+  it("carries the global HF token in config-update frames (IRI-019)", async () => {
+    let token: string | null | undefined = "hf_x";
+    const { url, created } = await setup({ getHfToken: async () => token });
+
+    const handshakeConfig = async () => {
+      const ws = new WebSocket(url);
+      await opened(ws);
+      ws.send(hello(created.token));
+      const reply = nextMessage(ws);
+      const config = nextMessage(ws);
+      expect(await reply).toMatchObject({ type: "hello-ok" });
+      ws.close();
+      return config;
+    };
+
+    // string = set
+    expect(await handshakeConfig()).toMatchObject({ hfToken: "hf_x" });
+    // null = clear
+    token = null;
+    expect(await handshakeConfig()).toMatchObject({ hfToken: null });
+    // read failure → key omitted so the agent keeps its current token
+    token = undefined;
+    const cfg = (await handshakeConfig()) as object;
+    expect("hfToken" in cfg).toBe(false);
+  });
 });

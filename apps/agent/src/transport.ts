@@ -139,6 +139,8 @@ export class AgentTransport {
   private llmTimer: NodeJS.Timeout | undefined;
   private llmProbing = false;
   private nasRoot: string | null = null;
+  /** IRI-019: global HF token from the last config-update (null = unset/cleared). */
+  private hfToken: string | null = null;
 
   constructor(options: AgentTransportOptions) {
     this.token = options.token;
@@ -191,6 +193,14 @@ export class AgentTransport {
   /** NAS store root from the last config-update (model-ops nodes). */
   getNasRoot(): string | null {
     return this.nasRoot;
+  }
+
+  /**
+   * IRI-019: global HF token from the last config-update; null until the
+   * hub sends one (or after it sends `hfToken: null` — env fallback wins).
+   */
+  getHfToken(): string | null {
+    return this.hfToken;
   }
 
   /** Snapshots currently buffered for the next connection. */
@@ -434,6 +444,9 @@ export class AgentTransport {
   private handleConfigUpdate(msg: Extract<ServerMsg, { type: "config-update" }>): void {
     this.cadenceMs = msg.cadenceMs;
     this.nasRoot = msg.nasRoot ?? null;
+    // IRI-019: string = set, null = clear (env fallback applies), absent
+    // (old server) = keep the current value.
+    if (msg.hfToken !== undefined) this.hfToken = msg.hfToken;
     this.log(`cadence updated to ${msg.cadenceMs} ms`);
     if (this.ready) this.startSnapshotTimer();
 

@@ -128,7 +128,7 @@ async function run(): Promise<void> {
   });
 
   const jobs = new JobManager(
-    () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath, hfToken: config.hfToken, serverUrl: config.serverUrl }),
+    () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath, hfToken: transport.getHfToken() ?? config.hfToken, serverUrl: config.serverUrl }),
     {
       onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
       onDone: (jobId, status, exitCode) => {

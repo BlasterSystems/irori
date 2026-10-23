@@ -164,4 +164,22 @@ describe("createHfQuantsService", () => {
     await expect(service.listQuants("org/a..b")).rejects.toMatchObject({ status: 400 });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it("sends the Authorization header only when a token is configured (IRI-019)", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const fetchImpl = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {
+      seen.push({ ...(init?.headers ?? {}) });
+      return jsonResponse({ siblings: FLINT_FILES.map((f) => ({ rfilename: f.path, size: f.bytes ?? undefined })) });
+    });
+    const service = createHfQuantsService({ fetchImpl });
+
+    await service.listQuants("unsloth/flint-GGUF");
+    expect(seen[0]).toEqual({ accept: "application/json" });
+
+    await service.listQuants("unsloth/flint-GGUF", "hf_x");
+    expect(seen[1]).toEqual({ accept: "application/json", authorization: "Bearer hf_x" });
+
+    await service.listQuants("unsloth/flint-GGUF", null);
+    expect(seen[2]).toEqual({ accept: "application/json" });
+  });
 });

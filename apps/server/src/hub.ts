@@ -82,6 +82,12 @@ export interface AgentHubDeps {
   usageEvents: {
     onBatch(nodeId: string, events: UsageRequest[]): Promise<boolean>;
   };
+  /**
+   * IRI-019: global HF token read for config-update frames. string = set,
+   * null = clear, undefined = unknown (read failure — the key is omitted so
+   * the agent keeps its current token). Optional: hub tests may omit it.
+   */
+  getHfToken?: () => Promise<string | null | undefined>;
   /** Injectables for tests. */
   writeFlushMs?: number;
   markSeenThrottleMs?: number;
@@ -94,7 +100,7 @@ export interface AgentHub {
   online(): ReadonlySet<string>;
   /** Sends a raw frame to a connected node's agent; false when offline. */
   sendToNode(nodeId: string, msg: unknown): boolean;
-  /** Resends the node's config-update (probe ports, cadence, nasRoot) live. */
+  /** Resends the node's config-update (probe ports, cadence, nasRoot, HF token) live. */
   refreshConfig(nodeId: string): Promise<boolean>;
   stop(): void;
 }
@@ -115,17 +121,22 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
   const pending: Array<{ nodeId: string; kind: "snapshot" | "llm" | "job-done" | "bench-done"; payload: unknown }> = [];
   const throttleMs = deps.markSeenThrottleMs ?? DEFAULT_MARK_SEEN_THROTTLE_MS;
 
-  /** Builds and sends the node's config-update (probe ports, cadence, nasRoot). */
+  /** Builds and sends the node's config-update (probe ports, cadence, nasRoot, HF token). */
   const sendConfigUpdate = async (id: string, sendMsg: (msg: unknown) => void): Promise<void> => {
     const row = await deps.store.get(id);
-    sendMsg({
+    const msg: Record<string, unknown> = {
       type: "config-update",
       cadenceMs: deps.cadenceMs,
       llmPorts: nodeLlmAssignments(row),
       llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
       llmDetectOnly: row?.role === "worker",
       nasRoot: row?.nasRoot ?? null,
-    });
+    };
+    // IRI-019: global HF token — set / clear / omit on read failure (the
+    // agent keeps its current value when the key is absent).
+    const hfToken = deps.getHfToken === undefined ? undefined : await deps.getHfToken().catch(() => undefined);
+    if (hfToken !== undefined) msg.hfToken = hfToken;
+    sendMsg(msg);
   };
 
   let flushing = false;
