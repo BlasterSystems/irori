@@ -7,8 +7,8 @@ import {
   DownloadBusyError,
   DownloadInvalidTransitionError,
   DownloadValidationError,
+  parseProgressLine,
   type DownloadQueueService,
-  type DownloadQueueEntry,
 } from "../src/download-queue-service.js";
 import { createJobsService, type JobSettledEvent, type JobsService } from "../src/jobs-service.js";
 
@@ -22,6 +22,25 @@ import { createJobsService, type JobSettledEvent, type JobsService } from "../sr
  */
 const url = process.env.IRORI_TEST_DATABASE_URL;
 const d = url ? describe : describe.skip;
+
+describe("parseProgressLine (pure)", () => {
+  it("extracts the modelctl progress contract fields", () => {
+    expect(parseProgressLine('progress: {"entry":2,"name":"sierra","bytes_done":1024.4,"bytes_total":2048,"speed_bps":5242880}')).toEqual({
+      entry: 2,
+      name: "sierra",
+      bytesDone: 1024.4,
+      bytesTotal: 2048,
+      speedBps: 5242880,
+    });
+  });
+
+  it("tolerates missing optional fields and junk lines", () => {
+    expect(parseProgressLine('progress: {"bytes_done":0}')).toEqual({ entry: null, name: null, bytesDone: 0, bytesTotal: null, speedBps: null });
+    expect(parseProgressLine("[1/1] complete: kappa -> /mnt/llms/models/org/kappa")).toBeNull();
+    expect(parseProgressLine("progress: {not json")).toBeNull();
+    expect(parseProgressLine('progress: {"bytes_done":"nope"}')).toBeNull();
+  });
+});
 
 const NAS_ID = randomUUID();
 const HEAD_ID = randomUUID();
@@ -63,6 +82,7 @@ d("download queue (db integration)", () => {
         "org/alpha", "org/beta", "org/gamma", "org/delta", "org/epsilon",
         "org/zeta", "org/eta", "org/theta", "org/iota", "org/juliet", "org/kappa", "org/lambda", "org/mike",
         "org/november", "org/oscar", "org/papa", "org/quebec", "org/romeo",
+        "org/rho", "org/sierra", "org/tango", "org/uniform",
       ]),
     );
     await db.delete(nodes).where(inArray(nodes.id, [NAS_ID, HEAD_ID, WORKER_ID])); // cascades jobs + job_output
@@ -328,5 +348,76 @@ d("download queue (db integration)", () => {
     await queue.recover();
     const after = await rowFor(pending!.id);
     expect(after?.status).toBe("running");
+  });
+
+  it("persists and dispatches per-entry force, and Retry with force re-arms it (IRI-017)", async () => {
+    // The recover test leaves its drained row dispatching — settle that batch
+    // so the store node is idle for this one.
+    const [leftover] = await db.select().from(downloadQueueTable).where(eq(downloadQueueTable.source, "org/lambda")).limit(1);
+    if (leftover !== undefined && leftover.jobId !== null) await settle(leftover, "succeeded");
+    const entries = await queue.enqueueBatch({
+      downloads: [{ source: "org/rho", force: true }, { source: "org/tango" }],
+      jobs: 2,
+    });
+    expect(entries[0]!.force).toBe(true);
+    expect(entries[1]!.force).toBe(false);
+    const job = await jobsService.get(entries[0]!.jobId!);
+    expect(job?.params).toMatchObject({
+      downloads: [
+        { source: "org/rho", name: "rho", force: true },
+        { source: "org/tango", name: "tango" },
+      ],
+    });
+    await settle(entries[0]!, "failed");
+    // A plain retry keeps the stored per-entry force.
+    const plain = await queue.retry(entries[0]!.id);
+    expect(plain.force).toBe(true);
+    expect(plain.status).toBe("running");
+    await settle(plain, "failed");
+    // Retry with force arms an entry that never had it.
+    const forced = await queue.retry(entries[1]!.id, { force: true });
+    expect(forced.force).toBe(true);
+    expect(forced.status).toBe("running");
+    const jobAfter = await jobsService.get(forced.jobId!);
+    expect(jobAfter?.params).toMatchObject({ downloads: [{ source: "org/tango", name: "tango", force: true }] });
+    await settle(forced, "succeeded");
+  });
+
+  it("maps modelctl progress lines onto the running batch rows (IRI-017)", async () => {
+    const busy = await jobsService.create(NAS_ID, "sync-local", { name: "alpha" });
+    const a = await queue.enqueue({ source: "org/sierra", jobs: 4 });
+    const b = await queue.enqueue({ source: "org/uniform", jobs: 4 });
+    for (const e of [a, b]) expect(e.status).toBe("pending");
+    await jobsService.cancel(busy.id);
+    await queue.dispatchIfIdle();
+    const rowA0 = await rowFor(a.id);
+    expect(rowA0?.status).toBe("running");
+    const jobId = rowA0!.jobId!;
+    expect((await rowFor(b.id))?.jobId).toBe(jobId);
+
+    // Name match updates only that row.
+    await queue.onJobOutput(jobId, 'progress: {"entry":2,"name":"uniform","bytes_done":1024,"bytes_total":2048,"speed_bps":5000000}');
+    const rowB = await rowFor(b.id);
+    expect(rowB?.bytesDone).toBe(1024);
+    expect(rowB?.bytesTotal).toBe(2048);
+    expect(rowB?.speedBps).toBe(5000000);
+    expect((await rowFor(a.id))?.bytesDone).toBeNull();
+
+    // Entry-index fallback (dispatch order = pending rows by createdAt).
+    await queue.onJobOutput(jobId, 'progress: {"entry":1,"bytes_done":1,"bytes_total":2}');
+    const rowA1 = await rowFor(a.id);
+    expect(rowA1?.bytesDone).toBe(1);
+    expect(rowA1?.bytesTotal).toBe(2);
+
+    // Unknown jobs and non-progress lines are no-ops.
+    await expect(queue.onJobOutput(randomUUID(), 'progress: {"bytes_done":1}')).resolves.toBeUndefined();
+    await expect(queue.onJobOutput(jobId, "[1/2] complete: sierra")).resolves.toBeUndefined();
+
+    // Terminal settle drops the stale speed but keeps the last byte counts.
+    await settle(rowA0!, "succeeded");
+    const rowB2 = await rowFor(b.id);
+    expect(rowB2?.status).toBe("succeeded");
+    expect(rowB2?.speedBps).toBeNull();
+    expect(rowB2?.bytesDone).toBe(1024);
   });
 });

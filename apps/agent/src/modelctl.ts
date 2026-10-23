@@ -17,6 +17,8 @@ export interface ModelctlCtx {
   pin: string;
   /** Explicit modelctl binary (uv installs to ~/.local/bin, off the default PATH). */
   modelctlPath?: string;
+  /** IRI-017: HF token handed to modelctl as HF_TOKEN (gated/private repos); empty = unset. */
+  hfToken?: string;
 }
 
 export class CommandBuildError extends Error {}
@@ -243,9 +245,10 @@ export function runStreaming(
   const onLine = (buf: Buffer) => {
     for (const line of buf.toString("utf8").split(/\r\n|\r|\n/)) {
       if (line.length === 0) continue;
-      // rsync --info=progress2 repaints one line via \r many times a second —
-      // throttle those to 1/s so the output ring and the SSE stream don't flood.
-      if (/\d+\s*%/.test(line) && /B\/s/.test(line)) {
+      // Progress repaints flood the output ring and the SSE stream — rsync
+      // --info=progress2 repaints one line via \r, huggingface_hub tqdm bars
+      // stream per-refresh lines: throttle all of them to 1/s.
+      if (/\d+\s*%/.test(line) && (/B\/s/.test(line) || /it\/s/.test(line) || /s\/it/.test(line))) {
         const now = Date.now();
         if (now - lastProgressAt < 1000) continue;
         lastProgressAt = now;

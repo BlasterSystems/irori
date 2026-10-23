@@ -83,6 +83,21 @@ describe("download create contract", () => {
     expect(deriveDownloadName("unsloth/flint-GGUF")).toBe("flint-GGUF");
   });
 
+  it("passes force through both shapes and leaves it absent by default (IRI-017)", () => {
+    const single = downloadCreateSchema.parse({ source: " org/model ", force: true });
+    expect(single.source).toBe("org/model");
+    expect(single.force).toBe(true);
+    const batch = downloadBatchCreateSchema.parse({
+      downloads: [{ source: "org/model", force: true }, { source: "org/other" }],
+      jobs: 2,
+    });
+    expect(batch.downloads[0]!.force).toBe(true);
+    expect(batch.downloads[1]!.force).toBeUndefined();
+    // Absent force stays absent (never a batch-wide default).
+    expect(downloadCreateSchema.safeParse({ source: "org/m" }).success).toBe(true);
+    expect(downloadCreateSchema.parse({ source: "org/m" }).force).toBeUndefined();
+  });
+
   it("parses pre-0016 queue responses without the new DTO fields", () => {
     const old = {
       id: "0b8b6f47-0b8b-4b0b-8b0b-0b8b6f470001",
@@ -96,5 +111,26 @@ describe("download create contract", () => {
     };
     expect(downloadQueueEntrySchema.safeParse(old).success).toBe(true);
     expect(downloadQueueEntrySchema.safeParse({ ...old, quantization: "bf16", mtp: null }).success).toBe(true);
+  });
+
+  it("parses IRI-017 force and progress fields on queue entries, tolerating their absence", () => {
+    const base = {
+      id: "0b8b6f47-0b8b-4b0b-8b0b-0b8b6f470002",
+      source: "Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold",
+      name: "GLM-5.3-Flash-EXL3-4bpw-TensorFold",
+      status: "running",
+      jobId: null,
+      error: null,
+      createdAt: "2026-10-22T00:00:00.000Z",
+      updatedAt: "2026-10-22T00:00:00.000Z",
+    };
+    const full = downloadQueueEntrySchema.parse({ ...base, force: true, bytesDone: 1024, bytesTotal: 2048, speedBps: 5_000_000 });
+    expect(full.force).toBe(true);
+    expect(full.bytesDone).toBe(1024);
+    expect(full.bytesTotal).toBe(2048);
+    expect(full.speedBps).toBe(5_000_000);
+    const bare = downloadQueueEntrySchema.parse(base);
+    expect(bare.force).toBeUndefined();
+    expect(bare.bytesDone).toBeUndefined();
   });
 });
