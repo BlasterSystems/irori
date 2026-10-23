@@ -98,9 +98,9 @@ no `backend` label).
   `{configured:false}`, Save → `{configured:true}` + pushed frame. Smoke
   stack torn down (container `--rm`, server killed).
 - Review round (PR #29, 4 parallel read-only reviewers + orchestrator pass):
-  13 findings — 1 MAJOR (missing `docs/API.md` → strict docs-check red),
+  14 findings — 1 MAJOR (missing `docs/API.md` → strict docs-check red),
   8 MINOR (token whitespace/charset validation, quants header guard,
-  modal busy guards, three weak test pins, ADR wording), 4 NIT — all
+  modal busy guards, three weak test pins, ADR wording), 5 NIT — all
   addressed in the review-fix commit. Post-fix gate: server 176/176, all
   other suites unchanged green; typecheck/build/validate/docs-check exit 0.
 
