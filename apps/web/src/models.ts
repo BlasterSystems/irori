@@ -202,14 +202,20 @@ export function downloadProgressPct(e: DownloadQueueEntry): number | null {
   return Math.max(0, Math.min(100, Math.round((e.bytesDone / e.bytesTotal) * 100)));
 }
 
-/** Pure: human speed label + animation bucket (drives the bar/speed color); null when unknown. Speed is shown in bits (network convention: Mb/s). */
-export function downloadSpeedView(e: DownloadQueueEntry): { label: string; bucket: "slow" | "ok" | "fast" } | null {
-  if (e.status !== "running" || e.speedBps === null || e.speedBps === undefined) return null;
-  const mbps = (e.speedBps * 8) / 1_000_000;
+/** Pure: human speed label + animation bucket from a raw bytes/s figure.
+ *  Speed is shown in bits (network convention: Mb/s). */
+export function downloadSpeedLabel(speedBps: number): { label: string; bucket: "slow" | "ok" | "fast" } {
+  const mbps = (speedBps * 8) / 1_000_000;
   const label =
-    mbps >= 1000 ? `${(mbps / 1000).toFixed(1)} Gb/s` : mbps >= 1 ? `${Math.round(mbps)} Mb/s` : `${Math.max(1, Math.round((e.speedBps * 8) / 1000))} kb/s`;
+    mbps >= 1000 ? `${(mbps / 1000).toFixed(1)} Gb/s` : mbps >= 1 ? `${Math.round(mbps)} Mb/s` : `${Math.max(1, Math.round((speedBps * 8) / 1000))} kb/s`;
   const bucket = mbps >= 1000 ? "fast" : mbps >= 100 ? "ok" : "slow";
   return { label, bucket };
+}
+
+/** Pure: human speed label + animation bucket (drives the bar/speed color); null when unknown. */
+export function downloadSpeedView(e: DownloadQueueEntry): { label: string; bucket: "slow" | "ok" | "fast" } | null {
+  if (e.status !== "running" || e.speedBps === null || e.speedBps === undefined) return null;
+  return downloadSpeedLabel(e.speedBps);
 }
 
 /** Pure: human bytes line ("12.3 GiB / 45.6 GiB") for a running entry; null when unknown. */
@@ -217,6 +223,124 @@ export function downloadBytesLine(e: DownloadQueueEntry): string | null {
   if (e.status !== "running" || e.bytesDone === null || e.bytesDone === undefined) return null;
   if (e.bytesTotal === null || e.bytesTotal === undefined || e.bytesTotal <= 0) return formatGiB(e.bytesDone);
   return `${formatGiB(e.bytesDone)} / ${formatGiB(e.bytesTotal)}`;
+}
+
+/** Pure: seconds remaining for a running entry; null when unknown. */
+export function downloadEntryEta(e: DownloadQueueEntry): number | null {
+  if (e.status !== "running" || e.speedBps === null || e.speedBps === undefined || e.speedBps <= 0) return null;
+  if (e.bytesDone === null || e.bytesDone === undefined || e.bytesTotal === null || e.bytesTotal === undefined) return null;
+  if (e.bytesTotal <= e.bytesDone) return 0;
+  return Math.round((e.bytesTotal - e.bytesDone) / e.speedBps);
+}
+
+/** Pure: average rate of a settled entry from its timestamps; null when unknowable. */
+export function downloadAvgSpeedBps(e: DownloadQueueEntry): number | null {
+  if (e.bytesTotal === null || e.bytesTotal === undefined || e.bytesTotal <= 0) return null;
+  const start = Date.parse(e.createdAt);
+  const end = Date.parse(e.updatedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return e.bytesTotal / ((end - start) / 1000);
+}
+
+/** Pure: "45s" under a minute, "m:ss" under an hour, "Hh MMm" beyond. */
+export function formatEta(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0s";
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}:${String(s % 60).padStart(2, "0")}`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+/** Aggregated batch state over the queue DTO (IRI-020): combined rate, overall
+ *  bytes + %, and ETA. Terminal rows count their settled bytes so finished
+ *  entries keep contributing to the strip; nulls mean "not enough data" and
+ *  callers hide the part. */
+export interface DownloadBatchTotals {
+  entries: number;
+  active: number;
+  bytesDone: number;
+  bytesTotal: number;
+  pct: number | null;
+  speedBps: number | null;
+  etaSeconds: number | null;
+}
+
+export function downloadBatchTotals(entries: DownloadQueueEntry[]): DownloadBatchTotals {
+  let bytesDone = 0;
+  let bytesTotal = 0;
+  let speedBps = 0;
+  let active = 0;
+  for (const e of entries) {
+    if (e.status === "running" || e.status === "pending") active += 1;
+    if (e.bytesTotal !== null && e.bytesTotal !== undefined) {
+      bytesTotal += e.bytesTotal;
+      if (e.status === "succeeded") bytesDone += e.bytesTotal;
+    }
+    if (e.bytesDone !== null && e.bytesDone !== undefined && e.status !== "succeeded") bytesDone += e.bytesDone;
+    if (e.status === "running" && e.speedBps !== null && e.speedBps !== undefined) speedBps += e.speedBps;
+  }
+  return {
+    entries: entries.length,
+    active,
+    bytesDone,
+    bytesTotal,
+    pct: bytesTotal > 0 ? Math.max(0, Math.min(100, Math.round((bytesDone / bytesTotal) * 100))) : null,
+    speedBps: speedBps > 0 ? speedBps : null,
+    etaSeconds: speedBps > 0 && bytesTotal > bytesDone ? Math.round((bytesTotal - bytesDone) / speedBps) : null,
+  };
+}
+
+/** Pure: ⋯-menu actions per queue-row state, in display order (IRI-020). */
+export type DownloadRowAction = "job" | "cancel-job" | "retry" | "retry-force" | "remove";
+
+export function downloadRowActions(status: DownloadQueueEntry["status"], hasJob: boolean): Array<{ act: DownloadRowAction; label: string }> {
+  const items: Array<{ act: DownloadRowAction; label: string }> = [];
+  if (hasJob) items.push({ act: "job", label: "Job output" });
+  if (status === "running") items.push({ act: "cancel-job", label: "Cancel job…" });
+  if (status === "failed" || status === "canceled") {
+    items.push({ act: "retry", label: "Retry" });
+    items.push({ act: "retry-force", label: "Retry with force…" });
+  }
+  if (status !== "running") items.push({ act: "remove", label: "Remove…" });
+  return items;
+}
+
+/** Pure: the job drawer's collapsed log (IRI-020) — one line per entry plus a
+ *  total line, name column padded to the longest entry for monospace rendering. */
+export function downloadJobSummary(entries: DownloadQueueEntry[]): string {
+  const n = entries.length;
+  const nameW = Math.max(0, ...entries.map((e) => e.name.length));
+  const glyph: Record<DownloadQueueEntry["status"], string> = { pending: "·", running: "▸", succeeded: "✓", failed: "✗", canceled: "✗", removed: "·" };
+  const lines = entries.map((e, i) => {
+    const idx = `[${i + 1}/${n}]`;
+    const name = e.name.padEnd(nameW);
+    if (e.status === "running") {
+      const pct = downloadProgressPct(e);
+      const segs = [pct !== null ? `${pct}%` : "", downloadBytesLine(e) ?? "", downloadSpeedView(e)?.label ?? ""];
+      const eta = downloadEntryEta(e);
+      if (eta !== null) segs.push(`eta ${formatEta(eta)}`);
+      return `${idx} ▸ ${[name, ...segs.filter((s) => s.length > 0)].join("  ")}`;
+    }
+    if (e.status === "succeeded") {
+      const total = e.bytesTotal ?? e.bytesDone ?? null;
+      const segs = [total !== null ? `${formatGiB(total)} downloaded` : "downloaded"];
+      const avg = downloadAvgSpeedBps(e);
+      if (avg !== null) segs.push(`avg ${downloadSpeedLabel(avg).label}`);
+      return `${idx} ✓ ${[name, ...segs].join("  ")}`;
+    }
+    if (e.status === "failed") return `${idx} ✗ ${name}  failed — ${(e.error ?? "error").replace(/\s+/g, " ")}`;
+    if (e.status === "canceled") return `${idx} ✗ ${name}  canceled`;
+    return `${idx} · ${name}  ${e.status === "pending" ? "waiting" : e.status}`;
+  });
+  const t = downloadBatchTotals(entries);
+  const tsegs: string[] = [];
+  if (t.pct !== null) tsegs.push(`${t.pct}%`);
+  if (t.bytesTotal > 0) tsegs.push(`${formatGiB(t.bytesDone)} / ${formatGiB(t.bytesTotal)}`);
+  if (t.speedBps !== null) tsegs.push(`${downloadSpeedLabel(t.speedBps).label} combined`);
+  if (t.etaSeconds !== null) tsegs.push(`eta ${formatEta(t.etaSeconds)}`);
+  if (tsegs.length > 0) lines.push(`total  ${tsegs.join("  ")}`);
+  return lines.join("\n");
 }
 
 /** Pure: a SUCCEEDED nas-delete job → the (nodeId, name) its arm may target; null otherwise (IRI-018). */
