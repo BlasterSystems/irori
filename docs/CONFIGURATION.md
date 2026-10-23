@@ -38,6 +38,7 @@ variables are optional unless noted:
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
 | `IRORI_USAGE_FLUSH_MS` | `30000` | Usage-buffer upload interval (ADR-0008) |
 | `IRORI_USAGE_MAX_ROWS` | `200000` | Usage-buffer hard cap (drop-oldest) |
+| `IRORI_HF_TOKEN` | none | Optional HF token handed to modelctl as `HF_TOKEN` (IRI-017) — enables gated/private repo downloads; never sent to the hub or stored in job params |
 
 ## Web
 
