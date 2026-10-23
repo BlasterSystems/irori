@@ -87,6 +87,10 @@ export function toDownloadDto(row: Row): DownloadQueueEntry {
     name: row.name,
     quantization: row.quantization,
     mtp: row.mtp,
+    force: row.force,
+    bytesDone: row.bytesDone,
+    bytesTotal: row.bytesTotal,
+    speedBps: row.speedBps,
     status: row.status as DownloadQueueStatus,
     jobId: row.jobId,
     error: row.error,
@@ -104,6 +108,41 @@ export interface DownloadQueueDeps {
   online: () => ReadonlySet<string>;
 }
 
+/** One modelctl progress event (IRI-017). */
+export interface DownloadProgress {
+  entry: number | null;
+  name: string | null;
+  bytesDone: number;
+  bytesTotal: number | null;
+  speedBps: number | null;
+}
+
+/**
+ * Extracts a modelctl progress event from a batch output line (IRI-017).
+ * Contract: modelctl emits `progress: {…}` JSONL lines on stderr with at
+ * least `bytes_done` (plus optional `entry`, `name`, `bytes_total`,
+ * `speed_bps`). Lines emitted by modelctl pins without the feature simply
+ * never match → null.
+ */
+export function parseProgressLine(line: string): DownloadProgress | null {
+  if (!line.startsWith("progress: ")) return null;
+  try {
+    const parsed: unknown = JSON.parse(line.slice("progress: ".length));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const e = parsed as Record<string, unknown>;
+    if (typeof e.bytes_done !== "number" || !Number.isFinite(e.bytes_done) || e.bytes_done < 0) return null;
+    return {
+      entry: typeof e.entry === "number" && Number.isInteger(e.entry) && e.entry > 0 ? e.entry : null,
+      name: typeof e.name === "string" && e.name.length > 0 ? e.name : null,
+      bytesDone: e.bytes_done,
+      bytesTotal: typeof e.bytes_total === "number" && Number.isFinite(e.bytes_total) && e.bytes_total >= 0 ? e.bytes_total : null,
+      speedBps: typeof e.speed_bps === "number" && Number.isFinite(e.speed_bps) && e.speed_bps >= 0 ? e.speed_bps : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface DownloadQueueService {
   /** Validates + inserts a pending entry, then attempts an immediate dispatch. */
   enqueue(input: unknown): Promise<DownloadQueueEntry>;
@@ -113,7 +152,13 @@ export interface DownloadQueueService {
   /** Removes a pending or terminal row; a running entry must settle first. */
   remove(id: string): Promise<void>;
   /** Re-queues a failed/canceled entry and attempts a dispatch. */
-  retry(id: string): Promise<DownloadQueueEntry>;
+  retry(id: string, opts?: { force?: boolean }): Promise<DownloadQueueEntry>;
+  /**
+   * IRI-017: live progress for the running batch — parses one job output
+   * line and updates the matching running row's byte/speed columns. No-op
+   * for non-progress lines, unknown jobs, or rows that already settled.
+   */
+  onJobOutput(jobId: string, line: string): Promise<void>;
   /** Terminal batch → row reconcile; hub settles call this (index wiring). */
   onJobSettled(event: JobSettledEvent): Promise<void>;
   /** Boot reconcile: settle rows whose batch already ended, then drain. */
@@ -153,12 +198,13 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
           name: r.name,
           ...(r.quantization === null ? {} : { quantization: r.quantization }),
           ...(r.mtp === null ? {} : { mtp: r.mtp }),
+          ...(r.force ? { force: true } : {}),
         })),
         jobs: batchJobs,
       });
       await db
         .update(downloadQueue)
-        .set({ status: "running", jobId: job.id, error: null, updatedAt: new Date() })
+        .set({ status: "running", jobId: job.id, error: null, bytesDone: null, bytesTotal: null, speedBps: null, updatedAt: new Date() })
         .where(inArray(downloadQueue.id, pending.map((r) => r.id)));
     } catch (err) {
       // JobBusy (a job raced in) / dispatch failure (node dropped): entries
@@ -175,14 +221,14 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
     if (status === "succeeded") {
       await db
         .update(downloadQueue)
-        .set({ status: "succeeded", error: null, updatedAt: now })
+        .set({ status: "succeeded", error: null, speedBps: null, updatedAt: now })
         .where(eq(downloadQueue.jobId, jobId));
       return;
     }
     if (status === "canceled") {
       await db
         .update(downloadQueue)
-        .set({ status: "canceled", error: "batch canceled", updatedAt: now })
+        .set({ status: "canceled", error: "batch canceled", speedBps: null, updatedAt: now })
         .where(eq(downloadQueue.jobId, jobId));
       // A canceled batch may still have published earlier entries.
       sendToAgent(nodeId, { type: "catalog-request" });
@@ -207,9 +253,9 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       for (const row of rows) {
         const verdict = verdicts.get(row.name);
         if (verdict === undefined) {
-          await db.update(downloadQueue).set({ status: "failed", error: "did not complete in the batch", updatedAt: now }).where(eq(downloadQueue.id, row.id));
+          await db.update(downloadQueue).set({ status: "failed", error: "did not complete in the batch", speedBps: null, updatedAt: now }).where(eq(downloadQueue.id, row.id));
         } else {
-          await db.update(downloadQueue).set({ status: verdict.status, error: verdict.error, updatedAt: now }).where(eq(downloadQueue.id, row.id));
+          await db.update(downloadQueue).set({ status: verdict.status, error: verdict.error, speedBps: null, updatedAt: now }).where(eq(downloadQueue.id, row.id));
         }
       }
       // Partial failure: published entries still changed the store — refresh.
@@ -229,10 +275,10 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
     }
     for (const row of rows) {
       if (completed.has(row.name)) {
-        await db.update(downloadQueue).set({ status: "succeeded", error: null, updatedAt: now }).where(eq(downloadQueue.id, row.id));
+        await db.update(downloadQueue).set({ status: "succeeded", error: null, speedBps: null, updatedAt: now }).where(eq(downloadQueue.id, row.id));
       } else {
         const error = failedMsgs.get(row.name) ?? "did not complete in the batch";
-        await db.update(downloadQueue).set({ status: "failed", error, updatedAt: now }).where(eq(downloadQueue.id, row.id));
+        await db.update(downloadQueue).set({ status: "failed", error, speedBps: null, updatedAt: now }).where(eq(downloadQueue.id, row.id));
       }
     }
     // Partial failure: published entries still changed the store — refresh.
@@ -253,6 +299,7 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
           name,
           quantization: parsed.data.quantization,
           mtp: parsed.data.mtp,
+          force: parsed.data.force === true,
           jobs: parsed.data.jobs,
         })
         .returning();
@@ -277,6 +324,7 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
             name: e.name ?? deriveDownloadName(e.source, e.quantization),
             quantization: e.quantization,
             mtp: e.mtp,
+            force: e.force === true,
             jobs: parsed.data.jobs,
           })),
         )
@@ -301,7 +349,7 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       await db.delete(downloadQueue).where(eq(downloadQueue.id, id));
     },
 
-    async retry(id) {
+    async retry(id, opts) {
       const [row] = await db.select().from(downloadQueue).where(eq(downloadQueue.id, id)).limit(1);
       if (!row) throw new DownloadNotFoundError("download entry not found");
       if (row.status !== "failed" && row.status !== "canceled") {
@@ -309,12 +357,47 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       }
       await db
         .update(downloadQueue)
-        .set({ status: "pending", jobId: null, error: null, updatedAt: new Date() })
+        .set({
+          status: "pending",
+          jobId: null,
+          error: null,
+          ...(opts?.force === true ? { force: true } : {}),
+          bytesDone: null,
+          bytesTotal: null,
+          speedBps: null,
+          updatedAt: new Date(),
+        })
         .where(eq(downloadQueue.id, id));
       await dispatchIfIdle();
       const [fresh] = await db.select().from(downloadQueue).where(eq(downloadQueue.id, id)).limit(1);
       if (!fresh) throw new DownloadNotFoundError("download entry not found");
       return toDownloadDto(fresh);
+    },
+
+    async onJobOutput(jobId, line) {
+      const progress = parseProgressLine(line);
+      if (progress === null) return;
+      const rows = await db
+        .select()
+        .from(downloadQueue)
+        .where(and(eq(downloadQueue.jobId, jobId), eq(downloadQueue.status, "running")));
+      if (rows.length === 0) return;
+      // Entry index maps to dispatch order = pending rows by createdAt ASC.
+      const ordered = rows.toSorted((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      let target: Row | undefined;
+      if (progress.name !== null) target = ordered.find((r) => r.name === progress.name);
+      if (target === undefined && progress.entry !== null) target = ordered[progress.entry - 1];
+      if (target === undefined && ordered.length === 1) target = ordered[0]!;
+      if (target === undefined) return;
+      await db
+        .update(downloadQueue)
+        .set({
+          bytesDone: Math.round(progress.bytesDone),
+          ...(progress.bytesTotal === null ? {} : { bytesTotal: Math.round(progress.bytesTotal) }),
+          ...(progress.speedBps === null ? {} : { speedBps: Math.round(progress.speedBps) }),
+          updatedAt: new Date(),
+        })
+        .where(eq(downloadQueue.id, target.id));
     },
 
     async onJobSettled(event) {

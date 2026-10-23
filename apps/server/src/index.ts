@@ -221,6 +221,8 @@ async function boot(): Promise<void> {
     onOutput: async (nodeId: string, jobId: string, seq: number, line: string) => {
       await jobsService.onOutput(nodeId, jobId, seq, line);
       await setupsService.onJobOutput(nodeId, jobId, seq, line);
+      // IRI-017: modelctl progress events → download_queue byte/speed columns.
+      await downloadQueue.onJobOutput(jobId, line);
     },
     onDone: async (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => {
       await jobsService.onDone(nodeId, jobId, status, exitCode);

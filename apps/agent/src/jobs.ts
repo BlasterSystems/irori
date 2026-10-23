@@ -154,8 +154,13 @@ export class JobManager {
       }
     }
     let seq = 0;
+    // IRI-017: hand the optional HF token to modelctl as HF_TOKEN (gated and
+    // private repos). Per-job extraEnv still wins if a caller sets it.
+    const jobEnv: Record<string, string> = { ...extraEnv };
+    const hfToken = this.ctx().hfToken;
+    if (hfToken !== undefined && hfToken.length > 0) jobEnv.HF_TOKEN = hfToken;
     const run = runStreaming(argv, {
-      env: extraEnv,
+      env: jobEnv,
       onLine: (line) => this.events.onOutput(jobId, seq++, line),
     });
     this.active = { jobId, cancel: run.cancel };

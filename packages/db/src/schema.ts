@@ -259,6 +259,12 @@ export const downloadQueue = pgTable(
     quantization: text("quantization"),
     /** Explicit MTP/draft companion path (modelctl --mtp); null = modelctl auto-selects. */
     mtp: text("mtp"),
+    /** IRI-017: per-entry manifest replace (modelctl queue force); default off. */
+    force: boolean("force").notNull().default(false),
+    /** IRI-017 live progress from modelctl progress events; null until reported. */
+    bytesDone: bigint("bytes_done", { mode: "number" }),
+    bytesTotal: bigint("bytes_total", { mode: "number" }),
+    speedBps: bigint("speed_bps", { mode: "number" }),
     status: downloadQueueStatusEnum("status").notNull().default("pending"),
     /** Batch job that carried the entry; null until first dispatch. */
     jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
