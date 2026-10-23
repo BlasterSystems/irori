@@ -129,6 +129,17 @@ touches no store-mutation or node-selection rule. Task
 `tasks/IRI-016-gguf-multi-quant-mtp-downloads.md`; brief
 `docs/research/IRI-016-research-brief.md`.
 
+IRI-017 (2026-10-22): migration 0016 adds three things to `download_queue` without
+touching dispatch/reconcile semantics: (1) a per-entry `force` flag that flows to the
+modelctl queue YAML so a retry can replace an existing manifest with different settings
+(still owner opt-in — the preflight conflict error is modelctl's guard and remains the
+default outcome); (2) nullable `bytes_done`/`bytes_total`/`speed_bps` columns fed by a
+hub-side parser for modelctl `progress:` JSONL job-output lines (no-op until the pinned
+modelctl emits them); (3) an agent-side `IRORI_HF_TOKEN` env that is handed to modelctl
+as `HF_TOKEN` only — it never enters job params, the DB, or output frames (the
+jobs no-credentials contract holds; ADR-0002's secrets posture is untouched since the
+token lives in the agent unit env). Brief `docs/research/IRI-017-research-brief.md`.
+
 ## Revisit triggers
 
 - modelctl grows a persistent queue/daemon API → consider delegating the queue.
