@@ -29,7 +29,7 @@ export interface AgentConfig {
   usageFlushMs: number;
   /** IRORI_USAGE_MAX_ROWS — hard cap on buffered usage rows (drop-oldest). */
   usageMaxRows: number;
-  /** IRORI_HF_TOKEN — optional HF token handed to modelctl as HF_TOKEN (gated/private repos). */
+  /** IRORI_HF_TOKEN — optional HF token handed to modelctl as HF_TOKEN (gated/private repos). Bootstrap fallback: a hub-set global token (IRI-019, config-update) wins over this env. */
   hfToken: string;
 }
 

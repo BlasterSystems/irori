@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, type NodeInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, type NodeInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
@@ -23,6 +23,7 @@ import {
 } from "./download-queue-service.js";
 import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
 import { HfQuantsError, type HfQuantsService } from "./hf-quants.js";
+import type { HfTokenService } from "./hf-token.js";
 import { planPlacement } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
@@ -108,13 +109,19 @@ export interface AppDeps {
   getUsageChats: () => UsageChats | null;
   /** Null while degraded: download-queue routes answer 503 (IRI-014). */
   getDownloads: () => DownloadQueueService | null;
+  /**
+   * IRI-019: global HF token service. Optional — when absent or null
+   * (degraded), the settings routes answer 503 and hf-quants lists
+   * tokenless, exactly as before.
+   */
+  getHfToken?: () => HfTokenService | null;
   /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
   hfQuants: HfQuantsService;
   dbHealthy: () => Promise<boolean>;
   rings: Rings;
   /** SSE hub; when wrapped in the IRI-013 recording feed it also serves /events/recent history. */
   sse: SseHub & { recent?(limit?: number): SseEvent[] };
-  getHub: () => Pick<AgentHub, "online" | "sendToNode"> | null;
+  getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig"> | null;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -176,11 +183,36 @@ export function createApp(deps: AppDeps): Express {
   app.get("/api/v1/hf-quants", async (req, res) => {
     const repo = typeof req.query.repo === "string" ? req.query.repo.trim() : "";
     try {
-      res.json(await deps.hfQuants.listQuants(repo));
+      const hfToken = deps.getHfToken?.() ?? null;
+      const token = hfToken === null ? null : await hfToken.get().catch(() => null);
+      res.json(await deps.hfQuants.listQuants(repo, token));
     } catch (err) {
       if (err instanceof HfQuantsError) return res.status(err.status).json({ error: err.message });
       throw err;
     }
+  });
+
+  // IRI-019: global HF token (ADR-0009 addendum). The GET is presence-only —
+  // the token itself never appears in any response body. Optional dep:
+  // absent/null (degraded) answers 503 like the other db-backed routes.
+  app.get("/api/v1/settings/hf-token", async (_req, res) => {
+    const hfToken = deps.getHfToken?.() ?? null;
+    if (hfToken === null) return res.status(503).json({ error: "database unavailable" });
+    const configured = (await hfToken.get()) !== null;
+    res.json({ configured } satisfies { configured: boolean });
+  });
+
+  app.put("/api/v1/settings/hf-token", async (req, res) => {
+    const hfToken = deps.getHfToken?.() ?? null;
+    if (hfToken === null) return res.status(503).json({ error: "database unavailable" });
+    const body = hfTokenPutSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    await hfToken.set(body.data.hfToken);
+    // Best-effort live push to online agents; offline agents receive the
+    // value in the config-update that follows their next hello.
+    const hub = deps.getHub();
+    if (hub !== null) for (const nodeId of hub.online()) void hub.refreshConfig(nodeId).catch(() => {});
+    res.json({ configured: body.data.hfToken !== null });
   });
 
   app.get("/api/v1/events", (_req, res) => {

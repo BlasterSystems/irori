@@ -7,9 +7,10 @@ import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore, makeSnapshot } from "./helpers.js";
 
-function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown } = {}) {
+function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> } } = {}) {
   const fake = makeFakeStore();
   const online = new Set<string>();
+  const refreshed: string[] = [];
   const deps: AppDeps = {
     getStore: () => (opts.store === undefined ? fake.store : opts.store),
     getLlmStore: () => null,
@@ -18,13 +19,21 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
     dbHealthy: opts.dbHealthy ?? (async () => true),
     rings: createRings(),
     sse: createSseHub({ heartbeatMs: 0 }),
-    getHub: () => ({ online: () => online }),
+    getHub: () => ({
+      online: () => online,
+      sendToNode: () => true,
+      refreshConfig: async (nodeId: string) => {
+        refreshed.push(nodeId);
+        return true;
+      },
+    }),
     getJobs: opts.jobs === undefined ? () => null : () => (opts.jobs as never),
+    getHfToken: () => (opts.hfToken === undefined ? null : opts.hfToken),
     version: "test",
     tag: null,
     staticDir: null,
   };
-  return { app: createApp(deps), fake, online, rings: deps.rings };
+  return { app: createApp(deps), fake, online, refreshed, rings: deps.rings };
 }
 
 describe("app", () => {
@@ -144,5 +153,55 @@ describe("app", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual(snapshot);
     expect((await request(app).get("/api/v1/nodes/not-a-uuid/snapshot")).status).toBe(400);
+  });
+
+  it("answers presence-only GET for the global HF token (IRI-019)", async () => {
+    const tokenSvc = { get: async () => "hf_x", set: async () => {} };
+    const { app } = makeApp({ hfToken: tokenSvc });
+    const res = await request(app).get("/api/v1/settings/hf-token");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ configured: true }); // never the token itself
+  });
+
+  it("answers 503 for the settings routes while the token service is absent", async () => {
+    const { app } = makeApp();
+    expect((await request(app).get("/api/v1/settings/hf-token")).status).toBe(503);
+    expect((await request(app).put("/api/v1/settings/hf-token").send({ hfToken: "hf_x" })).status).toBe(503);
+  });
+
+  it("sets the token and pushes config-refresh to every online node", async () => {
+    let stored: string | null = null;
+    const tokenSvc = { get: async () => stored, set: async (t: string | null) => { stored = t; } };
+    const { app, fake, online, refreshed } = makeApp({ hfToken: tokenSvc });
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    online.add(id);
+
+    const res = await request(app).put("/api/v1/settings/hf-token").send({ hfToken: "hf_x" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ configured: true });
+    expect(stored).toBe("hf_x");
+    expect(refreshed).toEqual([id]);
+
+    const get = await request(app).get("/api/v1/settings/hf-token");
+    expect(get.body).toEqual({ configured: true });
+  });
+
+  it("clears the token with null and still pushes", async () => {
+    let stored: string | null = "hf_x";
+    const tokenSvc = { get: async () => stored, set: async (t: string | null) => { stored = t; } };
+    const { app, online, refreshed } = makeApp({ hfToken: tokenSvc });
+    online.add("00000000-0000-4000-8000-000000000009");
+
+    const res = await request(app).put("/api/v1/settings/hf-token").send({ hfToken: null });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ configured: false });
+    expect(stored).toBeNull();
+    expect(refreshed).toEqual(["00000000-0000-4000-8000-000000000009"]);
+  });
+
+  it("rejects invalid token bodies with 400", async () => {
+    const { app } = makeApp({ hfToken: { get: async () => null, set: async () => {} } });
+    expect((await request(app).put("/api/v1/settings/hf-token").send({ hfToken: "" })).status).toBe(400);
+    expect((await request(app).put("/api/v1/settings/hf-token").send({})).status).toBe(400);
   });
 });

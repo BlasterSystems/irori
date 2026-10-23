@@ -12,6 +12,7 @@ import { createAgentHub, type AgentHub } from "./hub.js";
 import { createJobsService, type JobSettledEvent, type JobsService } from "./jobs-service.js";
 import { createDownloadQueueService, type DownloadQueueService } from "./download-queue-service.js";
 import { createHfQuantsService } from "./hf-quants.js";
+import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
@@ -70,6 +71,8 @@ const state: {
   dbHealthy: () => Promise<boolean>;
   hub: AgentHub | null;
   store: NodeStore | null;
+  /** IRI-019: global HF token service (null until the DB is wired). */
+  hfToken: HfTokenService | null;
   llmStore: LlmStore | null;
   jobs: JobsService | null;
   downloads: DownloadQueueService | null;
@@ -86,6 +89,7 @@ const state: {
   dbHealthy: async () => false,
   hub: null,
   store: null,
+  hfToken: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -127,6 +131,7 @@ const app = createApp({
   rings,
   sse,
   getHub: () => state.hub,
+  getHfToken: () => state.hfToken,
   hfQuants: createHfQuantsService(),
   version,
   tag: gitTag,
@@ -170,6 +175,8 @@ async function boot(): Promise<void> {
   state.usageClients = createUsageClients(dbHandle.db);
   // IR-53: session chaining + reconstruction over stored bodies.
   state.usageChats = createUsageChats(dbHandle.db);
+  // IRI-019: global HF token (settings row), pushed to agents via config-update.
+  state.hfToken = createHfTokenService(dbHandle.db);
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).
@@ -233,7 +240,7 @@ async function boot(): Promise<void> {
     onHello: (nodeId: string, agentVersion: string) => jobsService.settleAgentUpdate(nodeId, agentVersion),
   };
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, jobEvents, setupEvents: {
+  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(null) : state.hfToken.get()), jobEvents, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),

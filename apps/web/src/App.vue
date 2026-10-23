@@ -9,6 +9,7 @@ import AnalyticsView from "./components/AnalyticsView.vue";
 import OverviewView from "./components/OverviewView.vue";
 import UsageView from "./components/UsageView.vue";
 import ChatsView from "./components/ChatsView.vue";
+import HubSettingsModal from "./components/HubSettingsModal.vue";
 import { parseHash, chatsHash, usageHash, type Route } from "./router";
 import { loadServerVersion, serverTag, serverVersion } from "./version";
 
@@ -25,6 +26,9 @@ function onHashChange(): void {
 const detailNodeId = computed(() =>
   route.value.view === "node" ? route.value.id : null,
 );
+
+/** IRI-019: footer gear → hub-wide settings (global HF token). */
+const hubSettingsOpen = ref(false);
 
 const ageText = computed(() => {
   const v = live.lastEventAgeMs.value;
@@ -95,8 +99,13 @@ onUnmounted(() => {
   </main>
 
   <footer class="foot">
-    <div class="container foot__in">
+    <div class="container foot__in" style="justify-content: space-between">
       <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template></span>
+      <button class="iconbtn" aria-label="Hub settings" title="Hub settings" @click="hubSettingsOpen = true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+      </button>
     </div>
   </footer>
+
+  <HubSettingsModal v-if="hubSettingsOpen" @close="hubSettingsOpen = false" />
 </template>

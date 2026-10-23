@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import { buildCommand, buildQueueYaml, CommandBuildError } from "../src/modelctl.js";
 import { JobManager } from "../src/jobs.js";
 import { parseCatalog } from "@irori/core";
@@ -163,6 +163,37 @@ describe("store reading", () => {
       const read = await readStore(dir);
       expect(read.source).toBe("scan");
       expect(read.warning).toContain("no catalog.json");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("JobManager env (IRI-019)", () => {
+  it("hands ctx.hfToken to modelctl as HF_TOKEN and omits it when empty", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "irori-hfenv-"));
+    try {
+      // Fake modelctl: prints the HF token it was handed (or UNSET).
+      const script = join(dir, "modelctl");
+      writeFileSync(script, "#!/bin/sh\necho \"HF_TOKEN=${HF_TOKEN-UNSET}\"\n", { mode: 0o755 });
+      const outputs: string[] = [];
+
+      const jobs = new JobManager(
+        () => ({ nasRoot: dir, pin: "0", modelctlPath: script, hfToken: "hf_x", serverUrl: "" }),
+        { onOutput: (_jobId, _seq, line) => outputs.push(line), onDone: () => {} },
+      );
+      expect(jobs.start("44444444-4444-4444-8444-444444444444", "doctor", {})).toBe(true);
+      await vi.waitFor(() => expect(outputs.some((l) => l.startsWith("HF_TOKEN="))).toBe(true));
+      expect(outputs.find((l) => l.startsWith("HF_TOKEN="))).toBe("HF_TOKEN=hf_x");
+
+      // Empty ctx token → no HF_TOKEN in the child env at all.
+      const jobs2 = new JobManager(
+        () => ({ nasRoot: dir, pin: "0", modelctlPath: script, hfToken: "", serverUrl: "" }),
+        { onOutput: (_jobId, _seq, line) => outputs.push(line), onDone: () => {} },
+      );
+      expect(jobs2.start("55555555-5555-4555-8555-555555555555", "doctor", {})).toBe(true);
+      await vi.waitFor(() => expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).length >= 2).toBe(true));
+      expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).at(-1)).toBe("HF_TOKEN=UNSET");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

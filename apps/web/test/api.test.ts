@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createNode,
   deleteNode,
+  fetchHfTokenStatus,
   fetchNodeLlm,
   fetchLlmHistory,
   fetchNodes,
   patchNode,
+  putHfToken,
   rotateNodeToken,
 } from "../src/api";
 
@@ -278,6 +280,37 @@ describe("fetchLlmHistory", () => {
     await expect(fetchLlmHistory("abc", "24h")).rejects.toThrow(
       "llm history: point.decodeTps must be a number or null",
     );
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("hub settings API (IRI-019)", () => {
+  it("fetchHfTokenStatus returns the configured flag", async () => {
+    vi.stubGlobal("fetch", mockFetch(200, { configured: true }));
+    expect(await fetchHfTokenStatus()).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it("fetchHfTokenStatus throws on a malformed body", async () => {
+    vi.stubGlobal("fetch", mockFetch(200, { token: "hf_x" }));
+    await expect(fetchHfTokenStatus()).rejects.toThrow("unexpected shape");
+    vi.unstubAllGlobals();
+  });
+
+  it("putHfToken PUTs the nullable body", async () => {
+    const f = vi.fn(async () => new Response(JSON.stringify({ configured: true }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", f);
+    await putHfToken("hf_x");
+    expect(f).toHaveBeenCalledWith(
+      "/api/v1/settings/hf-token",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ hfToken: "hf_x" }) }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("putHfToken surfaces the server error message", async () => {
+    vi.stubGlobal("fetch", mockFetch(400, { error: "invalid request" }));
+    await expect(putHfToken(null)).rejects.toThrow("invalid request");
     vi.unstubAllGlobals();
   });
 });

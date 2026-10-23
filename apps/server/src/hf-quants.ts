@@ -167,7 +167,8 @@ export function groupRepoFiles(repo: string, files: HfFile[]): HfQuantsResult {
 }
 
 export interface HfQuantsService {
-  listQuants(repo: string): Promise<HfQuantsResult>;
+  /** `token` (IRI-019): global HF token — sent as Bearer only when configured. */
+  listQuants(repo: string, token?: string | null): Promise<HfQuantsResult>;
 }
 
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,94}\/[A-Za-z0-9][A-Za-z0-9._-]{0,94}$/;
@@ -178,14 +179,18 @@ export function createHfQuantsService(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const hfBase = opts.hfBase ?? "https://huggingface.co";
   return {
-    async listQuants(repo) {
+    async listQuants(repo, token) {
       if (!REPO_RE.test(repo) || repo.includes("..")) {
         throw new HfQuantsError("invalid repository id (expected owner/model)", 400);
       }
+      // IRI-019: gated/private repos authenticate via the global token when
+      // one is configured; tokenless requests are byte-identical to before.
+      const headers: Record<string, string> = { accept: "application/json" };
+      if (token !== undefined && token !== null && token.length > 0) headers.authorization = `Bearer ${token}`;
       let res: Response;
       try {
         res = await fetchImpl(`${hfBase}/api/models/${repo}?blobs=true`, {
-          headers: { accept: "application/json" },
+          headers,
           signal: AbortSignal.timeout(10_000),
         });
       } catch (err) {
