@@ -33,8 +33,8 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 
 ## Download queue (IRI-014, ADR-0009)
 
-- `POST /api/v1/downloads` `{source, name?, quantization?, mtp?, jobs?
-  (1–16, default 4)}` — **always queues**: `202 {entry}` with the row in
+- `POST /api/v1/downloads` `{source, name?, quantization?, mtp?, force?,
+  jobs? (1–16, default 4)}` — **always queues**: `202 {entry}` with the row in
   `pending` (or already `running` when the store node was idle and the batch
   dispatched immediately). Adding a download NEVER starts a one-off per-node
   job and never returns 409. Invalid payload → `400`; degraded DB → `503`.
@@ -42,11 +42,13 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   repos with several quants require it); `mtp` is an explicit draft
   companion path (modelctl otherwise auto-selects the single root
   `mtp-*.gguf`). A quantized entry without an explicit name derives
-  `{repo tail}-{TAG}`.
+  `{repo tail}-{TAG}`. IRI-017: `force` opts the entry into replacing an
+  existing manifest with different settings (modelctl per-entry `force`;
+  without it a conflicting manifest fails the batch preflight).
 - **Bulk form (IRI-015)**: `POST /api/v1/downloads`
-  `{downloads: [{source, name?, quantization?, mtp?}…] (1–50), jobs?}` →
-  `202 {entries}` (same per-row states). Atomic: any invalid entry rejects
-  the whole submission with `400` and nothing lands. Single-row bulk
+  `{downloads: [{source, name?, quantization?, mtp?, force?}…] (1–50),
+  jobs?}` → `202 {entries}` (same per-row states). Atomic: any invalid entry
+  rejects the whole submission with `400` and nothing lands. Single-row bulk
   submissions are equivalent to the single shape.
 - The server picks the store node (`pickStoreNode`: `nas`-kind node with
   `nasRoot` first, then any online node with the store mounted). Pending
@@ -56,7 +58,8 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `DELETE /api/v1/downloads/:id` removes a pending or terminal row (404
   unknown, 409 while the entry is in the running batch — cancel the job
   instead); `POST /api/v1/downloads/:id/retry` re-queues a failed/canceled
-  row (409 otherwise).
+  row (409 otherwise) — body `{force?: true}` opts the retry into manifest
+  replacement (IRI-017).
 - Batch reconcile: job `succeeded` ⇒ every entry succeeded (modelctl exits
   non-zero if any entry failed); `canceled` ⇒ entries canceled; `failed` ⇒
   per-entry status from the modelctl `queue --json` results document

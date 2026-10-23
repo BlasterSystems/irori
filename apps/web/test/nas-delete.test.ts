@@ -35,5 +35,7 @@ describe("setupServingModel", () => {
 
   it("is null when nothing serves the model", () => {
     expect(setupServingModel(setups, "unsloth/flint-GGUF")).toBeNull();
+    // Exact equality, not substring: "flint" is contained in RecursiveSI/flint.
+    expect(setupServingModel(setups, "flint")).toBeNull();
   });
 });
