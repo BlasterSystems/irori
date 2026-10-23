@@ -395,8 +395,15 @@ async function runConfirm(): Promise<void> {
     await a.run();
   } finally {
     confirmBusy.value = false;
-    confirmState.value = null;
+    // Only clear the dialog this run belongs to — a newer confirm opened
+    // meanwhile must survive, and dismissing mid-run must not re-close it.
+    if (confirmState.value === a) confirmState.value = null;
   }
+}
+
+function dismissConfirm(): void {
+  confirmBusy.value = false;
+  confirmState.value = null;
 }
 
 function runRowMenu(act: string): void {
@@ -441,16 +448,58 @@ function runRowMenu(act: string): void {
     });
   } else if (act === "cancel-job" && e.jobId !== null) {
     const jobId = e.jobId;
+    // Canceling the batch job settles EVERY entry sharing it (server
+    // settleBatch) — state the real blast radius, not the single row.
+    const batch = downloadQueueEntries.value.filter((x) => x.jobId === jobId).length;
     confirmAction({
-      title: `Cancel the download of ${e.name}?`,
-      body: "Stops the modelctl child for this entry; resumable staging is kept.",
-      danger: "Cancel job",
+      title: "Cancel this download batch?",
+      body: `Stops the running modelctl batch — all ${batch} entr${batch === 1 ? "y" : "ies"} sharing this job are marked canceled (resumable staging is kept).`,
+      danger: "Cancel batch",
       run: async () => {
-        await cancelJob(jobId);
+        try {
+          await cancelJob(jobId);
+        } catch (err) {
+          queueError.value = err instanceof Error ? err.message : String(err);
+        }
         await refreshQueue();
       },
     });
   }
+}
+
+/** IRI-020: the detail drawer's per-placement delete routes through the same confirm. */
+function confirmDrawerDelete(nodeId: string): void {
+  if (selected.value === null) return;
+  const name = selected.value;
+  confirmAction({
+    title: `Delete ${name} from the NAS?`,
+    body: "Runs a dry-run delete plan first — the destructive APPLY is armed from the succeeded dry-run's job drawer. NAS is never written outside modelctl.",
+    danger: "Plan delete (dry run)",
+    run: () => runJob(nodeId, "nas-delete", { name }),
+  });
+}
+
+/** IRI-020: the job drawer's Cancel job gets the same guard as the queue menu. */
+function confirmDrawerCancel(): void {
+  const j = job.value?.job;
+  if (j === undefined) return;
+  const jobId = j.id;
+  const isBatch = j.kind === "download-queue";
+  confirmAction({
+    title: isBatch ? "Cancel this download batch?" : `Cancel this ${j.kind} job?`,
+    body: isBatch
+      ? "Stops the running modelctl batch — every entry sharing this job is marked canceled (resumable staging is kept)."
+      : "Stops the running job; anything it already wrote stays as-is.",
+    danger: "Cancel job",
+    run: async () => {
+      try {
+        await cancelJob(jobId);
+      } catch (err) {
+        jobError.value = err instanceof Error ? err.message : String(err);
+      }
+      await openJob(jobId); // refetch terminal state into the drawer
+    },
+  });
 }
 
 /** IRI-020: batch totals strip — hidden until any row carries size/speed data. */
@@ -789,7 +838,7 @@ onBeforeUnmount(() => {
                   <button
                     v-else-if="row.node.kind === 'nas'"
                     class="btn btn--secondary btn--sm"
-                    @click="runJob(row.node.id, 'nas-delete', { name: selected })"
+                    @click="confirmDrawerDelete(row.node.id)"
                   >Delete (dry run)</button>
                 </td>
               </tr>
@@ -845,7 +894,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="job.job.status === 'running' || job.job.status === 'queued'" class="row row--between">
           <span class="faint">streaming…</span>
-          <button class="btn btn--danger btn--sm" @click="cancelJob(job.job.id)">Cancel job</button>
+          <button class="btn btn--danger btn--sm" @click="confirmDrawerCancel">Cancel job</button>
         </div>
       </section>
     </div>
@@ -978,17 +1027,17 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- IRI-020: shared confirmation for destructive actions (queue + catalog) -->
-    <div v-if="confirmState !== null" class="drawer-scrim" @click.self="confirmState = null">
+    <div v-if="confirmState !== null" class="drawer-scrim" @click.self="dismissConfirm">
       <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="confirmState.title">
         <div class="card__head">
           <h3>{{ confirmState.title }}</h3>
-          <button class="btn btn--secondary btn--sm" @click="confirmState = null">Close</button>
+          <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Close</button>
         </div>
         <p class="stat__sub" style="margin: 0">{{ confirmState.body }}</p>
         <div class="row row--between">
           <span class="stat__sub faint">nothing destructive runs until you confirm</span>
           <div class="row">
-            <button class="btn btn--secondary btn--sm" @click="confirmState = null">Cancel</button>
+            <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Cancel</button>
             <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
           </div>
         </div>

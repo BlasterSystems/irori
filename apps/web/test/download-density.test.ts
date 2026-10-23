@@ -55,6 +55,18 @@ describe("downloadBatchTotals", () => {
     expect(downloadBatchTotals([]).pct).toBeNull();
     expect(downloadBatchTotals([]).active).toBe(0);
   });
+
+  it("excludes bytes with no matching total from the numerator", () => {
+    // A running row may report bytesDone with bytesTotal unknown (parseProgressLine
+    // contract) — counting it would inflate the strip and can clamp 100% mid-flight.
+    const t = downloadBatchTotals([
+      entry({ id: "00000000-0000-4000-8000-000000000002", bytesDone: 0.5 * GIB, bytesTotal: undefined }),
+      entry({ id: "00000000-0000-4000-8000-000000000003", bytesDone: 1 * GIB, bytesTotal: 4 * GIB }),
+    ]);
+    expect(t.bytesDone).toBe(1 * GIB);
+    expect(t.bytesTotal).toBe(4 * GIB);
+    expect(t.pct).toBe(25);
+  });
 });
 
 describe("downloadRowActions", () => {
