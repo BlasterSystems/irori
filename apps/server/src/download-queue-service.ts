@@ -178,7 +178,13 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       .update(downloadQueue)
       .set({ status: "failed", error: "batch job reference lost", updatedAt: new Date() })
       .where(and(eq(downloadQueue.status, "running"), isNull(downloadQueue.jobId)));
-    const pending = await db.select().from(downloadQueue).where(eq(downloadQueue.status, "pending")).orderBy(downloadQueue.createdAt);
+    const pending = await db
+      .select()
+      .from(downloadQueue)
+      .where(eq(downloadQueue.status, "pending"))
+      // Batch rows share createdAt (one INSERT), so id breaks the tie —
+      // onJobOutput maps progress entry indexes against THIS exact order.
+      .orderBy(downloadQueue.createdAt, downloadQueue.id);
     if (pending.length === 0) return;
     const nodeRows = await db.select().from(nodes);
     const node = pickStoreNode(nodeRows, online());
@@ -338,7 +344,12 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
     },
 
     async list() {
-      const rows = await db.select().from(downloadQueue).orderBy(desc(downloadQueue.createdAt)).limit(LIST_LIMIT);
+      // Batch rows share createdAt — id breaks the tie so the UI order is stable.
+      const rows = await db
+        .select()
+        .from(downloadQueue)
+        .orderBy(desc(downloadQueue.createdAt), desc(downloadQueue.id))
+        .limit(LIST_LIMIT);
       return rows.map(toDownloadDto);
     },
 
@@ -377,17 +388,18 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
     async onJobOutput(jobId, line) {
       const progress = parseProgressLine(line);
       if (progress === null) return;
+      // Same (createdAt, id) order as the dispatch select: batch rows share
+      // createdAt, so id is the only stable entry-index tiebreaker.
       const rows = await db
         .select()
         .from(downloadQueue)
-        .where(and(eq(downloadQueue.jobId, jobId), eq(downloadQueue.status, "running")));
+        .where(and(eq(downloadQueue.jobId, jobId), eq(downloadQueue.status, "running")))
+        .orderBy(downloadQueue.createdAt, downloadQueue.id);
       if (rows.length === 0) return;
-      // Entry index maps to dispatch order = pending rows by createdAt ASC.
-      const ordered = rows.toSorted((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       let target: Row | undefined;
-      if (progress.name !== null) target = ordered.find((r) => r.name === progress.name);
-      if (target === undefined && progress.entry !== null) target = ordered[progress.entry - 1];
-      if (target === undefined && ordered.length === 1) target = ordered[0]!;
+      if (progress.name !== null) target = rows.find((r) => r.name === progress.name);
+      if (target === undefined && progress.entry !== null) target = rows[progress.entry - 1];
+      if (target === undefined && rows.length === 1) target = rows[0]!;
       if (target === undefined) return;
       await db
         .update(downloadQueue)
@@ -397,7 +409,10 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
           ...(progress.speedBps === null ? {} : { speedBps: Math.round(progress.speedBps) }),
           updatedAt: new Date(),
         })
-        .where(eq(downloadQueue.id, target.id));
+        // A job-done frame can settle the batch while this frame is in flight,
+        // and a retried row may already run under a NEW job — never write
+        // stale progress onto those.
+        .where(and(eq(downloadQueue.id, target.id), eq(downloadQueue.status, "running"), eq(downloadQueue.jobId, jobId)));
     },
 
     async onJobSettled(event) {
