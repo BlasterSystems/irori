@@ -375,7 +375,7 @@ reported in every snapshot; upgrade = re-run install.
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
-| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, WS `/agent-ws` |
+| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET /api/v1/settings/hf-token` (presence-only, IRI-019), `PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), WS `/agent-ws` |
 
 ## 14. Deviations & deferred
 
