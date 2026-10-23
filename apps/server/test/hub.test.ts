@@ -215,8 +215,14 @@ describe("agent hub", () => {
   });
 
   it("carries the global HF token in config-update frames (IRI-019)", async () => {
-    let token: string | null | undefined = "hf_x";
-    const { url, created } = await setup({ getHfToken: async () => token });
+    let token: string | null = "hf_x";
+    let failRead = false;
+    const { url, created } = await setup({
+      getHfToken: async () => {
+        if (failRead) throw new Error("db down");
+        return token;
+      },
+    });
 
     const handshakeConfig = async () => {
       const ws = new WebSocket(url);
@@ -234,8 +240,9 @@ describe("agent hub", () => {
     // null = clear
     token = null;
     expect(await handshakeConfig()).toMatchObject({ hfToken: null });
-    // read failure → key omitted so the agent keeps its current token
-    token = undefined;
+    // hub read failure → the .catch omits the key so the agent keeps its
+    // current token (here "hf_x" from the first handshake)
+    failRead = true;
     const cfg = (await handshakeConfig()) as object;
     expect("hfToken" in cfg).toBe(false);
   });

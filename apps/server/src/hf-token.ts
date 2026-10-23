@@ -22,8 +22,8 @@ export function createHfTokenService(db: Db): HfTokenService {
   return {
     async get() {
       const [row] = await db.select({ value: settings.value }).from(settings).where(eq(settings.key, HF_TOKEN_KEY));
-      const value = row?.value;
-      return typeof value === "string" && value.length > 0 ? value : null;
+      const value = typeof row?.value === "string" ? row.value.trim() : "";
+      return value.length > 0 ? value : null;
     },
     async set(token) {
       if (token === null) {

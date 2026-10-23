@@ -15,7 +15,9 @@ onMounted(async () => {
     configured.value = await fetchHfTokenStatus();
   } catch (err) {
     configured.value = null;
-    error.value = err instanceof Error ? err.message : String(err);
+    // A submit already showing its own error must not be overwritten by the
+    // slower presence check failing.
+    if (!busy.value) error.value = err instanceof Error ? err.message : String(err);
   }
 });
 
@@ -44,7 +46,7 @@ async function submit(value: string | null): Promise<void> {
 </script>
 
 <template>
-  <div class="backdrop" @click.self="emit('close')">
+  <div class="backdrop" @click.self="!busy && emit('close')">
     <div class="modal__panel" role="dialog" aria-modal="true" aria-label="Hub settings">
       <div class="card__head">
         <h3>Hub settings</h3>
@@ -79,12 +81,12 @@ async function submit(value: string | null): Promise<void> {
         <span class="stat__sub">applies live — online agents get it immediately, others on reconnect</span>
         <div class="row">
           <button
-            v-if="configured === true"
+            v-if="configured !== false"
             class="btn btn--danger btn--sm"
             :disabled="busy"
             @click="clear"
           >Clear token</button>
-          <button class="btn btn--ghost btn--sm" @click="emit('close')">Cancel</button>
+          <button class="btn btn--ghost btn--sm" :disabled="busy" @click="emit('close')">Cancel</button>
           <button class="btn btn--primary btn--sm" :disabled="busy || token.trim() === ''" @click="save">
             {{ busy ? "working…" : "Save token" }}
           </button>

@@ -33,7 +33,16 @@ describe("hfToken wire contracts", () => {
   it("validates the put body (string sets, null clears, empty rejected)", () => {
     expect(hfTokenPutSchema.safeParse({ hfToken: "hf_x" }).success).toBe(true);
     expect(hfTokenPutSchema.safeParse({ hfToken: null }).success).toBe(true);
+    // Whitespace is trimmed off the parsed value; whitespace-only is rejected.
     expect(hfTokenPutSchema.safeParse({ hfToken: "" }).success).toBe(false);
+    expect(hfTokenPutSchema.safeParse({ hfToken: "   " }).success).toBe(false);
+    expect(hfTokenPutSchema.parse({ hfToken: " hf_x " })).toEqual({ hfToken: "hf_x" });
+    // Trailing whitespace/newline is trimmed away entirely...
+    expect(hfTokenPutSchema.parse({ hfToken: "hf_x\n" })).toEqual({ hfToken: "hf_x" });
+    // ...but embedded control characters are rejected — they can neither sit
+    // in an HTTP header nor in a child env.
+    expect(hfTokenPutSchema.safeParse({ hfToken: "hf\nx" }).success).toBe(false);
+    expect(hfTokenPutSchema.safeParse({ hfToken: "hf\0x" }).success).toBe(false);
     expect(hfTokenPutSchema.safeParse({}).success).toBe(false);
   });
 });
