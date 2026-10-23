@@ -67,7 +67,8 @@ The agent is configured via env (no config file): `IRORI_SERVER_URL`,
 `IRORI_LLM_DETECT_ONLY`, `IRORI_MODELCTL_PIN` (minimum modelctl version the
 install job enforces; default `0.21.3`), `IRORI_MODELCTL_PATH`,
 `IRORI_HF_TOKEN` (optional HF token passed to modelctl as `HF_TOKEN` for
-gated/private repos; never stored hub-side, IRI-017), and
+gated/private repos; bootstrap fallback — a hub-set global token defined in
+the UI wins and is pushed via config-update, IRI-019), and
 `IRORI_STATE_DIR` (default `~/.local/state/irori-agent`) — the state dir holds
 setup-driver state (`setups.json`), persisted run logs (`setup-logs/`), and the
 usage capture buffer (`usage-buffer.db`, M8/ADR-0008: `IRORI_USAGE_FLUSH_MS`

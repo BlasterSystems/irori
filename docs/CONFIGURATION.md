@@ -38,8 +38,19 @@ variables are optional unless noted:
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
 | `IRORI_USAGE_FLUSH_MS` | `30000` | Usage-buffer upload interval (ADR-0008) |
 | `IRORI_USAGE_MAX_ROWS` | `200000` | Usage-buffer hard cap (drop-oldest) |
-| `IRORI_HF_TOKEN` | none | Optional HF token handed to modelctl as `HF_TOKEN` (IRI-017) — enables gated/private repo downloads; never sent to the hub or stored in job params |
+| `IRORI_HF_TOKEN` | none | Optional HF token handed to modelctl as `HF_TOKEN` (IRI-017) — enables gated/private repo downloads; never sent to the hub or stored in job params. Bootstrap fallback: a hub-set global token (IRI-019) wins over this env |
 
 ## Web
 
 No runtime configuration; built static assets are served by the server.
+
+### Hub settings (runtime, IRI-019)
+
+The global HF token is defined in the UI (footer gear → Hub settings) or via
+`PUT /api/v1/settings/hf-token` (`{ "hfToken": "hf_…" }` sets, `null`
+clears). It lives in the `settings` table, is pushed to online agents via
+`config-update` (offline agents pick it up on their next hello), and always
+wins over the agent's `IRORI_HF_TOKEN`. `GET /api/v1/settings/hf-token` is
+presence-only — the token itself never appears in a response body. The token
+is always optional; when unset, modelctl runs without `HF_TOKEN` and the
+quants listing sends no Authorization header.

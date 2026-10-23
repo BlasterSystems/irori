@@ -142,6 +142,22 @@ jobs no-credentials contract holds; ADR-0002's secrets posture is untouched
 since the token lives in the agent unit env). Brief
 `docs/research/IRI-017-research-brief.md`.
 
+IRI-019 (2026-10-23) revisits the third point — the owner can now define the
+HF token from the UI. ONE global token lives in the hub `settings` table
+(`hf_token`); `PUT /api/v1/settings/hf-token` sets or clears it and pushes a
+config-update to every online agent (a config-update follows every hello, so
+offline agents pick the value up on reconnect — no agent-side persistence).
+The agent prefers the hub-set token over its `IRORI_HF_TOKEN` env (which
+stays the bootstrap fallback; `agent-update` jobs still receive no token),
+and the hub-side `GET /api/v1/hf-quants` sends the token as
+`Authorization: Bearer` when configured. Posture delta: the token now exists
+in the settings table and in config-update frames — the same exposure class
+as the hello token in a no-auth homelab (ADR-0002) — but still never in job
+params, job-output frames, or any GET response body (the GET is
+presence-only). The token is always optional: tokenless flows are
+byte-identical to before, and clearing falls back to the unit env. Task
+`tasks/IRI-019-global-hf-token-ui.md`.
+
 ## Revisit triggers
 
 - modelctl grows a persistent queue/daemon API → consider delegating the queue.
