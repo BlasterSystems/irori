@@ -81,6 +81,24 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   root `mtp-*.gguf`); null means modelctl needs an explicit choice.
   Errors: `400` invalid repo id, `404` missing/not public, `502` HF
   unreachable or unusable response. No store required (works degraded).
+  IRI-019: when a global HF token is configured, the upstream request carries
+  `Authorization: Bearer <token>` (gated/private repos answer); without one
+  the request is unchanged.
+
+## Hub settings — global HF token (IRI-019, ADR-0009)
+
+- `GET /api/v1/settings/hf-token` → `{configured: boolean}` — **presence
+  only**; the token itself never appears in any response body. `503` while
+  the DB is degraded.
+- `PUT /api/v1/settings/hf-token` — `{hfToken: string | null}`: a non-empty
+  string sets the hub-wide token, `null` clears it (settings row deleted);
+  anything else → `400`. On success every online agent receives a
+  `config-update` with the new value; offline agents get it in the
+  config-update that follows their next hello. `503` while degraded.
+- The token rides `config-update` frames only (never job params or
+  job-output frames); the agent applies it as the modelctl child `HF_TOKEN`,
+  and a hub-set token wins over the agent's `IRORI_HF_TOKEN` (bootstrap
+  fallback). The token is always optional — unset, nothing is sent anywhere.
 
 ## Analytics (M7)
 

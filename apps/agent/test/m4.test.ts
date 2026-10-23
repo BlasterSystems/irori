@@ -186,14 +186,23 @@ describe("JobManager env (IRI-019)", () => {
       await vi.waitFor(() => expect(outputs.some((l) => l.startsWith("HF_TOKEN="))).toBe(true));
       expect(outputs.find((l) => l.startsWith("HF_TOKEN="))).toBe("HF_TOKEN=hf_x");
 
-      // Empty ctx token → no HF_TOKEN in the child env at all.
-      const jobs2 = new JobManager(
-        () => ({ nasRoot: dir, pin: "0", modelctlPath: script, hfToken: "", serverUrl: "" }),
-        { onOutput: (_jobId, _seq, line) => outputs.push(line), onDone: () => {} },
-      );
-      expect(jobs2.start("55555555-5555-4555-8555-555555555555", "doctor", {})).toBe(true);
-      await vi.waitFor(() => expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).length >= 2).toBe(true));
-      expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).at(-1)).toBe("HF_TOKEN=UNSET");
+      // Empty ctx token → no HF_TOKEN in the child env at all. runStreaming
+      // merges {...process.env, ...opts.env}, so neutralize any ambient
+      // HF_TOKEN (an owner exporting one would otherwise leak it into the
+      // assertion diff).
+      const savedToken = process.env.HF_TOKEN;
+      delete process.env.HF_TOKEN;
+      try {
+        const jobs2 = new JobManager(
+          () => ({ nasRoot: dir, pin: "0", modelctlPath: script, hfToken: "", serverUrl: "" }),
+          { onOutput: (_jobId, _seq, line) => outputs.push(line), onDone: () => {} },
+        );
+        expect(jobs2.start("55555555-5555-4555-8555-555555555555", "doctor", {})).toBe(true);
+        await vi.waitFor(() => expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).length >= 2).toBe(true));
+        expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).at(-1)).toBe("HF_TOKEN=UNSET");
+      } finally {
+        if (savedToken !== undefined) process.env.HF_TOKEN = savedToken;
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -40,4 +40,19 @@ d("hf token service (db integration)", () => {
     expect(await svc.get()).toBeNull();
     await svc.set(null); // leave the row deleted for other suites
   });
+
+  it("trims whitespace-padded stored values and treats whitespace-only as unset", async () => {
+    const svc = createHfTokenService(handle.db);
+    await handle.db
+      .insert(settings)
+      .values({ key: HF_TOKEN_KEY, value: "  hf_pad \n" })
+      .onConflictDoUpdate({ target: settings.key, set: { value: "  hf_pad \n" } });
+    expect(await svc.get()).toBe("hf_pad");
+    await handle.db
+      .insert(settings)
+      .values({ key: HF_TOKEN_KEY, value: "   " })
+      .onConflictDoUpdate({ target: settings.key, set: { value: "   " } });
+    expect(await svc.get()).toBeNull();
+    await svc.set(null); // leave the row deleted for other suites
+  });
 });
