@@ -267,6 +267,12 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?:
           await db.insert(nodeModels).values({ nodeId, model: name }).onConflictDoNothing();
         } else if (row.kind === "delete-local" || row.kind === "nas-delete-apply") {
           await db.delete(nodeModels).where(and(eq(nodeModels.nodeId, nodeId), eq(nodeModels.model, name)));
+          // IRI-018: model_meta is upsert-only (onCatalog), so a model deleted
+          // from its last node would stay on the Models list forever. Drop the
+          // cache row when no placement remains — a later catalog frame from a
+          // node that still has the model re-upserts it.
+          const [left] = await db.select({ model: nodeModels.model }).from(nodeModels).where(eq(nodeModels.model, name)).limit(1);
+          if (left === undefined) await db.delete(modelMeta).where(eq(modelMeta.name, name));
         }
       }
       // Store contents may have changed: ask the node to re-report its catalog

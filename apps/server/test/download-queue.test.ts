@@ -242,13 +242,14 @@ d("download queue (db integration)", () => {
     expect(entries[1]!.jobId).toBe(entries[0]!.jobId); // one shared batch
     const job = await jobsService.get(entries[0]!.jobId!);
     expect(job?.nodeId).toBe(NAS_ID);
-    expect(job?.params).toMatchObject({
-      downloads: [
-        { source: "org/november", name: "november" },
-        { source: "org/oscar", name: "oscar-custom" },
-      ],
-      jobs: 6,
-    });
+    // Batch rows share createdAt — the dispatch order is (createdAt, id), not
+    // insertion order, so compare the entry set order-insensitively.
+    const atomicDownloads = (job?.params as { downloads: Array<{ source: string; name: string }> }).downloads;
+    expect([...atomicDownloads].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { source: "org/november", name: "november" },
+      { source: "org/oscar", name: "oscar-custom" },
+    ]);
+    expect(job?.params).toMatchObject({ jobs: 6 });
     await settle(entries[0]!, "succeeded");
     expect((await rowFor(entries[1]!.id))?.status).toBe("succeeded");
   });
@@ -267,13 +268,12 @@ d("download queue (db integration)", () => {
     expect(entries[0]!.mtp).toBeNull();
     expect(entries[1]!.mtp).toBe("MTP/mtp-x.gguf");
     const job = await jobsService.get(entries[0]!.jobId!);
-    expect(job?.params).toMatchObject({
-      downloads: [
-        { source: "org/quebec", name: "quebec-UD-Q4_K_XL", quantization: "UD-Q4_K_XL" },
-        { source: "org/romeo", name: "romeo-bf16", quantization: "bf16", mtp: "MTP/mtp-x.gguf" },
-      ],
-      jobs: 2,
-    });
+    const i016Downloads = (job?.params as { downloads: Array<{ source: string; name: string; quantization?: string; mtp?: string }> }).downloads;
+    expect([...i016Downloads].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { source: "org/quebec", name: "quebec-UD-Q4_K_XL", quantization: "UD-Q4_K_XL" },
+      { source: "org/romeo", name: "romeo-bf16", quantization: "bf16", mtp: "MTP/mtp-x.gguf" },
+    ]);
+    expect(job?.params).toMatchObject({ jobs: 2 });
     await settle(entries[0]!, "failed");
     const retried = await queue.retry(entries[0]!.id);
     expect(retried.quantization).toBe("UD-Q4_K_XL"); // retry keeps the stored fields
@@ -362,12 +362,11 @@ d("download queue (db integration)", () => {
     expect(entries[0]!.force).toBe(true);
     expect(entries[1]!.force).toBe(false);
     const job = await jobsService.get(entries[0]!.jobId!);
-    expect(job?.params).toMatchObject({
-      downloads: [
-        { source: "org/rho", name: "rho", force: true },
-        { source: "org/tango", name: "tango" },
-      ],
-    });
+    const forceDownloads = (job?.params as { downloads: Array<{ source: string; name: string; force?: boolean }> }).downloads;
+    expect([...forceDownloads].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { source: "org/rho", name: "rho", force: true },
+      { source: "org/tango", name: "tango" },
+    ]);
     await settle(entries[0]!, "failed");
     // A plain retry keeps the stored per-entry force.
     const plain = await queue.retry(entries[0]!.id);
@@ -395,8 +394,9 @@ d("download queue (db integration)", () => {
     const jobId = rowA0!.jobId!;
     expect((await rowFor(b.id))?.jobId).toBe(jobId);
 
-    // Name match updates only that row.
-    await queue.onJobOutput(jobId, 'progress: {"entry":2,"name":"uniform","bytes_done":1024,"bytes_total":2048,"speed_bps":5000000}');
+    // Name match wins over the entry index — entry 1 points at sierra, so
+    // ONLY the name branch can select uniform.
+    await queue.onJobOutput(jobId, 'progress: {"entry":1,"name":"uniform","bytes_done":1024,"bytes_total":2048,"speed_bps":5000000}');
     const rowB = await rowFor(b.id);
     expect(rowB?.bytesDone).toBe(1024);
     expect(rowB?.bytesTotal).toBe(2048);

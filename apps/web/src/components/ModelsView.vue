@@ -44,8 +44,9 @@ const selected = ref<string | null>(null);
 const placement = ref<PlacementResponse | null>(null);
 const placementLoading = ref(false);
 const placementError = ref<string | null>(null);
-/** IRI-018: serving-setup advisory for the NAS delete flow (warnings never block). */
-const deleteSetupWarn = ref<string | null>(null);
+/** IRI-018: serving-setup advisory for the NAS delete flow — scoped to the model name it was fetched for (warnings never block). */
+const deleteSetupWarn = ref<{ name: string; setup: string } | null>(null);
+let deleteSetupSeq = 0;
 
 /** Download-from-HF modal state (paste + rows, IRI-015). */
 const downloadOpen = ref(false);
@@ -337,10 +338,14 @@ async function startNasDelete(name: string): Promise<void> {
   const nodeId = storeNode.value;
   if (nodeId === null) return;
   deleteSetupWarn.value = null;
-  // Advisory only — never delays the dry-run dispatch.
+  // Advisory only — never delays the dry-run dispatch; sequenced so a late
+  // response cannot attach to a different model's job.
+  const seq = ++deleteSetupSeq;
   void fetchSetups()
     .then((rows) => {
-      deleteSetupWarn.value = setupServingModel(rows, name);
+      if (seq !== deleteSetupSeq) return;
+      const setup = setupServingModel(rows, name);
+      deleteSetupWarn.value = setup === null ? null : { name, setup };
     })
     .catch(() => {});
   await runJob(nodeId, "nas-delete", { name });
@@ -348,6 +353,14 @@ async function startNasDelete(name: string): Promise<void> {
 
 /** IRI-018: the drawer's succeeded nas-delete job → armable target (same node + name by construction). */
 const armableDelete = computed(() => armableNasDelete(job.value?.job ?? null));
+
+/** IRI-018: the nas-delete job's target name — the advisory banner is scoped to it. */
+const jobDeleteName = computed(() => {
+  const j = job.value?.job;
+  if (j === undefined || j.kind !== "nas-delete") return null;
+  const name = j.params["name"];
+  return typeof name === "string" && name.length > 0 ? name : null;
+});
 
 async function armNasDelete(): Promise<void> {
   const target = armableDelete.value;
@@ -393,7 +406,8 @@ async function openModel(name: string): Promise<void> {
   void fetchSetups()
     .then((rows) => {
       if (seq !== placementSeq) return;
-      deleteSetupWarn.value = setupServingModel(rows, name);
+      const setup = setupServingModel(rows, name);
+      deleteSetupWarn.value = setup === null ? null : { name, setup };
     })
     .catch(() => {});
   try {
@@ -427,6 +441,8 @@ async function runJob(nodeId: string, kind: string, params: Record<string, unkno
 }
 
 let jobSeq = 0;
+/** IRI-018: delayed catalog refetch after a terminal delete job (cleared on unmount). */
+let deleteReloadTimer: ReturnType<typeof setTimeout> | undefined;
 async function openJob(id: string): Promise<void> {
   clearInterval(jobPoll);
   const seq = ++jobSeq;
@@ -446,7 +462,8 @@ async function openJob(id: string): Promise<void> {
       // round-trip is async, so refetch now and once more after it lands.
       if (job.value.job.kind === "nas-delete" || job.value.job.kind === "nas-delete-apply") {
         void load();
-        setTimeout(() => void load(), 5000);
+        clearTimeout(deleteReloadTimer);
+        deleteReloadTimer = setTimeout(() => void load(), 5000);
       }
       void refreshQueue(); // a settled download batch changes the queue rows
       return;
@@ -467,11 +484,11 @@ function closeJob(): void {
   jobSeq++; // an in-flight openJob must not repopulate the closed drawer
   job.value = null;
   jobError.value = null;
-  deleteSetupWarn.value = null;
 }
 
 onBeforeUnmount(() => {
   clearTimeout(debounce);
+  clearTimeout(deleteReloadTimer);
   clearInterval(jobPoll);
   clearInterval(queuePoll);
 });
@@ -667,8 +684,8 @@ onBeforeUnmount(() => {
           <button class="btn btn--secondary btn--sm" @click="closeJob">Close</button>
         </div>
         <p v-if="jobError" class="banner banner--warn">{{ jobError }}</p>
-        <p v-if="job.job.kind === 'nas-delete' && deleteSetupWarn !== null" class="banner banner--warn">
-          Setup "{{ deleteSetupWarn }}" serves this model — deleting breaks its next start (advisory, never blocks).
+        <p v-if="jobDeleteName !== null && deleteSetupWarn?.name === jobDeleteName" class="banner banner--warn">
+          Setup "{{ deleteSetupWarn!.setup }}" serves this model — deleting breaks its next start (advisory, never blocks).
         </p>
         <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
         <div v-if="armableDelete" class="row row--between">
