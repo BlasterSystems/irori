@@ -440,3 +440,25 @@ it("does not buffer llm frames while disconnected and drops them on send", async
   const ports = llmFrames(server).flatMap((f) => f.ports.map((p) => p.decodeTps));
   expect(ports).not.toContain(8); // point-in-time sample dropped while offline
 });
+
+it("applies the global HF token from config-update: set, clear, keep (IRI-019)", async () => {
+  const server = await startFakeServer(60_000);
+  teardown.push(server.close);
+  const transport = makeTransport();
+  transport.connect(server.url);
+  await vi.waitFor(() => expect(transport.isReady()).toBe(true));
+
+  // string = set
+  server.broadcast({ type: "config-update", cadenceMs: 25_000, hfToken: "hf_x" });
+  await vi.waitFor(() => expect(transport.getHfToken()).toBe("hf_x"));
+
+  // null = clear (env fallback applies downstream)
+  server.broadcast({ type: "config-update", cadenceMs: 26_000, hfToken: null });
+  await vi.waitFor(() => expect(transport.getCadenceMs()).toBe(26_000));
+  expect(transport.getHfToken()).toBeNull();
+
+  // old-server shape (key absent) keeps the current value
+  server.broadcast({ type: "config-update", cadenceMs: 27_000 });
+  await vi.waitFor(() => expect(transport.getCadenceMs()).toBe(27_000));
+  expect(transport.getHfToken()).toBeNull();
+});

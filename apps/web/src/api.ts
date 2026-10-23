@@ -3,6 +3,7 @@ import {
   clientIdentityCreatedSchema,
   chatDetailSchema,
   chatsResponseSchema,
+  hfTokenStatusSchema,
   LLM_BACKENDS,
   nodeInfoSchema,
   sseEventSchema,
@@ -18,6 +19,7 @@ import {
   type ClientIdentityCreated,
   type ChatDetail,
   type ChatsResponse,
+  type HfTokenPut,
   type LlmBackend,
   type LlmPortSnapshot,
   type NodeCreatePayload,
@@ -805,4 +807,32 @@ export async function fetchChat(id: string, signal?: AbortSignal): Promise<ChatD
   const parsed = chatDetailSchema.safeParse(body);
   if (!parsed.success) throw new Error(`GET /api/v1/usage/chats/${id}: unexpected shape`);
   return parsed.data;
+}
+
+/* ── Hub settings: global HF token (IRI-019) ───────────────────────────── */
+
+/** Whether a global HF token is configured. Presence-only — never the token. */
+export async function fetchHfTokenStatus(signal?: AbortSignal): Promise<boolean> {
+  const res = await fetch("/api/v1/settings/hf-token", { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/settings/hf-token failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = hfTokenStatusSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/settings/hf-token: unexpected shape");
+  return parsed.data.configured;
+}
+
+/** Sets (string) or clears (null) the hub-wide HF token; the hub pushes it to online agents. */
+export async function putHfToken(token: string | null): Promise<void> {
+  const res = await fetch("/api/v1/settings/hf-token", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ hfToken: token } satisfies HfTokenPut),
+  });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    if (typeof body === "object" && body !== null && "error" in body && typeof (body as { error: unknown }).error === "string") {
+      throw new Error((body as { error: string }).error);
+    }
+    throw new Error(`PUT /api/v1/settings/hf-token failed: HTTP ${res.status}`);
+  }
 }

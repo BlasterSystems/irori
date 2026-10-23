@@ -63,6 +63,13 @@ export const configUpdateMsgSchema = z.object({
   llmDetectOnly: z.boolean().default(false),
   /** NAS store root for model-ops nodes (M4); null otherwise. */
   nasRoot: z.string().nullable().default(null),
+  /**
+   * IRI-019: global HF token (ADR-0009 addendum). string = set, null =
+   * clear (agent falls back to its env), absent = no change (old server, or
+   * a hub read failure — the key is omitted). Older agents strip the field;
+   * the token never rides job params or job-output frames.
+   */
+  hfToken: z.string().min(1).nullish(),
 });
 
 export const serverErrorMsgSchema = z.object({
