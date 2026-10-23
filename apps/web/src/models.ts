@@ -273,11 +273,14 @@ export function downloadBatchTotals(entries: DownloadQueueEntry[]): DownloadBatc
   let active = 0;
   for (const e of entries) {
     if (e.status === "running" || e.status === "pending") active += 1;
+    // Bytes count toward the strip only when the row carries a matching
+    // denominator — a bytesDone with unknown total would otherwise inflate
+    // the numerator and can clamp the strip to 100% mid-flight.
     if (e.bytesTotal !== null && e.bytesTotal !== undefined) {
       bytesTotal += e.bytesTotal;
       if (e.status === "succeeded") bytesDone += e.bytesTotal;
+      else if (e.bytesDone !== null && e.bytesDone !== undefined) bytesDone += e.bytesDone;
     }
-    if (e.bytesDone !== null && e.bytesDone !== undefined && e.status !== "succeeded") bytesDone += e.bytesDone;
     if (e.status === "running" && e.speedBps !== null && e.speedBps !== undefined) speedBps += e.speedBps;
   }
   return {
@@ -311,7 +314,6 @@ export function downloadRowActions(status: DownloadQueueEntry["status"], hasJob:
 export function downloadJobSummary(entries: DownloadQueueEntry[]): string {
   const n = entries.length;
   const nameW = Math.max(0, ...entries.map((e) => e.name.length));
-  const glyph: Record<DownloadQueueEntry["status"], string> = { pending: "·", running: "▸", succeeded: "✓", failed: "✗", canceled: "✗", removed: "·" };
   const lines = entries.map((e, i) => {
     const idx = `[${i + 1}/${n}]`;
     const name = e.name.padEnd(nameW);
