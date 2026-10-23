@@ -16,6 +16,8 @@ it("HubSettingsModal keeps the token write-only and tri-state", () => {
   for (const token of ['type="password"', "leave blank to keep the current value", "submit(null)", "putHfToken", "Clear token", "Save token"]) {
     expect(modalSource).toContain(token);
   }
-  // Write-only: the modal has no way to render a stored token value.
-  expect(modalSource).not.toContain('value="hf_');
+  // Write-only: the token input binds only the local ref — no server-derived
+  // value binding exists (the API never returns the token).
+  expect(modalSource).toContain('v-model="token"');
+  expect(modalSource).not.toContain(":value=");
 });

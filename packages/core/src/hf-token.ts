@@ -12,8 +12,17 @@ export const hfTokenStatusSchema = z.object({
 });
 export type HfTokenStatus = z.infer<typeof hfTokenStatusSchema>;
 
-/** PUT /api/v1/settings/hf-token body: a string sets the token, null clears. */
+/**
+ * PUT /api/v1/settings/hf-token body: a string sets the token, null clears.
+ * Trimmed (pasted tokens pick up whitespace) and control characters are
+ * rejected — they can neither sit in an HTTP header nor in a child env.
+ */
 export const hfTokenPutSchema = z.object({
-  hfToken: z.string().min(1).nullable(),
+  hfToken: z
+    .string()
+    .trim()
+    .min(1)
+    .nullable()
+    .refine((v) => v === null || !/[\u0000\r\n]/.test(v), { message: "token contains control characters" }),
 });
 export type HfTokenPut = z.infer<typeof hfTokenPutSchema>;

@@ -7,7 +7,7 @@ import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore, makeSnapshot } from "./helpers.js";
 
-function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> } } = {}) {
+function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> }; hfQuants?: { listQuants: (repo: string, token?: string | null) => Promise<unknown> } } = {}) {
   const fake = makeFakeStore();
   const online = new Set<string>();
   const refreshed: string[] = [];
@@ -29,6 +29,7 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
     }),
     getJobs: opts.jobs === undefined ? () => null : () => (opts.jobs as never),
     getHfToken: () => (opts.hfToken === undefined ? null : opts.hfToken),
+    hfQuants: (opts.hfQuants ?? { listQuants: async () => ({}) }) as never,
     version: "test",
     tag: null,
     staticDir: null,
@@ -203,5 +204,23 @@ describe("app", () => {
     const { app } = makeApp({ hfToken: { get: async () => null, set: async () => {} } });
     expect((await request(app).put("/api/v1/settings/hf-token").send({ hfToken: "" })).status).toBe(400);
     expect((await request(app).put("/api/v1/settings/hf-token").send({})).status).toBe(400);
+  });
+
+  it("forwards the configured token to the quants listing (IRI-019)", async () => {
+    const calls: Array<[string, string | null]> = [];
+    const listQuants = async (repo: string, token?: string | null) => {
+      calls.push([repo, token ?? null]);
+      return { repo, modelCard: null, quants: [], companions: { mmproj: { candidates: [], default: null }, mtp: { candidates: [], default: null } } };
+    };
+    let stored: string | null = "hf_x";
+    const tokenSvc = { get: async () => stored, set: async (t: string | null) => { stored = t; } };
+    const { app } = makeApp({ hfToken: tokenSvc, hfQuants: { listQuants } });
+
+    await request(app).get("/api/v1/hf-quants?repo=org/model");
+    expect(calls).toEqual([["org/model", "hf_x"]]);
+
+    stored = null;
+    await request(app).get("/api/v1/hf-quants?repo=org/model");
+    expect(calls[1]).toEqual(["org/model", null]);
   });
 });

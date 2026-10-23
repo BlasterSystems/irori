@@ -186,7 +186,12 @@ export function createHfQuantsService(
       // IRI-019: gated/private repos authenticate via the global token when
       // one is configured; tokenless requests are byte-identical to before.
       const headers: Record<string, string> = { accept: "application/json" };
-      if (token !== undefined && token !== null && token.length > 0) headers.authorization = `Bearer ${token}`;
+      if (token !== undefined && token !== null && token.length > 0) {
+        // Header values reject NUL/CR/LF — undici's TypeError would embed the
+        // token into the 502 body. Reject without echoing the value.
+        if (/[\u0000\r\n]/.test(token)) throw new HfQuantsError("configured HF token contains invalid header characters", 500);
+        headers.authorization = `Bearer ${token}`;
+      }
       let res: Response;
       try {
         res = await fetchImpl(`${hfBase}/api/models/${repo}?blobs=true`, {

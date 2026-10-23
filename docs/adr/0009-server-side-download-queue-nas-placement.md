@@ -154,8 +154,11 @@ and the hub-side `GET /api/v1/hf-quants` sends the token as
 in the settings table and in config-update frames — the same exposure class
 as the hello token in a no-auth homelab (ADR-0002) — but still never in job
 params, job-output frames, or any GET response body (the GET is
-presence-only). The token is always optional: tokenless flows are
-byte-identical to before, and clearing falls back to the unit env. Task
+presence-only). The token is always optional: tokenless behavior is
+unchanged — the quants request is byte-identical (no Authorization header)
+and a tokenless hub's config-update frames merely carry `hfToken: null`,
+which new agents treat as unset (old agents strip the key); clearing falls
+back to the unit env. Task
 `tasks/IRI-019-global-hf-token-ui.md`.
 
 ## Revisit triggers

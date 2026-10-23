@@ -811,10 +811,19 @@ export async function fetchChat(id: string, signal?: AbortSignal): Promise<ChatD
 
 /* ── Hub settings: global HF token (IRI-019) ───────────────────────────── */
 
+/** Throws the server's `{error}` message when present, else a status error. */
+async function throwApiError(res: Response, label: string): Promise<never> {
+  const body: unknown = await res.json().catch(() => null);
+  if (typeof body === "object" && body !== null && "error" in body && typeof (body as { error: unknown }).error === "string") {
+    throw new Error((body as { error: string }).error);
+  }
+  throw new Error(`${label} failed: HTTP ${res.status}`);
+}
+
 /** Whether a global HF token is configured. Presence-only — never the token. */
 export async function fetchHfTokenStatus(signal?: AbortSignal): Promise<boolean> {
   const res = await fetch("/api/v1/settings/hf-token", { headers: { accept: "application/json" }, signal });
-  if (!res.ok) throw new Error(`GET /api/v1/settings/hf-token failed: HTTP ${res.status}`);
+  if (!res.ok) await throwApiError(res, "GET /api/v1/settings/hf-token");
   const body: unknown = await res.json();
   const parsed = hfTokenStatusSchema.safeParse(body);
   if (!parsed.success) throw new Error("GET /api/v1/settings/hf-token: unexpected shape");
@@ -828,11 +837,5 @@ export async function putHfToken(token: string | null): Promise<void> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ hfToken: token } satisfies HfTokenPut),
   });
-  if (!res.ok) {
-    const body: unknown = await res.json().catch(() => null);
-    if (typeof body === "object" && body !== null && "error" in body && typeof (body as { error: unknown }).error === "string") {
-      throw new Error((body as { error: string }).error);
-    }
-    throw new Error(`PUT /api/v1/settings/hf-token failed: HTTP ${res.status}`);
-  }
+  if (!res.ok) await throwApiError(res, "PUT /api/v1/settings/hf-token");
 }

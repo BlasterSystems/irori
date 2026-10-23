@@ -7,7 +7,8 @@ stored hub-side (settings table), pushed to all agents via the existing
 `config-update` frame, and used (a) by the agent as `HF_TOKEN` on the modelctl
 child env and (b) hub-side by `GET /api/v1/hf-quants` for gated/private repos.
 The token is **always optional** — absence is never an error path, and
-tokenless flows behave byte-identically to today.
+tokenless behavior is unchanged (no Authorization header on the quants
+request; config-update frames carry `hfToken: null`, treated as unset).
 
 Owner decisions (2026-10-23): one global token (not per-node); hub-side quants
 listing uses it; token always optional. Jira: IR-73 (sprint 985, full-stack,
@@ -84,8 +85,10 @@ no `backend` label).
   cases + agent transport set/clear/keep + JobManager child-env (fake
   modelctl prints `HF_TOKEN`) + web api + chrome pins.
 - Build: `pnpm -r build` green; typecheck green (web via vue-tsc).
-- Documentation check: `.agentic/bin/docs-check` exit 0; the new endpoints
-  were added to SPEC §13 Meta row (clears the API-docs heuristic warning).
+- Documentation check: `.agentic/bin/docs-check --base origin/main --strict`
+  exit 0 — the heuristic keys on changed FILENAMES, so this required the API
+  contract doc (`docs/API.md`: new endpoints + Authorization behavior), not
+  just the SPEC §13 row (which alone leaves the strict gate red).
 - Live smoke (disposable PG + built server on :3948): `GET /api/v1/settings/
   hf-token` → `{configured:false}`; PUT → `{configured:true}` (token never in
   a GET body); fake agent hello → `config-update` carried the token; a PUT
@@ -94,6 +97,12 @@ no `backend` label).
   → 200; browser (real dist + real API): footer gear → modal, Clear →
   `{configured:false}`, Save → `{configured:true}` + pushed frame. Smoke
   stack torn down (container `--rm`, server killed).
+- Review round (PR #29, 4 parallel read-only reviewers + orchestrator pass):
+  13 findings — 1 MAJOR (missing `docs/API.md` → strict docs-check red),
+  8 MINOR (token whitespace/charset validation, quants header guard,
+  modal busy guards, three weak test pins, ADR wording), 4 NIT — all
+  addressed in the review-fix commit. Post-fix gate: server 176/176, all
+  other suites unchanged green; typecheck/build/validate/docs-check exit 0.
 
 ## Review
 
