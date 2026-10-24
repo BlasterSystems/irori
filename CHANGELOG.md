@@ -33,6 +33,13 @@ All notable changes to Irori are recorded here. Format follows
   source IP; Agents tab + Client keys manager; project/agent-type filters
   on Requests (migration 0013).
 
+### Changed
+
+- Agent modelctl pin default raised to `0.22.0` (IR-75): modelctl now emits
+  `progress:` JSONL on stderr during real downloads, lighting up the
+  download-queue rows, batch totals strip and job-drawer summary shipped in
+  IR-71/74.
+
 ## [0.3.0] — Agent onboarding, usage capture, download queue & overview
 
 ### Added
