@@ -74,7 +74,10 @@ button { font: inherit; color: inherit; }
 .muted { color: var(--muted); } .faint { color: var(--faint); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-.page { flex: 1 0 auto; min-width: 0; padding: var(--space-5) 0 var(--space-7); }
+.page { flex: 1 0 auto; width: 100%; min-width: 0; padding: var(--space-5) 0 var(--space-7); }
+/* width:100% is load-bearing: .page is a cross-axis flex item of #app and
+   .container's auto margins disable stretch — without a definite cross size
+   every page shrinks to fit-content instead of filling the 1200px cap. */
 .foot { position: sticky; bottom: 0; z-index: 5;
   background: color-mix(in oklch, var(--paper) 90%, transparent); backdrop-filter: blur(8px);
   border-top: 1px solid var(--border); }
