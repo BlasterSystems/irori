@@ -14,16 +14,16 @@ verify live per IR-75's acceptance criteria.
 
 ## Acceptance criteria
 
-- [ ] Agent default pin is 0.22.0 (code + docs + changelog).
-- [ ] dev tag deployed; NAS agent bundle re-rolled via `agent-update` (IDLE
+- [x] Agent default pin is 0.22.0 (code + docs + changelog).
+- [x] dev tag deployed; NAS agent bundle re-rolled via `agent-update` (IDLE
       queue only, never mid-batch — the restart severs the job socket and the
       one-active guard 409s anyway).
-- [ ] `modelctl-install` on the NAS reports "modelctl 0.22.0 satisfies the
+- [x] `modelctl-install` on the NAS reports "modelctl 0.22.0 satisfies the
       0.22.0 gate".
-- [ ] A real download on the NAS: running queue row shows %, bytes, live
+- [x] A real download on the NAS: running queue row shows %, bytes, live
       speed; batch totals strip populates; job drawer summary lines carry
       live values and the collapsed raw log shows the `progress:` JSONL.
-- [ ] UI validated against `mockups/models-downloads.html`.
+- [x] UI validated against `mockups/models-downloads.html`.
 
 ## Scope
 
@@ -72,7 +72,18 @@ verify live per IR-75's acceptance criteria.
 - Tests: `pnpm test`
 - Build: `pnpm build`
 - Documentation check: `.agentic/bin/docs-check`
-- Live: see IR-75 closing comment (rollout + acceptance run).
+- Live: PR #33 (382898f feat + 3a5d740 docs) rebase-merged; `dev-0.3.0-25`
+  live on 10.0.10.9:3947. NAS agent-update `3e7d8406` succeeded
+  ("update confirmed: agent reports 0.3.0"); modelctl-install `31c00075`
+  succeeded — "modelctl 0.22.0 satisfies the 0.22.0 gate". Probe
+  `Qwen/Qwen3-8B` as `irori-progress-probe` (16.4 GB): queue row
+  `19% · 2.9 GiB / 15.3 GiB · 670 Mb/s`; batch strip
+  `batch 30% · 5.0 GiB / 16.7 GiB · 508 Mb/s combined · eta 3:17`; job
+  drawer `[1/1] ▸ … 30% 4.6 GiB / 15.3 GiB 1.0 Gb/s eta 1:29` + `total`
+  line; raw log carries 40 `progress:` lines (1/s). Screenshots match
+  `mockups/models-downloads.html` (dlbar row + repo subtext + strip +
+  collapsed rawlog). Probe cleaned up: queue row deleted,
+  `nas-delete-apply 7607255d` removed the object.
 
 ## Review
 
