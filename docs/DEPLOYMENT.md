@@ -65,7 +65,7 @@ advisory-locked (ADR-0002).
 The agent is configured via env (no config file): `IRORI_SERVER_URL`,
 `IRORI_NODE_TOKEN`, `IRORI_CADENCE_MS`, `IRORI_LLM_TARGETS`,
 `IRORI_LLM_DETECT_ONLY`, `IRORI_MODELCTL_PIN` (minimum modelctl version the
-install job enforces; default `0.21.3`), `IRORI_MODELCTL_PATH`,
+install job enforces; default `0.22.0`), `IRORI_MODELCTL_PATH`,
 `IRORI_HF_TOKEN` (optional HF token passed to modelctl as `HF_TOKEN` for
 gated/private repos; bootstrap fallback — a hub-set global token defined in
 the UI wins and is pushed via config-update, IRI-019), and
