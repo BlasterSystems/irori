@@ -489,6 +489,13 @@ async function ensureCreated(): Promise<SetupInfo> {
  *  (a refused start persists nothing) and has no runs to lose. */
 async function ensureFreshCreated(): Promise<SetupInfo> {
   if (created.value !== null && createdInput.value !== JSON.stringify(wizardInput())) {
+    // A staged transfer still owns live node jobs; deleting the row would
+    // cascade its record away and leave the downloads running (a later
+    // Stage transfers then fails with "busy: a job is already running").
+    if (activeTransfer.value !== null && activeTransfer.value.status === "running") {
+      await cancelTransfer(activeTransfer.value.id).catch(() => {});
+    }
+    activeTransfer.value = null;
     await deleteSetup(created.value.id);
     created.value = null;
   }
