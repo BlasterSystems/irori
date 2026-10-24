@@ -287,6 +287,7 @@ function openWizard(from?: SetupInfo): void {
   validation.value = null;
   placementRows.value = null;
   created.value = null;
+  createdInput.value = null;
   activeTransfer.value = null;
   const w = wizard.value;
   w.editId = from?.id ?? null;
@@ -435,6 +436,9 @@ function openHygiene(nodeId: string, name: string): void {
   hygieneNode.value = { id: nodeId, name };
 }
 const created = ref<SetupInfo | null>(null);
+/** Payload snapshot captured when `created` was persisted — detects form edits
+ *  after a saved-but-unstarted row so retries replace instead of fork (IR-76). */
+const createdInput = ref<string | null>(null);
 const activeTransfer = ref<SetupTransfer | null>(null);
 
 function targetIds(): string[] {
@@ -474,8 +478,25 @@ async function ensureCreated(): Promise<SetupInfo> {
     return patched;
   }
   const setup = await createSetup(wizardInput());
+  createdInput.value = JSON.stringify(wizardInput());
   created.value = setup;
   return setup;
+}
+
+/** Create-or-reuse for launch/save (IR-76): a row persisted by an earlier
+ *  attempt (failed start, staged transfer) is replaced when the wizard inputs
+ *  changed since — retries never fork the config. The replaced row is stopped
+ *  (a refused start persists nothing) and has no runs to lose. */
+async function ensureFreshCreated(): Promise<SetupInfo> {
+  if (created.value !== null && createdInput.value !== JSON.stringify(wizardInput())) {
+    await deleteSetup(created.value.id);
+    created.value = null;
+  }
+  if (created.value === null) {
+    created.value = await createSetup(wizardInput());
+    createdInput.value = JSON.stringify(wizardInput());
+  }
+  return created.value;
 }
 
 /** Serving port — the script owns it; Irori needs it for probes and env. */
@@ -543,10 +564,32 @@ async function onFinish(): Promise<void> {
     if (wizard.value.editId !== null) {
       await patchSetup(wizard.value.editId, wizardInput());
     } else {
-      const setup = created.value ?? (await createSetup(wizardInput()));
-      created.value = setup;
-      await startSetup(setup.id);
+      const setup = await ensureFreshCreated();
+      try {
+        await startSetup(setup.id);
+      } catch (err) {
+        // The row was already persisted — a start refusal (e.g. MODEL_PATH
+        // resolution) must not read as total loss (IR-76). The wizard stays
+        // open: retry Create & start, or Save without starting to keep it.
+        wizardError.value = `Setup saved — start failed: ${err instanceof Error ? err.message : String(err)}`;
+        return;
+      }
     }
+    wizardOpen.value = false;
+    await load();
+  } catch (err) {
+    wizardError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** Step 5 — persist a new config without launching it (IR-76). */
+async function onSaveOnly(): Promise<void> {
+  busy.value = true;
+  wizardError.value = null;
+  try {
+    await ensureFreshCreated();
     wizardOpen.value = false;
     await load();
   } catch (err) {
@@ -678,6 +721,7 @@ function fmtGiB(bytes: number | null): string {
 
         <section v-show="step === 1" class="step card__body">
           <div class="stack">
+            <div class="field"><label>Config name (optional — defaults to the model name)</label><input v-model="wizard.name" class="input" placeholder="(model name)" /></div>
             <div class="stack" style="gap: 8px">
               <label class="pick" :class="{ 'is-on': wizard.kind === 'single' }"><input v-model="wizard.kind" type="radio" value="single" name="wtype" /> <strong>Single node</strong><div class="stat__sub">one node serves; the usual case</div></label>
               <label class="pick" :class="{ 'is-on': wizard.kind === 'cluster' }"><input v-model="wizard.kind" type="radio" value="cluster" name="wtype" /> <strong>Cluster (head + workers)</strong><div class="stat__sub">sharded / multi-node serving · up to 8 nodes</div></label>
@@ -776,6 +820,7 @@ function fmtGiB(bytes: number | null): string {
 
         <section v-show="step === 5" class="step card__body">
           <dl class="kv">
+            <dt>name</dt><dd>{{ wizard.name.trim() || wizard.model }}</dd>
             <dt>type</dt><dd>{{ wizard.kind === "cluster" ? `cluster — head + ${wizard.workerIds.length} worker(s)` : "single node" }}</dd>
             <dt>model</dt><dd class="mono">{{ wizard.model }}</dd>
             <dt>port</dt><dd>{{ wizardPort }} · probed for health (/v1/models with the model id) · timeout 15 m</dd>
@@ -789,6 +834,7 @@ function fmtGiB(bytes: number | null): string {
           <span class="stat__sub">step {{ step }} of 5</span>
           <div class="row">
             <button v-if="step > 1" class="btn btn--secondary btn--sm" @click="prevStep">Back</button>
+            <button v-if="step === 5 && wizard.editId === null" class="btn btn--secondary btn--sm" :disabled="busy" @click="onSaveOnly">{{ busy ? "working…" : "Save without starting" }}</button>
             <button v-if="step < 5" class="btn btn--primary btn--sm" @click="nextStep">Next · {{ STEPS[step] }}</button>
             <button v-else class="btn btn--primary btn--sm" :disabled="busy" @click="onFinish">{{ busy ? "working…" : wizard.editId !== null ? "Save" : "Create & start" }}</button>
           </div>
