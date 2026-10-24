@@ -33,7 +33,7 @@ variables are optional unless noted:
 | `IRORI_CADENCE_MS` | `2000` | Snapshot cadence (server may override) |
 | `IRORI_LLM_TARGETS` | none | `host:port,...` probe targets extending/overriding server-assigned ports |
 | `IRORI_LLM_DETECT_ONLY` | off | Force detection-only LLM probes (no rates) |
-| `IRORI_MODELCTL_PIN` | `0.21.3` | Minimum modelctl version the `modelctl-install` job enforces |
+| `IRORI_MODELCTL_PIN` | `0.22.0` | Minimum modelctl version the `modelctl-install` job enforces |
 | `IRORI_MODELCTL_PATH` | `/root/.local/bin/modelctl` | Explicit modelctl binary |
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
 | `IRORI_USAGE_FLUSH_MS` | `30000` | Usage-buffer upload interval (ADR-0008) |
