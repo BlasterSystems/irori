@@ -58,11 +58,6 @@ export function heroDataForPort(p: LlmPortSnapshot): HeroData {
   };
 }
 
-export function computeHeroData(ports: LlmPortSnapshot[] | null | undefined): HeroData | null {
-  const p = pickPrimaryPort(ports);
-  return p === null ? null : heroDataForPort(p);
-}
-
 /** Highest decode tok/s in the window (the hero's "peak" sub-label). */
 export function peakDecode(points: LlmHistoryPoint[]): number | null {
   const values = points.map((p) => p.decodeTps).filter((v): v is number => v !== null);
