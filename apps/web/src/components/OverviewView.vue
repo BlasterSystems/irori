@@ -114,13 +114,13 @@ async function refreshCharts(): Promise<void> {
     ports.add(p.hero.port);
     perNode.set(p.nodeId, ports);
   }
-  const next = new Map<string, { chart: LensChart; peak: number | null }>();
+  const next = new Map(charts.value); // failed nodes keep their last chart
   for (const [nodeId, ports] of perNode) {
     let series: Array<{ port: number; points: LlmHistoryPoint[] }> = [];
     try {
       series = (await fetchLlmHistory(nodeId, "30m")).series;
     } catch {
-      continue; // history unavailable — charts keep their last data
+      continue; // history unavailable — this node's chart stays as-is
     }
     if (seq !== chartSeq) return;
     for (const port of ports) {
