@@ -199,7 +199,10 @@ flowchart LR
   added from a **modal** that takes a pasted list (one HF repo per line)
   parsed into editable rows — bulk submissions land as ONE `download_queue`
   batch (IRI-015) — with a persistent **queue panel** on the page (per-entry
-  status/remove/retry); store hygiene (doctor/gc) a **popover** off the
+  status/remove/retry; succeeded entries auto-clear ~60 s after the batch
+  settles — stale ones on load — while failed/canceled stay until removed or
+  retried, and the batch strip shows only while entries are pending or
+  running, IRI-026); store hygiene (doctor/gc) a **popover** off the
   status strip. No inline form walls. Multi-quant GGUF repos are
   first-class (IRI-016): rows carry optional `quantization` (modelctl
   substring selection) and `mtp` (explicit draft companion), and an

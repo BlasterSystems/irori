@@ -294,6 +294,15 @@ export function downloadBatchTotals(entries: DownloadQueueEntry[]): DownloadBatc
   };
 }
 
+/** IR-96: succeeded rows leave the table this long after the batch settles;
+ *  stale ones (previous session) are pruned on load. Failed/canceled stay. */
+export const DOWNLOAD_CLEAR_GRACE_MS = 60_000;
+
+/** Pure: ids of succeeded rows settled before `now - graceMs`. */
+export function staleSucceededIds(entries: DownloadQueueEntry[], now: number, graceMs = DOWNLOAD_CLEAR_GRACE_MS): string[] {
+  return entries.filter((e) => e.status === "succeeded" && Date.parse(e.updatedAt) < now - graceMs).map((e) => e.id);
+}
+
 /** Pure: ⋯-menu actions per queue-row state, in display order (IRI-020). */
 export type DownloadRowAction = "job" | "cancel-job" | "retry" | "retry-force" | "remove";
 
