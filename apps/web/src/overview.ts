@@ -1,6 +1,6 @@
 import { GB10_SYSTEM_ENVELOPE_W, type AnalyticsPoint, type AnalyticsSeries, type HardwareSnapshot, type LlmPortSnapshot, type SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "./api";
-import { lensChart, type LensChart } from "./analytics";
+import { fmtBucket, lensChart, type LensChart } from "./analytics";
 
 /**
  * Pure view models for the Overview landing page (IRI-013) — DOM-free like
@@ -195,10 +195,12 @@ export function fleetEnergyKwh(points: FleetPowerPoint[], bucketMs: number): num
   return any ? wh / 1000 : null;
 }
 
-export interface PowerBar { t: number; w: number; pct: number }
+export interface PowerBar { t: number; endT: number; w: number; wh: number; pct: number }
 
-/** Bins the fleet series into ≤ `target` bars (null buckets skipped). */
-export function binFleetPower(points: FleetPowerPoint[], target = 36): { bars: PowerBar[]; avgW: number | null } {
+/** Bins the fleet series into ≤ `target` bars (null buckets skipped). `bucketMs`
+ *  is the analytics bucket duration behind each point: per-bar energy (Wh) and
+ *  the covered span [t, endT) derive from it (IR-97). */
+export function binFleetPower(points: FleetPowerPoint[], bucketMs: number, target = 36): { bars: PowerBar[]; avgW: number | null } {
   const filled = points.filter((p): p is FleetPowerPoint & { w: number } => p.w !== null);
   if (filled.length === 0) return { bars: [], avgW: null };
   const group = Math.max(1, Math.ceil(filled.length / target));
@@ -206,10 +208,32 @@ export function binFleetPower(points: FleetPowerPoint[], target = 36): { bars: P
   for (let i = 0; i < filled.length; i += group) {
     const slice = filled.slice(i, i + group);
     const w = slice.reduce((a, b) => a + b.w, 0) / slice.length;
-    bars.push({ t: slice[0]!.t, w, pct: Math.min(100, (w / GB10_SYSTEM_ENVELOPE_W) * 100) });
+    const wh = slice.reduce((a, b) => a + (b.w * bucketMs) / 3_600_000, 0);
+    bars.push({ t: slice[0]!.t, endT: slice[slice.length - 1]!.t + bucketMs, w, wh, pct: Math.min(100, (w / GB10_SYSTEM_ENVELOPE_W) * 100) });
   }
   const avgW = filled.reduce((a, b) => a + b.w, 0) / filled.length;
   return { bars, avgW };
+}
+
+/** Energy label: "3.1 Wh" below a kWh, "1.49 kWh" style above (matches the ENERGY stat). */
+export function fmtEnergy(wh: number): string {
+  if (wh >= 1000) return `${(wh / 1000).toFixed(2)} kWh`;
+  if (wh >= 10) return `${Math.round(wh)} Wh`;
+  return `${Math.round(wh * 10) / 10} Wh`;
+}
+
+/** Hover slot label for a power bar: "14:32 – 14:33" (minute bins),
+ *  "Oct 20 14:00 – 15:00" (hour), "Oct 20" or "Oct 20 – Oct 22" (day). */
+export function powerBarSlot(bar: PowerBar, granularity: "minute" | "hour" | "day"): string {
+  const start = fmtBucket(bar.t, granularity);
+  if (granularity === "minute") return `${start} – ${fmtBucket(bar.endT, "minute")}`;
+  if (granularity === "hour") {
+    const end = new Date(bar.endT);
+    const endHM = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
+    return `${start} – ${endHM}`;
+  }
+  const endDay = fmtBucket(bar.endT - 1, "day"); // inclusive last covered day
+  return endDay === start ? start : `${start} – ${endDay}`;
 }
 
 export interface TokenTotals { input: number; cached: number; generated: number }

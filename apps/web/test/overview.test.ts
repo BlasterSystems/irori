@@ -9,11 +9,13 @@ import {
   feedLines,
   fleetEnergyKwh,
   fleetPowerSeries,
+  fmtEnergy,
   heroDataForPort,
   heroSpark,
   OVERVIEW_RANGES,
   peakDecode,
   pickPrimaryPort,
+  powerBarSlot,
   relativeTime,
   tokenCostOf,
   tokenTotals,
@@ -285,10 +287,46 @@ describe("overview range filter + fleet aggregation (IRI-025)", () => {
 
   it("bins the fleet series to at most the target bar count", () => {
     const many: AnalyticsSeries = { key: "a", label: "x", points: Array.from({ length: 100 }, (_, i) => point(i * 60_000, { watts: 100 + i })) };
-    const { bars, avgW } = binFleetPower(fleetPowerSeries([many], sparkIds), 24);
+    const { bars, avgW } = binFleetPower(fleetPowerSeries([many], sparkIds), 60_000, 24);
     expect(bars.length).toBeLessThanOrEqual(24);
     expect(bars.length).toBeGreaterThan(0);
     expect(avgW).toBeCloseTo(149.5, 1);
+  });
+
+  it("emits per-bar energy and covered span from the bucket duration (IR-97)", () => {
+    const pts = fleetPowerSeries([sparkA], sparkIds); // 60 W @ t0, 80 W @ t1, 60 s buckets
+    const { bars } = binFleetPower(pts, 60_000);
+    expect(bars[0]!.t).toBe(0);
+    expect(bars[0]!.endT).toBe(60_000);
+    expect(bars[0]!.w).toBe(60);
+    expect(bars[0]!.wh).toBeCloseTo(1, 9); // 60 W held 60 s
+    expect(bars[1]!.t).toBe(60_000);
+    expect(bars[1]!.endT).toBe(120_000);
+    expect(bars[1]!.w).toBe(80);
+    expect(bars[1]!.wh).toBeCloseTo(80 / 60, 9); // 80 W held 60 s
+    expect(binFleetPower([{ t: 0, w: null }], 60_000).bars).toEqual([]);
+  });
+
+  it("formats energy as Wh below a kWh and kWh above", () => {
+    expect(fmtEnergy(0.83)).toBe("0.8 Wh");
+    expect(fmtEnergy(3.1)).toBe("3.1 Wh");
+    expect(fmtEnergy(148.8)).toBe("149 Wh");
+    expect(fmtEnergy(1488)).toBe("1.49 kWh");
+  });
+
+  it("labels the covered slot per granularity", () => {
+    const hhmm = (t: number) => {
+      const d = new Date(t);
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    };
+    const bar = (t: number, endT: number) => ({ t, endT, w: 60, wh: 1, pct: 10 });
+    const minuteBase = new Date(2026, 10, 3, 14, 32).getTime();
+    expect(powerBarSlot(bar(minuteBase, minuteBase + 60_000), "minute")).toBe(`${hhmm(minuteBase)} – ${hhmm(minuteBase + 60_000)}`);
+    const hourBase = new Date(2026, 10, 3, 14, 0).getTime();
+    expect(powerBarSlot(bar(hourBase, hourBase + 5 * 3_600_000), "hour")).toBe(`Nov 3 14:00 – ${hhmm(hourBase + 5 * 3_600_000)}`);
+    const dayBase = new Date(2026, 10, 3).getTime();
+    expect(powerBarSlot(bar(dayBase, dayBase + 86_400_000), "day")).toBe("Nov 3");
+    expect(powerBarSlot(bar(dayBase, dayBase + 3 * 86_400_000), "day")).toBe("Nov 3 – Nov 5");
   });
 
   it("totals tokens over spark nodes only and prices billable input minus cached", () => {
