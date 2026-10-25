@@ -46,5 +46,14 @@ Owner feedback on the deployed dev-0.3.0-29 (2026-10-25, two screenshots):
 
 ## Deploy
 
-- PR open (see close-out comment on IR-96/IR-97); next dev tag after merge:
-  dev-0.3.0-30.
+- PR #39 rebase-merged to main as ae3ae3c (IR-96) + d8d30b1 (IR-97) + bc97dcf
+  (docs); branch deleted. Self-review comment:
+  https://github.com/BlasterSystems/irori/pull/39#issuecomment-6399000958
+  (APPROVE; findings fixed pre-push).
+- Jira IR-96 + IR-97 closed Done with evidence comments (ids 25345/25346).
+- Tag `dev-0.3.0-30` on bc97dcf; CD DEV run 40205034106 green (test + deploy).
+- Live 10.20.30.9:3947 on dev-0.3.0-30: `/healthz` {ok, db:true};
+  `/api/v1/version` → tag `dev-0.3.0-30`; served web bundle contains the new
+  hover tip and no longer contains "bucket size varies"; `/api/v1/downloads`
+  serves 18 succeeded rows (the stale batch — they auto-prune when Models is
+  next opened); agent bundle serves with download-queue markers.
