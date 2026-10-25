@@ -16,6 +16,12 @@ import {
   usageRequestsResponseSchema,
   usageToolsResponseSchema,
   USAGE_RANGES,
+  energyCostResponseSchema,
+  tokenCostResponseSchema,
+  type EnergyCost,
+  type EnergyCostInput,
+  type TokenCost,
+  type TokenCostInput,
   type ClientIdentityCreated,
   type ChatDetail,
   type ChatsResponse,
@@ -153,11 +159,12 @@ export async function rotateNodeToken(id: string): Promise<string> {
 
 /* ── Node history ─────────────────────────────────────────────────────── */
 
-export type HistoryRange = "30m" | "1h" | "24h" | "7d" | "30d" | "90d";
+export type HistoryRange = "30m" | "1h" | "4h" | "24h" | "7d" | "30d" | "90d";
 
 export const HISTORY_RANGES: readonly HistoryRange[] = [
   "30m",
   "1h",
+  "4h",
   "24h",
   "7d",
   "30d",
@@ -512,7 +519,7 @@ export async function fetchLlmHistory(
 // ─── M7: analytics + cleanup ────────────────────────────────────────────────
 
 export type AnalyticsLensName = "memory" | "decode" | "power" | "temps" | "tokens";
-export type AnalyticsRangeName = "1h" | "24h" | "7d" | "30d" | "90d";
+export type AnalyticsRangeName = "30m" | "1h" | "4h" | "24h" | "7d" | "30d" | "90d";
 
 /** Tolerant: identity fields validated, series shape checked structurally. */
 export async function fetchAnalytics(
@@ -655,6 +662,41 @@ export async function putCadenceMs(cadenceMs: number): Promise<void> {
     body: JSON.stringify({ cadenceMs }),
   });
   if (!res.ok) throw new Error(`PUT /api/v1/settings/cadence-ms failed: HTTP ${res.status}`);
+}
+
+/** IRI-025: energy + token cost settings. null = not configured. */
+export async function fetchEnergyCost(signal?: AbortSignal): Promise<EnergyCost | null> {
+  const res = await fetch("/api/v1/settings/energy-cost", { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/settings/energy-cost failed: HTTP ${res.status}`);
+  const parsed = energyCostResponseSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("malformed energy cost payload");
+  return parsed.data.energyCost;
+}
+
+export async function putEnergyCost(cost: EnergyCostInput): Promise<void> {
+  const res = await fetch("/api/v1/settings/energy-cost", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(cost),
+  });
+  if (!res.ok) throw new Error(`PUT /api/v1/settings/energy-cost failed: HTTP ${res.status}`);
+}
+
+export async function fetchTokenCost(signal?: AbortSignal): Promise<TokenCost | null> {
+  const res = await fetch("/api/v1/settings/token-cost", { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/settings/token-cost failed: HTTP ${res.status}`);
+  const parsed = tokenCostResponseSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("malformed token cost payload");
+  return parsed.data.tokenCost;
+}
+
+export async function putTokenCost(cost: TokenCostInput): Promise<void> {
+  const res = await fetch("/api/v1/settings/token-cost", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(cost),
+  });
+  if (!res.ok) throw new Error(`PUT /api/v1/settings/token-cost failed: HTTP ${res.status}`);
 }
 
 export async function fetchUsageOverview(

@@ -63,7 +63,7 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
     },
   });
 
-  it("diffs cumulative counters into hourly/daily ledger rows and survives re-runs", async () => {
+  it("diffs cumulative counters into minute/hourly/daily ledger rows and survives re-runs", async () => {
     await db.insert(llmSnapshots).values([
       llmSnapshot({ g: 100, p: 1000, c: 40 }, 50),
       llmSnapshot({ g: 300, p: 2000, c: 90 }, 40),
@@ -88,6 +88,11 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
     expect(hourly).toHaveLength(new Set(hourly.map((r) => r.bucketStart.toISOString())).size);
     expect(hourly[0]!.model).toBe("test-model");
     expect(rows.filter((r) => r.granularity === "day").length).toBeLessThanOrEqual(2);
+    // Minute rows mirror the same deltas (feeds the 30m/4h token views).
+    const minuteRows = rows.filter((r) => r.granularity === "minute");
+    expect(minuteRows.length).toBeGreaterThanOrEqual(hourly.length);
+    expect(minuteRows.reduce((s, r) => s + r.generatedTokens, 0)).toBe(250);
+    expect(minuteRows.reduce((s, r) => s + r.promptTokens, 0)).toBe(1100);
   });
 
   it("prunes ledger rows past retention", async () => {
@@ -101,7 +106,7 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
       promptSeen: true,
       promptTokens: 1,
     });
-    await pruneTokenLedger(db, 90, 365);
+    await pruneTokenLedger(db, 7, 90, 365);
     const old = await db.select().from(tokenLedger).where(and(eq(tokenLedger.nodeId, nodeId), eq(tokenLedger.model, "old")));
     expect(old).toHaveLength(0);
   });

@@ -251,7 +251,8 @@ One section, five lenses — **memory, decode, power, temps, tokens**
 node**, with time ranges backed by rollups:
 
 - Decode/prefill rates over time (per engine port, per node, per cluster).
-- Tokens: generated / cached / prefill, hourly + daily (ledger per model).
+- Tokens: generated / cached / prompt, minute + hourly + daily (ledger per
+  model) — minute rows feed the Overview 30m/4h cost preview (IRI-025).
 - Power: estimated watts (GPU board + CPU model + base overhead, clamped to
   the GB10 envelope), explicit coverage fields; monthly archive; Wh/token.
   Labeled *estimated, not wall-metered*. Constants (NVIDIA DGX Spark
@@ -375,7 +376,7 @@ reported in every snapshot; upgrade = re-run install.
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
-| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET /api/v1/settings/hf-token` (presence-only, IRI-019), `PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), WS `/agent-ws` |
+| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), WS `/agent-ws` |
 
 ## 14. Deviations & deferred
 

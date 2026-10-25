@@ -1,16 +1,22 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import type { AnalyticsSeries, LlmPortSnapshot, SseEvent } from "@irori/core";
+import type { AnalyticsPoint, AnalyticsSeries, LlmPortSnapshot, SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "../src/api";
 import {
+  binFleetPower,
   computeNasData,
   computePower,
   feedLines,
+  fleetEnergyKwh,
+  fleetPowerSeries,
   heroDataForPort,
   heroSpark,
+  OVERVIEW_RANGES,
   peakDecode,
   pickPrimaryPort,
   relativeTime,
+  tokenCostOf,
+  tokenTotals,
 } from "../src/overview";
 
 function port(overrides: Partial<LlmPortSnapshot> = {}): LlmPortSnapshot {
@@ -72,12 +78,16 @@ describe("hero spark + peak", () => {
   });
 
   it("charts decode and prefill as two series over a shared zero-floored domain", () => {
-    const chart = heroSpark(HIST);
+    const chart = heroSpark(HIST, "30m");
     expect(chart.series.map((s) => s.label)).toEqual(["decode 30m", "prefill 30m"]);
     expect(chart.series[0]?.points).toEqual([100, 168, null]);
     expect(chart.series[1]?.points).toEqual([2000, null, 3100]);
     expect(chart.yMin).toBeLessThanOrEqual(0);
     expect(chart.paths.length).toBe(2);
+  });
+
+  it("labels follow the selected range", () => {
+    expect(heroSpark(HIST, "24h").series.map((s) => s.label)).toEqual(["decode 24h", "prefill 24h"]);
   });
 });
 
@@ -201,16 +211,86 @@ const OVERVIEW_SRC = readFileSync(new URL("../src/components/OverviewView.vue", 
 describe("OverviewView source pins", () => {
   it("keeps the page contract: per-process heroes, nodes grid, one feed, add-node", () => {
     expect(OVERVIEW_SRC).toContain("heroProcesses");
-    expect(OVERVIEW_SRC).toContain('class="statgrid statgrid--6"');
+    expect(OVERVIEW_SRC).toContain("statgrid statgrid--6");
     expect(OVERVIEW_SRC).toContain(">Telemetry</h3>");
     expect(OVERVIEW_SRC).toContain("Add node…</button>");
     expect(OVERVIEW_SRC).toContain('class="hero-grid"');
-    expect(OVERVIEW_SRC).toContain('fetchLlmHistory(nodeId, "30m")');
+    expect(OVERVIEW_SRC).toContain("fetchLlmHistory(nodeId, range.value)");
   });
 
   it("has no fleet lens filter and no head-anchored hero", () => {
     expect(OVERVIEW_SRC).not.toContain('const lens = ref<Lens>');
     expect(OVERVIEW_SRC).not.toContain('aria-label="Lens"');
     expect(OVERVIEW_SRC).not.toContain("60m window");
+  });
+});
+
+describe("overview range filter + fleet aggregation (IRI-025)", () => {
+  function point(t: number, patch: Partial<AnalyticsPoint> = {}): AnalyticsPoint {
+    return {
+      t,
+      coverage: null,
+      usedBytes: null,
+      totalBytes: null,
+      gpuUsedBytes: null,
+      decodeTps: null,
+      prefillTps: null,
+      watts: null,
+      gpuW: null,
+      cpuW: null,
+      baseW: null,
+      gpuMin: null,
+      gpuMax: null,
+      gpuAvg: null,
+      cpuMin: null,
+      cpuMax: null,
+      cpuAvg: null,
+      throttled: null,
+      generated: null,
+      prompt: null,
+      cached: null,
+      ...patch,
+    };
+  }
+  const sparkA: AnalyticsSeries = { key: "a", label: "DGX-1", points: [point(0, { watts: 60 }), point(60_000, { watts: 80 })] };
+  const sparkB: AnalyticsSeries = { key: "b", label: "DGX-2", points: [point(0, { watts: 50 }), point(60_000, { watts: null })] };
+  const nas: AnalyticsSeries = { key: "nas", label: "NAS", points: [point(0)] };
+  const sparkIds = new Set(["a", "b"]);
+
+  it("lists the six filter options with week/month labels over 7d/30d", () => {
+    expect(OVERVIEW_RANGES.map((r) => r.value)).toEqual(["30m", "1h", "4h", "24h", "7d", "30d"]);
+    expect(OVERVIEW_RANGES.find((r) => r.value === "7d")?.label).toBe("week");
+    expect(OVERVIEW_RANGES.find((r) => r.value === "30d")?.label).toBe("month");
+  });
+
+  it("sums spark watts per bucket and skips the NAS", () => {
+    const pts = fleetPowerSeries([sparkA, sparkB, nas], sparkIds);
+    expect(pts).toEqual([
+      { t: 0, w: 110 },
+      { t: 60_000, w: 80 },
+    ]);
+  });
+
+  it("integrates energy over bucket duration and returns null with no data", () => {
+    const pts = fleetPowerSeries([sparkA], sparkIds);
+    // (60 W + 80 W) held for a 60 s bucket = 2.33 Wh = 140/60000 kWh
+    expect(fleetEnergyKwh(pts, 60_000)).toBeCloseTo(140 / 60_000, 9);
+    expect(fleetEnergyKwh([{ t: 0, w: null }], 60_000)).toBeNull();
+  });
+
+  it("bins the fleet series to at most the target bar count", () => {
+    const many: AnalyticsSeries = { key: "a", label: "x", points: Array.from({ length: 100 }, (_, i) => point(i * 60_000, { watts: 100 + i })) };
+    const { bars, avgW } = binFleetPower(fleetPowerSeries([many], sparkIds), 24);
+    expect(bars.length).toBeLessThanOrEqual(24);
+    expect(bars.length).toBeGreaterThan(0);
+    expect(avgW).toBeCloseTo(149.5, 1);
+  });
+
+  it("totals tokens over spark nodes only and prices billable input minus cached", () => {
+    const tokens: AnalyticsSeries = { key: "a", label: "DGX-1", points: [point(0, { prompt: 1_000_000, cached: 200_000, generated: 100_000 })] };
+    const totals = tokenTotals([tokens, nas], sparkIds);
+    expect(totals).toEqual({ input: 1_000_000, cached: 200_000, generated: 100_000 });
+    // (1M − 200k) × 0.15 + 200k × 0.015 + 100k × 0.6 = 0.12 + 0.003 + 0.06
+    expect(tokenCostOf(totals, { input: 0.15, cached: 0.015, output: 0.6 })).toBeCloseTo(0.183, 6);
   });
 });

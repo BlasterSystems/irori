@@ -16,7 +16,7 @@ export const ANALYTICS_LENSES = ["memory", "decode", "power", "temps", "tokens"]
 export const analyticsLensSchema = z.enum(ANALYTICS_LENSES);
 export type AnalyticsLens = (typeof ANALYTICS_LENSES)[number];
 
-export const ANALYTICS_RANGES = ["1h", "24h", "7d", "30d", "90d"] as const;
+export const ANALYTICS_RANGES = ["30m", "1h", "4h", "24h", "7d", "30d", "90d"] as const;
 export const analyticsRangeSchema = z.enum(ANALYTICS_RANGES);
 export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
 export type AnalyticsRangeValue = AnalyticsRange;
@@ -26,11 +26,14 @@ export const analyticsGroupBySchema = z.enum(ANALYTICS_GROUP_BY);
 export type AnalyticsGroupBy = (typeof ANALYTICS_GROUP_BY)[number];
 
 /** Ranges → bucket granularity. Temps reads minute buckets for 7d (min/max
- *  pairs preserve spikes); every other combination uses hour/day buckets. */
+ *  pairs preserve spikes); 30m/1h/4h read minute buckets (tokens needs them
+ *  below the hour); 24h/7d use hour, 30d/90d day. */
 export function analyticsGranularity(lens: AnalyticsLens, range: AnalyticsRangeValue): "minute" | "hour" | "day" {
   if (lens === "temps" && range === "7d") return "minute";
   switch (range) {
+    case "30m":
     case "1h":
+    case "4h":
       return "minute";
     case "24h":
     case "7d":
@@ -43,8 +46,12 @@ export function analyticsGranularity(lens: AnalyticsLens, range: AnalyticsRangeV
 
 export function analyticsRangeMs(range: AnalyticsRangeValue): number {
   switch (range) {
+    case "30m":
+      return 30 * 60_000;
     case "1h":
       return 3_600_000;
+    case "4h":
+      return 4 * 3_600_000;
     case "24h":
       return 24 * 3_600_000;
     case "7d":

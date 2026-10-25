@@ -3,7 +3,7 @@ import { snapshotBuckets } from "@irori/db";
 import type { Db } from "@irori/db";
 import { aggregateCols, bucketStartExpr, perSnapshotCte, type Granularity } from "./rollups.js";
 
-export const HISTORY_RANGES = ["30m", "1h", "24h", "7d", "30d", "90d"] as const;
+export const HISTORY_RANGES = ["30m", "1h", "4h", "24h", "7d", "30d", "90d"] as const;
 
 export type HistoryRange = (typeof HISTORY_RANGES)[number];
 
@@ -14,16 +14,18 @@ export function isHistoryRange(value: string): value is HistoryRange {
 export const RANGE_MS: Record<HistoryRange, number> = {
   "30m": 30 * 60_000,
   "1h": 3_600_000,
+  "4h": 4 * 3_600_000,
   "24h": 24 * 3_600_000,
   "7d": 7 * 86_400_000,
   "30d": 30 * 86_400_000,
   "90d": 90 * 86_400_000,
 };
 
-/** 1h resolves to raw-resolution minutes; 24h/7d/30d to hours; 90d to days. */
+/** 30m/1h/4h resolve to raw-resolution minutes; 24h/7d/30d to hours; 90d to days. */
 export const RANGE_GRANULARITY: Record<HistoryRange, Granularity> = {
   "30m": "minute",
   "1h": "minute",
+  "4h": "minute",
   "24h": "hour",
   "7d": "hour",
   "30d": "hour",
