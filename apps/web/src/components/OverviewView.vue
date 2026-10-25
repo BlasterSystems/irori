@@ -13,23 +13,23 @@ import { fetchSetups } from "../serve";
 import { fmtTokens } from "../usage";
 import { energyCost, tokenCost } from "../cost-settings";
 import {
-binFleetPower,
-computeNasData,
-computePower,
-feedLines,
-fleetEnergyKwh,
-fleetPowerSeries,
-granularityMs,
-heroDataForPort,
-heroSpark,
-OVERVIEW_RANGES,
-peakDecode,
-relativeTime,
-tokenCostOf,
-tokenTotals,
-type FleetPowerPoint,
-type HeroData,
-type OverviewRange,
+  binFleetPower,
+  computeNasData,
+  computePower,
+  feedLines,
+  fleetEnergyKwh,
+  fleetPowerSeries,
+  granularityMs,
+  heroDataForPort,
+  heroSpark,
+  OVERVIEW_RANGES,
+  peakDecode,
+  relativeTime,
+  tokenCostOf,
+  tokenTotals,
+  type FleetPowerPoint,
+  type HeroData,
+  type OverviewRange,
 } from "../overview";
 import { DISK_WARN_PCT, fmtBytes, fmtBucket, fmtTps, fmtWatts, type LensChart } from "../analytics";
 
@@ -159,12 +159,12 @@ const nasModelCount = ref<number | null>(null);
 const nasNewestAddedAt = ref<string | null>(null);
 
 const nas = computed(() =>
-computeNasData(nasModelCount.value, nasNewestAddedAt.value, nasNode.value === null ? null : (live.snapshots.get(nasNode.value.id) ?? null)),
+  computeNasData(nasModelCount.value, nasNewestAddedAt.value, nasNode.value === null ? null : (live.snapshots.get(nasNode.value.id) ?? null)),
 );
 const storeText = computed(() =>
-nas.value.storeUsedBytes !== null && nas.value.storeTotalBytes !== null
-? `${fmtBytes(nas.value.storeUsedBytes)} / ${fmtBytes(nas.value.storeTotalBytes)}`
-: null,
+  nas.value.storeUsedBytes !== null && nas.value.storeTotalBytes !== null
+    ? `${fmtBytes(nas.value.storeUsedBytes)} / ${fmtBytes(nas.value.storeTotalBytes)}`
+    : null,
 );
 const newestText = computed(() => relativeTime(nas.value.newestAddedAt, Date.now()));
 
@@ -191,7 +191,7 @@ const costText = computed(() => {
   return `≈ ${CURRENCY_SYMBOL[energyCost.value.currency]}${(energyKwh.value * energyCost.value.pricePerKwh).toFixed(2)}`;
 });
 const tokenCostText = computed(() =>
-tokenCostValue.value === null || currencySymbol.value === null ? null : `≈ ${currencySymbol.value}${tokenCostValue.value.toFixed(2)}`,
+  tokenCostValue.value === null || currencySymbol.value === null ? null : `≈ ${currencySymbol.value}${tokenCostValue.value.toFixed(2)}`,
 );
 const tokenPriceTip = computed(() => {
   if (tokenCost.value === null) return "";
@@ -319,15 +319,20 @@ function heroGridClass(h: HeroData): string {
 function hasQueue(h: HeroData): boolean {
   return h.queueRunning !== null || h.queueWaiting !== null;
 }
-/** "3 · 12" when waiting is known; running only when it is not. */
+/** "3 · 12" with null sides omitted (mirrors llm-data formatQueue). */
 function queueValue(h: HeroData): string {
   if (!hasQueue(h)) return "—";
-  if (h.queueWaiting === null) return num(h.queueRunning);
-  return `${num(h.queueRunning)} · ${num(h.queueWaiting)}`;
+  const parts: string[] = [];
+  if (h.queueRunning !== null) parts.push(num(h.queueRunning));
+  if (h.queueWaiting !== null) parts.push(num(h.queueWaiting));
+  return parts.join(" · ");
 }
 function queueSub(h: HeroData): string {
   if (!hasQueue(h)) return "queue";
-  return h.queueWaiting === null ? "running" : "running · waiting";
+  const parts: string[] = [];
+  if (h.queueRunning !== null) parts.push("running");
+  if (h.queueWaiting !== null) parts.push("waiting");
+  return parts.join(" · ");
 }
 
 // ─── power bar chart geometry (600×90 viewBox, 240 W envelope at the top) ───
