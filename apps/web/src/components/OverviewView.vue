@@ -19,11 +19,13 @@ import {
   feedLines,
   fleetEnergyKwh,
   fleetPowerSeries,
+  fmtEnergy,
   granularityMs,
   heroDataForPort,
   heroSpark,
   OVERVIEW_RANGES,
   peakDecode,
+  powerBarSlot,
   relativeTime,
   tokenCostOf,
   tokenTotals,
@@ -32,6 +34,7 @@ import {
   type OverviewRange,
 } from "../overview";
 import { DISK_WARN_PCT, fmtBytes, fmtBucket, fmtTps, fmtWatts, type LensChart } from "../analytics";
+import { clampTipX } from "../sparkline";
 
 const { sortedNodes } = live;
 const totalCount = computed(() => sortedNodes.value.length);
@@ -171,7 +174,7 @@ const newestText = computed(() => relativeTime(nas.value.newestAddedAt, Date.now
 /** Fleet aggregation over spark nodes only (the NAS has no power/telemetry). */
 const power = computed(() => computePower(rawPower.value.filter((s) => sparkIds.value.has(s.key))));
 const fleetPoints = computed(() => fleetPowerSeries(rawPower.value, sparkIds.value));
-const powerBars = computed(() => binFleetPower(fleetPoints.value));
+const powerBars = computed(() => binFleetPower(fleetPoints.value, granularityMs(powerGranularity.value)));
 const energyKwh = computed(() => fleetEnergyKwh(fleetPoints.value, granularityMs(powerGranularity.value)));
 const tokenSum = computed(() => tokenTotals(rawTokens.value, sparkIds.value));
 const tokenCostValue = computed(() => (tokenCost.value === null ? null : tokenCostOf(tokenSum.value, tokenCost.value)));
@@ -351,6 +354,26 @@ function barH(pct: number): number {
 function barY(pct: number): number {
   return BAR_BOTTOM - barH(pct);
 }
+
+/** IR-97: nearest-bar hover drives a fixed-position .charttip (LensChart pattern). */
+const barHover = ref<{ index: number; x: number; y: number } | null>(null);
+function onBarMove(e: PointerEvent): void {
+  const bars = powerBars.value.bars;
+  const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
+  if (rect.width === 0 || bars.length === 0) {
+    barHover.value = null;
+    return;
+  }
+  const index = Math.max(0, Math.min(bars.length - 1, Math.floor(((e.clientX - rect.left) / rect.width) * bars.length)));
+  barHover.value = { index, x: clampTipX(e.clientX), y: e.clientY };
+}
+const barTip = computed(() => {
+  const h = barHover.value;
+  if (h === null) return null;
+  const b = powerBars.value.bars[h.index];
+  if (b === undefined) return null;
+  return { slot: powerBarSlot(b, powerGranularity.value), wh: b.wh, x: h.x, y: h.y };
+});
 const avgLineY = computed(() => {
   const avg = powerBars.value.avgW;
   if (avg === null) return null;
@@ -428,13 +451,21 @@ function servingState(decodeTps: number | null): string {
           <p v-if="power?.nodes.length === 0" class="stat__sub">no power data yet</p>
         </div>
         <div style="margin-top: 14px;">
-          <span class="label">fleet draw<Tip text="selected window · bucket size varies (2.5 min at 30m → daily at month) · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average" /></span>
-          <svg viewBox="0 0 600 90" preserveAspectRatio="none" style="width: 100%; height: 96px; display: block; margin-top: 6px;" aria-hidden="true">
-            <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" />
+          <span class="label">fleet draw<Tip text="selected window · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average · hover a bar for its slot and energy" /></span>
+          <svg viewBox="0 0 600 90" preserveAspectRatio="none" style="width: 100%; height: 96px; display: block; margin-top: 6px;" aria-hidden="true" @pointermove="onBarMove" @pointerleave="barHover = null">
+            <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" :opacity="barHover === null || barHover.index === i ? 1 : 0.45" />
             <line x1="0" :y1="BAR_TOP" :x2="600" :y2="BAR_TOP" stroke="var(--border-strong)" stroke-width="1.25" stroke-dasharray="4 3" />
             <line v-if="avgLineY !== null" x1="0" :y1="avgLineY" :x2="600" :y2="avgLineY" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3" />
             <line x1="0" y1="84" x2="600" y2="84" stroke="var(--border)" />
           </svg>
+          <div v-if="barTip !== null" class="charttip" :style="{ left: `${barTip.x}px`, top: `${barTip.y}px` }" aria-hidden="true">
+            <div class="charttip__time">{{ barTip.slot }}</div>
+            <div class="charttip__row">
+              <span class="charttip__swatch" style="background: var(--ink)"></span>
+              <span class="charttip__label">energy</span>
+              <span class="charttip__value">{{ fmtEnergy(barTip.wh) }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </article>
