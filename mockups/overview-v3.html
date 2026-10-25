@@ -36,16 +36,20 @@
   .scrim { position: fixed; inset: 0; background: var(--overlay); opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 30; }
   .scrim.is-open { opacity: 1; pointer-events: auto; }
   .modal { position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.98);
-    width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--surface);
+    width: min(880px, 94vw); background: var(--surface);
     border: 1px solid var(--border-strong); border-radius: var(--radius); opacity: 0; pointer-events: none;
     transition: opacity .18s ease, transform .18s ease; }
   .modal.is-open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
-  .modal__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 16px 20px; }
+  .modal__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 14px 20px; }
   .modal__head h3 { font-size: 17px; }
-  .setsec { padding: 16px 20px 18px; border-top: 1px solid var(--border); }
-  .setsec h4 { font-size: 13px; margin: 0 0 10px; }
+  .modal__grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .modal__grid .setsec { border-top: 1px solid var(--border); }
+  .modal__grid .setsec:nth-child(-n+2) { border-top: 0; }
+  .modal__grid .setsec--foot { grid-column: 1 / -1; }
+  .setsec { padding: 14px 20px 16px; }
+  .setsec h4 { font-size: 13px; margin: 0 0 8px; }
   .setsec .field { margin-bottom: 8px; }
-  .sethint { font-size: 12.5px; color: var(--muted); margin: 0 0 12px; }
+  .sethint { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
   .suffix { position: relative; display: block; }
   .suffix .input { padding-right: 64px; }
   .suffix > span { position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
@@ -120,7 +124,7 @@
         <div class="statgrid statgrid--6" id="heroA">
           <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">37 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 67</span></div>
           <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">416 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 64%</span></div>
-          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1 · —</span><span class="stat__sub">running · waiting</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1</span><span class="stat__sub">running</span></div>
           <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">52%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:52%"></div></div></div>
           <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">84 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
           <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
@@ -131,7 +135,7 @@
           <div class="statgrid">
             <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">37 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 67</span></div>
             <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">416 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 64%</span></div>
-            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1 · —</span><span class="stat__sub">running · waiting</span></div>
+            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1</span><span class="stat__sub">running</span></div>
             <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">52%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:52%"></div></div></div>
           </div>
           <p class="stat__sub" style="margin-top: 8px;">ttft · itl appear with the first requests</p>
@@ -162,7 +166,7 @@
         <div class="statgrid statgrid--3">
           <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">37 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 67</span></div>
           <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">416 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 64%</span></div>
-          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1 · —</span><span class="stat__sub">running · waiting</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1</span><span class="stat__sub">running</span></div>
           <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">52%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:52%"></div></div></div>
           <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">84 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
           <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
@@ -347,7 +351,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
     </button>
   </div>
-  <div class="setsec" style="border-top:0">
+  <div class="modal__grid">
+  <div class="setsec">
     <h4>HF token <span class="faint">(optional)</span></h4>
     <div class="field"><label for="hfToken">Token</label>
       <input id="hfToken" class="input mono" value="hf_… — leave blank to keep the current value"></div>
@@ -363,8 +368,12 @@
   </div>
   <div class="setsec">
     <h4>Energy cost</h4>
-    <div class="field"><label for="kwh">Price per kWh</label>
-      <span class="suffix"><input id="kwh" class="input mono" value="0.35" inputmode="decimal"><span>€/kWh</span></span></div>
+    <div class="row" style="align-items:flex-end; gap:10px">
+      <div class="field" style="flex:1"><label for="kwh">Price per kWh</label>
+        <input id="kwh" class="input mono" value="0.35" inputmode="decimal"></div>
+      <div class="field" style="width:110px"><label for="cur">Currency</label>
+        <select id="cur" class="select"><option>€</option><option>$</option><option>£</option></select></div>
+    </div>
     <p class="sethint">Used for the Overview power cost estimate over the selected range. Fleet-only — the NAS is excluded.</p>
     <div class="row"><button class="btn btn--secondary">Save cost</button></div>
   </div>
@@ -377,13 +386,16 @@
         <span class="suffix"><input id="tokCacheP" class="input mono" value="0.015" inputmode="decimal"><span>€/Mtok</span></span></div>
       <div class="field" style="flex:1"><label for="tokOutP">Output</label>
         <span class="suffix"><input id="tokOutP" class="input mono" value="0.60" inputmode="decimal"><span>€/Mtok</span></span></div>
+      <div class="field" style="width:110px"><label for="tokCur">Currency</label>
+        <select id="tokCur" class="select"><option>€</option><option>$</option><option>£</option></select></div>
     </div>
     <p class="sethint">Per-million-token prices used for the token cost preview on the Overview (NAS section).</p>
     <div class="row"><button class="btn btn--secondary">Save prices</button></div>
   </div>
-  <div class="setsec row row--between">
+  <div class="setsec setsec--foot row row--between">
     <span class="stat__sub">changes apply immediately — no restart</span>
     <button class="btn btn--ghost" data-close="settings">Close</button>
+  </div>
   </div>
 </div>
 
