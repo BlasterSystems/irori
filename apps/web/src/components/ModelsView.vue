@@ -6,6 +6,7 @@ import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo } from "@irori
 import {
   cancelJob,
   createJob,
+  DOWNLOAD_CLEAR_GRACE_MS,
   downloadBatchTotals,
   downloadBytesLine,
   downloadJobSummary,
@@ -28,6 +29,7 @@ import {
   removeDownload,
   retryDownload,
   setupServingModel,
+  staleSucceededIds,
   type DownloadQueueEntry,
   type HfQuantsResult,
   type JobDetail,
@@ -289,9 +291,47 @@ const downloadQueueEntries = ref<DownloadQueueEntry[]>([]);
 const queueError = ref<string | null>(null);
 const queueSeq = { n: 0 }; // stale-response guard (object: survives interval closures)
 let queuePoll: ReturnType<typeof setInterval> | undefined;
+let clearTimer: ReturnType<typeof setTimeout> | undefined;
 
 function queueHasActive(entries: DownloadQueueEntry[]): boolean {
   return entries.some((e) => e.status === "pending" || e.status === "running");
+}
+
+/** IR-96: delete the given settled rows; tolerates 404/409 races (another tab
+ *  removed them first) — the follow-up refresh is the source of truth. */
+function pruneSucceeded(ids: string[]): void {
+  if (ids.length === 0) return;
+  void (async () => {
+    await Promise.allSettled(ids.map((id) => removeDownload(id)));
+    await refreshQueue();
+  })();
+}
+
+/** IR-96: rows settled before the grace window (previous session) never render. */
+function pruneStaleSucceeded(entries: DownloadQueueEntry[]): void {
+  pruneSucceeded(staleSucceededIds(entries, Date.now()));
+}
+
+/** IR-96: succeeded rows leave once they cross the grace window
+ *  (updatedAt + grace), active batch or not — the timer targets the next
+ *  crossing so polling while a batch runs cannot starve it; failed/canceled
+ *  rows stay until removed or retried. */
+function scheduleSucceededClear(entries: DownloadQueueEntry[]): void {
+  if (clearTimer !== undefined) {
+    clearTimeout(clearTimer);
+    clearTimer = undefined;
+  }
+  const now = Date.now();
+  const next = entries
+    .filter((e) => e.status === "succeeded")
+    .map((e) => Date.parse(e.updatedAt) + DOWNLOAD_CLEAR_GRACE_MS - now)
+    .filter((ms) => ms > 0)
+    .sort((a, b) => a - b)[0];
+  if (next === undefined) return;
+  clearTimer = setTimeout(() => {
+    clearTimer = undefined;
+    pruneSucceeded(staleSucceededIds(downloadQueueEntries.value, Date.now()));
+  }, next);
 }
 
 async function refreshQueue(): Promise<void> {
@@ -301,6 +341,8 @@ async function refreshQueue(): Promise<void> {
     if (seq !== queueSeq.n) return; // a newer refresh won
     downloadQueueEntries.value = entries;
     queueError.value = null;
+    pruneStaleSucceeded(entries); // IR-96: a stale batch from a previous session never renders
+    scheduleSucceededClear(entries); // IR-96: finished rows leave at updatedAt + grace
     // Poll only while something is queued/running; terminal states are static.
     if (queueHasActive(entries) && queuePoll === undefined) {
       queuePoll = setInterval(() => {
@@ -501,9 +543,10 @@ function confirmDrawerCancel(): void {
   });
 }
 
-/** IRI-020: batch totals strip — hidden until any row carries size/speed data. */
+/** IRI-020: batch totals strip; IR-96: shown only while the queue has active rows. */
 const queueTotals = computed(() => downloadBatchTotals(downloadQueueEntries.value));
-const showQueueTotals = computed(() => downloadQueueEntries.value.some((e) => e.bytesTotal != null || e.speedBps != null));
+// IR-96: the strip is progress toward done — hidden once nothing is pending/running.
+const showQueueTotals = computed(() => queueHasActive(downloadQueueEntries.value) && downloadQueueEntries.value.some((e) => e.bytesTotal != null || e.speedBps != null));
 const queueTotalsText = computed(() => {
   const t = queueTotals.value;
   const parts: string[] = [];
@@ -670,6 +713,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("click", onDocClick);
   clearTimeout(debounce);
   clearTimeout(deleteReloadTimer);
+  clearTimeout(clearTimer); // IR-96: no prune after unmount
   clearInterval(jobPoll);
   clearInterval(queuePoll);
 });
