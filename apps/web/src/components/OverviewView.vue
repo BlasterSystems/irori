@@ -1,32 +1,48 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { HardwareSnapshot, NodeInfo, SetupInfo } from "@irori/core";
-import { GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
+import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries } from "@irori/core";
 import { live } from "../live";
 import NodeCard from "./NodeCard.vue";
 import NodeModal from "./NodeModal.vue";
+import Tip from "./Tip.vue";
 import LensChartVue from "./LensChart.vue";
 import { fetchAnalytics, fetchLlmHistory, type LlmHistoryPoint } from "../api";
-import { fetchModelsPage } from "../models";
+import { downloadBytesLine, downloadEntryEta, downloadProgressPct, downloadSpeedView, fetchDownloadQueue, fetchModelsPage, formatEta, type DownloadQueueEntry } from "../models";
 import { fetchSetups } from "../serve";
+import { fmtTokens } from "../usage";
+import { energyCost, tokenCost } from "../cost-settings";
 import {
-  computeNasData,
-  computePower,
-  feedLines,
-  heroDataForPort,
-  heroSpark,
-  peakDecode,
-  relativeTime,
-  type HeroData,
-  type PowerData,
+binFleetPower,
+computeNasData,
+computePower,
+feedLines,
+fleetEnergyKwh,
+fleetPowerSeries,
+granularityMs,
+heroDataForPort,
+heroSpark,
+OVERVIEW_RANGES,
+peakDecode,
+relativeTime,
+tokenCostOf,
+tokenTotals,
+type FleetPowerPoint,
+type HeroData,
+type OverviewRange,
 } from "../overview";
 import { DISK_WARN_PCT, fmtBytes, fmtBucket, fmtTps, fmtWatts, type LensChart } from "../analytics";
 
 const { sortedNodes } = live;
 const totalCount = computed(() => sortedNodes.value.length);
 const onlineCount = computed(() => sortedNodes.value.filter((n) => n.online).length);
-/** Every spark node — heads included (they serve too); the NAS keeps its own card. */
+/** Every spark node - heads included (they serve too); the NAS keeps its own card. */
 const sparkNodes = computed(() => sortedNodes.value.filter((n) => n.kind !== "nas"));
+const sparkIds = computed(() => new Set(sparkNodes.value.map((n) => n.id)));
+
+// ─── range filter (IRI-025): drives the hero charts and the power/token cards
+const range = ref<OverviewRange>("30m");
+const rangeLabel = computed(() => OVERVIEW_RANGES.find((r) => r.value === range.value)?.label ?? range.value);
 const nasNode = computed<NodeInfo | null>(() => sortedNodes.value.find((n) => n.kind === "nas") ?? null);
 
 // ─── serving processes: one hero card per running setup, detected engines last ──
@@ -118,7 +134,7 @@ async function refreshCharts(): Promise<void> {
   for (const [nodeId, ports] of perNode) {
     let series: Array<{ port: number; points: LlmHistoryPoint[] }> = [];
     try {
-      series = (await fetchLlmHistory(nodeId, "30m")).series;
+      series = (await fetchLlmHistory(nodeId, range.value)).series;
     } catch {
       continue; // history unavailable — this node's chart stays as-is
     }
@@ -128,33 +144,104 @@ async function refreshCharts(): Promise<void> {
       if (points === undefined) continue;
       const process = heroProcesses.value.find((p) => p.nodeId === nodeId && p.hero.port === port);
       if (process === undefined) continue;
-      next.set(process.key, { chart: heroSpark(points), peak: peakDecode(points) });
+      next.set(process.key, { chart: heroSpark(points, rangeLabel.value), peak: peakDecode(points) });
     }
   }
   if (seq === chartSeq) charts.value = next;
 }
 
-// ─── power + NAS store cards ────────────────────────────────────────────────
+// ─── power + NAS store + token cards ────────────────────────────────────────
 
-const power = ref<PowerData | null>(null);
+const rawPower = ref<AnalyticsSeries[]>([]);
+const rawTokens = ref<AnalyticsSeries[]>([]);
+const powerGranularity = ref<"minute" | "hour" | "day">("hour");
 const nasModelCount = ref<number | null>(null);
 const nasNewestAddedAt = ref<string | null>(null);
 
 const nas = computed(() =>
-  computeNasData(nasModelCount.value, nasNewestAddedAt.value, nasNode.value === null ? null : (live.snapshots.get(nasNode.value.id) ?? null)),
+computeNasData(nasModelCount.value, nasNewestAddedAt.value, nasNode.value === null ? null : (live.snapshots.get(nasNode.value.id) ?? null)),
 );
 const storeText = computed(() =>
-  nas.value.storeUsedBytes !== null && nas.value.storeTotalBytes !== null
-    ? `${fmtBytes(nas.value.storeUsedBytes)} / ${fmtBytes(nas.value.storeTotalBytes)}`
-    : null,
+nas.value.storeUsedBytes !== null && nas.value.storeTotalBytes !== null
+? `${fmtBytes(nas.value.storeUsedBytes)} / ${fmtBytes(nas.value.storeTotalBytes)}`
+: null,
 );
 const newestText = computed(() => relativeTime(nas.value.newestAddedAt, Date.now()));
 
+/** Fleet aggregation over spark nodes only (the NAS has no power/telemetry). */
+const power = computed(() => computePower(rawPower.value.filter((s) => sparkIds.value.has(s.key))));
+const fleetPoints = computed(() => fleetPowerSeries(rawPower.value, sparkIds.value));
+const powerBars = computed(() => binFleetPower(fleetPoints.value));
+const energyKwh = computed(() => fleetEnergyKwh(fleetPoints.value, granularityMs(powerGranularity.value)));
+const tokenSum = computed(() => tokenTotals(rawTokens.value, sparkIds.value));
+const tokenCostValue = computed(() => (tokenCost.value === null ? null : tokenCostOf(tokenSum.value, tokenCost.value)));
+const currencySymbol = computed(() => {
+  if (energyCost.value !== null) return CURRENCY_SYMBOL[energyCost.value.currency];
+  if (tokenCost.value !== null) return CURRENCY_SYMBOL[tokenCost.value.currency];
+  return null;
+});
+const fleetNowText = computed(() => (power.value.fleetNow !== null ? fmtWatts(power.value.fleetNow) : "—"));
+const energyKwhText = computed(() => {
+  if (energyKwh.value === null) return null;
+  const kwh = energyKwh.value;
+  return kwh >= 100 ? kwh.toFixed(0) : kwh >= 10 ? kwh.toFixed(1) : kwh.toFixed(2);
+});
+const costText = computed(() => {
+  if (energyKwh.value === null || energyCost.value === null) return null;
+  return `≈ ${CURRENCY_SYMBOL[energyCost.value.currency]}${(energyKwh.value * energyCost.value.pricePerKwh).toFixed(2)}`;
+});
+const tokenCostText = computed(() =>
+tokenCostValue.value === null || currencySymbol.value === null ? null : `≈ ${currencySymbol.value}${tokenCostValue.value.toFixed(2)}`,
+);
+const tokenPriceTip = computed(() => {
+  if (tokenCost.value === null) return "";
+  const s = CURRENCY_SYMBOL[tokenCost.value.currency];
+  return `same period as the power chart · prices: input ${s}${tokenCost.value.input} · cached ${s}${tokenCost.value.cached} · output ${s}${tokenCost.value.output} per Mtok`;
+});
+const tokenCostTip = computed(() => {
+  if (tokenCost.value === null) return "";
+  const s = CURRENCY_SYMBOL[tokenCost.value.currency];
+  return `(input − cached) × ${s}${tokenCost.value.input} + cached × ${s}${tokenCost.value.cached} + output × ${s}${tokenCost.value.output} · per Mtok`;
+});
+
+// Download queue: every download runs on the NAS store node — 10s poll.
+const downloads = ref<DownloadQueueEntry[] | null>(null);
+const activeDownload = computed(() => downloads.value?.find((e) => e.status === "running") ?? null);
+const downloadEtaText = computed(() => {
+  const e = activeDownload.value;
+  if (e === null) return null;
+  const eta = downloadEntryEta(e);
+  return eta !== null ? `eta ${formatEta(eta)}` : null;
+});
+const downloadLineText = computed(() => {
+  const e = activeDownload.value;
+  if (e === null) return null;
+  const pct = downloadProgressPct(e);
+  const segs = [pct !== null ? `${pct}%` : "", downloadBytesLine(e) ?? "", downloadSpeedView(e)?.label ?? ""];
+  return segs.filter((s) => s !== "").join(" · ") || null;
+});
+
+async function refreshDownloads(): Promise<void> {
+  try {
+    downloads.value = await fetchDownloadQueue();
+  } catch {
+    /* store unavailable — keep the last known queue */
+  }
+}
+
 async function refreshCards(): Promise<void> {
   try {
-    power.value = computePower((await fetchAnalytics("power", "1h", "node")).series);
+    const res = await fetchAnalytics("power", range.value, "node");
+    rawPower.value = res.series;
+    powerGranularity.value = res.granularity;
   } catch {
     // Analytics unavailable (degraded DB) — card stays empty.
+  }
+  try {
+    const res = await fetchAnalytics("tokens", range.value, "node");
+    rawTokens.value = res.series;
+  } catch {
+    // Ledger unavailable — the token stats stay empty.
   }
   try {
     const page = await fetchModelsPage(1, "", "recent");
@@ -175,11 +262,14 @@ const addOpen = ref(false);
 
 let processTimer: ReturnType<typeof setInterval> | null = null;
 let cardsTimer: ReturnType<typeof setInterval> | null = null;
+let downloadTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   void refreshCards();
   void refreshSetups().then(() => void refreshCharts());
   void refreshCharts();
+  void refreshDownloads();
   processTimer = setInterval(() => void refreshSetups(), 5_000);
+  downloadTimer = setInterval(() => void refreshDownloads(), 10_000);
   cardsTimer = setInterval(() => {
     void refreshCards();
     void refreshCharts();
@@ -188,12 +278,18 @@ onMounted(() => {
 onUnmounted(() => {
   if (processTimer !== null) clearInterval(processTimer);
   if (cardsTimer !== null) clearInterval(cardsTimer);
+  if (downloadTimer !== null) clearInterval(downloadTimer);
 });
 // New or removed processes appear as soon as the registry poll lands.
 watch(
   () => heroProcesses.value.map((p) => p.key).join("|"),
   () => void refreshCharts(),
 );
+// The range filter re-fetches every card and chart.
+watch(range, () => {
+  void refreshCards();
+  void refreshCharts();
+});
 
 // ─── formatting helpers ─────────────────────────────────────────────────────
 
@@ -209,6 +305,53 @@ function powerBarPct(watts: number | null): number {
   return watts === null ? 0 : Math.min(100, (watts / GB10_SYSTEM_ENVELOPE_W) * 100);
 }
 
+// ─── hero visibility (IRI-025): hide what has no data, never leave dead space
+
+function showTtft(h: HeroData): boolean {
+  return h.ttftP95Ms !== null || h.e2eP95Ms !== null;
+}
+function showItl(h: HeroData): boolean {
+  return h.itlP95Ms !== null;
+}
+function heroGridClass(h: HeroData): string {
+  return showTtft(h) || showItl(h) ? "statgrid statgrid--6" : "statgrid";
+}
+function hasQueue(h: HeroData): boolean {
+  return h.queueRunning !== null || h.queueWaiting !== null;
+}
+/** "3 · 12" when waiting is known; running only when it is not. */
+function queueValue(h: HeroData): string {
+  if (!hasQueue(h)) return "—";
+  if (h.queueWaiting === null) return num(h.queueRunning);
+  return `${num(h.queueRunning)} · ${num(h.queueWaiting)}`;
+}
+function queueSub(h: HeroData): string {
+  if (!hasQueue(h)) return "queue";
+  return h.queueWaiting === null ? "running" : "running · waiting";
+}
+
+// ─── power bar chart geometry (600×90 viewBox, 240 W envelope at the top) ───
+
+const BAR_VIEW_W = 600;
+const BAR_TOP = 8;
+const BAR_BOTTOM = 84;
+const barStep = computed(() => BAR_VIEW_W / Math.max(1, powerBars.value.bars.length));
+const barW = computed(() => Math.max(4, barStep.value * 0.57));
+function barX(i: number): number {
+  return i * barStep.value + (barStep.value - barW.value) / 2;
+}
+function barH(pct: number): number {
+  return ((BAR_BOTTOM - BAR_TOP) * pct) / 100;
+}
+function barY(pct: number): number {
+  return BAR_BOTTOM - barH(pct);
+}
+const avgLineY = computed(() => {
+  const avg = powerBars.value.avgW;
+  if (avg === null) return null;
+  return BAR_BOTTOM - ((BAR_BOTTOM - BAR_TOP) * Math.min(100, (avg / GB10_SYSTEM_ENVELOPE_W) * 100)) / 100;
+});
+
 function servingState(decodeTps: number | null): string {
   return decodeTps !== null ? "serving" : "starting";
 }
@@ -223,6 +366,9 @@ function servingState(decodeTps: number | null): string {
       </p>
     </div>
     <div class="row">
+      <div class="seg" role="group" aria-label="History range">
+        <button v-for="r in OVERVIEW_RANGES" :key="r.value" :class="{ 'is-active': range === r.value }" @click="range = r.value">{{ r.label }}</button>
+      </div>
       <button class="btn btn--primary" @click="addOpen = true">Add node…</button>
     </div>
   </div>
@@ -231,27 +377,25 @@ function servingState(decodeTps: number | null): string {
   <section v-if="heroProcesses.length > 0" class="hero-grid" style="margin-bottom: 12px;">
     <article v-for="p in heroProcesses" :key="p.key" class="card">
       <div class="card__head">
-        <div class="row">
-          <h3>{{ p.title }}</h3>
+        <div class="row hero-head">
+          <h3 :title="p.title">{{ p.title }}</h3>
           <span class="chip chip--accent">{{ p.kind }}</span>
           <span class="chip chip--ok">{{ p.hero.backend }} :{{ p.hero.port }}</span>
+          <span class="chip"><span class="dot dot--run" aria-hidden="true"></span> {{ servingState(p.hero.decodeTps) }}</span>
         </div>
-        <span class="mono faint">{{ p.nodeName }}</span>
+        <span class="mono faint hero-node">{{ p.nodeName }}</span>
       </div>
       <div class="card__body">
-        <div class="row row--between" style="margin-bottom: 10px;">
-          <span class="mono" style="font-size: 15px; font-weight: 500;">{{ p.hero.model ?? "model unknown" }}</span>
-          <span class="mono faint">{{ servingState(p.hero.decodeTps) }}</span>
-        </div>
-        <div class="statgrid statgrid--6">
+        <div :class="heroGridClass(p.hero)">
           <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">{{ fmtTps(p.hero.decodeTps) }}</span><span v-if="charts.get(p.key)?.peak != null" class="stat__sub">peak {{ Math.round(charts.get(p.key)!.peak!) }}</span></div>
           <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">{{ fmtTps(p.hero.prefillTps) }}</span><span v-if="p.hero.cacheHitPct !== null" class="stat__sub">cache hit {{ Math.round(p.hero.cacheHitPct) }}%</span></div>
-          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">{{ num(p.hero.queueRunning) }} · {{ num(p.hero.queueWaiting) }}</span><span class="stat__sub">running · waiting</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">{{ queueValue(p.hero) }}</span><span class="stat__sub">{{ queueSub(p.hero) }}</span></div>
           <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">{{ num(p.hero.kvCachePct === null ? null : Math.round(p.hero.kvCachePct)) }}<template v-if="p.hero.kvCachePct !== null">%</template></span><div v-if="p.hero.kvCachePct !== null" class="bar" style="margin-top: 6px;"><div class="bar__fill" :style="{ width: p.hero.kvCachePct + '%' }"></div></div></div>
-          <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">{{ ms(p.hero.ttftP95Ms) }}</span><span v-if="p.hero.e2eP95Ms !== null" class="stat__sub">E2E {{ Math.round(p.hero.e2eP95Ms) }} ms</span></div>
-          <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
+          <div v-if="showTtft(p.hero)" class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">{{ ms(p.hero.ttftP95Ms) }}</span><span v-if="p.hero.e2eP95Ms !== null" class="stat__sub">E2E {{ Math.round(p.hero.e2eP95Ms) }} ms</span></div>
+          <div v-if="showItl(p.hero)" class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
         </div>
-        <LensChartVue v-if="charts.get(p.key) !== undefined" :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" aria-label="decode and prefill, 30m" />
+        <p v-if="!showTtft(p.hero) || !showItl(p.hero)" class="stat__sub" style="margin-top: 8px;">ttft · itl appear with the first requests</p>
+        <LensChartVue v-if="charts.get(p.key) !== undefined" :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
       </div>
     </article>
   </section>
@@ -265,7 +409,11 @@ function servingState(decodeTps: number | null): string {
     <article class="card">
       <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
       <div class="card__body" style="padding-top: 12px;">
-        <div class="stat"><span class="stat__label">Fleet now</span><span class="stat__value">{{ power?.fleetNow !== null && power?.fleetNow !== undefined ? fmtWatts(power.fleetNow) : "—" }}</span></div>
+        <div class="statgrid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+          <div class="stat"><span class="stat__label">Fleet now<Tip text="fleet = sparks only · the NAS is excluded (no power telemetry)" /></span><span class="stat__value">{{ fleetNowText }}</span></div>
+          <div class="stat"><span class="stat__label">Energy · {{ rangeLabel }}<Tip text="average draw across the window" /></span><span class="stat__value">{{ energyKwhText ?? "—" }}<template v-if="energyKwhText !== null"> <span class="stat__sub" style="display: inline;">kWh</span></template></span></div>
+          <div class="stat"><span class="stat__label">Cost · {{ rangeLabel }}<Tip v-if="energyCost !== null" :text="`@ ${energyCost.pricePerKwh} ${CURRENCY_SYMBOL[energyCost.currency]}/kWh · hub setting`" /></span><span class="stat__value">{{ costText ?? "—" }}</span></div>
+        </div>
         <div style="margin-top: 10px;">
           <div v-for="n in power?.nodes ?? []" :key="n.key" class="barrow">
             <span>{{ n.label }}</span>
@@ -273,6 +421,15 @@ function servingState(decodeTps: number | null): string {
             <span class="val">{{ fmtWatts(n.watts) }}</span>
           </div>
           <p v-if="power?.nodes.length === 0" class="stat__sub">no power data yet</p>
+        </div>
+        <div style="margin-top: 14px;">
+          <span class="label">fleet draw<Tip text="selected window · bucket size varies (2.5 min at 30m → daily at month) · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average" /></span>
+          <svg viewBox="0 0 600 90" preserveAspectRatio="none" style="width: 100%; height: 96px; display: block; margin-top: 6px;" aria-hidden="true">
+            <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" />
+            <line x1="0" :y1="BAR_TOP" :x2="600" :y2="BAR_TOP" stroke="var(--border-strong)" stroke-width="1.25" stroke-dasharray="4 3" />
+            <line v-if="avgLineY !== null" x1="0" :y1="avgLineY" :x2="600" :y2="avgLineY" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3" />
+            <line x1="0" y1="84" x2="600" y2="84" stroke="var(--border)" />
+          </svg>
         </div>
       </div>
     </article>
@@ -286,6 +443,24 @@ function servingState(decodeTps: number | null): string {
           <span class="val" :class="{ 'metric--hot': nas.storePct !== null && nas.storePct >= DISK_WARN_PCT }">{{ storeText }}</span>
         </div>
         <p v-if="newestText !== null" class="stat__sub" style="margin-top: 10px;">newest added {{ newestText }}</p>
+        <div v-if="activeDownload !== null" style="margin-top: 12px;">
+          <div class="row row--between">
+            <span class="row"><span class="dot dot--run" aria-hidden="true"></span><span class="mono" style="font-size: 12px;">{{ activeDownload.name }}</span></span>
+            <span v-if="downloadEtaText !== null" class="stat__sub">{{ downloadEtaText }}</span>
+          </div>
+          <div class="bar" style="margin-top: 6px;"><div class="bar__fill" :style="{ width: (downloadProgressPct(activeDownload) ?? 0) + '%' }"></div></div>
+          <p v-if="downloadLineText !== null" class="stat__sub" style="margin-top: 4px;">{{ downloadLineText }}</p>
+        </div>
+        <hr class="rule" />
+        <div class="row row--between">
+          <span class="label">Tokens · {{ rangeLabel }}<Tip v-if="tokenCost !== null" :text="tokenPriceTip" /></span>
+        </div>
+        <div class="statgrid" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 8px;">
+          <div class="stat"><span class="stat__label">Input</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.input) }}</span></div>
+          <div class="stat"><span class="stat__label">Cached</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.cached) }}</span></div>
+          <div class="stat"><span class="stat__label">Output</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.generated) }}</span></div>
+          <div class="stat"><span class="stat__label">Cost<Tip v-if="tokenCost !== null" :text="tokenCostTip" /></span><span class="stat__value stat__value--sm">{{ tokenCostText ?? "—" }}</span></div>
+        </div>
       </div>
     </article>
   </section>
@@ -319,6 +494,24 @@ function servingState(decodeTps: number | null): string {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
+}
+/* Hero heads: long model names truncate, the node label never breaks. */
+.hero-head {
+  min-width: 0;
+}
+.hero-head h3 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-node {
+  white-space: nowrap;
+  flex: none;
+}
+.rule {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
 }
 @media (max-width: 900px) {
   .hero-grid {
