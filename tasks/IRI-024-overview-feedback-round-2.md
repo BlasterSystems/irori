@@ -92,6 +92,18 @@ Jira: IR-88 (Story, epic IR-78, sprint 985, label frontend).
     padding 24 px horizontal, width 1200 px (no full-bleed).
   - Screenshots light + dark at 1568 px verified.
 
+## Deploy
+
+- PR #34 rebase-merged to main as 4c9f1a2 + 6e7c3ec (self-review APPROVE,
+  comment https://github.com/BlasterSystems/irori/pull/34#issuecomment-6395299792).
+- `pnpm typecheck` green on merged main (all six packages) before tagging.
+- Tag `dev-0.3.0-27` → CD DEV run 40176830898 green.
+- Live 10.0.10.9:3947: `/healthz {ok,db,version}`, `/api/v1/version
+  {tag:"dev-0.3.0-27", cadenceMs:2000}`, `GET /api/v1/settings/cadence-ms
+  {cadenceMs:null}`; browser probes: Nodes = DGX-1/2/3 (heads, no NAS),
+  hero card for GLM-5.3-Flash-EXL3 with 30m chart, footer
+  "dev-0.3.0-27 · updates every 2 s · 147 W", Telemetry gap 20 px.
+
 ## Review
 
 - Correctness: thresholds single-sourced (TEMPS_WARN_C, DISK_WARN_PCT); card
