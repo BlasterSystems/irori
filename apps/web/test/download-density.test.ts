@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { DownloadQueueEntry } from "@irori/core";
 import {
+  DOWNLOAD_CLEAR_GRACE_MS,
   downloadBatchTotals,
   downloadEntryEta,
   downloadJobSummary,
   downloadRowActions,
   downloadSpeedLabel,
   formatEta,
+  staleSucceededIds,
 } from "../src/models";
 
 /** IRI-020: batch totals, per-state row actions, and the collapsed job summary. */
@@ -144,5 +146,23 @@ describe("downloadJobSummary", () => {
 
   it("omits the total line for an empty batch", () => {
     expect(downloadJobSummary([])).toBe("");
+  });
+});
+
+describe("staleSucceededIds (IR-96)", () => {
+  const NOW = Date.parse("2026-10-25T15:00:00.000Z");
+
+  it("lists only succeeded rows settled before the grace window", () => {
+    const stale = entry({ status: "succeeded", updatedAt: "2026-10-25T14:00:00.000Z" });
+    const fresh = entry({ id: "00000000-0000-4000-8000-000000000002", status: "succeeded", updatedAt: "2026-10-25T14:59:30.000Z" });
+    const failed = entry({ id: "00000000-0000-4000-8000-000000000003", status: "failed", updatedAt: "2026-10-20T00:00:00.000Z" });
+    const running = entry({ id: "00000000-0000-4000-8000-000000000004", status: "running", updatedAt: "2026-10-20T00:00:00.000Z" });
+    expect(staleSucceededIds([stale, fresh, failed, running], NOW)).toEqual([stale.id]);
+  });
+
+  it("keeps rows exactly at the grace boundary (strictly older is stale)", () => {
+    const atEdge = entry({ status: "succeeded", updatedAt: new Date(NOW - DOWNLOAD_CLEAR_GRACE_MS).toISOString() });
+    const pastEdge = entry({ id: "00000000-0000-4000-8000-000000000002", status: "succeeded", updatedAt: new Date(NOW - DOWNLOAD_CLEAR_GRACE_MS - 1).toISOString() });
+    expect(staleSucceededIds([atEdge, pastEdge], NOW)).toEqual([pastEdge.id]);
   });
 });
