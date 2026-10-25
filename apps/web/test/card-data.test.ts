@@ -127,8 +127,31 @@ describe("computeCardData", () => {
     expect(card.rows[0]?.label).toBe("DISK");
     expect(card.rows[0]?.line).toBe("11.6 TB / 18.1 TB");
     expect(card.rows[0]?.barPct).toBeCloseTo((11_603_944_087_552 / 18_108_599_115_776) * 100);
+    expect(card.rows[0]?.freePct).toBeCloseTo(100 - (11_603_944_087_552 / 18_108_599_115_776) * 100);
+  });
+
+  it("shows the device disk on sparks, ignoring mounted volumes (IR-98)", () => {
+    const storage: HardwareSnapshot["storage"] = [
+      { mount: "/", fs: "ext4", totalBytes: 3_999_872_163_840, usedBytes: 3_599_884_947_456 },
+      { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200 },
+    ];
+    const card = computeCardData(nodeFixture(), { ...SNAPSHOT, storage });
+    const disk = card.rows.find((r) => r.key === "disk");
+    // the 18.1 TB NAS share must not win the row — the root device does
+    expect(disk?.line).toBe("3.6 TB / 4 TB");
+    expect(disk?.barPct).toBeCloseTo((3_599_884_947_456 / 3_999_872_163_840) * 100);
+    expect(disk?.freePct).toBeCloseTo(100 - (3_599_884_947_456 / 3_999_872_163_840) * 100);
+    expect(disk?.warn).toBe(true); // 90 % — the row text still warns at the app tier
     // sparks surface package power + disk after MEM (overview mockup round 5)
-    expect(computeCardData(nodeFixture(), { ...SNAPSHOT, storage }).rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem", "pkg", "disk"]);
+    expect(card.rows.map((r) => r.key)).toEqual(["gpu0", "cpu", "mem", "pkg", "disk"]);
+  });
+
+  it("falls back to the largest mount when the snapshot has no / entry", () => {
+    const storage: HardwareSnapshot["storage"] = [
+      { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200 },
+    ];
+    const card = computeCardData(nodeFixture(), { ...SNAPSHOT, storage });
+    expect(card.rows.find((r) => r.key === "disk")?.line).toBe("14.2 TB / 18.1 TB");
   });
 
   it("omits the disk row when a NAS has no readable storage", () => {

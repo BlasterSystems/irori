@@ -200,14 +200,8 @@ export function diskPct(usedBytes: number | null | undefined, totalBytes: number
   return Math.round((usedBytes / totalBytes) * 100);
 }
 
-/** Disk usage percent at which the value/chip render warn (owner rule: > 80 %). */
+/** Disk usage percent at which the value renders warn (owner rule: > 80 %). */
 export const DISK_WARN_PCT = 80;
-
-/** Warn chip at ≥ 80 % disk usage, none below (owner rule 2026-10-25; supersedes the two-tier 80/90 rule). */
-export function diskChipCls(pct: number | null): string | null {
-  if (pct === null || pct < DISK_WARN_PCT) return null;
-  return "chip--warn";
-}
 
 export function sumReclaimable(audit: { categories: Array<{ reclaimableBytes: number }> } | null | undefined): number {
   if (audit === undefined || audit === null) return 0;
