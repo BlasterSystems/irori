@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 
 describe("history granularity selection", () => {
   it("maps each range to its bucket granularity", () => {
+    expect(historyGranularity("30m")).toBe("minute");
     expect(historyGranularity("1h")).toBe("minute");
     expect(historyGranularity("24h")).toBe("hour");
     expect(historyGranularity("7d")).toBe("hour");
@@ -17,7 +18,7 @@ describe("history granularity selection", () => {
   });
 
   it("isHistoryRange is a narrowing type guard", () => {
-    for (const range of ["1h", "24h", "7d", "30d", "90d"]) expect(isHistoryRange(range)).toBe(true);
+    for (const range of ["30m", "1h", "24h", "7d", "30d", "90d"]) expect(isHistoryRange(range)).toBe(true);
     expect(isHistoryRange("3h")).toBe(false);
     expect(isHistoryRange("")).toBe(false);
     expect(isHistoryRange("1H")).toBe(false);

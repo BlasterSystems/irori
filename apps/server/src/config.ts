@@ -1,3 +1,5 @@
+import { CADENCE_MAX_MS, CADENCE_MIN_MS } from "@irori/core";
+
 /**
  * Server configuration. Fails fast only when DB features are used without an
  * encryption key (ADR-0002); a missing DATABASE_URL boots degraded instead.
@@ -12,7 +14,7 @@ export interface Config {
   minuteKeepDays: number;
   hourKeepDays: number;
   dayKeepDays: number;
-  /** Snapshot cadence handed to agents in hello-ok (core contract default). */
+  /** Snapshot cadence handed to agents in hello-ok (CADENCE_MS env, bounded). */
   cadenceMs: number;
 }
 
@@ -39,8 +41,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     minuteKeepDays: parsePositiveInt(env.MINUTE_KEEP_DAYS, DEFAULT_MINUTE_KEEP_DAYS),
     hourKeepDays: parsePositiveInt(env.HOUR_KEEP_DAYS, DEFAULT_HOUR_KEEP_DAYS),
     dayKeepDays: parsePositiveInt(env.DAY_KEEP_DAYS, DEFAULT_DAY_KEEP_DAYS),
-    cadenceMs: DEFAULT_CADENCE_MS,
+    cadenceMs: parseCadenceMs(env.CADENCE_MS),
   };
+}
+
+/** CADENCE_MS env: bounded to the same 1–60 s window as the persisted setting. */
+function parseCadenceMs(raw: string | undefined): number {
+  const n = parsePositiveInt(raw, DEFAULT_CADENCE_MS);
+  return Math.min(CADENCE_MAX_MS, Math.max(CADENCE_MIN_MS, n));
 }
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {

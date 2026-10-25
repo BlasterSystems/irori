@@ -37,6 +37,7 @@ export class SetupNotFoundError extends Error {}
 export class SetupBusyError extends Error {}
 export class SetupOfflineError extends Error {}
 export class SetupStartError extends Error {}
+export class SetupInvalidError extends Error {}
 
 export type TransferStageStatus = TransferStage["status"];
 
@@ -302,6 +303,27 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     return snap ? { model: snap.model, detected: snap.detected } : null;
   };
 
+  /**
+   * Worker rows must reference real spark nodes — not the head itself, not a
+   * NAS node, no duplicates. Nothing validated this once and a row shipped
+   * with DGX-3 x4 plus the NAS listed twice as a worker.
+   */
+  const validateWorkers = async (
+    workers: Array<{ nodeId: string; role: "worker" }>,
+    headNodeId: string,
+  ): Promise<void> => {
+    const known = new Map((await deps.getNodes()).map((n) => [n.id, n]));
+    const seen = new Set<string>();
+    for (const worker of workers) {
+      if (seen.has(worker.nodeId)) throw new SetupInvalidError(`duplicate worker node ${worker.nodeId}`);
+      seen.add(worker.nodeId);
+      if (worker.nodeId === headNodeId) throw new SetupInvalidError("the head cannot be its own worker");
+      const row = known.get(worker.nodeId);
+      if (row === undefined) throw new SetupInvalidError(`unknown worker node ${worker.nodeId}`);
+      if (row.kind === "nas") throw new SetupInvalidError(`${row.name} is a NAS node and cannot be a worker`);
+    }
+  };
+
   const ensurePortAssigned = async (headNodeId: string, port: number): Promise<void> => {
     const [row] = await deps.db.select().from(nodes).where(eq(nodes.id, headNodeId)).limit(1);
     if (!row) return;
@@ -355,6 +377,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     },
 
     async create(input) {
+      await validateWorkers(input.nodes, input.headNodeId);
       const [row] = await deps.db
         .insert(setups)
         .values({
@@ -380,6 +403,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     async patch(id, patch) {
       const [row] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
       if (!row) throw new SetupNotFoundError("setup not found");
+      if (patch.nodes !== undefined) await validateWorkers(patch.nodes, row.headNodeId);
       await updateRow(id, {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.port !== undefined ? { port: patch.port } : {}),
@@ -416,6 +440,19 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       if (!deps.online().has(row.headNodeId)) throw new SetupOfflineError("head node agent is offline");
 
       const envCfg = envExportsSchema.parse(row.env);
+      // Refuse fast: a MODEL_PATH start resolves on the head's local store via
+      // `modelctl path --local`; when the model was never staged there the
+      // agent refuses after we already recorded a run row. Check here instead
+      // — staging stays the explicit "Stage transfers" action.
+      if (envCfg.modelPath) {
+        const staged = new Set(await deps.jobs.presentNodesFor(row.model));
+        if (!staged.has(row.headNodeId)) {
+          const head = await deps.getNode(row.headNodeId);
+          throw new SetupStartError(
+            `${shortName(row.model)} is not staged on ${head?.name ?? "the head node"} — stage transfers first, then start`,
+          );
+        }
+      }
       const env: Record<string, string> = {};
       if (envCfg.modelName) env.MODEL_NAME = row.model;
       // ADR-0008 §7: captured setups get the agent-chosen loopback engine
@@ -594,6 +631,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
           break;
       }
       const lastError = msg.error ?? (status === "failed" ? "driver reported failure" : row.lastError);
+      // Driver-truth polls repeat every 15 s; re-announcing an unchanged state
+      // floods the feed with identical lines (and rewrites the row for nothing).
+      if (status === row.status && health === row.health && lastError === row.lastError) return;
       await updateRow(row.id, { status, health, lastError });
       announce(row.id, status, health, lastError);
     },

@@ -2,8 +2,9 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { createJob, fetchJob, type JobDetail } from "../models";
 import { fetchCleanup, setWeeklySafePass, type CleanupState } from "../api";
-import { fmtBytes } from "../analytics";
+import { DISK_WARN_PCT, fmtBytes } from "../analytics";
 import { HYGIENE_CATEGORY_LABELS, HYGIENE_SAFE_CATEGORIES, type HygieneCategory } from "@irori/core";
+import { vScrimClose } from "../scrim";
 
 const props = defineProps<{ nodeId: string; nodeName: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -180,10 +181,9 @@ const diskPct = computed(() => {
   return Math.round(((audit.totalBytes - audit.freeBytes) / audit.totalBytes) * 100);
 });
 
-const diskChipCls = computed(() => {
-  if (diskPct.value === null) return "chip";
-  return diskPct.value >= 90 ? "chip--warn" : "chip";
-});
+const diskChipCls = computed(() =>
+  diskPct.value !== null && diskPct.value >= DISK_WARN_PCT ? "chip--warn" : "chip",
+);
 
 function catLabel(category: string): string {
   return HYGIENE_CATEGORY_LABELS[category as HygieneCategory] ?? category;
@@ -191,7 +191,7 @@ function catLabel(category: string): string {
 </script>
 
 <template>
-  <div class="drawer-scrim" @click.self="emit('close')">
+  <div class="drawer-scrim" v-scrim-close="() => emit('close')">
     <aside class="drawer is-open" role="dialog" aria-label="Disk hygiene">
       <div class="row row--between" style="margin-bottom: 10px">
         <div class="row">

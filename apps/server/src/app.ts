@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
-import { benchTypeSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, type NodeInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, type NodeInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
+import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
@@ -29,7 +30,7 @@ import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import { EVENT_FEED_CAP } from "./events-feed.js";
 import type { AgentHub } from "./hub.js";
-import { SetupBusyError, SetupNotFoundError, SetupOfflineError, SetupStartError, type SetupsService } from "./setups-service.js";
+import { SetupBusyError, SetupInvalidError, SetupNotFoundError, SetupOfflineError, SetupStartError, type SetupsService } from "./setups-service.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
@@ -115,6 +116,15 @@ export interface AppDeps {
    * tokenless, exactly as before.
    */
   getHfToken?: () => HfTokenService | null;
+  /**
+   * IR-87: cadence setting service. Optional — when absent or null (degraded),
+   * the cadence settings route answers 503 exactly like the HF-token routes.
+   * getCadenceMs is the in-memory active value (settings row or env default)
+   * exposed on the version payload; setCadenceMs keeps it in sync on PUT.
+   */
+  getCadence?: () => CadenceService | null;
+  getCadenceMs?: () => number;
+  setCadenceMs?: (cadenceMs: number) => void;
   /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
   hfQuants: HfQuantsService;
   dbHealthy: () => Promise<boolean>;
@@ -173,7 +183,11 @@ export function createApp(deps: AppDeps): Express {
   app.get("/agent/irori-agent.mjs", serveArtifact("bundle", "text/javascript", "irori-agent.mjs"));
 
   app.get("/api/v1/version", (_req, res) => {
-    res.json({ version: deps.version, tag: deps.tag });
+    res.json({
+      version: deps.version,
+      tag: deps.tag,
+      ...(deps.getCadenceMs !== undefined ? { cadenceMs: deps.getCadenceMs() } : {}),
+    });
   });
 
   // IRI-016: GGUF quantization/companion listing for the download modal's
@@ -213,6 +227,27 @@ export function createApp(deps: AppDeps): Express {
     const hub = deps.getHub();
     if (hub !== null) for (const nodeId of hub.online()) void hub.refreshConfig(nodeId).catch(() => {});
     res.json({ configured: body.data.hfToken !== null });
+  });
+
+  // IR-87: hub snapshot cadence — persisted (settings row), bounds-checked,
+  // and live-pushed to online agents via config-update. The in-memory active
+  // value updates immediately; agents reconnecting read it on next hello.
+  app.get("/api/v1/settings/cadence-ms", async (_req, res) => {
+    const cadence = deps.getCadence?.() ?? null;
+    if (cadence === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ cadenceMs: await cadence.get() } satisfies { cadenceMs: number | null });
+  });
+
+  app.put("/api/v1/settings/cadence-ms", async (req, res) => {
+    const cadence = deps.getCadence?.() ?? null;
+    if (cadence === null) return res.status(503).json({ error: "database unavailable" });
+    const body = cadencePutSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    await cadence.set(body.data.cadenceMs);
+    deps.setCadenceMs?.(body.data.cadenceMs);
+    const hub = deps.getHub();
+    if (hub !== null) for (const nodeId of hub.online()) void hub.refreshConfig(nodeId).catch(() => {});
+    res.json({ cadenceMs: body.data.cadenceMs } satisfies { cadenceMs: number });
   });
 
   app.get("/api/v1/events", (_req, res) => {
@@ -835,6 +870,7 @@ export function createApp(deps: AppDeps): Express {
     try {
       res.status(201).json({ setup: await setups.create(body.data) });
     } catch (err) {
+      if (err instanceof SetupInvalidError) return res.status(400).json({ error: err.message });
       if (err instanceof SetupOfflineError) return res.status(409).json({ error: err.message });
       throw err;
     }
@@ -860,6 +896,7 @@ export function createApp(deps: AppDeps): Express {
     try {
       res.json({ setup: await setups.patch(id, body.data) });
     } catch (err) {
+      if (err instanceof SetupInvalidError) return res.status(400).json({ error: err.message });
       if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
       throw err;
     }

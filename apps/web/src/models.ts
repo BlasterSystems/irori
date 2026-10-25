@@ -345,16 +345,7 @@ export function downloadJobSummary(entries: DownloadQueueEntry[]): string {
   return lines.join("\n");
 }
 
-/** Pure: a SUCCEEDED nas-delete job → the (nodeId, name) its arm may target; null otherwise (IRI-018). */
-export function armableNasDelete(
-  job: { kind: string; status: string; nodeId: string; params: Record<string, unknown> } | null | undefined,
-): { nodeId: string; name: string } | null {
-  if (job === null || job === undefined || job.kind !== "nas-delete" || job.status !== "succeeded") return null;
-  const name = job.params["name"];
-  return typeof name === "string" && name.length > 0 ? { nodeId: job.nodeId, name } : null;
-}
-
-/** Pure: name of the first serving setup that references the model (delete advisory); null when none (IRI-018). */
+/** Pure: name of the first serving setup that references the model (delete advisory); null when none. */
 export function setupServingModel(setups: Array<{ name: string; model: string }>, model: string): string | null {
   return setups.find((s) => s.model === model)?.name ?? null;
 }
@@ -381,8 +372,7 @@ export const JOB_VERBS: Array<{ kind: string; label: string; destructive: boolea
   { kind: "download-queue", label: "Download to NAS", destructive: false },
   { kind: "sync-local", label: "Sync from NAS", destructive: false },
   { kind: "push", label: "Push to node", destructive: false },
-  { kind: "nas-delete", label: "Delete from NAS (dry run)", destructive: false },
-  { kind: "nas-delete-apply", label: "Delete from NAS (APPLY)", destructive: true },
+  { kind: "nas-delete-apply", label: "Delete from NAS", destructive: true },
   { kind: "doctor", label: "Doctor", destructive: false },
   { kind: "repair-active", label: "Repair check", destructive: false },
   { kind: "repair-active-apply", label: "Repair (APPLY)", destructive: true },

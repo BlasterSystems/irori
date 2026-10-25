@@ -4,6 +4,7 @@ import type { HistoryRange, HistoryResponse } from "./api";
 
 /** Client-side fallback for the server's per-range bucket size (DB enum). */
 export const RANGE_GRANULARITY: Record<HistoryRange, string> = {
+  "30m": "minute",
   "1h": "minute",
   "24h": "hour",
   "7d": "hour",

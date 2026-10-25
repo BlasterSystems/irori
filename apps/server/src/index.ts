@@ -13,6 +13,8 @@ import { createJobsService, type JobSettledEvent, type JobsService } from "./job
 import { createDownloadQueueService, type DownloadQueueService } from "./download-queue-service.js";
 import { createHfQuantsService } from "./hf-quants.js";
 import { createHfTokenService, type HfTokenService } from "./hf-token.js";
+import { createCadenceService, type CadenceService } from "./cadence.js";
+import { CADENCE_MAX_MS, CADENCE_MIN_MS } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
@@ -73,6 +75,8 @@ const state: {
   store: NodeStore | null;
   /** IRI-019: global HF token service (null until the DB is wired). */
   hfToken: HfTokenService | null;
+  /** IR-87: hub cadence setting service (null until the DB is wired). */
+  cadence: CadenceService | null;
   llmStore: LlmStore | null;
   jobs: JobsService | null;
   downloads: DownloadQueueService | null;
@@ -90,6 +94,7 @@ const state: {
   hub: null,
   store: null,
   hfToken: null,
+  cadence: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -106,6 +111,8 @@ const state: {
 let dbHandle: DbHandle | null = null;
 
 const config = loadConfig();
+/** The in-memory active cadence: settings row when present, else the env default. */
+let activeCadenceMs = config.cadenceMs;
 const version = readVersion();
 /** Git tag baked into the image by CD/release; null for local builds. */
 const gitTag = process.env.IRORI_GIT_TAG?.trim() || null;
@@ -132,6 +139,11 @@ const app = createApp({
   sse,
   getHub: () => state.hub,
   getHfToken: () => state.hfToken,
+  getCadence: () => state.cadence,
+  getCadenceMs: () => activeCadenceMs,
+  setCadenceMs: (ms) => {
+    activeCadenceMs = ms;
+  },
   hfQuants: createHfQuantsService(),
   version,
   tag: gitTag,
@@ -177,6 +189,11 @@ async function boot(): Promise<void> {
   state.usageChats = createUsageChats(dbHandle.db);
   // IRI-019: global HF token (settings row), pushed to agents via config-update.
   state.hfToken = createHfTokenService(dbHandle.db);
+  // IR-87: hub cadence (settings row) — the stored value becomes the active
+  // cadence for hello-ok/config-update until a PUT changes it.
+  state.cadence = createCadenceService(dbHandle.db, CADENCE_MIN_MS, CADENCE_MAX_MS);
+  const storedCadence = await state.cadence.get().catch(() => null);
+  if (storedCadence !== null) activeCadenceMs = storedCadence;
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).
@@ -240,7 +257,7 @@ async function boot(): Promise<void> {
     onHello: (nodeId: string, agentVersion: string) => jobsService.settleAgentUpdate(nodeId, agentVersion),
   };
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, cadenceMs: config.cadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), jobEvents, setupEvents: {
+  const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), jobEvents, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
+import { vScrimClose } from "../scrim";
 import { fetchModelsPage, fetchPlacement } from "../models";
 import { setupChip, type NodeInfo, type SetupTransfer, type TransferStage } from "@irori/core";
 import {
@@ -666,7 +667,7 @@ function fmtGiB(bytes: number | null): string {
     </section>
 
     <!-- Setup detail drawer: engine log, placement history, edit/duplicate/remove -->
-    <div v-if="selected !== null" class="drawer-scrim" @click.self="closeDetail">
+    <div v-if="selected !== null" class="drawer-scrim" v-scrim-close="closeDetail">
       <aside class="drawer" role="dialog" aria-label="Setup details">
         <div class="row row--between" style="margin-bottom: 10px">
           <div class="row">
@@ -716,7 +717,7 @@ function fmtGiB(bytes: number | null): string {
     </div>
 
     <!-- Setup wizard: type → model → scripts → placement → review -->
-    <div v-if="wizardOpen" class="drawer-scrim" @click.self="closeWizard">
+    <div v-if="wizardOpen" class="drawer-scrim" v-scrim-close="closeWizard">
       <div class="wizard" role="dialog" aria-modal="true" aria-label="New setup wizard">
         <div class="card__head row--between" style="display: flex">
           <div class="row"><h3>{{ wizard.editId !== null ? "Edit setup" : "New setup" }}</h3><span class="mono faint">nothing runs until you launch</span></div>
@@ -740,8 +741,8 @@ function fmtGiB(bytes: number | null): string {
             </div>
             <div v-if="wizard.kind === 'cluster'" class="field"><label>Workers</label>
               <div class="stack" style="gap: 6px">
-                <label v-for="n in nodes.filter((x) => x.id !== wizard.headNodeId)" :key="n.id" class="pick" :class="{ 'is-on': wizard.workerIds.includes(n.id) }">
-                  <input type="checkbox" :checked="wizard.workerIds.includes(n.id)" @change="n.id in wizard.workerIds ? (wizard.workerIds = wizard.workerIds.filter((x) => x !== n.id)) : wizard.workerIds.length < 7 && wizard.workerIds.push(n.id)" />
+                <label v-for="n in nodes.filter((x) => x.id !== wizard.headNodeId && x.kind !== 'nas')" :key="n.id" class="pick" :class="{ 'is-on': wizard.workerIds.includes(n.id) }">
+                  <input type="checkbox" :checked="wizard.workerIds.includes(n.id)" @change="wizard.workerIds.includes(n.id) ? (wizard.workerIds = wizard.workerIds.filter((x) => x !== n.id)) : wizard.workerIds.length < 7 && wizard.workerIds.push(n.id)" />
                   {{ n.name }} · {{ n.kind }}{{ n.online ? "" : " (offline)" }}
                 </label>
               </div>
@@ -784,8 +785,8 @@ function fmtGiB(bytes: number | null): string {
                 <label class="pick" :class="{ 'is-on': wizard.envModelPath }"><input v-model="wizard.envModelPath" type="checkbox" /> MODEL_PATH <span class="stat__sub">resolved on the head via modelctl path --local</span></label>
                 <label class="pick" :class="{ 'is-on': wizard.envExtraArgs }"><input v-model="wizard.envExtraArgs" type="checkbox" /> EXTRA_ARGS</label>
                 <input v-if="wizard.envExtraArgs" v-model="wizard.extraArgs" class="input mono" placeholder="--thinking --vision …" />
-                <label class="pick" :class="{ 'is-on': wizard.capture }"><input v-model="wizard.capture" type="checkbox" @change="onCaptureToggle" /> Capture usage (M8) <span class="stat__sub">serves the engine on loopback; the agent proxies the LAN port and records per-request usage. The start script must honor $PORT.</span></label>
-                <label v-if="wizard.capture" class="pick" :class="{ 'is-on': wizard.retain }"><input v-model="wizard.retain" type="checkbox" /> Keep bodies (IR-52) <span class="stat__sub">stores gzip-deduplicated request/response bodies on the server for chat reconstruction; capped per body and per part.</span></label>
+                <label class="pick" :class="{ 'is-on': wizard.capture }"><input v-model="wizard.capture" type="checkbox" @change="onCaptureToggle" /> Capture usage <span class="stat__sub">serves the engine on loopback; the agent proxies the LAN port and records per-request usage. The start script must honor $PORT.</span></label>
+                <label v-if="wizard.capture" class="pick" :class="{ 'is-on': wizard.retain }"><input v-model="wizard.retain" type="checkbox" /> Keep bodies <span class="stat__sub">stores gzip-deduplicated request/response bodies on the server for chat reconstruction; capped per body and per part.</span></label>
               </div>
             </div>
           </div>

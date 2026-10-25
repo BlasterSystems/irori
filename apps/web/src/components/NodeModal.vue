@@ -4,6 +4,7 @@ import type { NodeInfo } from "@irori/core";
 import { live } from "../live";
 import { createNode, patchNode, rotateNodeToken } from "../api";
 import { copyToClipboard } from "../clipboard";
+import { vScrimClose } from "../scrim";
 import {
   NODE_KIND_OPTIONS,
   NODE_ROLE_OPTIONS,
@@ -114,7 +115,7 @@ async function copyToken(): Promise<void> {
 </script>
 
 <template>
-  <div class="backdrop" @click.self="emit('close')">
+  <div class="backdrop" v-scrim-close="() => emit('close')">
     <div class="modal__panel" role="dialog" aria-modal="true" :aria-label="title">
       <div class="card__head">
         <h3>{{ title }}</h3>

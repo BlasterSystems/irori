@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { createDbHandle, createNodeStore, nodes, type DbHandle, type NodeRecord, type NodeStore } from "@irori/db";
 import { createRings, type Rings } from "../src/rings.js";
 import { createSseHub, type SseHub } from "../src/sse.js";
 import {
   createSetupsService,
+  SetupInvalidError,
   SetupOfflineError,
+  SetupStartError,
   type SetupsService,
   type SetupsServiceDeps,
 } from "../src/setups-service.js";
@@ -152,6 +154,80 @@ d("setups service", () => {
     expect(ctx.refreshed).toContain(ids.head);
   });
 
+  it("rejects duplicate, NAS, unknown, and self workers at create and patch", async () => {
+    const base = {
+      name: "validated",
+      kind: "cluster" as const,
+      model: "m-v",
+      port: 9003,
+      headNodeId: ids.head,
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    };
+    await expect(
+      ctx.service.create({ ...base, nodes: [{ nodeId: ids.worker, role: "worker" }, { nodeId: ids.worker, role: "worker" }] }),
+    ).rejects.toBeInstanceOf(SetupInvalidError);
+    await expect(
+      ctx.service.create({ ...base, nodes: [{ nodeId: ids.nas, role: "worker" }] }),
+    ).rejects.toThrow("NAS node");
+    await expect(
+      ctx.service.create({ ...base, nodes: [{ nodeId: randomUUID(), role: "worker" }] }),
+    ).rejects.toThrow("unknown worker node");
+
+    const setup = await ctx.service.create({ ...base, nodes: [] });
+    await expect(ctx.service.patch(setup.id, { nodes: [{ nodeId: ids.nas, role: "worker" }] })).rejects.toThrow("NAS node");
+    await expect(
+      ctx.service.patch(setup.id, { nodes: [{ nodeId: ids.worker, role: "worker" }, { nodeId: ids.worker, role: "worker" }] }),
+    ).rejects.toBeInstanceOf(SetupInvalidError);
+    // The valid patch still lands.
+    await ctx.service.patch(setup.id, { nodes: [{ nodeId: ids.worker, role: "worker" }] });
+    expect((await ctx.service.get(setup.id))!.nodes).toEqual([{ nodeId: ids.worker, role: "worker" }]);
+  });
+
+  it("refuses a MODEL_PATH start when the model is not staged on the head", async () => {
+    const setup = await ctx.service.create({
+      name: "un-staged",
+      kind: "single",
+      model: "Only-On-NAS",
+      port: 9004,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: true },
+    });
+    ctx.holders.set("Only-On-NAS", new Set([ids.nas]));
+    await expect(ctx.service.start(setup.id)).rejects.toBeInstanceOf(SetupStartError);
+    await expect(ctx.service.start(setup.id)).rejects.toThrow("not staged on");
+    // The refusal happens before any frame is sent — no run row, no spawn.
+    expect(ctx.sent.some((s) => (s.msg as { setupId?: string }).setupId === setup.id && (s.msg as { type?: string }).type === "setup-start")).toBe(false);
+    expect((await ctx.service.get(setup.id))!.status).toBe("stopped");
+  });
+
+  it("does not re-announce an unchanged driver state", async () => {
+    const setup = await ctx.service.create({
+      name: "dedupe",
+      kind: "single",
+      model: "m-dedupe",
+      port: 9005,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    const sendSpy = vi.spyOn(sse, "send");
+    const evt = { type: "setup-event" as const, setupId: setup.id, runId: null, state: "stopped" as const, exitCode: null, pid: null, pgid: null, error: "MODEL_PATH resolution failed" };
+    await ctx.service.onDriverEvent(evt, ids.head);
+    const stateFrames = () => sendSpy.mock.calls.filter((c) => (c[0] as { type?: string }).type === "setup-state");
+    expect(stateFrames().length).toBe(1);
+    // Identical poll reply (the 15 s driver-truth cycle) — no second event.
+    await ctx.service.onDriverEvent(evt, ids.head);
+    expect(stateFrames().length).toBe(1);
+    sendSpy.mockRestore();
+  });
+
   it("validates scripts through the head agent", async () => {
     const promise = ctx.service.validateScripts(ids.head, ["/a/start.sh", "/a/stop.sh"]);
     await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-validate"));
@@ -211,6 +287,9 @@ d("setups service", () => {
       scriptStop: "/home/me/glm/stop.sh",
       env: { modelName: true, port: true, extraArgs: "--thinking", modelPath: true },
     });
+    // MODEL_PATH starts pre-flight against the local-store inventory (IR-82):
+    // the head must hold the model or the start refuses before spawning.
+    ctx.holders.set("GLM-5.3-Flash-EXL3", new Set([ids.head]));
     const starting = ctx.service.start(setup.id);
     await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === setup.id));
     ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);

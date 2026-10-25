@@ -54,7 +54,8 @@ export interface AgentHubDeps {
   llmStore: Pick<LlmStore, "insertLlmSnapshot">;
   rings: Rings;
   sse: Pick<SseHub, "send">;
-  cadenceMs: number;
+  /** Resolved per hello/config-update so a settings change applies without restart. */
+  getCadenceMs: () => number;
   serverVersion: string;
   /** Agent frame routing for the jobs subsystem + catalog cache (M4). */
   jobEvents: {
@@ -126,7 +127,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     const row = await deps.store.get(id);
     const msg: Record<string, unknown> = {
       type: "config-update",
-      cadenceMs: deps.cadenceMs,
+      cadenceMs: deps.getCadenceMs(),
       llmPorts: nodeLlmAssignments(row),
       llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
       llmDetectOnly: row?.role === "worker",
@@ -249,7 +250,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         // update gate and drift views read it). Snapshots stay throttled.
         lastMarkedAt.set(id, Date.now());
         deps.store.markSeen(id, msg.agentVersion).catch(() => lastMarkedAt.delete(id));
-        sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.cadenceMs, serverVersion: deps.serverVersion });
+        sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.getCadenceMs(), serverVersion: deps.serverVersion });
         // Probe assignments + role-derived cadence. A worker's role may change
         // without a reconnect only via a later config-update; hello covers boot.
         await sendConfigUpdate(id, sendMsg);

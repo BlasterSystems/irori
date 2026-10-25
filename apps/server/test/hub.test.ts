@@ -30,7 +30,7 @@ async function setup(overrides: Partial<AgentHubDeps> = {}) {
     llmStore: fake.llmStore,
     rings,
     sse,
-    cadenceMs: 2000,
+    getCadenceMs: () => 2000,
     serverVersion: "test-server",
     writeFlushMs: 30,
     ...overrides,

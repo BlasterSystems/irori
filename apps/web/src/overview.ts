@@ -35,9 +35,8 @@ export function pickPrimaryPort(ports: LlmPortSnapshot[] | null | undefined): Ll
   return ranked[0] ?? null;
 }
 
-export function computeHeroData(ports: LlmPortSnapshot[] | null | undefined): HeroData | null {
-  const p = pickPrimaryPort(ports);
-  if (p === null) return null;
+/** Hero stats for a single port snapshot (per-serving-process cards). */
+export function heroDataForPort(p: LlmPortSnapshot): HeroData {
   const tokens = p.tokens ?? null;
   const cacheHitPct =
     tokens !== null && tokens.prompt !== null && tokens.prompt > 0 && tokens.cached !== null
@@ -57,6 +56,11 @@ export function computeHeroData(ports: LlmPortSnapshot[] | null | undefined): He
     itlP95Ms: p.itlP95Ms,
     cacheHitPct,
   };
+}
+
+export function computeHeroData(ports: LlmPortSnapshot[] | null | undefined): HeroData | null {
+  const p = pickPrimaryPort(ports);
+  return p === null ? null : heroDataForPort(p);
 }
 
 /** Highest decode tok/s in the window (the hero's "peak" sub-label). */
@@ -94,12 +98,12 @@ function heroPoint(t: number, patch: Partial<AnalyticsPoint>): AnalyticsPoint {
   };
 }
 
-/** 24h decode+prefill chart for one port's history (shared domain, two lines). */
-export function heroSpark(points: LlmHistoryPoint[], width = 600, height = 36): LensChart {
+/** 30m decode+prefill chart for one port's history (shared domain, two lines). */
+export function heroSpark(points: LlmHistoryPoint[], width = 600, height = 130): LensChart {
   return lensChart(
     [
-      { key: "decode", label: "decode 24h", points: points.map((p) => heroPoint(p.t, { decodeTps: p.decodeTps })) },
-      { key: "prefill", label: "prefill 24h", points: points.map((p) => heroPoint(p.t, { prefillTps: p.prefillTps })) },
+      { key: "decode", label: "decode 30m", points: points.map((p) => heroPoint(p.t, { decodeTps: p.decodeTps })) },
+      { key: "prefill", label: "prefill 30m", points: points.map((p) => heroPoint(p.t, { prefillTps: p.prefillTps })) },
     ],
     "decodeTps",
     width,
