@@ -45,4 +45,19 @@ Slices (implemented sequentially per owner preference):
 
 ## Deploy
 
-- (pending)
+- PR #36 rebase-merged to main as 4f93694 + 44e39c8 (review fixes); self-review
+  comment https://github.com/BlasterSystems/irori/pull/36#issuecomment-6397463394.
+- Follow-up PR #37 (e218a38): a single serving process spans the full hero row —
+  the 2-column grid left the approved dead column with one process.
+- Tags: `dev-0.3.0-28` (CD run 40192010447) superseded by `dev-0.3.0-29`
+  (CD run 40192561274) after the hero-width fix. Both green.
+- Live 10.0.10.9:3947 on dev-0.3.0-29: cost settings routes up (unset → null),
+  analytics `range=4h` returns minute-granularity series, Overview browser
+  probes: range seg with live relabel/refetch, single hero full-width (1152 px),
+  fleet-only power card with envelope + average dashed lines (FLEET NOW 201 W,
+  ENERGY · 30M 0.11 kWh), NAS split with Tokens · 30m, footer
+  "dev-0.3.0-29 · updates every 1 s · 147 W", topbar gear right of the theme
+  toggle. Owner still to set: energy price + token prices in hub settings
+  (stats show "—" until then).
+- Jira: IR-90..95 closed Done with evidence; epic IR-89 open (follows IR-78
+  precedent). Next dev tag: dev-0.3.0-30.
