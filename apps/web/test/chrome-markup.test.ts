@@ -26,10 +26,13 @@ it("NodeCard and NodeDetail render the importance-ordered rows with the hot-valu
       "formatTemp(row.tempC)",
       "'metric--hot': isHotTemp(row.tempC)",
       "'metric--hot': row.warn === true",
+      "bar__fill bar__fill--free", // IR-98: available space trails the used fill in the warn hue
     ]) {
       expect(src).toContain(token);
     }
   }
+  // IR-98: the usage-percent chip is gone from the card — free space lives in the bar.
+  expect(nodeCardSource).not.toContain("Disk {{");
 });
 
 it("CleanupDrawer keeps the shared drawer chrome, the DS table class and the reclaimable total", () => {
