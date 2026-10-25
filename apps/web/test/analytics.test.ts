@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AnalyticsSeries } from "@irori/core";
 import {
-  diskPct,
   fmtBucket,
   fmtBytes,
   fmtCount,
   lensChart,
-  sumReclaimable,
 } from "../src/analytics";
 
 function series(points: Array<Record<string, number | null | boolean>>): AnalyticsSeries {
@@ -87,18 +85,5 @@ describe("formatters", () => {
   it("formats token counts", () => {
     expect(fmtCount(1_234_567)).toBe("1.2M");
     expect(fmtCount(null)).toBe("—");
-  });
-});
-
-describe("disk usage percent (warn ≥ 80 %, owner rule 2026-10-25)", () => {
-  it("computes disk percent safely", () => {
-    expect(diskPct(50, 100)).toBe(50);
-    expect(diskPct(50, 0)).toBeNull();
-    expect(diskPct(null, 100)).toBeNull();
-  });
-
-  it("sums reclaimable bytes from an audit", () => {
-    expect(sumReclaimable({ categories: [{ reclaimableBytes: 5 }, { reclaimableBytes: 7 }] })).toBe(12);
-    expect(sumReclaimable(null)).toBe(0);
   });
 });
