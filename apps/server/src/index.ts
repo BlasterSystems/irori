@@ -14,6 +14,7 @@ import { createDownloadQueueService, type DownloadQueueService } from "./downloa
 import { createHfQuantsService } from "./hf-quants.js";
 import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createCadenceService, type CadenceService } from "./cadence.js";
+import { createCostService, type CostService } from "./cost.js";
 import { CADENCE_MAX_MS, CADENCE_MIN_MS } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
@@ -77,6 +78,8 @@ const state: {
   hfToken: HfTokenService | null;
   /** IR-87: hub cadence setting service (null until the DB is wired). */
   cadence: CadenceService | null;
+  /** IRI-025: energy/token cost settings (null until the DB is wired). */
+  cost: CostService | null;
   llmStore: LlmStore | null;
   jobs: JobsService | null;
   downloads: DownloadQueueService | null;
@@ -95,6 +98,7 @@ const state: {
   store: null,
   hfToken: null,
   cadence: null,
+  cost: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -140,6 +144,7 @@ const app = createApp({
   getHub: () => state.hub,
   getHfToken: () => state.hfToken,
   getCadence: () => state.cadence,
+  getCost: () => state.cost,
   getCadenceMs: () => activeCadenceMs,
   setCadenceMs: (ms) => {
     activeCadenceMs = ms;
@@ -194,6 +199,8 @@ async function boot(): Promise<void> {
   state.cadence = createCadenceService(dbHandle.db, CADENCE_MIN_MS, CADENCE_MAX_MS);
   const storedCadence = await state.cadence.get().catch(() => null);
   if (storedCadence !== null) activeCadenceMs = storedCadence;
+  // IRI-025: energy/token cost settings (Overview cost previews).
+  state.cost = createCostService(dbHandle.db);
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).
@@ -335,7 +342,7 @@ async function boot(): Promise<void> {
     void dbHandle?.isHealthy().then(async (healthy) => {
       if (!healthy) return;
       try {
-        await pruneTokenLedger(dbHandle!.db, config.hourKeepDays, config.dayKeepDays);
+        await pruneTokenLedger(dbHandle!.db, config.minuteKeepDays, config.hourKeepDays, config.dayKeepDays);
       } catch (err) {
         console.error(`[irori-server] token ledger prune failed (${err instanceof Error ? err.message : String(err)})`);
       }

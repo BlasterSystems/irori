@@ -23,10 +23,15 @@ it("NodeCard keeps the DS card vocabulary", () => {
 });
 
 it("App keeps the DS topbar lockup and nav", () => {
-  for (const cls of ["topbar__in", "brand-mark", "mark-node", "mark-line", "mark-square", "brand-name", "brand-endorsement", "nav", "is-active", "chip--ok", "pulse"]) {
+  for (const cls of ["topbar__in", "brand-mark", "mark-node", "mark-line", "mark-square", "brand-name", "brand-endorsement", "nav", "is-active", "chip--warn", "dot--warn"]) {
     expect(appSource).toContain(cls);
   }
   expect(appSource).toContain("irori-theme");
+  // IRI-025: no status chip while healthy; the warn OFFLINE chip is the only state.
+  expect(appSource).toContain('v-if="!connected"');
+  expect(appSource).not.toContain("Connecting…");
+  // IRI-025: the hub-settings gear lives in the topbar, right of the theme toggle.
+  expect(appSource).toContain('aria-label="Hub settings"');
   // IRI-013: the fleet page body moved to OverviewView — the shell keeps only routing.
   expect(appSource).toContain("<OverviewView v-else />");
   // M8: Usage is a first-class nav entry mounted as its own view.

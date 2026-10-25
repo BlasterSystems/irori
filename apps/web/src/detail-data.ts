@@ -6,6 +6,7 @@ import type { HistoryRange, HistoryResponse } from "./api";
 export const RANGE_GRANULARITY: Record<HistoryRange, string> = {
   "30m": "minute",
   "1h": "minute",
+  "4h": "minute",
   "24h": "hour",
   "7d": "hour",
   "30d": "hour",

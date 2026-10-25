@@ -1,4 +1,4 @@
-import type { AnalyticsPoint, AnalyticsSeries, HardwareSnapshot, LlmPortSnapshot, SseEvent } from "@irori/core";
+import { GB10_SYSTEM_ENVELOPE_W, type AnalyticsPoint, type AnalyticsSeries, type HardwareSnapshot, type LlmPortSnapshot, type SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "./api";
 import { lensChart, type LensChart } from "./analytics";
 
@@ -93,12 +93,12 @@ function heroPoint(t: number, patch: Partial<AnalyticsPoint>): AnalyticsPoint {
   };
 }
 
-/** 30m decode+prefill chart for one port's history (shared domain, two lines). */
-export function heroSpark(points: LlmHistoryPoint[], width = 600, height = 130): LensChart {
+/** Decode+prefill chart for one port's history over `label` (shared domain, two lines). */
+export function heroSpark(points: LlmHistoryPoint[], label: string, width = 600, height = 130): LensChart {
   return lensChart(
     [
-      { key: "decode", label: "decode 30m", points: points.map((p) => heroPoint(p.t, { decodeTps: p.decodeTps })) },
-      { key: "prefill", label: "prefill 30m", points: points.map((p) => heroPoint(p.t, { prefillTps: p.prefillTps })) },
+      { key: "decode", label: `decode ${label}`, points: points.map((p) => heroPoint(p.t, { decodeTps: p.decodeTps })) },
+      { key: "prefill", label: `prefill ${label}`, points: points.map((p) => heroPoint(p.t, { prefillTps: p.prefillTps })) },
     ],
     "decodeTps",
     width,
@@ -140,6 +140,100 @@ export function computePower(series: AnalyticsSeries[]): PowerData {
     fleetNow: watts.length === 0 ? null : watts.reduce((a, b) => a + b, 0),
     coverage: coverages.length === 0 ? null : coverages.reduce((a, b) => a + b, 0) / coverages.length,
   };
+}
+
+// ─── range filter + fleet aggregation (IRI-025) ────────────────────────────
+
+/** Overview chart range filter: wire values valid for BOTH the history and
+ *  the analytics APIs; week/month label the existing 7d/30d. */
+export const OVERVIEW_RANGES = [
+  { value: "30m", label: "30m" },
+  { value: "1h", label: "1h" },
+  { value: "4h", label: "4h" },
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "week" },
+  { value: "30d", label: "month" },
+] as const;
+export type OverviewRange = (typeof OVERVIEW_RANGES)[number]["value"];
+
+/** Bucket duration for an analytics granularity. */
+export function granularityMs(g: "minute" | "hour" | "day"): number {
+  return g === "minute" ? 60_000 : g === "hour" ? 3_600_000 : 86_400_000;
+}
+
+export interface FleetPowerPoint { t: number; w: number | null }
+
+/** Sums the spark nodes' watts per bucket (the NAS has no power telemetry). */
+export function fleetPowerSeries(series: AnalyticsSeries[], sparkIds: Set<string>): FleetPowerPoint[] {
+  const times = new Set<number>();
+  for (const s of series) {
+    if (!sparkIds.has(s.key)) continue;
+    for (const p of s.points) times.add(p.t);
+  }
+  const out: FleetPowerPoint[] = [];
+  for (const t of [...times].sort((a, b) => a - b)) {
+    let w: number | null = null;
+    for (const s of series) {
+      if (!sparkIds.has(s.key)) continue;
+      const p = s.points.find((x) => x.t === t);
+      if (p !== undefined && typeof p.watts === "number") w = (w ?? 0) + p.watts;
+    }
+    out.push({ t, w });
+  }
+  return out;
+}
+
+/** kWh over the window: Σ(watts × bucket duration). */
+export function fleetEnergyKwh(points: FleetPowerPoint[], bucketMs: number): number | null {
+  let wh = 0;
+  let any = false;
+  for (const p of points) {
+    if (p.w === null) continue;
+    any = true;
+    wh += (p.w * bucketMs) / 3_600_000;
+  }
+  return any ? wh / 1000 : null;
+}
+
+export interface PowerBar { t: number; w: number; pct: number }
+
+/** Bins the fleet series into ≤ `target` bars (null buckets skipped). */
+export function binFleetPower(points: FleetPowerPoint[], target = 36): { bars: PowerBar[]; avgW: number | null } {
+  const filled = points.filter((p): p is FleetPowerPoint & { w: number } => p.w !== null);
+  if (filled.length === 0) return { bars: [], avgW: null };
+  const group = Math.max(1, Math.ceil(filled.length / target));
+  const bars: PowerBar[] = [];
+  for (let i = 0; i < filled.length; i += group) {
+    const slice = filled.slice(i, i + group);
+    const w = slice.reduce((a, b) => a + b.w, 0) / slice.length;
+    bars.push({ t: slice[0]!.t, w, pct: Math.min(100, (w / GB10_SYSTEM_ENVELOPE_W) * 100) });
+  }
+  const avgW = filled.reduce((a, b) => a + b.w, 0) / filled.length;
+  return { bars, avgW };
+}
+
+export interface TokenTotals { input: number; cached: number; generated: number }
+
+/** Sums the spark nodes' token ledger points over the window. */
+export function tokenTotals(series: AnalyticsSeries[], sparkIds: Set<string>): TokenTotals {
+  let input = 0;
+  let cached = 0;
+  let generated = 0;
+  for (const s of series) {
+    if (!sparkIds.has(s.key)) continue;
+    for (const p of s.points) {
+      input += p.prompt ?? 0;
+      cached += p.cached ?? 0;
+      generated += p.generated ?? 0;
+    }
+  }
+  return { input, cached, generated };
+}
+
+/** Billable cost: (prompt − cached) × input + cached × cached + generated × output, per Mtok. */
+export function tokenCostOf(t: TokenTotals, prices: { input: number; cached: number; output: number }): number {
+  const billableInput = Math.max(0, t.input - t.cached);
+  return (billableInput * prices.input + t.cached * prices.cached + t.generated * prices.output) / 1_000_000;
 }
 
 // ─── NAS store card ─────────────────────────────────────────────────────────

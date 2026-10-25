@@ -5,7 +5,7 @@ import type { Granularity } from "./rollups.js";
 
 /**
  * Token ledger (M7, SPEC §9): diffs the probes' cumulative token counters
- * per (node, port) into hourly/daily deltas attributed to the detected
+ * per (node, port) into minute/hourly/daily deltas attributed to the detected
  * model. State (last seen llm snapshot id + per-port counter baselines)
  * lives in the settings table — deltas are consumed exactly once, so the
  * pass is idempotent under re-runs and safe to run every 60 s.
@@ -28,7 +28,7 @@ interface LedgerDelta {
   nodeId: string;
   port: number;
   model: string;
-  granularity: "hour" | "day";
+  granularity: Granularity;
   bucketStart: string;
   dGen: number;
   dPrompt: number;
@@ -39,7 +39,7 @@ interface LedgerDelta {
 }
 
 function floorIso(t: Date, granularity: Granularity): string {
-  const ms = granularity === "hour" ? 3_600_000 : 86_400_000;
+  const ms = granularity === "minute" ? 60_000 : granularity === "hour" ? 3_600_000 : 86_400_000;
   return new Date(Math.floor(t.getTime() / ms) * ms).toISOString();
 }
 
@@ -84,6 +84,7 @@ export function createTokenLedgerEngine(db: Db): TokenLedgerEngine {
           state.lastId = row.id;
           const payload = row.payload as { ports?: unknown };
           if (!Array.isArray(payload?.ports)) continue;
+          const bucketMinute = floorIso(row.serverTime, "minute");
           const bucketHour = floorIso(row.serverTime, "hour");
           const bucketDay = floorIso(row.serverTime, "day");
           for (const rawPort of payload.ports) {
@@ -112,6 +113,7 @@ export function createTokenLedgerEngine(db: Db): TokenLedgerEngine {
             const model = typeof p.model === "string" && p.model.length > 0 ? p.model : "unknown";
 
             for (const [granularity, bucketStart] of [
+              ["minute", bucketMinute],
               ["hour", bucketHour],
               ["day", bucketDay],
             ] as const) {
@@ -177,11 +179,12 @@ export function createTokenLedgerEngine(db: Db): TokenLedgerEngine {
 }
 
 /** Prunes ledger rows past the bucket retention (mirror of the bucket knobs). */
-export async function pruneTokenLedger(db: Db, hourKeepDays: number, dayKeepDays: number): Promise<number> {
+export async function pruneTokenLedger(db: Db, minuteKeepDays: number, hourKeepDays: number, dayKeepDays: number): Promise<number> {
   const result = await db.execute<{ n: number }>(sql`
     with deleted as (
       delete from token_ledger
-      where (granularity = 'hour' and bucket_start < now() - (${hourKeepDays} * interval '1 day'))
+      where (granularity = 'minute' and bucket_start < now() - (${minuteKeepDays} * interval '1 day'))
+         or (granularity = 'hour' and bucket_start < now() - (${hourKeepDays} * interval '1 day'))
          or (granularity = 'day' and bucket_start < now() - (${dayKeepDays} * interval '1 day'))
       returning 1
     )

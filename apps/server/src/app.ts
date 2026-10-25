@@ -8,6 +8,8 @@ import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./histo
 import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
+import { energyCostPutSchema, tokenCostPutSchema, type EnergyCost, type TokenCost } from "@irori/core";
+import type { CostService } from "./cost.js";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
 import type { UsageChats } from "./usage-chats.js";
@@ -123,6 +125,9 @@ export interface AppDeps {
    * exposed on the version payload; setCadenceMs keeps it in sync on PUT.
    */
   getCadence?: () => CadenceService | null;
+  /** IRI-025: energy/token cost settings. Optional — when absent or null
+   *  (degraded), the cost settings routes answer 503 like the cadence routes. */
+  getCost?: () => CostService | null;
   getCadenceMs?: () => number;
   setCadenceMs?: (cadenceMs: number) => void;
   /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
@@ -248,6 +253,38 @@ export function createApp(deps: AppDeps): Express {
     const hub = deps.getHub();
     if (hub !== null) for (const nodeId of hub.online()) void hub.refreshConfig(nodeId).catch(() => {});
     res.json({ cadenceMs: body.data.cadenceMs } satisfies { cadenceMs: number });
+  });
+
+  // IRI-025: energy + token cost settings (settings rows; the Overview power
+  // and token cost previews read them). Null = not configured.
+  app.get("/api/v1/settings/energy-cost", async (_req, res) => {
+    const cost = deps.getCost?.() ?? null;
+    if (cost === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ energyCost: await cost.getEnergy() } satisfies { energyCost: EnergyCost | null });
+  });
+
+  app.put("/api/v1/settings/energy-cost", async (req, res) => {
+    const cost = deps.getCost?.() ?? null;
+    if (cost === null) return res.status(503).json({ error: "database unavailable" });
+    const body = energyCostPutSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    await cost.setEnergy(body.data);
+    res.json({ energyCost: body.data } satisfies { energyCost: EnergyCost });
+  });
+
+  app.get("/api/v1/settings/token-cost", async (_req, res) => {
+    const cost = deps.getCost?.() ?? null;
+    if (cost === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ tokenCost: await cost.getToken() } satisfies { tokenCost: TokenCost | null });
+  });
+
+  app.put("/api/v1/settings/token-cost", async (req, res) => {
+    const cost = deps.getCost?.() ?? null;
+    if (cost === null) return res.status(503).json({ error: "database unavailable" });
+    const body = tokenCostPutSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    await cost.setToken(body.data);
+    res.json({ tokenCost: body.data } satisfies { tokenCost: TokenCost });
   });
 
   app.get("/api/v1/events", (_req, res) => {
