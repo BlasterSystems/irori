@@ -14,7 +14,23 @@
     padding: 12px 0; font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
   .mockctl { margin: calc(-1 * var(--space-3)) 0 var(--space-4); }
   .hot { color: var(--thread-ink); }
-  .swatch { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
+
+  /* Tooltip metadata (proposed vocabulary): visible = primary value, hover = detail */
+  .tip { position: relative; display: inline-flex; align-items: center; margin-left: 5px; color: var(--faint); cursor: help; vertical-align: -1px; }
+  .tip svg { width: 10px; height: 10px; display: block; }
+  .tip:hover { color: var(--fg); }
+  .tip::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); width: 300px; max-width: 80vw;
+    background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
+    padding: 8px 10px; border-radius: var(--radius-sm); opacity: 0; pointer-events: none; transition: opacity .12s ease; z-index: 20; }
+  .tip:hover::after { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .tip::after { transition: none; } }
+
+  /* Hero heads: long model names truncate, the node label never breaks */
+  .card__head .row { min-width: 0; }
+  .card__head h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card__head > .mono { white-space: nowrap; flex: none; }
+
+  .rule { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 
   /* Settings modal (page-scoped until approved) */
   .scrim { position: fixed; inset: 0; background: var(--overlay); opacity: 0; pointer-events: none; transition: opacity .18s ease; z-index: 30; }
@@ -51,9 +67,9 @@
     <a href="#">Chats</a>
     <a href="benchmarks.html">Benchmarks</a>
   </nav>
-  <span class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live · 2s</span>
+  <!-- Add-on: no status chip while healthy; OFFLINE only when something is wrong -->
+  <span class="chip chip--warn" id="connChip" style="display:none"><span class="dot dot--warn" aria-hidden="true"></span> OFFLINE</span>
   <button class="iconbtn" id="themeToggle" aria-label="Toggle theme"></button>
-  <!-- Change 1: hub settings moved next to the theme toggle -->
   <button class="iconbtn" data-open="settings" aria-label="Hub settings" title="Hub settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
   </button>
@@ -66,7 +82,6 @@
       <p>4 nodes · 4 online · 1 serving</p>
     </div>
     <div class="row">
-      <!-- Change 4: history range for hero + power charts -->
       <div class="seg" id="rangeSeg" role="group" aria-label="History range">
         <button class="is-active" data-range="30m">30m</button><button data-range="1h">1h</button><button data-range="4h">4h</button><button data-range="24h">24h</button><button data-range="week">week</button><button data-range="month">month</button>
       </div>
@@ -74,33 +89,33 @@
     </div>
   </div>
 
-  <!-- Mock-only: flip the hero between the two data states of change 2 -->
+  <!-- Mock-only controls -->
   <div class="mockctl row row--between">
     <div class="row"><span class="label">mock · hero state</span>
       <div class="seg" id="scenSeg" role="group" aria-label="Hero scenario">
-        <button class="is-active" data-s="a">with latency data</button><button data-s="b">no histogram data</button>
+        <button class="is-active" data-s="a">with latency data</button><button data-s="b">no histogram data</button><button data-s="c">two engines</button>
       </div>
     </div>
-    <span class="label">charts follow the range filter</span>
+    <div class="row"><span class="label">mock · topbar</span>
+      <div class="seg" id="connSeg" role="group" aria-label="Connection state">
+        <button class="is-active" data-c="up">healthy</button><button data-c="down">offline</button>
+      </div>
+    </div>
   </div>
 
-  <!-- Change 3: a single serving process spans the full row -->
-  <section style="margin-bottom: 12px;">
+  <!-- Single serving process: full row -->
+  <section id="heroSingle" style="margin-bottom: 12px;">
     <article class="card">
       <div class="card__head">
         <div class="row">
-          <h3>GLM-5.3-Flash-EXL3</h3>
+          <h3 title="GLM-5.3-Flash-EXL3">GLM-5.3-Flash-EXL3</h3>
           <span class="chip">ENGINE</span>
           <span class="chip">TENSORFOLD&ensp;:8081</span>
+          <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span> serving</span>
         </div>
         <span class="mono faint">DGX-1</span>
       </div>
       <div class="card__body">
-        <div class="row row--between" style="margin-bottom: 10px;">
-          <span class="mono" style="font-size: 17px; font-weight: 500;">GLM-5.3-Flash-EXL3</span>
-          <span class="mono faint">serving</span>
-        </div>
-
         <!-- Scenario a: every metric has data -->
         <div class="statgrid statgrid--6" id="heroA">
           <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">37 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 67</span></div>
@@ -111,14 +126,15 @@
           <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
         </div>
 
-        <!-- Scenario b: change 2 — no-data metrics hidden, layout adapts -->
+        <!-- Scenario b: only ttft/itl hide; queue keeps the running side -->
         <div id="heroB" style="display:none">
-          <div class="statgrid statgrid--3">
+          <div class="statgrid">
             <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">37 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 67</span></div>
             <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">416 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 64%</span></div>
+            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1 · —</span><span class="stat__sub">running · waiting</span></div>
             <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">52%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:52%"></div></div></div>
           </div>
-          <p class="stat__sub" style="margin-top: 8px;">queue · ttft · itl appear with the first requests</p>
+          <p class="stat__sub" style="margin-top: 8px;">ttft · itl appear with the first requests</p>
         </div>
 
         <div style="margin-top: 14px;">
@@ -135,15 +151,62 @@
     </article>
   </section>
 
+  <!-- Scenario c: two serving engines share the row -->
+  <section id="heroTwo" class="cols cols-2" style="margin-bottom: 12px; display:none;">
+    <article class="card">
+      <div class="card__head">
+        <div class="row"><h3 title="GLM-5.3-Flash-EXL3">GLM-5.3-Flash-EXL3</h3><span class="chip">ENGINE</span><span class="chip">TENSORFOLD&ensp;:8081</span><span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span> serving</span></div>
+        <span class="mono faint">DGX-1</span>
+      </div>
+      <div class="card__body">
+        <div class="statgrid statgrid--3">
+          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">37 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 67</span></div>
+          <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">416 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 64%</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1 · —</span><span class="stat__sub">running · waiting</span></div>
+          <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">52%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:52%"></div></div></div>
+          <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">84 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
+          <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
+        </div>
+        <div style="margin-top: 12px;">
+          <svg viewBox="0 0 600 110" preserveAspectRatio="none" style="width:100%;height:110px;display:block" aria-hidden="true">
+            <polyline fill="none" stroke="var(--ink-3)" stroke-width="1.5" points="0,78 40,72 80,84 120,66 160,74 200,58 240,70 280,50 320,64 360,44 400,58 440,38 480,52 520,30 560,44 600,18"/>
+            <polyline fill="none" stroke="var(--thread)" stroke-width="1.5" points="0,96 40,94 80,97 120,92 160,95 200,90 240,93 280,88 320,91 360,86 400,89 440,84 480,87 520,82 560,86 600,80"/>
+          </svg>
+        </div>
+      </div>
+    </article>
+    <article class="card">
+      <div class="card__head">
+        <div class="row"><h3>Qwen3-8B</h3><span class="chip">ENGINE</span><span class="chip">LLAMACPP&ensp;:8000</span><span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span> serving</span></div>
+        <span class="mono faint">DGX-1</span>
+      </div>
+      <div class="card__body">
+        <div class="statgrid statgrid--3">
+          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">112 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">peak 140</span></div>
+          <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">1,204 <span class="stat__sub" style="display:inline">tok/s</span></span><span class="stat__sub">cache hit 71%</span></div>
+          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">2 · 1</span><span class="stat__sub">running · waiting</span></div>
+          <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">38%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:38%"></div></div></div>
+          <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">41 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
+          <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">12.2 <span class="stat__sub" style="display:inline">ms</span></span><span class="stat__sub">30m window</span></div>
+        </div>
+        <div style="margin-top: 12px;">
+          <svg viewBox="0 0 600 110" preserveAspectRatio="none" style="width:100%;height:110px;display:block" aria-hidden="true">
+            <polyline fill="none" stroke="var(--ink-3)" stroke-width="1.5" points="0,64 50,60 100,66 150,52 200,58 250,44 300,52 350,38 400,46 450,30 500,38 550,22 600,14"/>
+            <polyline fill="none" stroke="var(--thread)" stroke-width="1.5" points="0,92 50,90 100,93 150,88 200,91 250,86 300,89 350,84 400,87 450,82 500,85 550,80 600,82"/>
+          </svg>
+        </div>
+      </div>
+    </article>
+  </section>
+
   <section class="cols cols-2" style="margin-bottom: 12px;">
-    <!-- Change 5: fleet only (no NAS) + interval bar chart + cost -->
     <article class="card">
       <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
       <div class="card__body" style="padding-top: 12px;">
         <div class="statgrid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-          <div class="stat"><span class="stat__label">Fleet now</span><span class="stat__value">190 <span class="stat__sub" style="display:inline">W</span></span><span class="stat__sub">sparks only · nas excluded</span></div>
-          <div class="stat"><span class="stat__label">Energy · <span id="energyRange">30m</span></span><span class="stat__value"><span id="energyVal">0.10</span> <span class="stat__sub" style="display:inline">kWh</span></span><span class="stat__sub">avg 190 W</span></div>
-          <div class="stat"><span class="stat__label">Cost · <span id="costRange">30m</span></span><span class="stat__value" id="costVal">≈ €0.03</span><span class="stat__sub">@ €0.35/kWh · hub setting</span></div>
+          <div class="stat"><span class="stat__label">Fleet now<span class="tip" data-tip="fleet = sparks only · the NAS is excluded (no power telemetry)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span></span><span class="stat__value">190 <span class="stat__sub" style="display:inline">W</span></span></div>
+          <div class="stat"><span class="stat__label">Energy · <span id="energyRange">30m</span><span class="tip" data-tip="average 190 W across the window"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span></span><span class="stat__value"><span id="energyVal">0.10</span> <span class="stat__sub" style="display:inline">kWh</span></span></div>
+          <div class="stat"><span class="stat__label">Cost · <span id="costRange">30m</span><span class="tip" data-tip="@ €0.35/kWh · hub setting “energy cost”"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span></span><span class="stat__value" id="costVal">≈ €0.03</span></div>
         </div>
         <div style="margin-top: 12px;">
           <div class="barrow"><span>DGX-1</span><div class="bar"><div class="bar__fill" style="width:27%"></div></div><span class="val">65 W</span></div>
@@ -151,7 +214,7 @@
           <div class="barrow"><span>DGX-3</span><div class="bar"><div class="bar__fill" style="width:26%"></div></div><span class="val">63 W</span></div>
         </div>
         <div style="margin-top: 14px;">
-          <span class="label">fleet draw · <span id="powerRange">30m</span> · <span id="powerBuckets">2.5 min buckets</span></span>
+          <span class="label">fleet draw<span class="tip" data-tip="selected window · bucket size varies (2.5 min at 30m → daily at month) · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span></span>
           <svg id="powerShort" viewBox="0 0 600 90" preserveAspectRatio="none" style="width:100%;height:96px;display:block;margin-top:6px" aria-hidden="true">
             <rect x="8"   y="50" width="34" height="34" fill="var(--ink)"/>
             <rect x="58"  y="42" width="34" height="42" fill="var(--ink)"/>
@@ -165,6 +228,7 @@
             <rect x="458" y="40" width="34" height="44" fill="var(--ink)"/>
             <rect x="508" y="37" width="34" height="47" fill="var(--ink)"/>
             <rect x="558" y="34" width="34" height="50" fill="var(--ink)"/>
+            <line x1="0" y1="8" x2="600" y2="8" stroke="var(--border-strong)" stroke-width="1.25" stroke-dasharray="4 3"/>
             <line x1="0" y1="42" x2="600" y2="42" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3"/>
             <line x1="0" y1="84" x2="600" y2="84" stroke="var(--border)"/>
           </svg>
@@ -181,10 +245,10 @@
             <rect x="458" y="44" width="34" height="40" fill="var(--ink)"/>
             <rect x="508" y="40" width="34" height="44" fill="var(--ink)"/>
             <rect x="558" y="43" width="34" height="41" fill="var(--ink)"/>
+            <line x1="0" y1="8" x2="600" y2="8" stroke="var(--border-strong)" stroke-width="1.25" stroke-dasharray="4 3"/>
             <line x1="0" y1="42" x2="600" y2="42" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3"/>
             <line x1="0" y1="84" x2="600" y2="84" stroke="var(--border)"/>
           </svg>
-          <div class="row row--between" style="margin-top:4px"><span class="stat__sub">240 W envelope</span><span class="stat__sub" id="powerAvg">avg 190 W</span></div>
         </div>
       </div>
     </article>
@@ -194,7 +258,23 @@
       <div class="card__body" style="padding-top: 12px;">
         <div class="stat"><span class="stat__label">Models</span><span class="stat__value">148</span></div>
         <div class="barrow" style="margin-top: 10px;"><span>store</span><div class="bar"><div class="bar__fill" style="width:78%"></div></div><span class="val">14.2 TB / 18.1 TB</span></div>
-        <p class="stat__sub" style="margin-top: 10px;">newest added 1h ago</p>
+        <!-- ongoing download summary (hidden when the queue is idle) -->
+        <div style="margin-top: 12px;">
+          <div class="row row--between"><span class="row"><span class="dot dot--run" aria-hidden="true"></span><span class="mono" style="font-size:12px">Qwen3-8B-4bpw-TensorFold</span></span><span class="stat__sub">eta 22m</span></div>
+          <div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:19%"></div></div>
+          <p class="stat__sub" style="margin-top:4px;">19% · 2.9 / 15.3 GiB · 670 Mb/s</p>
+        </div>
+        <hr class="rule">
+        <!-- tokens: same period as the power chart; cost from hub settings -->
+        <div class="row row--between">
+          <span class="label">Tokens · <span id="tokRange">30m</span><span class="tip" data-tip="same period as the power chart · prices from hub settings: input €0.15 · cached €0.015 · output €0.60 per Mtok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span></span>
+        </div>
+        <div class="statgrid" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:8px">
+          <div class="stat"><span class="stat__label">Input</span><span class="stat__value stat__value--sm" id="tokIn">1.8M</span></div>
+          <div class="stat"><span class="stat__label">Cached</span><span class="stat__value stat__value--sm" id="tokCache">5.2M</span></div>
+          <div class="stat"><span class="stat__label">Output</span><span class="stat__value stat__value--sm" id="tokOut">96k</span></div>
+          <div class="stat"><span class="stat__label">Cost<span class="tip" data-tip="input × €0.15 + cached × €0.015 + output × €0.60 · per Mtok, hub setting"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span></span><span class="stat__value stat__value--sm" id="tokCost">≈ €0.41</span></div>
+        </div>
       </div>
     </article>
   </section>
@@ -258,7 +338,7 @@
   <span></span>
 </div></footer>
 
-<!-- Hub settings: change 1 (one section per setting, own action row) + change 5 (energy cost) -->
+<!-- Hub settings: one section per setting, own action row -->
 <div class="scrim" id="scrim"></div>
 <div class="modal" id="settingsModal" role="dialog" aria-label="Hub settings">
   <div class="modal__head">
@@ -288,6 +368,19 @@
     <p class="sethint">Used for the Overview power cost estimate over the selected range. Fleet-only — the NAS is excluded.</p>
     <div class="row"><button class="btn btn--secondary">Save cost</button></div>
   </div>
+  <div class="setsec">
+    <h4>Token cost</h4>
+    <div class="row" style="gap:10px; align-items:flex-start;">
+      <div class="field" style="flex:1"><label for="tokInP">Input</label>
+        <span class="suffix"><input id="tokInP" class="input mono" value="0.15" inputmode="decimal"><span>€/Mtok</span></span></div>
+      <div class="field" style="flex:1"><label for="tokCacheP">Cached</label>
+        <span class="suffix"><input id="tokCacheP" class="input mono" value="0.015" inputmode="decimal"><span>€/Mtok</span></span></div>
+      <div class="field" style="flex:1"><label for="tokOutP">Output</label>
+        <span class="suffix"><input id="tokOutP" class="input mono" value="0.60" inputmode="decimal"><span>€/Mtok</span></span></div>
+    </div>
+    <p class="sethint">Per-million-token prices used for the token cost preview on the Overview (NAS section).</p>
+    <div class="row"><button class="btn btn--secondary">Save prices</button></div>
+  </div>
   <div class="setsec row row--between">
     <span class="stat__sub">changes apply immediately — no restart</span>
     <button class="btn btn--ghost" data-close="settings">Close</button>
@@ -311,41 +404,55 @@
   document.querySelectorAll("[data-close='settings']").forEach(function(el){ el.addEventListener("click", function(){ modal.classList.remove("is-open"); scrim.classList.remove("is-open"); }); });
   scrim.addEventListener("click", function(){ modal.classList.remove("is-open"); scrim.classList.remove("is-open"); });
 
-  // Hero scenario (change 2)
+  // Hero scenario: a/b swap stats in the single hero; c shows two engines
   document.querySelectorAll("#scenSeg button").forEach(function(b){
     b.addEventListener("click", function(){
       document.querySelectorAll("#scenSeg button").forEach(function(x){ x.classList.remove("is-active"); });
       b.classList.add("is-active");
-      var noData = b.dataset.s === "b";
-      document.getElementById("heroA").style.display = noData ? "none" : "";
-      document.getElementById("heroB").style.display = noData ? "" : "none";
+      var s = b.dataset.s;
+      document.getElementById("heroSingle").style.display = s === "c" ? "none" : "";
+      document.getElementById("heroTwo").style.display = s === "c" ? "" : "none";
+      document.getElementById("heroA").style.display = s === "a" ? "" : "none";
+      document.getElementById("heroB").style.display = s === "b" ? "" : "none";
     });
   });
 
-  // Range filter (change 4) drives hero + power charts and the cost estimate (change 5)
+  // Topbar connection state: OFFLINE chip only when something is wrong
+  document.querySelectorAll("#connSeg button").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll("#connSeg button").forEach(function(x){ x.classList.remove("is-active"); });
+      b.classList.add("is-active");
+      document.getElementById("connChip").style.display = b.dataset.c === "down" ? "" : "none";
+    });
+  });
+
+  // Range filter drives hero + power charts, the cost estimate and the token preview
   var RD = {
-    "30m":  { buckets: "2.5 min buckets", e: "0.10",  c: "≈ €0.03",  dense: true },
-    "1h":   { buckets: "5 min buckets",   e: "0.19",  c: "≈ €0.07",  dense: true },
-    "4h":   { buckets: "20 min buckets",  e: "0.76",  c: "≈ €0.27",  dense: true },
-    "24h":  { buckets: "2 h buckets",     e: "4.56",  c: "≈ €1.60",  dense: false },
-    "week": { buckets: "12 h buckets",    e: "31.92", c: "≈ €11.17", dense: false },
-    "month":{ buckets: "daily buckets",   e: "136.8", c: "≈ €47.88", dense: false }
+    "30m":  { buckets: "2.5 min buckets", e: "0.10",  c: "≈ €0.03",   dense: true,  i: "1.8M",  ca: "5.2M",  o: "96k",  tc: "≈ €0.41" },
+    "1h":   { buckets: "5 min buckets",   e: "0.19",  c: "≈ €0.07",   dense: true,  i: "3.4M",  ca: "9.8M",  o: "182k", tc: "≈ €0.77" },
+    "4h":   { buckets: "20 min buckets",  e: "0.76",  c: "≈ €0.27",   dense: true,  i: "12.6M", ca: "38M",   o: "710k", tc: "≈ €2.89" },
+    "24h":  { buckets: "2 h buckets",     e: "4.56",  c: "≈ €1.60",   dense: false, i: "38.4M", ca: "96M",   o: "2.1M", tc: "≈ €8.46" },
+    "week": { buckets: "12 h buckets",    e: "31.92", c: "≈ €11.17",  dense: false, i: "214M",  ca: "590M",  o: "12.8M", tc: "≈ €48.63" },
+    "month":{ buckets: "daily buckets",   e: "136.8", c: "≈ €47.88",  dense: false, i: "890M",  ca: "2.4B",  o: "52M",  tc: "≈ €200.70" }
   };
   document.querySelectorAll("#rangeSeg button").forEach(function(b){
     b.addEventListener("click", function(){
       document.querySelectorAll("#rangeSeg button").forEach(function(x){ x.classList.remove("is-active"); });
       b.classList.add("is-active");
-      var d = RD[b.dataset.range];
+      var r = b.dataset.range, d = RD[r];
       document.getElementById("powerShort").style.display = d.dense ? "" : "none";
       document.getElementById("powerLong").style.display  = d.dense ? "none" : "";
       document.getElementById("heroShort").style.display  = d.dense ? "" : "none";
       document.getElementById("heroLong").style.display   = d.dense ? "none" : "";
-      document.getElementById("energyRange").textContent = b.dataset.range;
-      document.getElementById("costRange").textContent = b.dataset.range;
+      document.getElementById("energyRange").textContent = r;
+      document.getElementById("costRange").textContent = r;
       document.getElementById("energyVal").textContent = d.e;
       document.getElementById("costVal").textContent = d.c;
-      document.getElementById("powerRange").textContent = b.dataset.range;
-      document.getElementById("powerBuckets").textContent = d.buckets;
+      document.getElementById("tokRange").textContent = r;
+      document.getElementById("tokIn").textContent = d.i;
+      document.getElementById("tokCache").textContent = d.ca;
+      document.getElementById("tokOut").textContent = d.o;
+      document.getElementById("tokCost").textContent = d.tc;
     });
   });
 </script>
