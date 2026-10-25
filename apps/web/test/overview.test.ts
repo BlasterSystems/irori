@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { AnalyticsSeries, LlmPortSnapshot, SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "../src/api";
 import {
-  computeHeroData,
   computeNasData,
   computePower,
   feedLines,
@@ -49,31 +48,6 @@ describe("pickPrimaryPort", () => {
     expect(pickPrimaryPort([port({ detected: false, model: null }), port({ port: 8001, detected: false, model: null })])?.port).toBe(8000);
     expect(pickPrimaryPort([])).toBeNull();
     expect(pickPrimaryPort(null)).toBeNull();
-  });
-});
-
-describe("computeHeroData", () => {
-  it("carries the six hero stats and the cache-hit ratio", () => {
-    const hero = computeHeroData([
-      port({
-        decodeTps: 142.3,
-        prefillTps: 3214,
-        queueRunning: 3,
-        queueWaiting: 12,
-        kvCachePct: 78,
-        ttftP95Ms: 84,
-        e2eP95Ms: 1240,
-        itlP95Ms: 18.4,
-        tokens: { generated: 100, prompt: 1000, cached: 640 },
-      }),
-    ]);
-    expect(hero).toMatchObject({ port: 8000, backend: "exl3", model: "GLM-5.3-Flash-EXL3", decodeTps: 142.3, queueRunning: 3, queueWaiting: 12, kvCachePct: 78, ttftP95Ms: 84, e2eP95Ms: 1240, itlP95Ms: 18.4 });
-    expect(hero?.cacheHitPct).toBeCloseTo(64);
-  });
-
-  it("is null with no ports and omits cache hit without counters", () => {
-    expect(computeHeroData(null)).toBeNull();
-    expect(computeHeroData([port()])?.cacheHitPct).toBeNull();
   });
 });
 
