@@ -193,17 +193,5 @@ export function fmtBucket(t: number, granularity: "minute" | "hour" | "day"): st
   return day;
 }
 
-/** 0–100 disk usage percent, or null when unknown. */
-export function diskPct(usedBytes: number | null | undefined, totalBytes: number | null | undefined): number | null {
-  if (usedBytes === null || usedBytes === undefined || totalBytes === null || totalBytes === undefined) return null;
-  if (totalBytes <= 0) return null;
-  return Math.round((usedBytes / totalBytes) * 100);
-}
-
 /** Disk usage percent at which the value renders warn (owner rule: > 80 %). */
 export const DISK_WARN_PCT = 80;
-
-export function sumReclaimable(audit: { categories: Array<{ reclaimableBytes: number }> } | null | undefined): number {
-  if (audit === undefined || audit === null) return 0;
-  return audit.categories.reduce((sum, c) => sum + c.reclaimableBytes, 0);
-}
