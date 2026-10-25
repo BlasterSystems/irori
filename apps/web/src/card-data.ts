@@ -1,6 +1,6 @@
 import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
 import { GB10_SOC_TDP_W } from "@irori/core";
-import { fmtBytes, fmtWatts, TEMPS_WARN_C } from "./analytics";
+import { fmtBytes, fmtWatts, DISK_WARN_PCT, TEMPS_WARN_C } from "./analytics";
 import { llmSummaryLine, nodeLlmPorts } from "./llm-data";
 
 export interface CardRow {
@@ -12,6 +12,8 @@ export interface CardRow {
   line: string;
   /** Rendered after `line` with the hot-temp accent; null when unreadable. */
   tempC: number | null;
+  /** Value renders with the hot accent (disk usage > 80 %); absent otherwise. */
+  warn?: boolean;
 }
 
 export interface CardData {
@@ -52,7 +54,7 @@ export function formatMetricLine(...parts: Array<string | null>): string {
   return parts.filter((p) => p !== null).join(" · ");
 }
 
-/** Hot-temp accent, matching the analytics temps lens warn tier (85 °C). */
+/** Hot-temp accent at the app-wide warn tier (70 °C, analytics.ts). */
 export function isHotTemp(tempC: number | null): boolean {
   return tempC !== null && tempC >= TEMPS_WARN_C;
 }
@@ -101,6 +103,7 @@ export function computeCardData(
       line: formatMetricLine(
         gpu.name,
         formatPct(gpu.usagePct),
+        gpu.powerW === null ? null : fmtWatts(gpu.powerW),
         memUsedGiB === null && memTotalGiB === null
           ? null
           : `${memUsedGiB ?? "?"} / ${memTotalGiB ?? "?"} GB`,
@@ -111,7 +114,7 @@ export function computeCardData(
 
   // Largest real mount — the store volume on a NAS (/mnt/nas on the QNAP
   // instance), the local disk on sparks (overview mockup round 5 renders
-  // DISK on worker cards; the ≥80% disk chip stays as the warning tier).
+  // DISK on worker cards; > 80 % usage renders the value warn).
   const bestMount = (snapshot?.storage ?? []).reduce<{ usedBytes: number; totalBytes: number } | null>(
     (acc, s) =>
       s.totalBytes > 0 && (acc === null || s.totalBytes > acc.totalBytes)
@@ -121,12 +124,14 @@ export function computeCardData(
   );
   let diskRow: CardRow | null = null;
   if (bestMount !== null) {
+    const diskPctValue = Math.round((bestMount.usedBytes / bestMount.totalBytes) * 100);
     diskRow = {
       key: "disk",
       label: "DISK",
       barPct: (bestMount.usedBytes / bestMount.totalBytes) * 100,
       line: `${fmtBytes(bestMount.usedBytes)} / ${fmtBytes(bestMount.totalBytes)}`,
       tempC: null,
+      warn: diskPctValue >= DISK_WARN_PCT,
     };
   }
 

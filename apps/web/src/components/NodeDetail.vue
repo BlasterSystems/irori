@@ -318,7 +318,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
             <div v-for="row in card.rows" :key="row.key" class="barrow">
               <span>{{ row.label }}</span>
               <div class="bar"><div class="bar__fill" :style="{ width: (row.barPct ?? 0) + '%' }"></div></div>
-              <span class="val">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'temp--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
+              <span class="val" :class="{ 'metric--hot': row.warn === true }">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'metric--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
             </div>
           </template>
           <p v-else class="muted">waiting for first snapshot</p>

@@ -24,7 +24,8 @@ export const GROUP_TABS = [
   { key: "node", label: "Node" },
 ] as const;
 
-export const TEMPS_WARN_C = 85;
+/** Warn tier for temperatures app-wide (cards, node detail, analytics lens). */
+export const TEMPS_WARN_C = 70;
 export const TEMPS_CRITICAL_C = 90;
 
 export interface ChartSeries {
@@ -199,10 +200,13 @@ export function diskPct(usedBytes: number | null | undefined, totalBytes: number
   return Math.round((usedBytes / totalBytes) * 100);
 }
 
-/** Two-tier chip class (SPEC §11.6): plain ≤89, warn ≥90, none under 80. */
+/** Disk usage percent at which the value/chip render warn (owner rule: > 80 %). */
+export const DISK_WARN_PCT = 80;
+
+/** Warn chip at ≥ 80 % disk usage, none below (owner rule 2026-10-25; supersedes the two-tier 80/90 rule). */
 export function diskChipCls(pct: number | null): string | null {
-  if (pct === null || pct < 80) return null;
-  return pct >= 90 ? "chip--warn" : "chip";
+  if (pct === null || pct < DISK_WARN_PCT) return null;
+  return "chip--warn";
 }
 
 export function sumReclaimable(audit: { categories: Array<{ reclaimableBytes: number }> } | null | undefined): number {

@@ -7,6 +7,7 @@ import {
   computeNasData,
   computePower,
   feedLines,
+  heroDataForPort,
   heroSpark,
   peakDecode,
   pickPrimaryPort,
@@ -76,6 +77,14 @@ describe("computeHeroData", () => {
   });
 });
 
+describe("heroDataForPort", () => {
+  it("maps one port snapshot to the six hero stats", () => {
+    const hero = heroDataForPort(port({ decodeTps: 65, queueRunning: 2, kvCachePct: 32 }));
+    expect(hero).toMatchObject({ port: 8000, backend: "exl3", model: "GLM-5.3-Flash-EXL3", decodeTps: 65, queueRunning: 2, kvCachePct: 32 });
+    expect(hero.cacheHitPct).toBeNull();
+  });
+});
+
 const HIST: LlmHistoryPoint[] = [
   { t: 1, decodeTps: 100, prefillTps: 2000, queueRunning: 1, queueWaiting: 0, kvCachePct: 50, ttftP95Ms: 80, samples: 5 },
   { t: 2, decodeTps: 168, prefillTps: null, queueRunning: 0, queueWaiting: 2, kvCachePct: 60, ttftP95Ms: 82, samples: 5 },
@@ -90,7 +99,7 @@ describe("hero spark + peak", () => {
 
   it("charts decode and prefill as two series over a shared zero-floored domain", () => {
     const chart = heroSpark(HIST);
-    expect(chart.series.map((s) => s.label)).toEqual(["decode 24h", "prefill 24h"]);
+    expect(chart.series.map((s) => s.label)).toEqual(["decode 30m", "prefill 30m"]);
     expect(chart.series[0]?.points).toEqual([100, 168, null]);
     expect(chart.series[1]?.points).toEqual([2000, null, 3100]);
     expect(chart.yMin).toBeLessThanOrEqual(0);
@@ -216,12 +225,18 @@ describe("feedLines", () => {
 const OVERVIEW_SRC = readFileSync(new URL("../src/components/OverviewView.vue", import.meta.url), "utf8");
 
 describe("OverviewView source pins", () => {
-  it("keeps the mockup contract: cluster default lens, one feed, add-node, hero statgrid", () => {
-    expect(OVERVIEW_SRC).toContain('const lens = ref<Lens>("cluster")');
-    expect(OVERVIEW_SRC).toContain('label: "All fleet"');
-    expect(OVERVIEW_SRC).toContain("Add node…</button>");
+  it("keeps the page contract: per-process heroes, nodes grid, one feed, add-node", () => {
+    expect(OVERVIEW_SRC).toContain("heroProcesses");
     expect(OVERVIEW_SRC).toContain('class="statgrid statgrid--6"');
     expect(OVERVIEW_SRC).toContain(">Telemetry</h3>");
-    expect(OVERVIEW_SRC).toContain('role="group" aria-label="Lens"');
+    expect(OVERVIEW_SRC).toContain("Add node…</button>");
+    expect(OVERVIEW_SRC).toContain('class="hero-grid"');
+    expect(OVERVIEW_SRC).toContain('fetchLlmHistory(nodeId, "30m")');
+  });
+
+  it("has no fleet lens filter and no head-anchored hero", () => {
+    expect(OVERVIEW_SRC).not.toContain('const lens = ref<Lens>');
+    expect(OVERVIEW_SRC).not.toContain('aria-label="Lens"');
+    expect(OVERVIEW_SRC).not.toContain("60m window");
   });
 });

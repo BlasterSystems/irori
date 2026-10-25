@@ -261,8 +261,8 @@ node**, with time ranges backed by rollups:
   envelope before integrating.
 - Memory: unified-memory pressure (GB10) / RAM+VRAM (discrete), trends.
 - Temperatures: fleet strip (latest GPU/CPU per node, hottest first, no
-  color-only tiers — ◇ warn ≥ 85 °C, ▫ critical ≥ 90 °C, shapes carry the
-  tier), per-node GPU (solid) / CPU pkg (dashed) charts with 85/90 °C guide
+  color-only tiers — ◇ warn ≥ 70 °C, ▫ critical ≥ 90 °C, shapes carry the
+  tier), per-node GPU (solid) / CPU pkg (dashed) charts with 70/90 °C guide
   lines, **cluster view = fleet-max aggregates** (thermals don't add; 8-node
   per-node lines would be soup), and throttle/crossing **event markers**
   joined from the event log + `clocks_throttle_reasons` (no rules engine).
@@ -321,8 +321,8 @@ bootstrap and when the agent is off.
      (diamond `care` chip; docker old images, HF cache, modelctl staging),
      zero rows disabled. Flow: **dry-run plan → typed node-name confirm →
      staged streamed run** (`.stage` rows per category; a failing category
-     flips to held/failed and the rest continue). Two-tier threshold chips:
-     plain ≤ 89 %, `chip--warn` ≥ 90 %, none under 80 %; completion lands in
+     flips to held/failed and the rest continue). Threshold chips:
+     `chip--warn` ≥ 80 % usage, none under 80 %; completion lands in
      the drawer result, History (last 20 · 90 d; output kept 30 d), the fleet
      event log, and re-derives the chips. Prevention lives per-node at the
      drawer bottom (weekly safe-set `.pick` + one-time log-rotation state

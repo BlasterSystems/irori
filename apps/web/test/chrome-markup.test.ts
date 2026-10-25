@@ -17,14 +17,15 @@ const cssSource = readFileSync(new URL("../src/assets/irori.css", import.meta.ur
  * the template wiring and the shared drawer CSS have no render-test layer, so
  * the load-bearing tokens are pinned here against the actual sources.
  */
-it("NodeCard and NodeDetail render the importance-ordered rows with the hot-temp accent", () => {
+it("NodeCard and NodeDetail render the importance-ordered rows with the hot-value accent", () => {
   for (const src of [nodeCardSource, nodeDetailSource]) {
     for (const token of [
       'v-for="row in card.rows"',
       ':key="row.key"',
       "isHotTemp(row.tempC)",
       "formatTemp(row.tempC)",
-      "'temp--hot'",
+      "'metric--hot': isHotTemp(row.tempC)",
+      "'metric--hot': row.warn === true",
     ]) {
       expect(src).toContain(token);
     }
@@ -48,11 +49,11 @@ it("NodeDetail describes what the hygiene CTA does", () => {
   expect(nodeDetailSource).toContain("dry-run plan first, nothing deleted without a typed confirm");
 });
 
-it("irori.css ships the shared drawer chrome and the temp accent", () => {
+it("irori.css ships the shared drawer chrome and the hot-value accent", () => {
   for (const rule of [
     ".drawer-scrim { position: fixed; inset: 0; background: var(--overlay);",
     ".drawer { width: min(560px, 100%); max-height: 88vh; overflow: auto; padding: 14px;",
-    ".temp--hot { color: var(--thread-ink); }",
+    ".metric--hot { color: var(--thread-ink); }",
   ]) {
     expect(cssSource).toContain(rule);
   }

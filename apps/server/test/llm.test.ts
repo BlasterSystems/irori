@@ -130,7 +130,7 @@ describe("llm ingest + config-update (hub, fake store)", () => {
       llmStore: fake.llmStore,
       rings,
       sse,
-      cadenceMs: 2000,
+      getCadenceMs: () => 2000,
       serverVersion: "test-server",
       writeFlushMs: 30,
       ...overrides,
@@ -514,7 +514,7 @@ d("llm (db integration)", () => {
       llmStore,
       rings,
       sse: createSseHub({ heartbeatMs: 0 }),
-      cadenceMs: 2000,
+      getCadenceMs: () => 2000,
       serverVersion: "test",
     });
     const server = createServer();
@@ -551,7 +551,7 @@ d("llm (db integration)", () => {
       llmStore,
       rings,
       sse: createSseHub({ heartbeatMs: 0 }),
-      cadenceMs: 2000,
+      getCadenceMs: () => 2000,
       serverVersion: "test",
     });
     const server = createServer();

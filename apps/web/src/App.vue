@@ -11,9 +11,28 @@ import UsageView from "./components/UsageView.vue";
 import ChatsView from "./components/ChatsView.vue";
 import HubSettingsModal from "./components/HubSettingsModal.vue";
 import { parseHash, chatsHash, usageHash, type Route } from "./router";
-import { loadServerVersion, serverTag, serverVersion } from "./version";
+import { loadServerVersion, serverCadenceMs, serverTag, serverVersion } from "./version";
+import { DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
+import { fmtWatts } from "./analytics";
 
 const { connected } = live;
+
+/** Fleet power now: per reporting node gpu + cpu package + base overhead,
+ *  clamped to the GB10 envelope — the same math as the server power analytics. */
+const fleetWatts = computed<number | null>(() => {
+  let total: number | null = null;
+  for (const snap of live.snapshots.values()) {
+    const gpu = (snap.gpus ?? []).reduce((a, g) => a + (g.powerW ?? 0), 0);
+    const cpu = snap.cpu?.packagePowerW ?? 0;
+    if (gpu === 0 && cpu === 0) continue; // nothing readable on this node
+    total = (total ?? 0) + Math.min(gpu + cpu + DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W);
+  }
+  return total;
+});
+const wattsText = computed(() => (fleetWatts.value === null ? null : fmtWatts(fleetWatts.value)));
+const intervalText = computed(() =>
+  serverCadenceMs.value === null ? null : `updates every ${Math.round(serverCadenceMs.value / 1000)} s`,
+);
 
 const route = ref<Route>(
   parseHash(typeof location === "undefined" ? "" : location.hash),
@@ -100,7 +119,7 @@ onUnmounted(() => {
 
   <footer class="foot">
     <div class="container foot__in" style="justify-content: space-between">
-      <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template></span>
+      <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template><template v-if="intervalText"> · {{ intervalText }}</template><template v-if="wattsText"> · {{ wattsText }}</template></span>
       <button class="iconbtn" aria-label="Hub settings" title="Hub settings" @click="hubSettingsOpen = true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
       </button>

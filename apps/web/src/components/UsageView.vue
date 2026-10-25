@@ -14,6 +14,7 @@ import {
   type UsageRangeName,
 } from "../api";
 import { live } from "../live";
+import { vScrimClose } from "../scrim";
 import { parseUsageHash, usageHashFor, agentGroupKey, agentGroupLabel, agentGroupSource, clientLabel, retryText, toolRowKey, type UsageTab, USAGE_TABS } from "../usage";
 import {
   activityCharts,
@@ -307,7 +308,7 @@ const liveAgeText = computed(() => {
     <div class="pagehead">
       <div>
         <h1 style="font-size: 20px">Usage</h1>
-        <p>Captured LLM traffic through proxy-flagged setups (ADR-0008).</p>
+        <p>Captured LLM traffic through proxy-flagged setups.</p>
       </div>
       <div class="row">
         <span v-if="live.connected" class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live<template v-if="liveAgeText"> · {{ liveAgeText }}</template></span>
@@ -566,7 +567,7 @@ const liveAgeText = computed(() => {
     </template>
 
     <!-- Request detail drawer -->
-    <div v-if="drawer !== null" class="drawer-scrim" @click.self="drawer = null">
+    <div v-if="drawer !== null" class="drawer-scrim" v-scrim-close="() => (drawer = null)">
       <aside class="drawer" role="dialog" aria-label="Request details">
         <div class="row row--between" style="margin-bottom: 10px">
           <h3 style="font-size: 17px">Request {{ drawer.row.id.slice(0, 8) }}</h3>
@@ -594,7 +595,7 @@ const liveAgeText = computed(() => {
     </div>
 
     <!-- Client keys drawer (IR-55): issue identification keys for clients -->
-    <div v-if="clientsOpen" class="drawer-scrim" @click.self="clientsOpen = false">
+    <div v-if="clientsOpen" class="drawer-scrim" v-scrim-close="() => (clientsOpen = false)">
       <aside class="drawer" role="dialog" aria-label="Client keys">
         <div class="row row--between" style="margin-bottom: 10px">
           <h3 style="font-size: 17px">Client keys</h3>

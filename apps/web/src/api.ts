@@ -153,9 +153,10 @@ export async function rotateNodeToken(id: string): Promise<string> {
 
 /* ── Node history ─────────────────────────────────────────────────────── */
 
-export type HistoryRange = "1h" | "24h" | "7d" | "30d" | "90d";
+export type HistoryRange = "30m" | "1h" | "24h" | "7d" | "30d" | "90d";
 
 export const HISTORY_RANGES: readonly HistoryRange[] = [
+  "30m",
   "1h",
   "24h",
   "7d",
@@ -633,6 +634,27 @@ export type UsageRangeName = (typeof USAGE_RANGES)[number];
 function rangeQuery(range: UsageRangeName, extra: Record<string, string> = {}): string {
   const params = new URLSearchParams({ range, ...extra });
   return params.toString();
+}
+
+/** IR-87: the hub snapshot cadence. null = unset (env default governs). */
+export async function fetchCadenceMs(signal?: AbortSignal): Promise<number | null> {
+  const res = await fetch("/api/v1/settings/cadence-ms", { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/settings/cadence-ms failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || !("cadenceMs" in body)) {
+    throw new Error("malformed cadence payload");
+  }
+  const value = (body as { cadenceMs: unknown }).cadenceMs;
+  return typeof value === "number" ? value : null;
+}
+
+export async function putCadenceMs(cadenceMs: number): Promise<void> {
+  const res = await fetch("/api/v1/settings/cadence-ms", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cadenceMs }),
+  });
+  if (!res.ok) throw new Error(`PUT /api/v1/settings/cadence-ms failed: HTTP ${res.status}`);
 }
 
 export async function fetchUsageOverview(

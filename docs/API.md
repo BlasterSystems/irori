@@ -100,10 +100,22 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   and a hub-set token wins over the agent's `IRORI_HF_TOKEN` (bootstrap
   fallback). The token is always optional — unset, nothing is sent anywhere.
 
+## Hub settings — snapshot cadence
+
+- `GET /api/v1/settings/cadence-ms` → `{cadenceMs: number | null}` — the
+  persisted hub cadence; `null` means unset (the `CADENCE_MS` env default
+  governs). `503` while the DB is degraded.
+- `PUT /api/v1/settings/cadence-ms` — `{cadenceMs: number}`, bounds 1000–60000
+  (else `400`). Persists a settings row, updates the hub's in-memory active
+  value immediately, and live-pushes a `config-update` to every online agent —
+  agents re-arm their snapshot timer without reconnecting; the rest read it in
+  the next `hello-ok`. `GET /api/v1/version` includes the active `cadenceMs`.
+  `503` while degraded.
+
 ## Analytics (M7)
 
 - `GET /api/v1/analytics/:lens?range=&groupBy=` — five lenses
-  (`memory|decode|power|temps|tokens`), ranges `1h|24h|7d|30d|90d`,
+  (`memory|decode|power|temps|tokens`), ranges `30m|1h|24h|7d|30d|90d`,
   `groupBy=cluster|node` (cluster = a serving setup; nodes in no setup fold
   into a `standalone` group). Optional `setupId`/`nodeId` filters. Answers
   from the rollup buckets — never raw scans. Temps uses minute buckets for
@@ -161,7 +173,9 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   layout in dev). No secrets are embedded — the token is supplied by the
   operator at run time. Work while degraded.
 - `GET /api/v1/version` → `{version}` — the hub's own version, the drift
-  reference for the UI badges and the update target.
+  reference for the UI badges and the update target. Includes `tag` when the
+  image carries one and `cadenceMs` (the active snapshot cadence) on newer
+  hubs.
 - `POST /api/v1/nodes/:id/agent-update` dispatches an `agent-update` job
   (params `{expectedVersion: hubVersion}`) → `202 {job}`. Refusals: `400`
   malformed id, `404` unknown node, `409` when the agent predates
@@ -200,6 +214,17 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 
 ## Setups
 
+- Setup worker validation: `POST /api/v1/setups` and `PATCH /api/v1/setups/:id`
+  reject worker lists containing duplicate node ids, unknown ids, the head
+  itself, or a NAS node → `400` with the reason. The wizard filters NAS
+  candidates client-side too.
+- `POST /api/v1/setups/:id/start` refuses (409) when the setup resolves
+  `MODEL_PATH` and the model is not staged on the head's local store — stage
+  transfers first; the agent-side `modelctl path --local` refusal would only
+  leave a failed run row behind.
+- Identical driver-state replies are not re-announced: an unchanged
+  `(status, health, lastError)` produces no `setup-state` SSE event and no row
+  write, so the driver-truth poll cannot flood the event feed.
 - Setup frames (`setup-ack`, `setup-event`, `setup-log`) are accepted only
   from the setup's head node; `setup-validate-result` only from the node the
   validation was sent to. Frames from any other authenticated agent are
