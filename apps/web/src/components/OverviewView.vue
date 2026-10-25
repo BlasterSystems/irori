@@ -379,7 +379,7 @@ function servingState(decodeTps: number | null): string {
   </div>
 
   <!-- Serving processes: one card per running setup, then detected engines -->
-  <section v-if="heroProcesses.length > 0" class="hero-grid" style="margin-bottom: 12px;">
+  <section v-if="heroProcesses.length > 0" class="hero-grid" :class="{ 'hero-grid--single': heroProcesses.length === 1 }" style="margin-bottom: 12px;">
     <article v-for="p in heroProcesses" :key="p.key" class="card">
       <div class="card__head">
         <div class="row hero-head">
@@ -499,6 +499,10 @@ function servingState(decodeTps: number | null): string {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
+}
+/* A single serving process spans the full row — no dead column. */
+.hero-grid--single {
+  grid-template-columns: 1fr;
 }
 /* Hero heads: long model names truncate, the node label never breaks. */
 .hero-head {

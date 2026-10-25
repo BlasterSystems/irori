@@ -218,6 +218,11 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).toContain("fetchLlmHistory(nodeId, range.value)");
   });
 
+  it("spans a single serving process across the full row (no dead column)", () => {
+    expect(OVERVIEW_SRC).toContain("'hero-grid--single': heroProcesses.length === 1");
+    expect(OVERVIEW_SRC).toContain(".hero-grid--single");
+  });
+
   it("has no fleet lens filter and no head-anchored hero", () => {
     expect(OVERVIEW_SRC).not.toContain('const lens = ref<Lens>');
     expect(OVERVIEW_SRC).not.toContain('aria-label="Lens"');
