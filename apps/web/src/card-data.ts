@@ -8,6 +8,8 @@ export interface CardRow {
   key: string;
   label: string;
   barPct: number | null;
+  /** Available-space share rendered as the trailing orange segment (disk rows only, IR-98). */
+  freePct?: number;
   /** Metric segments without the temperature: "NVIDIA GB10 · 34% · 42.1 / 127.0 GB". */
   line: string;
   /** Rendered after `line` with the hot-temp accent; null when unreadable. */
@@ -112,16 +114,25 @@ export function computeCardData(
     };
   });
 
-  // Largest real mount — the store volume on a NAS (/mnt/nas on the QNAP
-  // instance), the local disk on sparks (overview mockup round 5 renders
-  // DISK on worker cards; > 80 % usage renders the value warn).
-  const bestMount = (snapshot?.storage ?? []).reduce<{ usedBytes: number; totalBytes: number } | null>(
-    (acc, s) =>
-      s.totalBytes > 0 && (acc === null || s.totalBytes > acc.totalBytes)
-        ? { usedBytes: s.usedBytes, totalBytes: s.totalBytes }
-        : acc,
-    null,
-  );
+  // Device disk = the filesystem backing "/" (the internal NVMe on sparks);
+  // mounted volumes (NAS shares) are ignored per owner rule 2026-10-25
+  // (IR-98). NAS cards keep the largest-mount selection because the store
+  // volume is the point there (the QNAP root is squashfs, never reported).
+  // Snapshots without a "/" entry fall back to the largest real mount.
+  const storage = snapshot?.storage ?? [];
+  const deviceMount =
+    node.kind === "nas"
+      ? undefined
+      : storage.find((s) => s.mount === "/" && s.totalBytes > 0);
+  const bestMount =
+    deviceMount ??
+    storage.reduce<{ usedBytes: number; totalBytes: number } | null>(
+      (acc, s) =>
+        s.totalBytes > 0 && (acc === null || s.totalBytes > acc.totalBytes)
+          ? { usedBytes: s.usedBytes, totalBytes: s.totalBytes }
+          : acc,
+      null,
+    );
   let diskRow: CardRow | null = null;
   if (bestMount !== null) {
     const diskPctValue = Math.round((bestMount.usedBytes / bestMount.totalBytes) * 100);
@@ -129,6 +140,7 @@ export function computeCardData(
       key: "disk",
       label: "DISK",
       barPct: (bestMount.usedBytes / bestMount.totalBytes) * 100,
+      freePct: 100 - (bestMount.usedBytes / bestMount.totalBytes) * 100,
       line: `${fmtBytes(bestMount.usedBytes)} / ${fmtBytes(bestMount.totalBytes)}`,
       tempC: null,
       warn: diskPctValue >= DISK_WARN_PCT,

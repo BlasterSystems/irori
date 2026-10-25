@@ -188,6 +188,8 @@ button { font: inherit; color: inherit; }
 /* ── Bars ──────────────────────────────────────────────────────────── */
 .bar { position: relative; height: 6px; border-radius: 1px; background: var(--surface-2); overflow: hidden; }
 .bar__fill { position: absolute; inset: 0 auto 0 0; background: var(--ink); transition: width .5s ease; }
+/* Trailing available-space segment (disk rows, IR-98): right-anchored, warn hue. */
+.bar__fill--free { inset: 0 0 0 auto; background: var(--thread); }
 @media (prefers-reduced-motion: reduce) { .bar__fill { transition: none; } }
 .bar--lg { height: 10px; }
 .barrow { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }

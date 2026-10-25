@@ -301,8 +301,10 @@ bootstrap and when the agent is off.
    `~/.cache/{vllm,torch,triton}` + `~/.nv`, pip/uv/apt caches, journal,
    stale `/tmp`, core dumps). The agent provides:
    - **Audit** (read-only job): per-category reclaimable report with a
-     one-line safety rationale each; cached ~5 min; surfaced on the node card
-     when usage crosses 80/90 % (`Disk 91% · 212 GB reclaimable`).
+     one-line safety rationale each; cached ~5 min; surfaced in the Disk
+     hygiene drawer — not on the node card (IR-98: the card's DISK row shows
+     the device disk — the fs backing `/`, mounted volumes ignored — and the
+     bar trails the available space in the warn hue instead of a usage chip).
    - **Clean** (armed, per category, streamed job output — never one opaque
      button): docker build-cache/dangling-image/stopped-container prunes,
      old-image policy (keep last 2 per repo, exclude in-use), HF incomplete/
