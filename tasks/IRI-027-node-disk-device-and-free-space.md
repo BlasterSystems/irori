@@ -56,7 +56,7 @@
 ## Validation evidence
 
 - Configuration validation: `.agentic/bin/validate` green.
-- Tests: `pnpm test` green (web suite; device-disk + fallback cases added).
+- Tests: `pnpm test` green (web suite 221/221; device-disk + fallback cases added).
 - Build: `pnpm build` green.
 - Documentation check: `.agentic/bin/docs-check` green.
 - Browser: fixture smoke on the built dist, light + dark, 0 console errors.
