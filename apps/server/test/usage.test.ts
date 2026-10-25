@@ -61,7 +61,7 @@ describe("agent hub usage batches", () => {
       llmStore: fake.llmStore,
       rings: createRings(),
       sse,
-      cadenceMs: 2000,
+      getCadenceMs: () => 2000,
       serverVersion: "test-server",
       jobEvents: {
         onOutput: async () => {},

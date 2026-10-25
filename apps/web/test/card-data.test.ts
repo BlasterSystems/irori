@@ -80,7 +80,7 @@ describe("computeCardData", () => {
     expect(mem?.line).toBe("96.0 / 127.0 GB");
     expect(mem?.barPct).toBeCloseTo((96 / 127) * 100);
     expect(gpu?.label).toBe("GPU0");
-    expect(gpu?.line).toBe("NVIDIA GB10 · 34% · 42.1 / 127.0 GB");
+    expect(gpu?.line).toBe("NVIDIA GB10 · 34% · 74 W · 42.1 / 127.0 GB");
     expect(gpu?.tempC).toBe(61);
     expect(gpu?.barPct).toBe(34);
     // package power scaled against the documented GB10 SOC TDP (140 W)
@@ -136,11 +136,21 @@ describe("computeCardData", () => {
     expect(card.rows.map((r) => r.key)).toEqual(["mem", "cpu"]);
   });
 
-  it("flags hot temps at the analytics temps warn tier", () => {
+  it("flags hot temps at the app-wide warn tier (70 °C)", () => {
     expect(isHotTemp(null)).toBe(false);
-    expect(isHotTemp(84)).toBe(false);
-    expect(isHotTemp(85)).toBe(true);
+    expect(isHotTemp(69)).toBe(false);
+    expect(isHotTemp(70)).toBe(true);
     expect(isHotTemp(91)).toBe(true);
+  });
+
+  it("warns when the disk mount is at or above 80 % usage", () => {
+    const total = 18_108_599_115_776;
+    const hot: HardwareSnapshot["storage"] = [{ mount: "/mnt/nas", fs: "ext4", totalBytes: total, usedBytes: 15_000_000_000_000 }];
+    const cool: HardwareSnapshot["storage"] = [{ mount: "/mnt/nas", fs: "ext4", totalBytes: total, usedBytes: 11_603_944_087_552 }];
+    const hotCard = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage: hot });
+    const coolCard = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage: cool });
+    expect(hotCard.rows[0]?.warn).toBe(true);
+    expect(coolCard.rows[0]?.warn).toBe(false);
   });
 
   it("shows the inference summary line on head cards only", () => {

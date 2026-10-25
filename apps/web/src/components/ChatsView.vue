@@ -104,7 +104,7 @@ const hasRetentionHint = computed(() => (chats.value?.capturedWithoutBodies ?? 0
     <div class="pagehead">
       <div>
         <h1 style="font-size: 20px">Chats</h1>
-        <p>Reconstructed conversations from retained request bodies (IR-53).</p>
+        <p>Reconstructed conversations from retained request bodies.</p>
       </div>
       <div class="row">
         <nav class="seg" aria-label="Range">

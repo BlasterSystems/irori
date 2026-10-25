@@ -7,6 +7,8 @@ import { ref } from "vue";
 export const serverVersion = ref<string | null>(null);
 /** Git tag the hub image was built from (IRORI_GIT_TAG); null on local builds. */
 export const serverTag = ref<string | null>(null);
+/** Active snapshot cadence (IR-87); null on older hubs — the footer hides it. */
+export const serverCadenceMs = ref<number | null>(null);
 
 /** Tolerant: best-effort load at app boot; failure leaves the badges hidden. */
 export async function loadServerVersion(): Promise<void> {
@@ -20,6 +22,9 @@ export async function loadServerVersion(): Promise<void> {
     }
     if ("tag" in body && typeof body.tag === "string") {
       serverTag.value = body.tag;
+    }
+    if ("cadenceMs" in body && typeof body.cadenceMs === "number") {
+      serverCadenceMs.value = body.cadenceMs;
     }
   } catch {
     // Drift UI is cosmetic; a failed load just hides it.

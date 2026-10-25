@@ -4,7 +4,6 @@ import { fetchNodes } from "../api";
 import { fetchSetups } from "../serve";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo } from "@irori/core";
 import {
-  armableNasDelete,
   cancelJob,
   createJob,
   downloadBatchTotals,
@@ -415,9 +414,9 @@ function runRowMenu(act: string): void {
     else if (act === "delete") {
       confirmAction({
         title: `Delete ${m.name} from the NAS?`,
-        body: "Runs a dry-run delete plan first — the destructive APPLY is armed from the succeeded dry-run's job drawer. NAS is never written outside modelctl.",
-        danger: "Plan delete (dry run)",
-        run: () => startNasDelete(m.name),
+        body: "Removes the model's objects, references and staging from the NAS store via modelctl. NAS is never written outside modelctl.",
+        danger: "Delete from NAS",
+        run: () => runNasDelete(m.name),
       });
     }
     return;
@@ -467,15 +466,15 @@ function runRowMenu(act: string): void {
   }
 }
 
-/** IRI-020: the detail drawer's per-placement delete routes through the same confirm. */
+/** The detail drawer's per-placement delete routes through the same confirm. */
 function confirmDrawerDelete(nodeId: string): void {
   if (selected.value === null) return;
   const name = selected.value;
   confirmAction({
     title: `Delete ${name} from the NAS?`,
-    body: "Runs a dry-run delete plan first — the destructive APPLY is armed from the succeeded dry-run's job drawer. NAS is never written outside modelctl.",
-    danger: "Plan delete (dry run)",
-    run: () => runJob(nodeId, "nas-delete", { name }),
+    body: "Removes the model's objects, references and staging from the NAS store via modelctl. NAS is never written outside modelctl.",
+    danger: "Delete from NAS",
+    run: () => runJob(nodeId, "nas-delete-apply", { name }),
   });
 }
 
@@ -524,13 +523,14 @@ const jobBatchEntries = computed(() => {
 });
 const jobSummaryText = computed(() => (jobBatchEntries.value.length > 0 ? downloadJobSummary(jobBatchEntries.value) : ""));
 
-/** IRI-018: row-level delete entry point — dry-run on the store node; the arm
- *  lives in the job drawer once the same dry-run has succeeded. */
-async function startNasDelete(name: string): Promise<void> {
+/** Row-level delete entry point — applies immediately behind the confirm
+ *  dialog (owner decision: no dry-run/arm dance); the modelctl write path is
+ *  unchanged. */
+async function runNasDelete(name: string): Promise<void> {
   const nodeId = storeNode.value;
   if (nodeId === null) return;
   deleteSetupWarn.value = null;
-  // Advisory only — never delays the dry-run dispatch; sequenced so a late
+  // Advisory only — never delays the delete dispatch; sequenced so a late
   // response cannot attach to a different model's job.
   const seq = ++deleteSetupSeq;
   void fetchSetups()
@@ -540,25 +540,16 @@ async function startNasDelete(name: string): Promise<void> {
       deleteSetupWarn.value = setup === null ? null : { name, setup };
     })
     .catch(() => {});
-  await runJob(nodeId, "nas-delete", { name });
+  await runJob(nodeId, "nas-delete-apply", { name });
 }
 
-/** IRI-018: the drawer's succeeded nas-delete job → armable target (same node + name by construction). */
-const armableDelete = computed(() => armableNasDelete(job.value?.job ?? null));
-
-/** IRI-018: the nas-delete job's target name — the advisory banner is scoped to it. */
-const jobDeleteName = computed(() => {
+/** The open drawer's nas-delete-apply job's target name — the advisory banner is scoped to it. */
+const jobApplyName = computed(() => {
   const j = job.value?.job;
-  if (j === undefined || j.kind !== "nas-delete") return null;
+  if (j === undefined || j.kind !== "nas-delete-apply") return null;
   const name = j.params["name"];
   return typeof name === "string" && name.length > 0 ? name : null;
 });
-
-async function armNasDelete(): Promise<void> {
-  const target = armableDelete.value;
-  if (target === null) return;
-  await runJob(target.nodeId, "nas-delete-apply", { name: target.name });
-}
 
 let debounce: ReturnType<typeof setTimeout> | undefined;
 function onSearchInput(): void {
@@ -839,13 +830,13 @@ onBeforeUnmount(() => {
                     v-else-if="row.node.kind === 'nas'"
                     class="btn btn--secondary btn--sm"
                     @click="confirmDrawerDelete(row.node.id)"
-                  >Delete (dry run)</button>
+                  >Delete from NAS</button>
                 </td>
               </tr>
             </tbody>
           </table>
           <p class="stat__sub faint">
-            Sync/push jobs stream output below · destructive deletes arm from the succeeded dry-run's job drawer
+            Sync/push jobs stream output below · deletes apply immediately after their confirmation
           </p>
           <details class="hygiene">
             <summary class="stat__sub">Store maintenance…</summary>
@@ -876,7 +867,7 @@ onBeforeUnmount(() => {
           <button class="btn btn--secondary btn--sm" @click="closeJob">Close</button>
         </div>
         <p v-if="jobError" class="banner banner--warn">{{ jobError }}</p>
-        <p v-if="jobDeleteName !== null && deleteSetupWarn?.name === jobDeleteName" class="banner banner--warn">
+        <p v-if="jobApplyName !== null && deleteSetupWarn?.name === jobApplyName" class="banner banner--warn">
           Setup "{{ deleteSetupWarn!.setup }}" serves this model — deleting breaks its next start (advisory, never blocks).
         </p>
         <template v-if="job.job.kind === 'download-queue' && jobSummaryText !== ''">
@@ -888,10 +879,6 @@ onBeforeUnmount(() => {
           <p class="stat__sub faint">summary from the download queue (IR 71 progress fields) · raw output stays in the job record</p>
         </template>
         <pre v-else class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
-        <div v-if="armableDelete" class="row row--between">
-          <span class="stat__sub faint">Dry run succeeded — arming removes the reference, staging, and now-unreferenced objects.</span>
-          <button class="btn btn--danger btn--sm" @click="armNasDelete">Arm delete (APPLY)</button>
-        </div>
         <div v-if="job.job.status === 'running' || job.job.status === 'queued'" class="row row--between">
           <span class="faint">streaming…</span>
           <button class="btn btn--danger btn--sm" @click="confirmDrawerCancel">Cancel job</button>

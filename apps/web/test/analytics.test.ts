@@ -91,10 +91,11 @@ describe("formatters", () => {
   });
 });
 
-describe("disk chip tiers (SPEC §11.6)", () => {
-  it("no chip under 80, plain 80–89, warn ≥90", () => {
+describe("disk chip tiers (warn ≥ 80 %, owner rule 2026-10-25)", () => {
+  it("no chip under 80, warn from 80", () => {
     expect(diskChipCls(70)).toBeNull();
-    expect(diskChipCls(85)).toBe("chip");
+    expect(diskChipCls(79)).toBeNull();
+    expect(diskChipCls(80)).toBe("chip--warn");
     expect(diskChipCls(91)).toBe("chip--warn");
   });
 

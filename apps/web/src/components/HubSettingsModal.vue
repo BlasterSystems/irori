@@ -1,8 +1,37 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { fetchHfTokenStatus, putHfToken } from "../api";
+import { fetchCadenceMs, fetchHfTokenStatus, putCadenceMs, putHfToken } from "../api";
+import { serverCadenceMs } from "../version";
+import { vScrimClose } from "../scrim";
 
 const emit = defineEmits<{ close: [] }>();
+
+/** Backdrop click closes only when the press started on the backdrop (scrim.ts). */
+function onScrimClose(): void {
+  if (!busy.value) emit("close");
+}
+
+/** IR-87: snapshot cadence in seconds (the setting is stored in ms). */
+const cadenceSec = ref<number | null>(null);
+const cadenceBusy = ref(false);
+const cadenceError = ref<string | null>(null);
+const cadenceOk = ref(false);
+
+async function saveCadence(): Promise<void> {
+  if (cadenceBusy.value || cadenceSec.value === null) return;
+  const ms = Math.round(cadenceSec.value * 1000);
+  cadenceBusy.value = true;
+  cadenceError.value = null;
+  try {
+    await putCadenceMs(ms);
+    serverCadenceMs.value = ms; // the footer reflects the change without a reload
+    cadenceOk.value = true;
+  } catch (err) {
+    cadenceError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    cadenceBusy.value = false;
+  }
+}
 
 /** null until the presence check lands; false/true render the field hint. */
 const configured = ref<boolean | null>(null);
@@ -18,6 +47,13 @@ onMounted(async () => {
     // A submit already showing its own error must not be overwritten by the
     // slower presence check failing.
     if (!busy.value) error.value = err instanceof Error ? err.message : String(err);
+  }
+  try {
+    const ms = await fetchCadenceMs();
+    if (ms !== null) cadenceSec.value = Math.round(ms / 1000);
+    cadenceOk.value = true;
+  } catch {
+    // Older hub without the route — leave the field empty and the save disabled.
   }
 });
 
@@ -46,7 +82,7 @@ async function submit(value: string | null): Promise<void> {
 </script>
 
 <template>
-  <div class="backdrop" @click.self="!busy && emit('close')">
+  <div class="backdrop" v-scrim-close="onScrimClose">
     <div class="modal__panel" role="dialog" aria-modal="true" aria-label="Hub settings">
       <div class="card__head">
         <h3>Hub settings</h3>
@@ -77,6 +113,23 @@ async function submit(value: string | null): Promise<void> {
         </div>
       </div>
 
+      <div class="card__head row--between" style="margin-top: 14px;">
+        <h3 style="font-size: 15px;">Snapshot cadence</h3>
+      </div>
+      <div class="card__body" style="padding-top: 10px;">
+        <p v-if="cadenceError" class="banner banner--warn" style="margin-bottom: 10px">{{ cadenceError }}</p>
+        <div class="stack" style="gap: 10px">
+          <div class="field">
+            <label>Interval (seconds, 1–60)</label>
+            <input v-model.number="cadenceSec" type="number" min="1" max="60" step="1" class="input" />
+          </div>
+          <p class="stat__sub">
+            How often every agent samples hardware and LLM ports (default 2 s). Applies live — online agents pick it up
+            without reconnecting<template v-if="cadenceOk">; the footer shows the active value</template>.
+          </p>
+        </div>
+      </div>
+
       <div class="card__head row--between">
         <span class="stat__sub">applies live — online agents get it immediately, others on reconnect</span>
         <div class="row">
@@ -86,6 +139,11 @@ async function submit(value: string | null): Promise<void> {
             :disabled="busy"
             @click="clear"
           >Clear token</button>
+          <button
+            class="btn btn--secondary btn--sm"
+            :disabled="cadenceBusy || cadenceSec === null || cadenceSec < 1 || cadenceSec > 60"
+            @click="saveCadence"
+          >{{ cadenceBusy ? "working…" : "Save cadence" }}</button>
           <button class="btn btn--ghost btn--sm" :disabled="busy" @click="emit('close')">Cancel</button>
           <button class="btn btn--primary btn--sm" :disabled="busy || token.trim() === ''" @click="save">
             {{ busy ? "working…" : "Save token" }}
