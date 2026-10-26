@@ -186,6 +186,13 @@ flowchart LR
     the CX7 fabric beats the SMB store hop (IR-100); sync-local is the
     fallback when no holder is reachable, and staged transfers apply the same
     preference (the store node's own sync stays — local disk copy).
+    Transfers run as the node's **cache user** when one is set on the node
+    (IR-101 / ADR-0011: `runuser`, the user's modelctl, scrubbed env), so
+    models and registration state land in that user's HF cache instead of the
+    agent's (root). Push destinations are dialed as `user@host` from the
+    destination's cache user; prerequisites: modelctl installed for the cache
+    user and passwordless user-level ssh between sparks. Unset = the agent
+    user (root).
   - **push** node → node over the CX7 fabric (parallel rsync streams,
     `--host` per link, round-robin). Head pulls once, fans out to workers.
   - **doctor / repair / catalog refresh** surfaced with two-click armed apply.

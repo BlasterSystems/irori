@@ -139,6 +139,8 @@ export class AgentTransport {
   private llmTimer: NodeJS.Timeout | undefined;
   private llmProbing = false;
   private nasRoot: string | null = null;
+  /** IR-101: cache owner for transfers from the last config-update (null = agent user). */
+  private cacheUser: string | null = null;
   /** IRI-019: global HF token from the last config-update (null = unset/cleared). */
   private hfToken: string | null = null;
 
@@ -193,6 +195,11 @@ export class AgentTransport {
   /** NAS store root from the last config-update (model-ops nodes). */
   getNasRoot(): string | null {
     return this.nasRoot;
+  }
+
+  /** IR-101: cache owner for transfers from the last config-update. */
+  getCacheUser(): string | null {
+    return this.cacheUser;
   }
 
   /**
@@ -444,6 +451,8 @@ export class AgentTransport {
   private handleConfigUpdate(msg: Extract<ServerMsg, { type: "config-update" }>): void {
     this.cadenceMs = msg.cadenceMs;
     this.nasRoot = msg.nasRoot ?? null;
+    // IR-101: null (or absent — old server) = the agent's own user (root).
+    this.cacheUser = msg.cacheUser ?? null;
     // IRI-019: string = set, null = clear (env fallback applies), absent
     // (old server) = keep the current value.
     if (msg.hfToken !== undefined) this.hfToken = msg.hfToken;

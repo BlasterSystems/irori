@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CACHE_USER_PATTERN } from "./node.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmMsgSchema } from "./llm.js";
 import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
@@ -63,6 +64,8 @@ export const configUpdateMsgSchema = z.object({
   llmDetectOnly: z.boolean().default(false),
   /** NAS store root for model-ops nodes (M4); null otherwise. */
   nasRoot: z.string().nullable().default(null),
+  /** IR-101: cache owner for transfers; null = the agent's own user (root). */
+  cacheUser: z.string().regex(CACHE_USER_PATTERN).nullable().default(null),
   /**
    * IRI-019: global HF token (ADR-0009 addendum). string = set, null =
    * clear (agent falls back to its env), absent = no change (old server, or

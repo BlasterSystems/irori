@@ -183,6 +183,7 @@ async function copyToken(): Promise<void> {
             <div class="field"><label>Host / IP</label><input v-model="form.host" class="input mono" placeholder="10.20.30.5 or dgx1.example.com" /></div>
             <div class="field"><label>LLM probe ports (comma-separated)</label><input v-model="form.ports" class="input mono" placeholder="8080, 8081" /></div>
             <div class="field"><label>NAS store root (model-ops nodes)</label><input v-model="form.nasRoot" class="input mono" placeholder="/mnt/nas" /></div>
+            <div class="field"><label>Model cache user (optional)</label><input v-model="form.cacheUser" class="input mono" placeholder="operator" /></div>
           </div>
         </template>
       </div>

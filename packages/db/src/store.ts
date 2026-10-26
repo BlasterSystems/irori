@@ -40,6 +40,7 @@ const nodeRecordColumns = {
   sortOrder: nodes.sortOrder,
   llmPorts: nodes.llmPorts,
   nasRoot: nodes.nasRoot,
+  cacheUser: nodes.cacheUser,
   createdAt: nodes.createdAt,
   updatedAt: nodes.updatedAt,
 } satisfies Record<keyof NodeRecord, unknown>;
@@ -74,6 +75,7 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
           // them or a "model-ops NAS root" create silently yields neither.
           llmPorts: (input.llmPorts ?? []).map((p) => ({ port: p, host: "127.0.0.1" })),
           nasRoot: input.nasRoot ?? null,
+          cacheUser: input.cacheUser ?? null,
           ...tokenPair(token),
         })
         .returning({ id: nodes.id });

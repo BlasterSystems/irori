@@ -493,7 +493,9 @@ d("setups service", () => {
     const spark3 = randomUUID();
     await h.db.insert(nodes).values({
       id: spark3,
-      name: "spark3",
+      // Random suffix: the shared disposable DB keeps rows across runs and
+      // nodes.name is unique.
+      name: `spark3-${spark3.slice(0, 8)}`,
       kind: "spark",
       role: "worker",
       host: "spark3.lan",
@@ -526,5 +528,38 @@ d("setups service", () => {
     // The NAS (store node) still syncs onto itself — a local disk copy.
     expect(byTarget.get(ids.nas)!.kind).toBe("sync-local");
     expect(byTarget.get(ids.nas)!.nodeId).toBe(ids.nas);
+  });
+
+  it("dials push destinations as user@host when the target has a cache user (IR-101)", async () => {
+    const spark4 = randomUUID();
+    await h.db.insert(nodes).values({
+      id: spark4,
+      name: `spark4-${spark4.slice(0, 8)}`,
+      kind: "spark",
+      role: "worker",
+      host: "spark4.lan",
+      nasRoot: "/mnt/nas",
+      cacheUser: "operator",
+      agentTokenHash: "x",
+      agentTokenEnc: "x",
+    });
+    extraOwned.push(spark4);
+    const setup = await ctx.service.create({
+      name: "cx7-user",
+      kind: "single",
+      model: "CX7-User-Model",
+      port: 9007,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    ctx.catalog.set("CX7-User-Model", { name: "CX7-User-Model", repository: "org/CX7-User-Model", runtime: "vllm", bytes: 1024 });
+    ctx.holders.set("CX7-User-Model", new Set([ids.head]));
+    const transfer = await ctx.service.createTransfer(setup.id, [spark4]);
+    expect(transfer.stages).toHaveLength(1);
+    expect(transfer.stages[0]!.kind).toBe("push");
+    expect((transfer.stages[0]!.params as { hosts: string[] }).hosts).toEqual(["operator@spark4.lan"]);
   });
 });

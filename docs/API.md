@@ -197,11 +197,15 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   install block (IRI-011).
 - `POST /api/v1/nodes` persists `llmPorts` (as `127.0.0.1` probe assignments)
   and `nasRoot` — a create with a NAS root yields a model-ops node, not a
-  silently dropped field.
+  silently dropped field. `cacheUser` (IR-101, optional validated username) is
+  persisted the same way: transfers (`sync-local`, push source) run as that
+  user so models land in their HF cache; unset = the agent user (root).
 - `PATCH /api/v1/nodes/:id` accepts `llmPorts: number[]` per the core
   contract and coerces them to `{port, host: "127.0.0.1"}` assignments at the
   store boundary, so `config-update` keeps probing them. Only keys present in
   the request body are applied (absent `llmPorts` never wipes stored values).
+  `cacheUser` follows the same rule; `null` clears it. The hub hands the value
+  to the agent in every `config-update`.
 - `PUT /api/v1/nodes/:id/llm-ports` (`{ports: number[]}`) remains the
   dedicated probe-assignment endpoint and hardcodes the probe host to
   `127.0.0.1`.

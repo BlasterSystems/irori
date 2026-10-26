@@ -186,6 +186,7 @@ describe("llm ingest + config-update (hub, fake store)", () => {
       llmCadenceMs: 2000,
       llmDetectOnly: false,
       nasRoot: null,
+      cacheUser: null,
     });
 
     // Worker with mixed junk in llmPorts: valid entries kept, garbage dropped.
@@ -199,6 +200,7 @@ describe("llm ingest + config-update (hub, fake store)", () => {
       llmCadenceMs: 10_000,
       llmDetectOnly: true,
       nasRoot: null,
+      cacheUser: null,
     });
     ws.ws.close();
     head.ws.close();
@@ -541,6 +543,7 @@ d("llm (db integration)", () => {
       llmCadenceMs: 10_000,
       llmDetectOnly: true,
       nasRoot: null,
+      cacheUser: null,
     });
     ws.close();
   });

@@ -23,6 +23,7 @@ const NODE: NodeInfo = {
   sortOrder: 0,
   llmPorts: [8080, 8081],
   nasRoot: null,
+  cacheUser: null,
   createdAt: "2026-10-19T09:00:00.000Z",
   updatedAt: "2026-10-19T09:00:00.000Z",
 };
@@ -60,6 +61,7 @@ describe("toCreatePayload / toPatchPayload", () => {
     host: " 10.20.30.79 ",
     ports: "8080, 8081, junk",
     nasRoot: " /mnt/nas ",
+    cacheUser: " operator ",
   };
 
   it("trims fields, parses ports and nulls an empty nasRoot", () => {
@@ -70,12 +72,18 @@ describe("toCreatePayload / toPatchPayload", () => {
       host: "10.20.30.79",
       llmPorts: [8080, 8081],
       nasRoot: "/mnt/nas",
+      cacheUser: "operator",
     });
   });
 
   it("maps an empty nasRoot to null (clears the stored value)", () => {
     const cleared = { ...state, nasRoot: "" };
     expect(toPatchPayload(cleared)).toMatchObject({ nasRoot: null });
+  });
+
+  it("maps an empty cache user to null (clears the stored value, IR-101)", () => {
+    const cleared = { ...state, cacheUser: "" };
+    expect(toPatchPayload(cleared)).toMatchObject({ cacheUser: null });
   });
 });
 
@@ -89,6 +97,7 @@ describe("formFromNode", () => {
       host: "dgx1.example.com",
       ports: "8080, 8081",
       nasRoot: "",
+      cacheUser: "",
     });
     // Editing without touching fields must reproduce the stored ports.
     expect(toPatchPayload(state).llmPorts).toEqual([8080, 8081]);
