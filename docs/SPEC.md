@@ -182,6 +182,10 @@ flowchart LR
     outcomes reconcile per entry, with retry reusing published objects.
   - **Delete**: dry-run plan → armed `--apply --yes`.
   - **sync-local** NAS → node HF cache (resumable rsync, ETag validation).
+    Placement prefers a **push from an online local holder** when one exists —
+    the CX7 fabric beats the SMB store hop (IR-100); sync-local is the
+    fallback when no holder is reachable, and staged transfers apply the same
+    preference (the store node's own sync stays — local disk copy).
   - **push** node → node over the CX7 fabric (parallel rsync streams,
     `--host` per link, round-robin). Head pulls once, fans out to workers.
   - **doctor / repair / catalog refresh** surfaced with two-click armed apply.

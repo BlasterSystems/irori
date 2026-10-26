@@ -652,6 +652,14 @@ function closeDetail(): void {
   deleteSetupWarn.value = null;
 }
 
+/** IR-100: name of the node the push job will run on (viaNodeIds[0]) — the
+ * CX7 holder; null when the source node is not in the placement response. */
+function pushViaName(viaNodeIds: string[]): string | null {
+  const id = viaNodeIds[0];
+  if (id === undefined || placement.value === null) return null;
+  return placement.value.placements.find((p) => p.node.id === id)?.node.name ?? null;
+}
+
 async function runJob(nodeId: string, kind: string, params: Record<string, unknown>): Promise<void> {
   jobError.value = null;
   try {
@@ -856,6 +864,7 @@ onBeforeUnmount(() => {
                 <td><span class="chip">{{ row.node.role }}</span></td>
                 <td>
                   <span class="chip" :class="placementChip(row.action).cls">{{ placementChip(row.action).label }}</span>
+                  <span v-if="row.action === 'push' && pushViaName(row.viaNodeIds)" class="mono faint"> via {{ pushViaName(row.viaNodeIds) }}</span>
                   <span v-if="row.action === 'unavailable' && row.reason" class="mono faint"> {{ row.reason }}</span>
                 </td>
                 <td>

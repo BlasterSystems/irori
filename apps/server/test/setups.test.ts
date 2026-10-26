@@ -99,6 +99,9 @@ d("setups service", () => {
   let sse: SseHub;
   let ctx: Harness;
   let ids: Ids;
+  // Nodes a single test adds to the shared fixture set (the harness only
+  // surfaces owned rows).
+  const extraOwned: string[] = [];
 
   async function waitFor(pred: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
     const deadline = Date.now() + ms;
@@ -127,7 +130,7 @@ d("setups service", () => {
     }
     await h.db.update(nodes).set({ nasRoot: "/mnt/nas" }).where(eq(nodes.id, created.nas!));
     ids = { head: created.dgx1!, nas: created.nas!, worker: created.spark2! };
-    ctx = makeHarness(h.db, rings, sse, store, () => Object.values(created));
+    ctx = makeHarness(h.db, rings, sse, store, () => [...Object.values(created), ...extraOwned]);
     ctx.online.add(ids.head);
   });
 
@@ -483,5 +486,45 @@ d("setups service", () => {
     const persisted = (await ctx.service.transfers(setup.id)).find((t) => t.id === transfer.id)!;
     expect(persisted.stages.find((s) => s.kind === "push")!.status).toBe("failed");
     expect(persisted.stages.find((s) => s.kind === "sync-local")!.status).toBe("succeeded");
+  });
+
+  it("pushes from a reachable holder instead of the NAS sync for NAS-mounting targets (IR-100)", async () => {
+    // A second worker that mounts the store (the fixture spark2 mounts none).
+    const spark3 = randomUUID();
+    await h.db.insert(nodes).values({
+      id: spark3,
+      name: "spark3",
+      kind: "spark",
+      role: "worker",
+      host: "spark3.lan",
+      nasRoot: "/mnt/nas",
+      agentTokenHash: "x",
+      agentTokenEnc: "x",
+    });
+    extraOwned.push(spark3);
+    const setup = await ctx.service.create({
+      name: "cx7",
+      kind: "single",
+      model: "CX7-Model",
+      port: 9006,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    ctx.catalog.set("CX7-Model", { name: "CX7-Model", repository: "org/CX7-Model", runtime: "vllm", bytes: 1024 });
+    // The model is on the store AND the online head holds it locally: the
+    // NAS-mounting target pushes from the head over the CX7 fabric instead of
+    // syncing from the NAS. The store node's own sync (local disk) is untouched.
+    ctx.holders.set("CX7-Model", new Set([ids.head]));
+    const transfer = await ctx.service.createTransfer(setup.id, [spark3, ids.nas]);
+    const byTarget = new Map(transfer.stages.map((s) => [s.targetId, s]));
+    expect(byTarget.get(spark3)!.kind).toBe("push");
+    expect(byTarget.get(spark3)!.nodeId).toBe(ids.head);
+    expect((byTarget.get(spark3)!.params as { hosts: string[] }).hosts).toEqual(["spark3.lan"]);
+    // The NAS (store node) still syncs onto itself — a local disk copy.
+    expect(byTarget.get(ids.nas)!.kind).toBe("sync-local");
+    expect(byTarget.get(ids.nas)!.nodeId).toBe(ids.nas);
   });
 });

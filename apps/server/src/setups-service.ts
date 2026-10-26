@@ -712,11 +712,19 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       };
 
       // Pass 1: NAS-mounting targets sync from the store; they become push
-      // sources for pass 2 (the staged NAS→head→worker chain).
+      // sources for pass 2 (the staged NAS→head→worker chain). Sync on the
+      // store node itself is a local disk copy and always stays. Every other
+      // NAS-mounting target defers to pass 2 when a reachable node already
+      // holds the model locally — the CX7 push beats the SMB store hop
+      // (IR-100, same policy as planPlacement).
       const nasTargets: string[] = [];
       for (const targetId of targetNodeIds) {
         const target = byId.get(targetId);
         if (target && !holderIds.has(targetId) && modelEntry !== null && target.nasRoot !== null) {
+          const holderReachable =
+            targetId !== nasNode?.id &&
+            allNodes.some((n) => holderIds.has(n.id) && n.id !== targetId && n.enabled && online.has(n.id));
+          if (holderReachable) continue;
           pushStage(`NAS → ${target.name} (sync)`, targetId, targetId, "sync-local", { name: row.model });
           nasTargets.push(targetId);
         }

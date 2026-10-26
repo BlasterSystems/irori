@@ -881,9 +881,13 @@ export function createApp(deps: AppDeps): Express {
     const rows = await store.list();
     const online = deps.getHub()?.online() ?? NO_NODES_ONLINE;
     // Where the model exists: the NAS store (always — the catalog IS the store)
-    // plus every node a succeeded transfer left it on.
+    // plus every node a succeeded transfer left it on. The online flag feeds
+    // the CX7-first planner (IR-100): a reachable holder beats the store hop.
     const presentNodeIds = await jobs.presentNodesFor(model);
-    const availableOn = [{ nodeId: "nas", bytes: entry.bytes }, ...presentNodeIds.map((nodeId) => ({ nodeId, bytes: entry.bytes }))];
+    const availableOn = [
+      { nodeId: "nas", bytes: entry.bytes },
+      ...presentNodeIds.map((nodeId) => ({ nodeId, bytes: entry.bytes, online: online.has(nodeId) })),
+    ];
     const placements = [];
     for (const row of rows) {
       const snapshot = deps.rings.latest(row.id);
