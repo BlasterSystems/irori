@@ -204,6 +204,24 @@ describe("feedLines", () => {
     );
     expect(lines).toEqual([]);
   });
+
+  it("renders job-progress output with node and kind from the job context (IR-102)", () => {
+    const events: SseEvent[] = [
+      { type: "job-progress", serverTimeMs: 2, nodeId: "a", jobId: "j", seq: 1, line: " 163.6G 79%  111 MB/s  0:05:19" },
+    ];
+    const lines = feedLines(events, nodeName, 30, (id) =>
+      id === "j" ? { nodeId: "a", kind: "sync-local" } : undefined,
+    );
+    expect(lines.map((l) => l.text)).toEqual(["spark1 · sync-local:  163.6G 79%  111 MB/s  0:05:19"]);
+  });
+
+  it("falls back to the frame's node when no job context exists (IR-102)", () => {
+    const events: SseEvent[] = [
+      { type: "job-progress", serverTimeMs: 2, nodeId: "a", jobId: "unknown", seq: 1, line: "progress line" },
+    ];
+    const lines = feedLines(events, nodeName);
+    expect(lines.map((l) => l.text)).toEqual(["spark1 · progress line"]);
+  });
 });
 
 // ─── source pins (DOM-free, per chrome-markup convention) ───────────────────

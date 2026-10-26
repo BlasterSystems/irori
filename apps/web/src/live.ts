@@ -10,7 +10,7 @@ import {
   type UsageEvent,
 } from "@irori/core";
 import { fetchEventsRecent, fetchNodes } from "./api";
-import { fetchRecentJobs, jobLiveFromSummary, runningJobCount, type JobLive } from "./jobs";
+import { fetchRecentJobs, jobLiveFromSummary, type JobLive } from "./jobs";
 
 /** Cap on the newest-first captured-request ring (M8). */
 const USAGE_LATEST_CAP = 50;
@@ -53,10 +53,10 @@ export interface LiveStore {
   /** Latest bench frame per run id, from SSE bench events (M6). */
   benches: Map<string, BenchLive>;
   /** Live job view (id → job), seeded from GET /api/v1/jobs and updated by
-   *  the `job` / `job-progress` SSE frames (IRI-028). */
+   *  the `job` / `job-progress` SSE frames (IRI-028). Progress output lines
+   *  stream into the Telemetry feed (IR-102); the seed keeps node/kind
+   *  context for feedLines there. */
   jobs: Map<string, JobLive>;
-  /** Number of queued/running jobs (topbar Activity badge). */
-  runningJobs: ComputedRef<number>;
   /** Bounded feed ring (newest last): node status, setups, benches, jobs,
    *  thermal — never the 2 s snapshot/llm floods (IRI-013). Seeded from
    *  /api/v1/events/recent on init. */
@@ -77,7 +77,7 @@ export interface LiveStore {
   ingest(raw: string): void;
   /** Re-fetch the node registry (used on init and on SSE (re)connect). */
   refreshNodes(): Promise<void>;
-  /** Re-fetch the recent-job list (Activity drawer seed). */
+  /** Re-fetch the recent-job list (Telemetry feed job context seed). */
   refreshJobs(): Promise<void>;
 }
 
@@ -100,7 +100,6 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const llm = reactive(new Map<string, LlmEntry>());
   const benches = reactive(new Map<string, BenchLive>());
   const jobs = reactive(new Map<string, JobLive>());
-  const runningJobs = computed(() => runningJobCount([...jobs.values()]));
   const events = ref<SseEvent[]>([]);
   const usageLatest = ref<UsageEvent[]>([]);
   const lastEventAtMs = ref<number | null>(null);
@@ -193,12 +192,17 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
         break;
       }
       case "job-progress": {
-        // 1/s output tail for the Activity drawer; never enters the feed ring.
+        // ≤1/s per job. IR-102: changed output lines stream into the feed
+        // ring (deduped — rsync repaints identical lines); lifecycle `job`
+        // frames were already in the ring. The server's recent-events ring
+        // excludes progress frames, so the output tail is live-only.
         const job = jobs.get(event.jobId);
+        const changed = job !== undefined && job.lastLine !== event.line;
         if (job !== undefined) {
           job.lastLine = event.line;
           if (job.status === "queued") job.status = "running";
         }
+        if (changed && event.line.trim() !== "") pushEvent(event);
         break;
       }
       case "thermal":
@@ -232,7 +236,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     for (const node of fetched) nodes.set(node.id, node);
   }
 
-  /** Seeds/refreshes the Activity list; SSE keeps it live afterwards. */
+  /** Seeds/refreshes the job map (node/kind context for the Telemetry feed). */
   async function refreshJobs(): Promise<void> {
     try {
       const fetched = await (options.fetchRecentJobsFn ?? fetchRecentJobs)(20);
@@ -323,7 +327,6 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     llm,
     benches,
     jobs,
-    runningJobs,
     events,
     usageLatest,
     getLlm,

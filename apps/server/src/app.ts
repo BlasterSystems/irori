@@ -756,8 +756,8 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  // IRI-028: recent jobs across every node — the global Activity drawer's
-  // seed (SSE `job`/`job-progress` frames keep it live afterwards).
+  // IRI-028: recent jobs across every node — the Telemetry feed's job context
+  // seed (SSE `job`/`job-progress` frames keep it live afterwards; IR-102).
   app.get("/api/v1/jobs", async (req, res) => {
     const jobs = deps.getJobs();
     if (jobs === null) return res.status(503).json({ error: "database unavailable" });

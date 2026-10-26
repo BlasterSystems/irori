@@ -331,17 +331,32 @@ function pct(n: number | null | undefined): string {
 
 /** Maps feed frames to display lines, newest last, capped. One feed for all
  *  event classes (owner decision, mockup round 5). */
-export function feedLines(events: SseEvent[], nodeName: (id: string) => string, cap = 30): FeedLine[] {
+export function feedLines(
+  events: SseEvent[],
+  nodeName: (id: string) => string,
+  cap = 30,
+  /** IR-102: job context (node id + kind) for job-progress lines. */
+  jobById?: (jobId: string) => { nodeId: string; kind: string } | undefined,
+): FeedLine[] {
   const lines: FeedLine[] = [];
   for (const event of events) {
     const node = "nodeId" in event && typeof event.nodeId === "string" ? nodeName(event.nodeId) : "node";
     switch (event.type) {
-      case "job":
+      case "job": {
         lines.push({
           t: event.serverTimeMs,
           text: `${node} · ${event.kind} ${event.status === "running" ? "started" : event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}`,
         });
         break;
+      }
+      case "job-progress": {
+        // IR-102: the job's live output streams into the feed; the context
+        // gives node and kind, falling back to the frame's node id.
+        const job = jobById?.(event.jobId);
+        const label = job !== undefined ? `${nodeName(job.nodeId)} · ${job.kind}: ` : `${node} · `;
+        lines.push({ t: event.serverTimeMs, text: `${label}${event.line}` });
+        break;
+      }
       case "thermal":
         lines.push({
           t: event.serverTimeMs,
