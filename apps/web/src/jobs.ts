@@ -1,15 +1,17 @@
 import { jobInfoSchema, type JobInfo } from "@irori/core";
 
 /**
- * Recent-job client + pure helpers (IRI-028). The Activity drawer seeds from
- * GET /api/v1/jobs and then follows the SSE `job` / `job-progress` frames.
+ * Recent-job client + pure helpers (IRI-028). The jobs map is seeded from
+ * GET /api/v1/jobs and kept current by the SSE `job` / `job-progress` frames;
+ * IR-102: job output streams into the Overview Telemetry feed (the Activity
+ * drawer is gone), and the seed keeps node/kind context available there.
  */
 
 export interface JobSummary extends JobInfo {
   lastLine: string | null;
 }
 
-/** Live view of a job in the Activity drawer (SSE-updated, seedable). */
+/** Live view of a job (SSE-updated, seedable). */
 export interface JobLive {
   id: string;
   nodeId: string;
@@ -62,20 +64,6 @@ export async function fetchRecentJobs(limit = 20, signal?: AbortSignal): Promise
   return jobs;
 }
 
-export function isActiveJob(job: Pick<JobLive, "status">): boolean {
-  return job.status === "queued" || job.status === "running";
-}
-
-/** Running jobs first (newest started), then settled ones by creation desc. */
-export function sortJobs<T extends { status: string; createdAt: string }>(jobs: T[]): T[] {
-  return [...jobs].sort((a, b) => {
-    const aActive = a.status === "queued" || a.status === "running";
-    const bActive = b.status === "queued" || b.status === "running";
-    if (aActive !== bActive) return aActive ? -1 : 1;
-    return Date.parse(b.createdAt) - Date.parse(a.createdAt);
-  });
-}
-
 /** "12s" / "3m 4s" / "1h 02m" — elapsed for a job row. */
 export function jobElapsed(job: Pick<JobLive, "createdAt" | "startedAt" | "finishedAt" | "status">, now: number): string {
   const start = Date.parse(job.startedAt ?? job.createdAt);
@@ -85,8 +73,4 @@ export function jobElapsed(job: Pick<JobLive, "createdAt" | "startedAt" | "finis
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
-}
-
-export function runningJobCount(jobs: JobLive[]): number {
-  return jobs.filter((job) => isActiveJob(job)).length;
 }

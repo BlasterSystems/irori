@@ -231,24 +231,33 @@ describe("createLiveStore", () => {
     store.stop();
   });
 
-  it("tracks job start, progress and settlement without flooding the feed", async () => {
+  it("tracks job start, streams changed progress lines into the feed, and settles", async () => {
     const nodeId = nodeFixture().id;
     const jobId = "00000000-0000-4000-8000-000000000010";
     const { store, es } = await startedStore([nodeFixture()]);
 
     es.emit(JSON.stringify({ type: "job", serverTimeMs: 10, nodeId, jobId, kind: "sync-local", status: "running", exitCode: null, durationMs: null }));
     expect(store.jobs.get(jobId)).toMatchObject({ status: "running", kind: "sync-local" });
-    expect(store.runningJobs.value).toBe(1);
     const feedAfterStart = store.events.value.length;
 
+    // IR-102: a CHANGED progress line enters the feed ring (still ≤1/s per job).
     es.emit(JSON.stringify({ type: "job-progress", serverTimeMs: 11, nodeId, jobId, seq: 3, line: "1.2 GB/s" }));
     expect(store.jobs.get(jobId)?.lastLine).toBe("1.2 GB/s");
-    expect(store.events.value.length).toBe(feedAfterStart); // progress stays out of the feed
+    expect(store.events.value.length).toBe(feedAfterStart + 1);
 
-    es.emit(JSON.stringify({ type: "job", serverTimeMs: 12, nodeId, jobId, kind: "sync-local", status: "succeeded", exitCode: 0, durationMs: 2000 }));
+    // An identical repaint is deduped — the ring does not grow.
+    es.emit(JSON.stringify({ type: "job-progress", serverTimeMs: 12, nodeId, jobId, seq: 4, line: "1.2 GB/s" }));
+    expect(store.events.value.length).toBe(feedAfterStart + 1);
+
+    // Unknown jobs (e.g. frames racing the seed) never enter the ring.
+    es.emit(JSON.stringify({ type: "job-progress", serverTimeMs: 13, nodeId, jobId: "00000000-0000-4000-8000-000000000099", seq: 1, line: "orphan" }));
+    expect(store.events.value.length).toBe(feedAfterStart + 1);
+
+    es.emit(JSON.stringify({ type: "job", serverTimeMs: 14, nodeId, jobId, kind: "sync-local", status: "succeeded", exitCode: 0, durationMs: 2000 }));
     expect(store.jobs.get(jobId)?.status).toBe("succeeded");
     expect(store.jobs.get(jobId)?.lastLine).toBe("1.2 GB/s");
-    expect(store.runningJobs.value).toBe(0);
+    // The lifecycle frame still rides the feed.
+    expect(store.events.value.length).toBe(feedAfterStart + 2);
     store.stop();
   });
 });
