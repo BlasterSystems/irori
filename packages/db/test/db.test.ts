@@ -44,6 +44,14 @@ d("db integration", () => {
     expect(row?.agent_token_enc.startsWith("v1:")).toBe(true);
   });
 
+  it("persists the cache user on create and patch (IR-101)", async () => {
+    const store = createNodeStore(h.db, "a".repeat(64));
+    const { id } = await store.create({ name: "cacheuser", kind: "spark", role: "worker", host: "cu.lan", cacheUser: "piresbruno" });
+    expect((await store.get(id))?.cacheUser).toBe("piresbruno");
+    await store.patch(id, { cacheUser: null });
+    expect((await store.get(id))?.cacheUser).toBeNull();
+  });
+
   it("snapshots insert, count and prune", async () => {
     const store = createNodeStore(h.db, "a".repeat(64));
     const { id } = await store.create({ name: "spark2", kind: "spark", role: "worker", host: "spark2.lan" });

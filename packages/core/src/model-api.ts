@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CACHE_USER_PATTERN } from "./node.js";
 
 /** Models v2 + placement + jobs API payload contracts (M4). */
 
@@ -32,6 +33,8 @@ export const placementRowSchema = z.object({
     role: z.string(),
     /** Push destination as the source agent should dial it (user@host or host). */
     host: z.string(),
+    /** IR-101: cache owner of the destination (null = the agent user). */
+    cacheUser: z.string().regex(CACHE_USER_PATTERN).nullable().default(null),
     online: z.boolean().default(false),
   }),
   action: placementActionSchema,

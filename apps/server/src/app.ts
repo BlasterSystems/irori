@@ -329,6 +329,9 @@ export function createApp(deps: AppDeps): Express {
       online: false,
       lastSeenAt: null,
       sortOrder: 0,
+      llmPorts: body.data.llmPorts ?? [],
+      nasRoot: body.data.nasRoot ?? null,
+      cacheUser: body.data.cacheUser ?? null,
       createdAt: now,
       updatedAt: now,
     });
@@ -902,7 +905,7 @@ export function createApp(deps: AppDeps): Express {
         diskFreeBytes,
       };
       placements.push({
-        node: { id: row.id, name: row.name, kind: row.kind, role: row.role, host: row.host, online: online.has(row.id) },
+        node: { id: row.id, name: row.name, kind: row.kind, role: row.role, host: row.host, cacheUser: row.cacheUser ?? null, online: online.has(row.id) },
         ...planPlacement({
           availableOn,
           target,
@@ -1206,6 +1209,7 @@ function toNodeDto(row: NodeRecord, online: boolean): NodeInfo {
     sortOrder: row.sortOrder,
     llmPorts: normalizeLlmPorts(row.llmPorts),
     nasRoot: row.nasRoot,
+    cacheUser: row.cacheUser,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   });

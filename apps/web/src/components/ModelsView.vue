@@ -877,7 +877,7 @@ onBeforeUnmount(() => {
                   <button
                     v-else-if="row.node.online && row.node.kind !== 'nas' && row.viaNodeIds.length > 0"
                     class="btn btn--secondary btn--sm"
-                    @click="runJob(row.viaNodeIds[0]!, 'push', { name: selected, hosts: [row.node.host], jobs: 4 })"
+                    @click="runJob(row.viaNodeIds[0]!, 'push', { name: selected, hosts: [row.node.cacheUser ? `${row.node.cacheUser}@${row.node.host}` : row.node.host], jobs: 4 })"
                   >Push</button>
                   <button
                     v-else-if="row.node.kind === 'nas'"
