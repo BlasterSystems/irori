@@ -31,6 +31,7 @@ import { createSetupsService, type SetupsService } from "./setups-service.js";
 import { createBenchService, type BenchService } from "./bench-service.js";
 import { createAnalyticsService, type AnalyticsService } from "./analytics.js";
 import { createCleanupService, weeklySafePassParams, type CleanupService } from "./cleanup-service.js";
+import { createInventoryService, type InventoryService } from "./inventory-service.js";
 import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
 import { type CleanupEntry } from "./cleanup-service.js";
 import { createEnergyEngine } from "./energy.js";
@@ -87,6 +88,8 @@ const state: {
   bench: BenchService | null;
   analytics: AnalyticsService | null;
   cleanup: CleanupService | null;
+  /** IRI-028: cached per-node model inventory reads. */
+  inventory: InventoryService | null;
   usage: UsageStore | null;
   usageClients: UsageClients | null;
   usageChats: UsageChats | null;
@@ -106,6 +109,7 @@ const state: {
   bench: null,
   analytics: null,
   cleanup: null,
+  inventory: null,
   usage: null,
   usageClients: null,
   usageChats: null,
@@ -133,6 +137,7 @@ const app = createApp({
   getBench: () => state.bench,
   getAnalytics: () => state.analytics,
   getCleanup: () => state.cleanup,
+  getInventory: () => state.inventory,
   getUsage: () => state.usage,
   getUsageClients: () => state.usageClients,
   getUsageChats: () => state.usageChats,
@@ -208,6 +213,10 @@ async function boot(): Promise<void> {
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg), (e) => {
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: e.status, exitCode: e.exitCode, durationMs: e.durationMs });
     queueSettle?.(e);
+  }, (e) => {
+    // IRI-028: a job starts from many places (download queue, setups, web
+    // pages) — the Activity drawer must learn about all of them.
+    sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", exitCode: null, durationMs: null });
   });
 
   const downloadQueue = createDownloadQueueService({
@@ -232,6 +241,9 @@ async function boot(): Promise<void> {
   state.analytics = createAnalyticsService(dbHandle.db);
   const cleanup = createCleanupService(dbHandle.db);
   state.cleanup = cleanup;
+  // IRI-028: per-node model inventory cache (written by jobs-service on a
+  // models-inventory settle; invalidated by model-mutating settles).
+  state.inventory = createInventoryService(dbHandle.db);
 
   const setupsService = createSetupsService({
     db: dbHandle.db,
@@ -246,6 +258,11 @@ async function boot(): Promise<void> {
     log: (message) => console.log(`[irori-server] ${message}`),
   });
 
+  // IRI-028: at most one job-output SSE frame per second per job. The full
+  // ring stays in job_output; this keeps the Activity drawer live without
+  // flooding the stream (rsync/tqdm repaint far faster than 1/s).
+  const progressSentAt = new Map<string, number>();
+
   // Job frames feed both the jobs subsystem (persistence + inventory) and the
   // staged-transfer engine (progress parsing + stage chaining).
   const jobEvents = {
@@ -254,8 +271,14 @@ async function boot(): Promise<void> {
       await setupsService.onJobOutput(nodeId, jobId, seq, line);
       // IRI-017: modelctl progress events → download_queue byte/speed columns.
       await downloadQueue.onJobOutput(jobId, line);
+      const now = Date.now();
+      if (now - (progressSentAt.get(jobId) ?? 0) >= 1000) {
+        progressSentAt.set(jobId, now);
+        sse.send({ type: "job-progress", serverTimeMs: now, nodeId, jobId, seq, line });
+      }
     },
     onDone: async (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => {
+      progressSentAt.delete(jobId);
       await jobsService.onDone(nodeId, jobId, status, exitCode);
       await setupsService.onJobDone(nodeId, jobId, status, exitCode);
     },

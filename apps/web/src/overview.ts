@@ -337,7 +337,10 @@ export function feedLines(events: SseEvent[], nodeName: (id: string) => string, 
     const node = "nodeId" in event && typeof event.nodeId === "string" ? nodeName(event.nodeId) : "node";
     switch (event.type) {
       case "job":
-        lines.push({ t: event.serverTimeMs, text: `${node} · ${event.kind} ${event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}` });
+        lines.push({
+          t: event.serverTimeMs,
+          text: `${node} · ${event.kind} ${event.status === "running" ? "started" : event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}`,
+        });
         break;
       case "thermal":
         lines.push({

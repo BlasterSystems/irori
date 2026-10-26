@@ -82,6 +82,7 @@ async function startedStore(nodes: NodeInfo[]) {
   const fetchNodesFn = vi.fn(async () => nodes);
   const store = createLiveStore({
     fetchNodesFn,
+    fetchRecentJobsFn: async () => [],
     EventSourceCtor: MockEventSource as unknown as typeof EventSource,
   });
   await store.init();
@@ -226,6 +227,27 @@ describe("createLiveStore", () => {
       ports: [{ port: 8081, backend: "tensorfold", detected: true, probedAtMs: 3 }],
     }));
     expect(store.getLlm(unknown)?.ports[0]).toMatchObject({ port: 8081, backend: "tensorfold" });
+    store.stop();
+  });
+
+  it("tracks job start, progress and settlement without flooding the feed", async () => {
+    const nodeId = nodeFixture().id;
+    const jobId = "00000000-0000-4000-8000-000000000010";
+    const { store, es } = await startedStore([nodeFixture()]);
+
+    es.emit(JSON.stringify({ type: "job", serverTimeMs: 10, nodeId, jobId, kind: "sync-local", status: "running", exitCode: null, durationMs: null }));
+    expect(store.jobs.get(jobId)).toMatchObject({ status: "running", kind: "sync-local" });
+    expect(store.runningJobs.value).toBe(1);
+    const feedAfterStart = store.events.value.length;
+
+    es.emit(JSON.stringify({ type: "job-progress", serverTimeMs: 11, nodeId, jobId, seq: 3, line: "1.2 GB/s" }));
+    expect(store.jobs.get(jobId)?.lastLine).toBe("1.2 GB/s");
+    expect(store.events.value.length).toBe(feedAfterStart); // progress stays out of the feed
+
+    es.emit(JSON.stringify({ type: "job", serverTimeMs: 12, nodeId, jobId, kind: "sync-local", status: "succeeded", exitCode: 0, durationMs: 2000 }));
+    expect(store.jobs.get(jobId)?.status).toBe("succeeded");
+    expect(store.jobs.get(jobId)?.lastLine).toBe("1.2 GB/s");
+    expect(store.runningJobs.value).toBe(0);
     store.stop();
   });
 });

@@ -16,7 +16,19 @@ import { computeCardData, formatPct, formatTemp, isHotTemp } from "../card-data"
 import { computeDetailData, formatRate } from "../detail-data";
 import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
-import { fetchJob, startAgentUpdate } from "../models";
+import { cancelJob, createJob, fetchJob, jobStatusChip, startAgentUpdate, type JobDetail } from "../models";
+import {
+  deleteConfirmCopy,
+  deleteRequestFor,
+  fetchNodeInventory,
+  filterModels,
+  inventorySummary,
+  leftoverLabel,
+  refreshNodeInventory,
+  storeMountLabel,
+  type DeleteTarget,
+} from "../inventory";
+import type { NodeInventory } from "@irori/core";
 import { agentDrifts, serverVersion } from "../version";
 import LlmPanel from "./LlmPanel.vue";
 import Sparkline from "./Sparkline.vue";
@@ -81,6 +93,7 @@ watch(range, () => {
 onMounted(() => {
   void load();
   void loadLlm();
+  void loadInventory();
 });
 onUnmounted(() => {
   controller?.abort();
@@ -159,6 +172,173 @@ const historyMeta = computed(() => {
 
 const statusChipClass = computed(() =>
   node.value?.online ? "chip--ok" : "chip--muted",
+);
+
+/* ── Models on this node (IRI-028) ──────────────────────────────────────── */
+
+const inventory = ref<NodeInventory | null>(null);
+const inventoryUpdatedAt = ref<string | null>(null);
+const inventoryState = ref<"loading" | "ready" | "error">("loading");
+const inventoryError = ref<string | null>(null);
+const inventoryBusy = ref(false);
+const modelFilter = ref("");
+/** One auto-refresh per node visit — a failed report must not loop jobs. */
+let inventoryAutoTried = false;
+/** Node navigation epoch: in-flight polls from the previous node stop writing. */
+let nodeEpoch = 0;
+let inventorySeq = 0;
+
+const storeRows = computed(() => filterModels(inventory.value?.store?.models ?? [], modelFilter.value));
+const storeMount = computed(() => {
+  const root = inventory.value?.store?.root ?? node.value?.nasRoot ?? "";
+  return root.length === 0 ? "" : storeMountLabel(root, snapshot.value?.storage ?? null);
+});
+const inventoryReadLabel = computed(() =>
+  inventoryUpdatedAt.value === null ? null : new Date(inventoryUpdatedAt.value).toLocaleTimeString(),
+);
+
+async function loadInventory(): Promise<void> {
+  const seq = ++inventorySeq;
+  inventoryState.value = "loading";
+  try {
+    const res = await fetchNodeInventory(props.nodeId);
+    if (seq !== inventorySeq) return;
+    inventory.value = res.report;
+    inventoryUpdatedAt.value = res.updatedAt;
+    inventoryState.value = "ready";
+    inventoryError.value = null;
+    if (res.report === null && node.value?.online === true && !inventoryAutoTried) {
+      inventoryAutoTried = true;
+      void refreshInventory();
+    }
+  } catch (err) {
+    if (seq !== inventorySeq) return;
+    inventoryState.value = "error";
+    inventoryError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function refreshInventory(): Promise<void> {
+  if (inventoryBusy.value) return;
+  const epoch = nodeEpoch;
+  inventoryBusy.value = true;
+  inventoryError.value = null;
+  try {
+    const job = await refreshNodeInventory(props.nodeId);
+    const detail = await pollJob(job.id, undefined, 30 * 60_000, () => epoch === nodeEpoch);
+    if (epoch !== nodeEpoch) return;
+    if (detail.job.status !== "succeeded") {
+      const line = detail.output.at(-1)?.line ?? `inventory job ${detail.job.status}`;
+      inventoryError.value = /unknown job kind/i.test(line)
+        ? "this node's agent predates the inventory job — update the agent from the header, then refresh"
+        : line;
+      return;
+    }
+    await loadInventory();
+  } catch (err) {
+    if (epoch !== nodeEpoch) return;
+    inventoryError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (epoch === nodeEpoch) inventoryBusy.value = false;
+  }
+}
+
+/** Polls a job to a terminal state; `alive` stops the loop after a node
+ *  navigation (NodeDetail is one instance across :nodeId changes). */
+async function pollJob(id: string, onUpdate?: (detail: JobDetail) => void, deadlineMs = 30 * 60_000, alive: () => boolean = () => true): Promise<JobDetail> {
+  const deadline = Date.now() + deadlineMs;
+  let last: JobDetail | null = null;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 1500));
+    if (!alive() || last !== null && (last.job.status !== "queued" && last.job.status !== "running")) return last!;
+    last = await fetchJob(id);
+    onUpdate?.(last);
+    if (last.job.status !== "queued" && last.job.status !== "running") return last;
+    if (Date.now() > deadline) return last;
+  }
+}
+
+const deleteTarget = ref<DeleteTarget | null>(null);
+const deleteJob = ref<JobDetail | null>(null);
+const deleteBusy = ref(false);
+const modelDeleteError = ref<string | null>(null);
+const deleteCopy = computed(() => (deleteTarget.value === null ? null : deleteConfirmCopy(deleteTarget.value)));
+const deleteRunning = computed(
+  () => deleteJob.value !== null && (deleteJob.value.job.status === "queued" || deleteJob.value.job.status === "running"),
+);
+
+function askDelete(target: DeleteTarget): void {
+  deleteTarget.value = target;
+  modelDeleteError.value = null;
+}
+
+async function runDelete(): Promise<void> {
+  const target = deleteTarget.value;
+  if (target === null || deleteBusy.value) return;
+  const request = deleteRequestFor(target);
+  if (request === null) {
+    modelDeleteError.value = "this leftover has no derivable gc-objects target";
+    return;
+  }
+  const epoch = nodeEpoch;
+  deleteBusy.value = true;
+  modelDeleteError.value = null;
+  deleteJob.value = null;
+  deleteTarget.value = null;
+  try {
+    const job = await createJob(props.nodeId, request.kind, request.params);
+    const detail = await pollJob(
+      job.id,
+      (d) => {
+        if (epoch === nodeEpoch) deleteJob.value = d;
+      },
+      30 * 60_000,
+      () => epoch === nodeEpoch,
+    );
+    if (epoch !== nodeEpoch) return;
+    deleteJob.value = detail;
+    if (detail.job.status !== "succeeded") {
+      modelDeleteError.value = detail.output.at(-1)?.line ?? `job ${detail.job.status}`;
+    }
+    // A settle invalidates the cached inventory server-side; rebuild it.
+    inventory.value = null;
+    await loadInventory();
+  } catch (err) {
+    if (epoch !== nodeEpoch) return;
+    modelDeleteError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (epoch === nodeEpoch) deleteBusy.value = false;
+  }
+}
+
+async function cancelDelete(): Promise<void> {
+  const job = deleteJob.value;
+  if (job === null) return;
+  try {
+    await cancelJob(job.job.id);
+  } catch (err) {
+    modelDeleteError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+watch(
+  () => props.nodeId,
+  () => {
+    nodeEpoch += 1;
+    inventorySeq += 1;
+    inventoryAutoTried = false;
+    inventory.value = null;
+    inventoryUpdatedAt.value = null;
+    inventoryState.value = "loading";
+    inventoryError.value = null;
+    inventoryBusy.value = false;
+    modelFilter.value = "";
+    deleteTarget.value = null;
+    deleteJob.value = null;
+    deleteBusy.value = false;
+    modelDeleteError.value = null;
+    void loadInventory();
+  },
 );
 
 /* ── Agent update (IRI-012) ─────────────────────────────────────────────── */
@@ -344,6 +524,139 @@ onUnmounted(() => clearTimeout(deleteTimer));
       style="margin: -2px 0 12px;"
     >inference history unavailable — showing live probes only</p>
 
+    <h2 style="margin-bottom: 10px;">Models</h2>
+
+    <p v-if="inventoryState === 'error'" class="banner banner--warn" style="margin-bottom: 12px;">
+      inventory unavailable — {{ inventoryError }}
+      <button class="btn btn--sm btn--secondary" type="button" @click="loadInventory">Retry</button>
+    </p>
+    <div v-else-if="inventory === null" class="row row--between" style="margin-bottom: 12px;">
+      <span class="muted">
+        {{ inventoryBusy ? "reading the node's caches…" : node?.online === true ? "no inventory yet" : "node offline — no inventory" }}
+      </span>
+      <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy || node?.online !== true" @click="refreshInventory">
+        {{ inventoryBusy ? "reading…" : "Read models" }}
+      </button>
+    </div>
+    <template v-else>
+      <p v-if="inventoryError" class="banner banner--warn" style="margin-bottom: 12px;">{{ inventoryError }}</p>
+
+      <article v-if="inventory.store" class="card" style="margin-bottom: 12px;">
+        <div class="card__head">
+          <h3>Store</h3>
+          <span class="chip">{{ inventory.store.source }}</span>
+          <span class="mono faint model-root">{{ storeMount }}</span>
+          <span class="stat__sub">{{ inventorySummary(inventory.store.models) }}</span>
+          <span v-if="inventoryReadLabel" class="stat__sub faint">read {{ inventoryReadLabel }}</span>
+          <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy" @click="refreshInventory">
+            {{ inventoryBusy ? "reading…" : "Refresh" }}
+          </button>
+        </div>
+        <div class="card__body" style="padding-top: 12px;">
+          <p v-if="inventory.store.warning" class="stat__sub faint">{{ inventory.store.warning }}</p>
+
+          <div
+            v-for="leftover in inventory.store.leftovers"
+            :key="leftover.object"
+            class="banner banner--warn"
+            style="display: block; margin-bottom: 8px;"
+          >
+            <div class="row row--between">
+              <span><strong>{{ leftoverLabel(leftover) }}</strong> — failed delete leftover</span>
+              <span class="mono">{{ leftover.bytes !== null ? fmtBytes(leftover.bytes) : "size unknown" }}</span>
+            </div>
+            <p class="stat__sub mono model-object">{{ leftover.object }}</p>
+            <p v-if="leftover.error" class="stat__sub">{{ leftover.error }}</p>
+            <div class="row" style="gap: 8px; margin-top: 6px;">
+              <button
+                class="btn btn--danger btn--sm"
+                :disabled="deleteBusy || leftover.target === null"
+                @click="askDelete({ scope: 'leftover', name: leftover.name, object: leftover.object, target: leftover.target ?? '', bytes: leftover.bytes, error: leftover.error })"
+              >Remove leftover</button>
+              <span v-if="leftover.target === null" class="stat__sub faint">no gc-objects target derivable</span>
+            </div>
+          </div>
+
+          <div class="model-toolbar">
+            <input v-model="modelFilter" class="input" placeholder="Filter by name or repository…" aria-label="Filter store models" />
+            <span class="stat__sub faint">{{ storeRows.length }} of {{ inventory.store.models.length }}</span>
+          </div>
+          <p v-if="inventory.store.models.length === 0" class="muted">no active models in the store</p>
+          <div v-else class="model-scroll">
+            <table class="table">
+              <thead><tr><th>Model</th><th>Repository</th><th>Runtime</th><th>Size</th><th></th></tr></thead>
+              <tbody>
+                <tr v-for="m in storeRows" :key="m.name">
+                  <td class="model-name">{{ m.name }}</td>
+                  <td class="model-repo" :title="m.repository">{{ m.repository }}</td>
+                  <td><span class="chip">{{ m.runtime }}</span></td>
+                  <td class="mono">{{ m.bytes !== null ? fmtBytes(m.bytes) : "—" }}</td>
+                  <td style="text-align: right;">
+                    <button
+                      class="btn btn--ghost btn--sm"
+                      :disabled="deleteBusy"
+                      @click="askDelete({ scope: 'store', name: m.name, repository: m.repository, bytes: m.bytes })"
+                    >Delete</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </article>
+
+      <article
+        v-for="cache in inventory.local"
+        :key="`${cache.user}:${cache.cacheDir}`"
+        class="card"
+        style="margin-bottom: 12px;"
+      >
+        <div class="card__head">
+          <h3>Local cache</h3>
+          <span class="chip">{{ cache.user }}</span>
+          <span class="mono faint model-root">{{ cache.cacheDir }}</span>
+          <span v-if="cache.modelctlVersion" class="stat__sub faint">modelctl {{ cache.modelctlVersion }}</span>
+          <span class="stat__sub">{{ inventorySummary(cache.models) }}</span>
+        </div>
+        <div class="card__body" style="padding-top: 12px;">
+          <p v-if="cache.error" class="banner banner--warn">{{ cache.error }}</p>
+          <p v-else-if="cache.models.length === 0" class="muted">no local registrations</p>
+          <table v-else class="table">
+            <thead><tr><th>Model</th><th>Repository</th><th>Runtime</th><th>Size</th><th></th></tr></thead>
+            <tbody>
+              <tr v-for="m in cache.models" :key="m.name">
+                <td class="model-name">{{ m.name }}</td>
+                <td class="model-repo" :title="m.repository">{{ m.repository }}</td>
+                <td><span class="chip">{{ m.runtime }}</span></td>
+                <td class="mono">{{ m.bytes !== null ? fmtBytes(m.bytes) : "—" }}</td>
+                <td style="text-align: right;">
+                  <button
+                    class="btn btn--ghost btn--sm"
+                    :disabled="deleteBusy"
+                    @click="askDelete({ scope: 'local', name: m.name, repository: m.repository, bytes: m.bytes, user: cache.user, cacheDir: cache.cacheDir })"
+                  >Delete</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <p v-if="inventory.local.length === 0" class="muted" style="margin-bottom: 12px;">no HF cache found for any user on this node</p>
+    </template>
+
+    <div v-if="deleteBusy || deleteJob !== null || modelDeleteError !== null" class="card" style="margin-bottom: 12px;">
+      <div class="card__head">
+        <h3>Model operation</h3>
+        <span v-if="deleteJob" class="chip" :class="jobStatusChip(deleteJob.job.status).cls">{{ jobStatusChip(deleteJob.job.status).label }}</span>
+        <button v-if="deleteRunning" class="btn btn--danger btn--sm" @click="cancelDelete">Cancel</button>
+      </div>
+      <div class="card__body" style="padding-top: 12px;">
+        <p v-if="modelDeleteError" class="banner banner--warn">{{ modelDeleteError }}</p>
+        <pre v-if="deleteJob" class="model-log mono faint">{{ deleteJob.output.map((o) => o.line).slice(-10).join("\n") || "waiting for output…" }}</pre>
+        <p v-else-if="deleteBusy" class="stat__sub">dispatching…</p>
+      </div>
+    </div>
+
     <h2 style="margin-bottom: 10px;">History</h2>
     <div class="row row--between detail-range" style="margin-bottom: 12px;">
       <div class="seg" role="group" aria-label="History range">
@@ -427,6 +740,24 @@ onUnmounted(() => clearTimeout(deleteTimer));
     <NodeModal v-if="editOpen && node !== null" mode="edit" :node="node" @close="editOpen = false" />
     <NodeModal v-if="rotateOpen && node !== null" mode="rotate" :node="node" @close="rotateOpen = false" />
     <CleanupDrawer v-if="cleanupOpen && node !== null" :node-id="nodeId" :node-name="node.name" @close="cleanupOpen = false" />
+
+    <!-- IRI-028: model delete confirmation (store / local cache / leftover) -->
+    <div v-if="deleteTarget !== null && deleteCopy !== null" class="drawer-scrim" @click.self="deleteTarget = null">
+      <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="deleteCopy.title">
+        <div class="card__head">
+          <h3>{{ deleteCopy.title }}</h3>
+          <button class="btn btn--secondary btn--sm" @click="deleteTarget = null">Close</button>
+        </div>
+        <p class="stat__sub" style="margin: 0;">{{ deleteCopy.body }}</p>
+        <div class="row row--between">
+          <span class="stat__sub faint">nothing is deleted until you confirm</span>
+          <div class="row">
+            <button class="btn btn--secondary btn--sm" @click="deleteTarget = null">Cancel</button>
+            <button class="btn btn--danger btn--sm" :disabled="deleteBusy" @click="runDelete">{{ deleteCopy.danger }}</button>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -441,6 +772,55 @@ onUnmounted(() => clearTimeout(deleteTimer));
    36-char UUID from forcing horizontal overflow on 390px phones. */
 h1 {
   overflow-wrap: anywhere;
+}
+
+/* IRI-028: node model tables */
+.model-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.model-toolbar .input {
+  flex: 1;
+  min-width: 0;
+}
+.model-scroll {
+  max-height: 360px;
+  overflow: auto;
+}
+.model-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.model-repo {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-root,
+.model-object {
+  overflow-wrap: anywhere;
+}
+.model-object {
+  margin: 4px 0;
+}
+.model-log {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.confirm-card {
+  width: min(520px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
 }
 
 @media (max-width: 720px) {

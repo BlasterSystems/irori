@@ -74,13 +74,22 @@ export interface JobEvents {
  * server persists it into cleanup_runs). `ok=false` marks the job failed
  * without throwing.
  */
-export type HygieneJobRunner = (
+export type AgentJobRunner = (
   jobId: string,
-  kind: "hygiene-audit" | "hygiene-clean" | "hygiene-prevent",
+  kind: string,
   params: Record<string, unknown>,
   emit: (line: string) => void,
   signal: AbortSignal,
 ) => Promise<{ ok: boolean }>;
+
+/** Kinds executed by agent code rather than a single modelctl argv. */
+const RUNNER_KINDS = new Set([
+  "hygiene-audit",
+  "hygiene-clean",
+  "hygiene-prevent",
+  "models-inventory",
+  "nas-delete-apply",
+]);
 
 /**
  * One active job per node (SPEC §13). Additional run requests are rejected —
@@ -95,7 +104,7 @@ export class JobManager {
   constructor(
     private readonly ctx: () => JobCtx,
     private readonly events: JobEvents,
-    private readonly hygiene?: HygieneJobRunner,
+    private readonly runner?: AgentJobRunner,
   ) {}
 
   get activeJobId(): string | null {
@@ -109,16 +118,16 @@ export class JobManager {
   start(jobId: string, kind: string, params: Record<string, unknown>, extraEnv: Record<string, string> = {}): boolean {
     if (this.active) return false;
 
-    if (kind === "hygiene-audit" || kind === "hygiene-clean" || kind === "hygiene-prevent") {
-      if (this.hygiene === undefined) {
-        this.events.onOutput(jobId, 0, "error: hygiene runner not available on this agent build");
+    if (RUNNER_KINDS.has(kind)) {
+      if (this.runner === undefined) {
+        this.events.onOutput(jobId, 0, "error: agent-side job runner not available on this agent build");
         this.events.onDone(jobId, "failed", null);
         return true;
       }
       const ctrl = new AbortController();
       let seq = 0;
       this.active = { jobId, cancel: () => ctrl.abort() };
-      void this.hygiene(jobId, kind, params, (line) => this.events.onOutput(jobId, seq++, line), ctrl.signal)
+      void this.runner(jobId, kind, params, (line) => this.events.onOutput(jobId, seq++, line), ctrl.signal)
         .then((result) => {
           if (this.active?.jobId === jobId) this.active = null;
           this.events.onDone(jobId, result.ok ? "succeeded" : "failed", result.ok ? 0 : 1);

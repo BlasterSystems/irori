@@ -14,9 +14,11 @@ export interface EventFeed extends SseHub {
 
 export const EVENT_FEED_CAP = 500;
 
-/** Frames that never enter the feed: heartbeats and the 2 s-cadence
- *  snapshot/llm streams (they would evict real events from the cap). */
-const FEED_EXCLUDED = new Set(["heartbeat", "snapshot", "llm"]);
+/** Frames that never enter the feed: heartbeats, the 2 s-cadence
+ *  snapshot/llm streams and the throttled job-output frames (IRI-028) — they
+ *  would evict real events from the cap; the Activity drawer seeds from
+ *  GET /api/v1/jobs and reads the full output on expand. */
+const FEED_EXCLUDED = new Set(["heartbeat", "snapshot", "llm", "job-progress"]);
 
 export function createEventFeed(inner: SseHub, cap: number = EVENT_FEED_CAP): EventFeed {
   const ring: SseEvent[] = [];
