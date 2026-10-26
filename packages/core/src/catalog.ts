@@ -72,7 +72,12 @@ export interface PlacementNode {
 
 export interface PlacementInput {
   /** Which node currently holds the model (NAS root counts as the source). */
-  availableOn: Array<{ nodeId: string; bytes: number }>;
+  availableOn: Array<{
+    nodeId: string;
+    bytes: number;
+    /** The holder's agent is reachable (online). Omitted on the NAS pseudo-entry. */
+    online?: boolean;
+  }>;
   target: PlacementNode;
   reserveBytes: number;
 }
@@ -87,9 +92,11 @@ export type PlacementResult =
  * Pure planner: model × node → present|sync|push|unavailable with capacity
  * math free = diskFree − reserve; needs = model bytes.
  *
- * "present" = the node already holds the model (or IS the store); "sync" =
- * the node mounts the store and the model is on it (plain rsync); "push" =
- * some node holding the model locally must ssh it over.
+ * "present" = the node already holds the model (or IS the store); "push" =
+ * some node holding the model locally must ssh it over — preferred whenever a
+ * reachable holder exists, because the CX7 fabric beats the SMB store hop;
+ * "sync" = fallback: the node mounts the store and the model is on it but no
+ * reachable holder exists (plain rsync from the store).
  */
 export function planPlacement(input: PlacementInput): PlacementResult {
   const needs = input.availableOn.find((a) => a.bytes > 0)?.bytes ?? 0;
@@ -99,7 +106,11 @@ export function planPlacement(input: PlacementInput): PlacementResult {
   if (local) return { action: "present" };
 
   const cannotServe = (reason: string): PlacementResult => ({ action: "unavailable", reason });
-  const viaNodeIds = input.availableOn.filter((a) => a.nodeId !== input.target.id && a.nodeId !== "nas").map((a) => a.nodeId);
+  // Local holders (NAS excluded), reachable ones first — callers dispatch the
+  // push job on viaNodeIds[0].
+  const onlineIds = new Set(input.availableOn.filter((a) => a.online === true).map((a) => a.nodeId));
+  const holderIds = input.availableOn.filter((a) => a.nodeId !== input.target.id && a.nodeId !== "nas").map((a) => a.nodeId);
+  const viaNodeIds = [...holderIds.filter((id) => onlineIds.has(id)), ...holderIds.filter((id) => !onlineIds.has(id))];
   const blocked = (reason: string): PlacementResult =>
     viaNodeIds.length > 0 ? { action: "unavailable", reason, viaNodeIds } : { action: "unavailable", reason };
   if (!input.target.pushCapable) return blocked("node is offline or not modelctl-capable");
@@ -110,10 +121,16 @@ export function planPlacement(input: PlacementInput): PlacementResult {
   }
   if (input.availableOn.length === 0) return blocked("model not present on any node");
 
-  // The node mounts the store and the model is on it: a plain sync-local.
+  // A reachable local holder pushes over the CX7 fabric (IR-100): node → node
+  // beats the SMB store hop. The NAS sync is the fallback when every holder
+  // is unreachable, and the offline-holder push remains the last resort for
+  // store-less models (it dispatches when the holder reconnects).
+  if (viaNodeIds.some((id) => onlineIds.has(id))) return { action: "push", bytes: needs, viaNodeIds };
+
+  // No reachable holder, but the node mounts the store and the model is on
+  // it: a plain sync-local.
   if (input.target.hasNasRoot && onNas) return { action: "sync", bytes: needs };
 
-  // Otherwise the model must arrive from a node that holds it locally.
   if (viaNodeIds.length === 0) {
     return cannotServe("model is on the NAS but no node holds it locally to push from");
   }

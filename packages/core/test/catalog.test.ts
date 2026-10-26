@@ -47,6 +47,41 @@ describe("planPlacement", () => {
       .toEqual({ action: "unavailable", reason: expect.stringContaining("needs 300") });
   });
 
+  it("prefers the CX7 push from an online holder over the NAS sync hop (IR-100)", () => {
+    expect(
+      planPlacement({
+        availableOn: [{ nodeId: "nas", bytes: 300 }, { nodeId: "head", bytes: 300, online: true }],
+        target: { ...head, id: "spark2", name: "spark2", hasNasRoot: true },
+        reserveBytes: 0,
+      }),
+    ).toEqual({ action: "push", bytes: 300, viaNodeIds: ["head"] });
+  });
+
+  it("falls back to the NAS sync when every holder is offline", () => {
+    expect(
+      planPlacement({
+        availableOn: [{ nodeId: "nas", bytes: 300 }, { nodeId: "head", bytes: 300, online: false }],
+        target: { ...head, id: "spark2", name: "spark2", hasNasRoot: true },
+        reserveBytes: 0,
+      }),
+    ).toEqual({ action: "sync", bytes: 300 });
+  });
+
+  it("orders online holders before offline ones (the push dispatches on viaNodeIds[0])", () => {
+    const spark3 = { ...head, id: "spark3", name: "spark3", hasNasRoot: true };
+    expect(
+      planPlacement({
+        availableOn: [
+          { nodeId: "nas", bytes: 300 },
+          { nodeId: "head", bytes: 300, online: false },
+          { nodeId: "worker", bytes: 300, online: true },
+        ],
+        target: spark3,
+        reserveBytes: 0,
+      }),
+    ).toEqual({ action: "push", bytes: 300, viaNodeIds: ["worker", "head"] });
+  });
+
   it("push from another node when nas lacks it", () => {
     expect(planPlacement({ availableOn: [{ nodeId: "head", bytes: 200 }], target: { ...offline, pushCapable: true }, reserveBytes: 0 }))
       .toEqual({ action: "push", bytes: 200, viaNodeIds: ["head"] });
