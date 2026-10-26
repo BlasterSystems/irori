@@ -220,6 +220,21 @@ export const nodeModels = pgTable(
   (t) => [primaryKey({ name: "node_models_node_id_model_pk", columns: [t.nodeId, t.model] })],
 );
 
+/**
+ * Cached per-node model inventory (IRI-028): the agent's last
+ * `models-inventory` report (store models + leftovers + per-user local
+ * caches). A read-only projection — invalidated whenever a model-mutating
+ * job settles, then rebuilt on the next node-detail refresh.
+ */
+export const nodeInventory = pgTable("node_inventory", {
+  nodeId: uuid("node_id")
+    .primaryKey()
+    .notNull()
+    .references(() => nodes.id, { onDelete: "cascade" }),
+  report: jsonb("report").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Generic secret store (SSH credentials, future per-node material). */
 export const secrets = pgTable(
   "secrets",

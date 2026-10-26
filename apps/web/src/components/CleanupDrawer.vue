@@ -18,9 +18,9 @@ const error = ref<string | null>(null);
 /** audit rows: checked set (safe pre-checked), persisted per open. */
 const checked = ref<Set<string>>(new Set(HYGIENE_SAFE_CATEGORIES));
 
-type Phase = "idle" | "busy" | "plan" | "armed" | "running" | "done";
+type Phase = "idle" | "busy" | "running" | "done";
 const phase = ref<Phase>("idle");
-const planOutcomes = ref<Array<{ category: string; status: string; bytesReclaimed: number; itemsRemoved: number; error: string | null }>>([]);
+const outcomes = ref<Array<{ category: string; status: string; bytesReclaimed: number; itemsRemoved: number; error: string | null }>>([]);
 const runOutput = ref<string[]>([]);
 const confirmName = ref("");
 const lastRunOk = ref<boolean | null>(null);
@@ -72,30 +72,7 @@ async function runAudit(): Promise<void> {
 
 const selectedCategories = computed(() => [...checked.value] as HygieneCategory[]);
 
-async function planClean(): Promise<void> {
-  const mySeq = ++seq;
-  phase.value = "busy";
-  error.value = null;
-  try {
-    const detail = await runJob("hygiene-clean", { categories: selectedCategories.value, dryRun: true });
-    if (mySeq !== seq) return;
-    const last = detail.output.at(-1)?.line ?? "";
-    try {
-      const parsed = JSON.parse(last) as { outcomes?: typeof planOutcomes.value };
-      planOutcomes.value = parsed.outcomes ?? [];
-    } catch {
-      planOutcomes.value = [];
-      error.value = "clean plan unreadable — see job output";
-    }
-    phase.value = "plan";
-  } catch (err) {
-    if (mySeq !== seq) return;
-    error.value = err instanceof Error ? err.message : String(err);
-    phase.value = "idle";
-  }
-}
-
-async function armedClean(): Promise<void> {
+async function runClean(): Promise<void> {
   if (confirmName.value !== props.nodeName) return;
   const mySeq = ++seq;
   phase.value = "running";
@@ -106,10 +83,10 @@ async function armedClean(): Promise<void> {
     if (mySeq !== seq) return;
     const last = detail.output.at(-1)?.line ?? "";
     try {
-      const parsed = JSON.parse(last) as { outcomes?: typeof planOutcomes.value };
-      planOutcomes.value = parsed.outcomes ?? [];
+      const parsed = JSON.parse(last) as { outcomes?: typeof outcomes.value };
+      outcomes.value = parsed.outcomes ?? [];
     } catch {
-      planOutcomes.value = [];
+      outcomes.value = [];
     }
     lastRunOk.value = detail.job.status === "succeeded";
     phase.value = "done";
@@ -154,10 +131,32 @@ onBeforeUnmount(() => {
 const auditReport = computed(() => {
   const row = cleanup.value?.latestAudit ?? null;
   if (row === null || typeof row.report !== "object" || row.report === null) return null;
-  const report = row.report as { generatedAtMs: number; totalBytes: number | null; freeBytes: number | null; categories: Array<{ category: string; safe: boolean; rationale: string; itemCount: number; reclaimableBytes: number }> };
+  const report = row.report as {
+    generatedAtMs: number;
+    totalBytes: number | null;
+    freeBytes: number | null;
+    categories: Array<{
+      category: string;
+      safe: boolean;
+      rationale: string;
+      itemCount: number;
+      reclaimableBytes: number;
+      details?: Array<{ label: string; path: string | null; bytes: number; items: number }>;
+    }>;
+  };
   if (!Array.isArray(report.categories)) return null;
-  return report;
+  return {
+    ...report,
+    categories: report.categories.map((row) => ({ ...row, details: Array.isArray(row.details) ? row.details : [] })),
+  };
 });
+
+/** Reclaimable bytes across the checked categories (the clean button summary). */
+const selectedReclaimable = computed(() =>
+  auditRows.value
+    .filter((row) => checked.value.has(row.category))
+    .reduce((sum, row) => sum + row.reclaimableBytes, 0),
+);
 
 const auditRows = computed(() => {
   const audit = auditReport.value;
@@ -212,8 +211,8 @@ function catLabel(category: string): string {
 
       <p class="stat__sub" style="margin-bottom: 10px;">
         Reclaims caches, journal, /tmp and stale artifacts — protected models and in-use
-        images are never touched; care rows are opt-in. Every clean is a dry-run plan
-        first, armed by typing the node name.
+        images are never touched; care rows are opt-in. The audit is read-only: nothing
+        is deleted until you type the node name and run the clean.
       </p>
 
       <template v-if="tab === 'audit'">
@@ -252,6 +251,14 @@ function catLabel(category: string): string {
                 </span>
               </span>
               <span class="stat__sub">{{ row.rationale }}</span>
+              <ul v-if="row.details.length > 0" class="hy-details">
+                <li v-for="detail in row.details" :key="`${detail.label}:${detail.path ?? ''}`" class="stat__sub">
+                  <span class="mono">{{ detail.label }}</span>
+                  <span v-if="detail.items > 1" class="faint"> · {{ detail.items }} items</span>
+                  <span class="mono"> · {{ fmtBytes(detail.bytes) }}</span>
+                  <span v-if="detail.path !== null" class="faint mono hy-path" :title="detail.path"> · {{ detail.path }}</span>
+                </li>
+              </ul>
               <span class="bar"><span class="bar__fill" :style="{ width: `${Math.round((row.reclaimableBytes / maxReclaimable) * 100)}%` }"></span></span>
             </span>
           </label>
@@ -259,30 +266,25 @@ function catLabel(category: string): string {
 
         <div class="row row--between" style="margin-top: 12px">
           <span class="stat__sub">safe categories pre-checked · care rows are opt-in</span>
-          <button class="btn btn--secondary btn--sm" :disabled="phase === 'busy' || phase === 'running' || selectedCategories.length === 0" @click="planClean">
-            {{ phase === "busy" ? "planning…" : "Plan clean (dry run)" }}
-          </button>
+          <span class="stat__sub">{{ selectedCategories.length }} selected · {{ fmtBytes(selectedReclaimable) }}</span>
         </div>
 
-        <!-- Dry-run plan -->
-        <div v-if="phase === 'plan' || phase === 'armed' || phase === 'running' || phase === 'done'" style="margin-top: 12px">
-          <h4 style="margin-bottom: 6px">Plan (dry run)</h4>
-          <table class="table">
-            <thead><tr><th>category</th><th>result</th><th>reclaimable</th></tr></thead>
-            <tbody>
-              <tr v-for="o in planOutcomes" :key="o.category">
-                <td class="mono">{{ catLabel(o.category) }}</td>
-                <td><span class="chip" :class="{ 'chip--warn': o.status === 'failed' }">{{ o.status }}</span><span v-if="o.error" class="stat__sub"> {{ o.error }}</span></td>
-                <td class="mono">{{ fmtBytes(o.bytesReclaimed) }}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <!-- Typed node-name arm (SPEC §11.6) -->
-          <div v-if="phase === 'plan'" class="stack" style="margin-top: 10px; gap: 6px">
-            <label class="stat__sub">type the node name to arm: <strong>{{ nodeName }}</strong></label>
-            <input v-model="confirmName" class="select" :placeholder="nodeName" :aria-label="'Type node name to arm the clean'" />
-            <button class="btn btn--sm" :disabled="confirmName !== nodeName" @click="armedClean">Run armed clean</button>
+        <!-- Typed node-name confirm (SPEC §11.6) — the only destructive gate -->
+        <div class="stack" style="gap: 6px; margin-top: 8px">
+          <label class="stat__sub">type the node name to confirm: <strong>{{ nodeName }}</strong></label>
+          <div class="row" style="gap: 8px">
+            <input
+              v-model="confirmName"
+              class="select"
+              :placeholder="nodeName"
+              aria-label="Type the node name to confirm the clean"
+              style="flex: 1; min-width: 0;"
+            />
+            <button
+              class="btn btn--sm"
+              :disabled="phase === 'busy' || phase === 'running' || selectedCategories.length === 0 || confirmName !== nodeName"
+              @click="runClean"
+            >{{ phase === "running" ? "cleaning…" : `Clean ${selectedCategories.length} categories` }}</button>
           </div>
         </div>
 
@@ -296,7 +298,7 @@ function catLabel(category: string): string {
             <table class="table">
               <thead><tr><th>category</th><th>result</th><th>reclaimed</th></tr></thead>
               <tbody>
-                <tr v-for="o in planOutcomes" :key="o.category">
+                <tr v-for="o in outcomes" :key="o.category">
                   <td class="mono">{{ catLabel(o.category) }}</td>
                   <td><span class="chip" :class="{ 'chip--warn': o.status === 'failed' }">{{ o.status }}</span><span v-if="o.error" class="stat__sub"> {{ o.error }}</span></td>
                   <td class="mono">{{ fmtBytes(o.bytesReclaimed) }}</td>
@@ -349,3 +351,19 @@ function catLabel(category: string): string {
     </aside>
   </div>
 </template>
+
+<style scoped>
+.hy-details {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0 0 0 2px;
+  display: grid;
+  gap: 2px;
+}
+.hy-details li {
+  font-size: 11.5px;
+}
+.hy-path {
+  overflow-wrap: anywhere;
+}
+</style>

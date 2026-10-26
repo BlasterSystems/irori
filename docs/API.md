@@ -142,9 +142,51 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   registrations, running-container images, `/proc` open files, files <24 h
   outside caches, the NAS store — is enforced agent-side; `modelctl-staging`
   cleans go through `modelctl cleanup-staging --apply`, never raw `rm`.
+- IRI-028: each audit category also carries `details: [{label, path, bytes,
+  items}]` — the concrete targets behind `reclaimableBytes` (old images, HF
+  incomplete blobs vs unreferenced snapshots, staging entries, compiler
+  cache dirs, journal/tmp/core dirs). Older agents omit it (defaults to `[]`).
+  The drawer runs the audit, then the armed clean directly; `hygiene-clean`
+  still accepts `dryRun: true` for scripts, but the UI no longer plans first.
 - `hygiene-prevent` writes docker `daemon.json` log rotation (backup kept)
   and records `logRotationApplied` in the node's prevention settings; docker
   is NOT restarted by the agent (it may live on that daemon).
+
+## Node model inventory (IRI-028)
+
+- `GET /api/v1/nodes/:id/models` → `{report: NodeInventory | null, updatedAt}`
+  — the cached `models-inventory` report. `report.store` is the modelctl store
+  (active models + failed-delete leftovers) when the node has a `nasRoot`;
+  `report.local[]` is one entry per user HF cache (`user`, `home`, `cacheDir`,
+  `modelctlVersion`, `error`, `models[]`). Modelctl local state is per user,
+  so a root agent lists each cache owner through `runuser`.
+- `POST /api/v1/nodes/:id/models/refresh` → `202 {job}` dispatches the
+  read-only `models-inventory` job (409 while the node has any active job;
+  agents older than 0.4.0 fail it with "unknown job kind"). The hub persists
+  the job's final JSON line into `node_inventory` and deletes the row whenever
+  a model-mutating job settles (`download*`, `sync-local`, `push`,
+  `nas-delete*`, `delete-local`, `gc-objects`, `cleanup-staging`,
+  `catalog-refresh`, `repair-active-apply`).
+- Deletes from the node page reuse existing kinds: `nas-delete-apply`
+  (store), `delete-local` (local registration, params `{name, user}` — the
+  agent resolves the binary/home/cache dir, never the request) and
+  `gc-objects` (leftover, params `{targets: [ORG/REPO/COMMIT--SELECTION],
+  apply: true}`).
+- `nas-delete-apply` now preflights: the agent runs `modelctl delete NAME
+  --json` (read-only plan), probes every object/staging directory with a
+  create+unlink, and only then runs `--apply --yes`. A denied tree fails the
+  job with the failing path/errno and leaves the model ACTIVE.
+
+## Job activity (IRI-028)
+
+- `GET /api/v1/jobs?limit=` → `{jobs: [{...jobInfo, lastLine}]}` — recent jobs
+  across every node, newest first (limit 1–100, default 20).
+- SSE `job` frames now also fire on dispatch with `status: "running"`
+  (`exitCode`/`durationMs` null); terminal frames are unchanged.
+- SSE `job-progress` `{nodeId, jobId, seq, line}` carries at most one output
+  line per second per job. It is not recorded in `/api/v1/events/recent`
+  (the full 400-line ring stays in `job_output`). Older web bundles ignore
+  both frames.
 
 ## Nodes
 

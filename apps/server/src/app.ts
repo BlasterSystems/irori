@@ -7,6 +7,7 @@ import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
+import { type InventoryService } from "./inventory-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
 import { energyCostPutSchema, tokenCostPutSchema, type EnergyCost, type TokenCost } from "@irori/core";
 import type { CostService } from "./cost.js";
@@ -104,6 +105,8 @@ export interface AppDeps {
   getAnalytics: () => AnalyticsService | null;
   /** Null while degraded: cleanup routes answer 503 (M7). */
   getCleanup: () => CleanupService | null;
+  /** Null while degraded: node-model inventory reads answer 503 (IRI-028). */
+  getInventory?: () => InventoryService | null;
   /** Null while degraded: usage routes answer 503 (M8). */
   getUsage: () => UsageStore | null;
   /** Null while degraded: client-identity routes answer 503 (IR-55). */
@@ -634,6 +637,39 @@ export function createApp(deps: AppDeps): Express {
     res.json(await service.prevention(id));
   });
 
+  // ---- IRI-028: per-node model inventory (store + per-user local caches) ----
+  app.get("/api/v1/nodes/:id/models", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const inventory = deps.getInventory?.() ?? null;
+    if (inventory === null) return res.status(503).json({ error: "database unavailable" });
+    const entry = await inventory.get(id);
+    res.json({ report: entry?.report ?? null, updatedAt: entry?.updatedAt ?? null });
+  });
+
+  // Dispatches the read-only inventory job; 409 while the node has any active
+  // job (one-active-per-node), 202 otherwise.
+  app.post("/api/v1/nodes/:id/models/refresh", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    try {
+      const job = await jobs.create(id, "models-inventory", {});
+      res.status(202).json({ job: serializeJob(job) });
+    } catch (err) {
+      if (err instanceof JobBusyError) return res.status(409).json({ error: err.message });
+      if (err instanceof JobDispatchError) return res.status(409).json({ error: err.message });
+      throw err;
+    }
+  });
+
   // Live llm probe view: in-memory ring first, latest persisted pass as
   // fallback (fresh boot, agent still to reconnect). 404 when nothing is known.
   app.get("/api/v1/nodes/:id/llm", async (req, res) => {
@@ -715,6 +751,17 @@ export function createApp(deps: AppDeps): Express {
       if (err instanceof Error && err.name === "ZodError") return res.status(400).json({ error: "unknown job kind" });
       throw err;
     }
+  });
+
+  // IRI-028: recent jobs across every node — the global Activity drawer's
+  // seed (SSE `job`/`job-progress` frames keep it live afterwards).
+  app.get("/api/v1/jobs", async (req, res) => {
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    const raw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : 20;
+    const limit = Number.isFinite(raw) ? raw : 20;
+    const rows = await jobs.listAll(limit);
+    res.json({ jobs: rows.map((row) => ({ ...serializeJob(row), lastLine: row.lastLine })) });
   });
 
   app.get("/api/v1/jobs/:id", async (req, res) => {

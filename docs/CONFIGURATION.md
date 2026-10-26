@@ -41,6 +41,13 @@ variables are optional unless noted:
 | `IRORI_USAGE_MAX_ROWS` | `200000` | Usage-buffer hard cap (drop-oldest) |
 | `IRORI_HF_TOKEN` | none | Optional HF token handed to modelctl as `HF_TOKEN` (IRI-017) — enables gated/private repo downloads; never sent to the hub or stored in job params. Bootstrap fallback: a hub-set global token (IRI-019) wins over this env |
 
+The per-node model inventory (IRI-028) needs no new env: the agent lists its
+own cache via `IRORI_MODELCTL_PATH` and discovers every other user's cache
+under `/home/*` + `/root` (requiring `<home>/.cache/huggingface` and an
+executable `<home>/.local/bin/modelctl`), running `modelctl list --local` as
+that user. Nodes whose agents predate the `models-inventory` job kind answer
+its refresh with a visible failure until they are updated.
+
 ## Web
 
 No runtime configuration; built static assets are served by the server.

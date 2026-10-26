@@ -13,6 +13,7 @@ import {
   type HygieneCleanOutcome,
   type HygieneCleanParams,
   type HygieneCleanResult,
+  type HygieneDetail,
 } from "@irori/core";
 
 const execFileAsync = promisify(execFile);
@@ -59,6 +60,13 @@ export function selectCleanableStaging(entries: StagingEntry[]): StagingEntry[] 
   return entries.filter((e) => e.status !== "resumable" && e.status !== "journal_referenced");
 }
 
+/** Category details are UI rows; cap them so the report stays small. */
+const MAX_DETAILS = 12;
+
+function capDetails(rows: HygieneDetail[]): HygieneDetail[] {
+  return rows.slice(0, MAX_DETAILS);
+}
+
 /** Maps a modelctl staging-audit JSON array to the modelctl-staging category row. */
 export function stagingAuditToCategory(entries: StagingEntry[]): HygieneCategoryAudit {
   const cleanable = selectCleanableStaging(entries);
@@ -68,6 +76,14 @@ export function stagingAuditToCategory(entries: StagingEntry[]): HygieneCategory
     rationale: "Non-resumable staging data under the NAS store root; resumable and journal-referenced entries are protected.",
     itemCount: cleanable.length,
     reclaimableBytes: cleanable.reduce((sum, e) => sum + (Number.isFinite(e.bytes) ? e.bytes : 0), 0),
+    details: capDetails(
+      cleanable.map((entry) => ({
+        label: entry.status,
+        path: entry.path,
+        bytes: Number.isFinite(entry.bytes) ? entry.bytes : 0,
+        items: 1,
+      })),
+    ),
   };
 }
 
@@ -294,6 +310,10 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
       : "docker CLI not available on this agent.",
     itemCount: buildCache ? 1 : 0,
     reclaimableBytes: buildCache?.reclaimableBytes ?? 0,
+    details:
+      buildCache === undefined
+        ? []
+        : [{ label: "docker builder cache", path: null, bytes: buildCache.reclaimableBytes, items: 1 }],
   });
 
   // 2. docker old images (keep last 2 per repo, exclude in-use)
@@ -314,6 +334,14 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
     rationale: "Keeps the last 2 images per repository; running containers and platform images are protected.",
     itemCount: oldImages.length,
     reclaimableBytes: oldImages.reduce((sum, r) => sum + r.sizeBytes, 0),
+    details: capDetails(
+      oldImages.map((image) => ({
+        label: `${image.repository}:${image.tag}`,
+        path: null,
+        bytes: image.sizeBytes,
+        items: 1,
+      })),
+    ),
   });
 
   // 3. stopped containers
@@ -329,6 +357,10 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
     rationale: dockerAvailable ? "Removes exited/created containers only — never running ones." : "docker CLI not available on this agent.",
     itemCount: stoppedCount,
     reclaimableBytes: containers?.reclaimableBytes ?? 0,
+    details:
+      stoppedCount === 0
+        ? []
+        : [{ label: "exited/created containers", path: null, bytes: containers?.reclaimableBytes ?? 0, items: stoppedCount }],
   });
 
   // 4. HF cache orphans
@@ -343,6 +375,14 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
     rationale: "Removes *.incomplete blobs and snapshots no ref points at; modelctl registrations are protected.",
     itemCount: hfScan.incompleteCount + hfScan.unreferencedCount,
     reclaimableBytes: hfScan.incompleteBytes + hfScan.unreferencedBytes,
+    details: [
+      ...(hfScan.incompleteCount > 0
+        ? [{ label: "*.incomplete blobs", path: hfDir, bytes: hfScan.incompleteBytes, items: hfScan.incompleteCount }]
+        : []),
+      ...(hfScan.unreferencedCount > 0
+        ? [{ label: "unreferenced snapshots", path: hfDir, bytes: hfScan.unreferencedBytes, items: hfScan.unreferencedCount }]
+        : []),
+    ],
   });
 
   // 5. modelctl staging (non-resumable only)
@@ -352,6 +392,7 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
     rationale: ctx.nasRoot ? "Non-resumable staging data under the NAS store root." : "No NAS store root on this node.",
     itemCount: 0,
     reclaimableBytes: 0,
+    details: [],
   };
   if (ctx.nasRoot && ctx.modelctlPath && existsSync(ctx.modelctlPath)) {
     const audit = await execFileAsync(ctx.modelctlPath, ["staging-audit", "--json", "--root", ctx.nasRoot], { encoding: "utf8", timeout: 120_000 }).catch(() => null);
@@ -369,19 +410,21 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
 
   // 6. compiler/pkg caches
   let compilerBytes = 0;
-  let compilerCount = 0;
+  const compilerDetails: HygieneDetail[] = [];
   for (const dir of COMPILER_CACHE_DIRS) {
     const p = join(home, dir);
     if (!existsSync(p)) continue;
-    compilerCount += 1;
-    compilerBytes += await walkBytes(p);
+    const bytes = await walkBytes(p);
+    compilerBytes += bytes;
+    compilerDetails.push({ label: dir, path: p, bytes, items: 1 });
   }
   categories.push({
     category: "compiler-caches",
     safe: true,
     rationale: "vllm/torch/triton compile caches and the CUDA ComputeCache — rebuilt on demand.",
-    itemCount: compilerCount,
+    itemCount: compilerDetails.length,
     reclaimableBytes: compilerBytes,
+    details: capDetails(compilerDetails),
   });
 
   // 7. apt/pkg caches
@@ -393,39 +436,49 @@ export async function auditHygiene(ctx: HygieneCtx): Promise<HygieneAudit> {
     rationale: existsSync(aptDir) ? "apt-get clean + autoremove — package archives and orphaned deps only." : "No apt cache on this platform.",
     itemCount: existsSync(aptDir) ? 1 : 0,
     reclaimableBytes: aptBytes,
+    details: existsSync(aptDir) ? [{ label: "package archives", path: aptDir, bytes: aptBytes, items: 1 }] : [],
   });
 
   // 8. system junk: journal, /tmp > 7d, cores, old snap revisions
   let junkBytes = 0;
-  let junkCount = 0;
+  const junkDetails: HygieneDetail[] = [];
   const journal = await execFileAsync("journalctl", ["--disk-usage"], { encoding: "utf8", timeout: 30_000 }).catch(() => null);
   if (journal) {
     const m = /archive and latest ([\d.]+)\s*([GMTKB])/.exec(journal.stdout) ?? /([\d.]+)\s*([GMTKB])/.exec(journal.stdout);
-    if (m) junkBytes += parseDockerSize(`${m[1]}${m[2]!.toUpperCase() === "K" ? "kB" : m[2]}`);
-    junkCount += 1;
+    const journalBytes = m ? parseDockerSize(`${m[1]}${m[2]!.toUpperCase() === "K" ? "kB" : m[2]}`) : 0;
+    junkBytes += journalBytes;
+    junkDetails.push({ label: "journal", path: null, bytes: journalBytes, items: 1 });
   }
   const tmpEntries = await safeReaddir("/tmp");
   const nowMs = now;
+  let tmpBytes = 0;
+  let tmpCount = 0;
   for (const entry of tmpEntries) {
     const st = await safeStat(join("/tmp", entry.name));
     if (st === null) continue;
     if (nowMs - st.mtimeMs < 24 * 3_600_000) continue; // <24 h protected
     if (nowMs - st.mtimeMs > 7 * 86_400_000) {
-      junkCount += 1;
-      junkBytes += st.isDir ? await walkBytes(join("/tmp", entry.name)) : st.size;
+      tmpCount += 1;
+      tmpBytes += st.isDir ? await walkBytes(join("/tmp", entry.name)) : st.size;
     }
+  }
+  if (tmpCount > 0) {
+    junkBytes += tmpBytes;
+    junkDetails.push({ label: "/tmp older than 7 d", path: "/tmp", bytes: tmpBytes, items: tmpCount });
   }
   for (const coreDir of ["/var/crash", "/var/lib/apport/coredump"]) {
     if (!existsSync(coreDir)) continue;
-    junkCount += 1;
-    junkBytes += await walkBytes(coreDir);
+    const bytes = await walkBytes(coreDir);
+    junkBytes += bytes;
+    junkDetails.push({ label: coreDir, path: coreDir, bytes, items: 1 });
   }
   categories.push({
     category: "system-junk",
     safe: true,
     rationale: "Journal vacuum, /tmp older than 7 d, core dumps. Files modified <24 h are protected.",
-    itemCount: junkCount,
+    itemCount: junkDetails.reduce((sum, detail) => sum + detail.items, 0),
     reclaimableBytes: junkBytes,
+    details: capDetails(junkDetails),
   });
 
   // Disk usage (statvfs via df — portable enough for Linux agents).

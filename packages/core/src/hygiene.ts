@@ -40,6 +40,21 @@ export const HYGIENE_SAFE_CATEGORIES: readonly HygieneCategory[] = [
   "system-junk",
 ];
 
+/**
+ * One concrete target inside a category (IRI-028): an old image, an
+ * unreferenced HF snapshot, a staging entry, a compiler cache dir, the
+ * journal, a /tmp entry or a core-dump dir. `path` is null for command-based
+ * targets (docker prune) and set for filesystem targets.
+ */
+export const hygieneDetailSchema = z.object({
+  label: z.string().min(1),
+  path: z.string().nullable().default(null),
+  bytes: z.number().nonnegative(),
+  items: z.number().int().nonnegative().default(1),
+});
+
+export type HygieneDetail = z.infer<typeof hygieneDetailSchema>;
+
 /** One audited category: what is reclaimable and why it is (un)safe to clean. */
 export const hygieneCategoryAuditSchema = z.object({
   category: hygieneCategorySchema,
@@ -48,6 +63,8 @@ export const hygieneCategoryAuditSchema = z.object({
   rationale: z.string(),
   itemCount: z.number().int().nonnegative(),
   reclaimableBytes: z.number().nonnegative(),
+  /** Per-target rows behind `reclaimableBytes`; older agents send none. */
+  details: z.array(hygieneDetailSchema).default([]),
 });
 
 export type HygieneCategoryAudit = z.infer<typeof hygieneCategoryAuditSchema>;

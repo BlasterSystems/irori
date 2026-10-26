@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
@@ -19,6 +19,10 @@ export interface ModelctlCtx {
   modelctlPath?: string;
   /** IRI-017: HF token handed to modelctl as HF_TOKEN (gated/private repos); empty = unset. */
   hfToken?: string;
+  /** The agent's own user (root); its local cache runs without runuser. */
+  agentUser?: string;
+  /** IRI-028: resolves a cache owner for delete-local; null when unknown. */
+  resolveLocalUser?: (user: string) => { home: string; binary: string } | null;
 }
 
 export class CommandBuildError extends Error {}
@@ -70,11 +74,12 @@ const ROOT_FLAG = "--root";
 export function buildCommand(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string } {
   const modelctl = ctx.modelctlPath ?? "modelctl";
   const built = buildKindArgs(kind, params, ctx);
-  if (built.shell !== undefined) return built;
+  // `raw` kinds already carry their executable (e.g. a runuser wrapper).
+  if (built.shell !== undefined || built.raw === true) return built;
   return { argv: [modelctl, ...built.argv] };
 }
 
-function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string } {
+function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string; raw?: boolean } {
   const str = (key: string): string | undefined => {
     const v = params[key];
     return typeof v === "string" && v.length > 0 ? v : undefined;
@@ -173,7 +178,38 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
     case "delete-local": {
       const name = str("name");
       if (!name) throw new CommandBuildError("delete-local needs name");
-      return { argv: ["delete-local", name] };
+      const user = str("user");
+      if (user === undefined || user === (ctx.agentUser ?? "root")) {
+        return { argv: ["delete-local", name] };
+      }
+      // A modelctl local registration lives in the invoking user's state dir;
+      // a root agent must run the delete as the cache owner (IRI-028). The
+      // home/binary are resolved agent-side — the hub never sends paths.
+      const resolved = ctx.resolveLocalUser?.(user) ?? null;
+      if (resolved === null) {
+        throw new CommandBuildError(`delete-local: unknown local cache user "${user}"`);
+      }
+      return {
+        raw: true,
+        argv: [
+          "runuser",
+          "-u",
+          user,
+          "--",
+          "env",
+          "-u",
+          "XDG_STATE_HOME",
+          "-u",
+          "HF_HOME",
+          "-u",
+          "HF_HUB_CACHE",
+          `HOME=${resolved.home}`,
+          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+          resolved.binary,
+          "delete-local",
+          name,
+        ],
+      };
     }
     case "doctor":
       return { argv: ["doctor", "--json", ROOT_FLAG, root()] };

@@ -10,6 +10,7 @@ import {
   type UsageEvent,
 } from "@irori/core";
 import { fetchEventsRecent, fetchNodes } from "./api";
+import { fetchRecentJobs, jobLiveFromSummary, runningJobCount, type JobLive } from "./jobs";
 
 /** Cap on the newest-first captured-request ring (M8). */
 const USAGE_LATEST_CAP = 50;
@@ -35,6 +36,7 @@ export interface LiveStoreOptions {
   /** Overridable for tests. */
   fetchNodesFn?: typeof fetchNodes;
   fetchEventsRecentFn?: typeof fetchEventsRecent;
+  fetchRecentJobsFn?: typeof fetchRecentJobs;
   EventSourceCtor?: typeof EventSource | null;
   now?: () => number;
   /** Interval at which lastEventAgeMs is refreshed. */
@@ -50,6 +52,11 @@ export interface LiveStore {
   llm: Map<string, LlmEntry>;
   /** Latest bench frame per run id, from SSE bench events (M6). */
   benches: Map<string, BenchLive>;
+  /** Live job view (id → job), seeded from GET /api/v1/jobs and updated by
+   *  the `job` / `job-progress` SSE frames (IRI-028). */
+  jobs: Map<string, JobLive>;
+  /** Number of queued/running jobs (topbar Activity badge). */
+  runningJobs: ComputedRef<number>;
   /** Bounded feed ring (newest last): node status, setups, benches, jobs,
    *  thermal — never the 2 s snapshot/llm floods (IRI-013). Seeded from
    *  /api/v1/events/recent on init. */
@@ -70,6 +77,8 @@ export interface LiveStore {
   ingest(raw: string): void;
   /** Re-fetch the node registry (used on init and on SSE (re)connect). */
   refreshNodes(): Promise<void>;
+  /** Re-fetch the recent-job list (Activity drawer seed). */
+  refreshJobs(): Promise<void>;
 }
 
 /**
@@ -90,6 +99,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const snapshots = reactive(new Map<string, HardwareSnapshot>());
   const llm = reactive(new Map<string, LlmEntry>());
   const benches = reactive(new Map<string, BenchLive>());
+  const jobs = reactive(new Map<string, JobLive>());
+  const runningJobs = computed(() => runningJobCount([...jobs.values()]));
   const events = ref<SseEvent[]>([]);
   const usageLatest = ref<UsageEvent[]>([]);
   const lastEventAtMs = ref<number | null>(null);
@@ -162,7 +173,34 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
         });
         pushEvent(event);
         break;
-      case "job":
+      case "job": {
+        const existing = jobs.get(event.jobId);
+        const at = new Date(event.serverTimeMs).toISOString();
+        jobs.set(event.jobId, {
+          id: event.jobId,
+          nodeId: event.nodeId,
+          kind: event.kind,
+          status: event.status,
+          params: existing?.params ?? {},
+          exitCode: event.exitCode,
+          durationMs: event.durationMs,
+          createdAt: existing?.createdAt ?? at,
+          startedAt: event.status === "running" ? at : (existing?.startedAt ?? null),
+          finishedAt: event.status === "running" ? null : at,
+          lastLine: existing?.lastLine ?? null,
+        });
+        pushEvent(event);
+        break;
+      }
+      case "job-progress": {
+        // 1/s output tail for the Activity drawer; never enters the feed ring.
+        const job = jobs.get(event.jobId);
+        if (job !== undefined) {
+          job.lastLine = event.line;
+          if (job.status === "queued") job.status = "running";
+        }
+        break;
+      }
       case "thermal":
       case "setup-state":
       case "setup-transfer":
@@ -194,6 +232,28 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     for (const node of fetched) nodes.set(node.id, node);
   }
 
+  /** Seeds/refreshes the Activity list; SSE keeps it live afterwards. */
+  async function refreshJobs(): Promise<void> {
+    try {
+      const fetched = await (options.fetchRecentJobsFn ?? fetchRecentJobs)(20);
+      if (stopped) return;
+      for (const summary of fetched) {
+        const current = jobs.get(summary.id);
+        const next = jobLiveFromSummary(summary);
+        jobs.set(summary.id, { ...next, lastLine: current?.lastLine ?? summary.lastLine });
+      }
+      // Bound the map: drop the oldest settled entries beyond the last 50.
+      if (jobs.size > 50) {
+        const settled = [...jobs.values()]
+          .filter((job) => !(job.status === "queued" || job.status === "running"))
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+        for (const job of settled.slice(0, jobs.size - 50)) jobs.delete(job.id);
+      }
+    } catch {
+      // Older hub without the endpoint — SSE still fills the map.
+    }
+  }
+
   async function init(): Promise<void> {
     try {
       const recent = await (options.fetchEventsRecentFn ?? fetchEventsRecent)(200);
@@ -208,6 +268,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       // re-fetches, and a hard failure here used to leave the store dead
       // (no SSE, no retry) rendering a misleading "no nodes" banner.
     }
+    void refreshJobs();
     if (stopped) return;
 
     if (EventSourceImpl) {
@@ -261,6 +322,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     snapshots,
     llm,
     benches,
+    jobs,
+    runningJobs,
     events,
     usageLatest,
     getLlm,
@@ -271,6 +334,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     stop,
     ingest,
     refreshNodes,
+    refreshJobs,
   };
 }
 

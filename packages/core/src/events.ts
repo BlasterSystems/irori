@@ -79,16 +79,28 @@ export const benchEventSchema = z.object({
     .nullable(),
 });
 
-/** Terminal job settlement (M4/M5 jobs) — one frame per settled job. */
+/** Job lifecycle (M4/M5 jobs) — `running` on dispatch (IRI-028), then one
+ *  terminal frame per settled job. */
 export const jobEventSchema = z.object({
   type: z.literal("job"),
   serverTimeMs: z.number(),
   nodeId: z.string().uuid(),
   jobId: z.string().uuid(),
   kind: z.string(),
-  status: z.enum(["succeeded", "failed", "canceled"]),
+  status: z.enum(["running", "succeeded", "failed", "canceled"]),
   exitCode: z.number().int().nullable(),
   durationMs: z.number().nullable(),
+});
+
+/** One streamed job-output line, throttled server-side (IRI-028). The full
+ *  ring stays in `job_output`; this frame keeps the Activity drawer live. */
+export const jobProgressEventSchema = z.object({
+  type: z.literal("job-progress"),
+  serverTimeMs: z.number(),
+  nodeId: z.string().uuid(),
+  jobId: z.string().uuid(),
+  seq: z.number().int().nonnegative(),
+  line: z.string(),
 });
 
 /** GPU throttle-reason set changed for one card — computed server-side from
@@ -119,6 +131,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   setupTransferEventSchema,
   benchEventSchema,
   jobEventSchema,
+  jobProgressEventSchema,
   thermalEventSchema,
   usageEventSchema,
 ]);
@@ -131,5 +144,6 @@ export type SetupStateEvent = z.infer<typeof setupStateEventSchema>;
 export type SetupTransferEvent = z.infer<typeof setupTransferEventSchema>;
 export type BenchEvent = z.infer<typeof benchEventSchema>;
 export type JobEvent = z.infer<typeof jobEventSchema>;
+export type JobProgressEvent = z.infer<typeof jobProgressEventSchema>;
 export type ThermalEvent = z.infer<typeof thermalEventSchema>;
 export type UsageEvent = z.infer<typeof usageEventSchema>;

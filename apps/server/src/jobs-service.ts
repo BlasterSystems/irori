@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { cleanupRuns, jobOutput, jobs, modelMeta, nodeModels, settings } from "@irori/db";
+import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -42,6 +42,34 @@ async function settleCleanupRun(db: Db, jobId: string, kind: "hygiene-audit" | "
 }
 
 /**
+ * IRI-028: persists a succeeded `models-inventory` job's JSON report (the
+ * agent's FINAL output line, validated against the core schema) into
+ * node_inventory. A failed job leaves the previous report untouched.
+ */
+async function settleInventory(db: Db, nodeId: string, jobId: string): Promise<void> {
+  const [last] = await db
+    .select({ line: jobOutput.line })
+    .from(jobOutput)
+    .where(eq(jobOutput.jobId, jobId))
+    .orderBy(desc(jobOutput.seq))
+    .limit(1);
+  if (last === undefined) return;
+  let report: unknown;
+  try {
+    report = JSON.parse(last.line);
+  } catch {
+    return;
+  }
+  const parsed = nodeInventorySchema.safeParse(report);
+  if (!parsed.success) return;
+  const updatedAt = new Date();
+  await db
+    .insert(nodeInventory)
+    .values({ nodeId, report: parsed.data, updatedAt })
+    .onConflictDoUpdate({ target: nodeInventory.nodeId, set: { report: parsed.data, updatedAt } });
+}
+
+/**
  * Jobs subsystem for apps/server (M4): one active job per node, streamed
  * output ring (last MAX_OUTPUT_LINES per job), model_meta cache from catalog
  * frames. Canonical persistence home is packages/db — kept here for the same
@@ -71,6 +99,15 @@ const CATALOG_MUTATING_KINDS = new Set([
   "cleanup-staging",
 ]);
 
+/** Job kinds that can change what a node holds (store or local cache) — drop
+ *  the cached inventory so the next node-detail read refreshes it (IRI-028). */
+const INVENTORY_MUTATING_KINDS = new Set([
+  ...CATALOG_MUTATING_KINDS,
+  "delete-local",
+  "sync-local",
+  "push",
+]);
+
 export interface JobRow {
   id: string;
   nodeId: string;
@@ -85,11 +122,20 @@ export interface JobRow {
 
 export type JobAgentSend = (nodeId: string, msg: unknown) => boolean;
 
+/** Recent-job row for the global Activity drawer (IRI-028): metadata + the
+ *  latest output line, so a drawer opened mid-job renders something useful
+ *  before fetching the full output. */
+export interface JobSummary extends JobRow {
+  lastLine: string | null;
+}
+
 export interface JobsService {
   /** Creates + dispatches a job; returns the row. Throws JobBusyError on conflict. */
   create(nodeId: string, kind: string, params: Record<string, unknown>): Promise<JobRow>;
   get(id: string): Promise<(JobRow & { output: Array<{ seq: number; line: string }> }) | null>;
   list(nodeId: string, limit?: number): Promise<JobRow[]>;
+  /** Recent jobs across every node, newest first, with their last output line. */
+  listAll(limit?: number): Promise<JobSummary[]>;
   cancel(id: string): Promise<boolean>;
   /** Agent frame routing (hub calls these). */
   onOutput(nodeId: string, jobId: string, seq: number, line: string): Promise<void>;
@@ -129,7 +175,21 @@ export interface JobSettledEvent {
   durationMs: number | null;
 }
 
-export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?: (event: JobSettledEvent) => void): JobsService {
+/** Dispatch transition of a job — SSE `job` frame with status `running`
+ *  (IRI-028), so the Activity drawer can show work it did not initiate. */
+export interface JobStartedEvent {
+  nodeId: string;
+  jobId: string;
+  kind: string;
+  startedAt: Date;
+}
+
+export function createJobsService(
+  db: Db,
+  sendToAgent: JobAgentSend,
+  onSettled?: (event: JobSettledEvent) => void,
+  onStarted?: (event: JobStartedEvent) => void,
+): JobsService {
   return {
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
@@ -174,8 +234,10 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?:
         }
         throw new JobDispatchError("node is not connected");
       }
-      await db.update(jobs).set({ status: "running", startedAt: new Date() }).where(eq(jobs.id, row.id));
-      return { ...row, status: "running", startedAt: new Date(), finishedAt: null, exitCode: null };
+      const startedAt = new Date();
+      await db.update(jobs).set({ status: "running", startedAt }).where(eq(jobs.id, row.id));
+      onStarted?.({ nodeId, jobId: row.id, kind, startedAt });
+      return { ...row, status: "running", startedAt, finishedAt: null, exitCode: null };
     },
 
     async get(id) {
@@ -197,6 +259,36 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?:
         .where(eq(jobs.nodeId, nodeId))
         .orderBy(desc(jobs.createdAt))
         .limit(limit);
+    },
+
+    async listAll(limit = 20) {
+      const capped = Math.min(Math.max(Math.trunc(limit), 1), 100);
+      const rows = (await db.execute(sql`
+        select j.id, j.node_id as "nodeId", j.kind, j.status, j.params,
+               j.exit_code as "exitCode", j.created_at as "createdAt",
+               j.started_at as "startedAt", j.finished_at as "finishedAt",
+               (select o.line from job_output o where o.job_id = j.id order by o.seq desc limit 1) as "lastLine"
+        from jobs j
+        order by j.created_at desc
+        limit ${capped}
+      `)) as unknown as Array<{
+        id: string;
+        nodeId: string;
+        kind: string;
+        status: JobRow["status"];
+        params: unknown;
+        exitCode: number | null;
+        createdAt: Date | string;
+        startedAt: Date | string | null;
+        finishedAt: Date | string | null;
+        lastLine: string | null;
+      }>;
+      return rows.map((row) => ({
+        ...row,
+        createdAt: new Date(row.createdAt),
+        startedAt: row.startedAt === null ? null : new Date(row.startedAt),
+        finishedAt: row.finishedAt === null ? null : new Date(row.finishedAt),
+      }));
     },
 
     async cancel(id) {
@@ -252,6 +344,8 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?:
       if (!row) return;
       if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
         await settleCleanupRun(db, jobId, row.kind, status);
+      } else if (row.kind === "models-inventory") {
+        if (status === "succeeded") await settleInventory(db, nodeId, jobId);
       } else if (row.kind === "hygiene-prevent") {
         // Prevention state (SPEC §11.6): log rotation applied iff the agent
         // wrote daemon.json successfully.
@@ -274,6 +368,12 @@ export function createJobsService(db: Db, sendToAgent: JobAgentSend, onSettled?:
           const [left] = await db.select({ model: nodeModels.model }).from(nodeModels).where(eq(nodeModels.model, name)).limit(1);
           if (left === undefined) await db.delete(modelMeta).where(eq(modelMeta.name, name));
         }
+      }
+      // Any model-ops settle can change what the node holds — even a failed
+      // delete leaves leftovers. Drop the cached inventory so the next node
+      // detail read (or the UI's post-settle refresh) rebuilds it.
+      if (INVENTORY_MUTATING_KINDS.has(row.kind)) {
+        await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
       }
       // Store contents may have changed: ask the node to re-report its catalog
       // so the Models page reflects downloads/deletes without manual refresh.

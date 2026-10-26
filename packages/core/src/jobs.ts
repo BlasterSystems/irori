@@ -27,6 +27,9 @@ export const JOB_KINDS = [
   "hygiene-audit",
   "hygiene-clean",
   "hygiene-prevent",
+  // Per-node model inventory (IRI-028) — read-only, agent-side; the final
+  // output line is the JSON report persisted into node_inventory.
+  "models-inventory",
   // Agent self-update (IRI-012, ADR-0007) — the agent replaces its own bundle
   // and restarts; settlement is hello-driven, params carry `expectedVersion`.
   "agent-update",
