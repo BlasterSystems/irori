@@ -19,3 +19,4 @@ export * from "./analytics.js";
 export * from "./usage.js";
 export * from "./usage-api.js";
 export * from "./hygiene.js";
+export * from "./inventory.js";

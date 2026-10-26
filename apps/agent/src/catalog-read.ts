@@ -52,7 +52,7 @@ const execFileAsync = promisify(execFile);
  * Async so a slow NAS never stalls the agent's event loop mid-catalog; GNU
  * `du -sb` falls back to a manual walk where it is unavailable (BSD/macOS).
  */
-async function dirBytes(path: string): Promise<number> {
+export async function dirBytes(path: string): Promise<number> {
   try {
     const { stdout } = await execFileAsync("du", ["-sb", path], { encoding: "utf8", timeout: 30_000 });
     const n = Number.parseInt(stdout.split("\t")[0] ?? "0", 10);

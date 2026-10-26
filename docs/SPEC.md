@@ -185,6 +185,18 @@ flowchart LR
   - **push** node → node over the CX7 fabric (parallel rsync streams,
     `--host` per link, round-robin). Head pulls once, fans out to workers.
   - **doctor / repair / catalog refresh** surfaced with two-click armed apply.
+- **Node drill-down inventory** (IRI-028): the node detail page lists what the
+  node actually holds — the modelctl store (active models + failed-delete
+  leftovers) when it has a `nasRoot`, and every local HF-cache registration per
+  user (modelctl local state is per user; a root agent lists each cache owner
+  through `runuser`). Rows carry size/repo/runtime and delete in place:
+  `nas-delete-apply` for store models, `delete-local` for a local registration,
+  `gc-objects` for a leftover. `nas-delete-apply` preflights every object and
+  staging directory with a create+unlink probe after the read-only `--json`
+  plan and **before** `--apply`, so a denied tree leaves the model active
+  instead of orphaning its data (the NAS store can be a CIFS mount whose ACLs
+  deny the agent's principal). The report is cached in `node_inventory` and
+  invalidated by every model-mutating job settle.
 - **Placement planning**: for model × node → `present / sync / push / unavailable`,
   offered as one-click remediations wherever a model is needed (serving
   start, setups). Capacity math shown (`free X GB · needs Y GB` minus
@@ -321,18 +333,30 @@ bootstrap and when the agent is off.
    - **Placement tie-in**: a failed capacity check offers
      "Clean up disk — est. +N GB" linking to the audit.
    - **UI contract**: per-node **Cleanup drawer** (Audit | History tabs,
-     models/serve drawer chrome). Audit = an 8-category `.hyrow` checklist —
-     checkbox · name + safety rationale · scaled bar · item count · size —
-     with **safe categories pre-checked and needs-care rows opt-in**
-     (diamond `care` chip; docker old images, HF cache, modelctl staging),
-     zero rows disabled. Flow: **dry-run plan → typed node-name confirm →
-     staged streamed run** (`.stage` rows per category; a failing category
-     flips to held/failed and the rest continue). Threshold chips:
+     models/serve drawer chrome). Audit = an 8-category checklist — checkbox ·
+     name + safety rationale · scaled bar · item count · size — with
+     **safe categories pre-checked and needs-care rows opt-in** (diamond
+     `care` chip; docker old images, HF cache, modelctl staging), zero rows
+     disabled. IRI-028: each category also lists its concrete targets
+     (`details`: old images, HF incomplete blobs vs unreferenced snapshots,
+     staging entries, compiler dirs, journal/tmp/core dirs) with per-target
+     bytes. Flow: **audit → typed node-name confirm → staged streamed run**
+     (no dry-run plan CTA; the audit is the plan; a failing category flips to
+     held/failed and the rest continue). Threshold chips:
      `chip--warn` ≥ 80 % usage, none under 80 %; completion lands in
      the drawer result, History (last 20 · 90 d; output kept 30 d), the fleet
      event log, and re-derives the chips. Prevention lives per-node at the
      drawer bottom (weekly safe-set `.pick` + one-time log-rotation state
      chip). Safety copy uses `--muted`, never `--faint`.
+
+   - **Activity** (IRI-028): a global topbar drawer lists every job across the
+     fleet — active first, then recent — with the last output line, expandable
+     output (the persisted 400-line ring) and cancel. The hub seeds it from
+     `GET /api/v1/jobs` and follows SSE `job` frames (running on dispatch,
+     terminal on settle) plus a throttled `job-progress` frame (≤1/s per job),
+     so leaving the modal that started a download never loses its log. Job
+     start/settle lines also land in the Overview Telemetry feed; progress
+     stays out of the feed ring.
 
 Bootstrap: server UI generates an install one-liner (or SSH-pushes the bundle
 using stored credentials): bundle + config (server URL, token) + root systemd
@@ -374,10 +398,10 @@ reported in every snapshot; upgrade = re-run install.
 | Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/agent-update`, `POST /api/v1/nodes/:id/token/rotate`, `GET /install-agent.sh`, `GET /irori-agent.service`, `GET /agent/irori-agent.mjs` |
 | Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE), `GET /api/v1/events/recent?limit=` (feed history, IRI-013) |
 | Inference | `GET /api/v1/nodes/:id/llm`, `PUT /:id/llm-ports`, `GET /api/v1/clusters/:id` |
-| Models | `GET /api/v1/models?scope=nas\|node:id&q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `POST /api/v1/models/:name/delete`, `POST /api/v1/nodes/:id/sync`, `POST /api/v1/nodes/:id/push`, `GET /api/v1/placement?model=&node=` |
+| Models | `GET /api/v1/models?q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `GET /api/v1/nodes/:id/models` + `POST /api/v1/nodes/:id/models/refresh` (per-node inventory, IRI-028), `POST /api/v1/nodes/:id/jobs` (`nas-delete-apply`, `delete-local`, `gc-objects`, `sync-local`, `push`), `GET /api/v1/placement?model=&node=` |
 | Serving | `GET/POST /api/v1/setups`, `PATCH/DELETE /api/v1/setups/:id`, `POST /api/v1/setups/:id/start\|stop`, `GET /api/v1/setups/:id/log` (stream) |
-| Jobs | `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel` |
-| Cleanup | `GET /api/v1/nodes/:id/cleanup/audit`, `POST /api/v1/nodes/:id/cleanup` (dry_run default) |
+| Jobs | `GET /api/v1/jobs?limit=` (recent, last output line), `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel`; SSE `job` (running + terminal) and throttled `job-progress` frames |
+| Cleanup | `GET /api/v1/nodes/:id/cleanup`, `PUT /api/v1/nodes/:id/hygiene`; agent-side `hygiene-audit` / `hygiene-clean` / `hygiene-prevent` jobs (the clean still accepts `dryRun`, the UI no longer plans first) |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |

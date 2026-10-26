@@ -3,11 +3,12 @@ import request from "supertest";
 import { nodeInfoSchema } from "@irori/core";
 import type { NodeStore } from "@irori/db";
 import { createApp, type AppDeps } from "../src/app.js";
+import { JobBusyError } from "../src/jobs-service.js";
 import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore, makeSnapshot } from "./helpers.js";
 
-function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> }; hfQuants?: { listQuants: (repo: string, token?: string | null) => Promise<unknown> } } = {}) {
+function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; inventory?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> }; hfQuants?: { listQuants: (repo: string, token?: string | null) => Promise<unknown> } } = {}) {
   const fake = makeFakeStore();
   const online = new Set<string>();
   const refreshed: string[] = [];
@@ -28,6 +29,7 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
       },
     }),
     getJobs: opts.jobs === undefined ? () => null : () => (opts.jobs as never),
+    getInventory: opts.inventory === undefined ? () => null : () => (opts.inventory as never),
     getHfToken: () => (opts.hfToken === undefined ? null : opts.hfToken),
     hfQuants: (opts.hfQuants ?? { listQuants: async () => ({}) }) as never,
     version: "test",
@@ -222,5 +224,105 @@ describe("app", () => {
     stored = null;
     await request(app).get("/api/v1/hf-quants?repo=org/model");
     expect(calls[1]).toEqual(["org/model", null]);
+  });
+});
+
+describe("node model inventory + activity routes (IRI-028)", () => {
+  const report = {
+    generatedAtMs: 1,
+    store: { root: "/mnt/llms", source: "catalog", warning: null, models: [{ name: "glm", repository: "org/glm", runtime: "vllm", bytes: 10 }], leftovers: [] },
+    local: [],
+  };
+
+  it("serves the cached inventory and 404s unknown nodes", async () => {
+    const fake = makeFakeStore();
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const inventory = { get: async (nodeId: string) => (nodeId === id ? { report, updatedAt: "2026-10-26T06:00:00.000Z" } : null) };
+    const { app } = makeApp({ inventory, store: fake.store });
+    const res = await request(app).get(`/api/v1/nodes/${id}/models`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ updatedAt: "2026-10-26T06:00:00.000Z", report: { store: { root: "/mnt/llms" } } });
+
+    const missing = await request(app).get("/api/v1/nodes/00000000-0000-4000-8000-000000000099/models");
+    expect(missing.status).toBe(404);
+  });
+
+  it("answers 503 when the inventory service is unavailable", async () => {
+    const { app, fake } = makeApp();
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    expect((await request(app).get(`/api/v1/nodes/${id}/models`)).status).toBe(503);
+  });
+
+  it("dispatches models-inventory on refresh and maps busy to 409", async () => {
+    const created: Array<{ nodeId: string; kind: string }> = [];
+    const jobs = {
+      create: async (nodeId: string, kind: string) => {
+        created.push({ nodeId, kind });
+        return {
+          id: "00000000-0000-4000-8000-000000000010",
+          nodeId,
+          kind,
+          status: "running",
+          params: {},
+          exitCode: null,
+          createdAt: new Date("2026-10-26T06:00:00.000Z"),
+          startedAt: new Date("2026-10-26T06:00:00.000Z"),
+          finishedAt: null,
+        };
+      },
+    };
+    const { app, fake } = makeApp({ jobs });
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const res = await request(app).post(`/api/v1/nodes/${id}/models/refresh`);
+    expect(res.status).toBe(202);
+    expect(res.body.job).toMatchObject({ kind: "models-inventory", status: "running" });
+    expect(created).toEqual([{ nodeId: id, kind: "models-inventory" }]);
+
+    const busyJobs = {
+      create: async () => {
+        throw new JobBusyError("node already has an active job");
+      },
+    };
+    const busy = makeApp({ jobs: busyJobs, store: fake.store });
+    expect((await request(busy.app).post(`/api/v1/nodes/${id}/models/refresh`)).status).toBe(409);
+  });
+
+  it("lists recent jobs across nodes with the last output line", async () => {
+    const jobs = {
+      listAll: async (limit: number) => {
+        expect(limit).toBe(5);
+        return [
+          {
+            id: "00000000-0000-4000-8000-000000000010",
+            nodeId: "00000000-0000-4000-8000-000000000001",
+            kind: "sync-local",
+            status: "running",
+            params: { name: "glm" },
+            exitCode: null,
+            createdAt: new Date("2026-10-26T06:00:00.000Z"),
+            startedAt: new Date("2026-10-26T06:00:01.000Z"),
+            finishedAt: null,
+            lastLine: "1.2 GB/s",
+          },
+        ];
+      },
+    };
+    const { app } = makeApp({ jobs });
+    const res = await request(app).get("/api/v1/jobs?limit=5");
+    expect(res.status).toBe(200);
+    expect(res.body.jobs).toEqual([
+      {
+        id: "00000000-0000-4000-8000-000000000010",
+        nodeId: "00000000-0000-4000-8000-000000000001",
+        kind: "sync-local",
+        status: "running",
+        params: { name: "glm" },
+        exitCode: null,
+        createdAt: "2026-10-26T06:00:00.000Z",
+        startedAt: "2026-10-26T06:00:01.000Z",
+        finishedAt: null,
+        lastLine: "1.2 GB/s",
+      },
+    ]);
   });
 });

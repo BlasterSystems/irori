@@ -4,6 +4,8 @@ import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
+import { buildInventory, resolveLocalUser } from "./inventory.js";
+import { runNasDeleteApply } from "./delete-preflight.js";
 import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
@@ -27,6 +29,8 @@ function fail(message: string): never {
 
 async function run(): Promise<void> {
   const config = loadConfig();
+  /** The cache owner for the agent's own modelctl registrations. */
+  const agentUser = os.userInfo().username;
   log(
     `irori agent ${AGENT_VERSION} (schema v${SCHEMA_VERSION}) starting — ` +
       `server ${config.serverUrl}, cadence ${config.cadenceMs} ms` +
@@ -128,7 +132,15 @@ async function run(): Promise<void> {
   });
 
   const jobs = new JobManager(
-    () => ({ nasRoot: transport.getNasRoot(), pin: config.modelctlPin, modelctlPath: config.modelctlPath, hfToken: transport.getHfToken() ?? config.hfToken, serverUrl: config.serverUrl }),
+    () => ({
+      nasRoot: transport.getNasRoot(),
+      pin: config.modelctlPin,
+      modelctlPath: config.modelctlPath,
+      hfToken: transport.getHfToken() ?? config.hfToken,
+      serverUrl: config.serverUrl,
+      agentUser,
+      resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
+    }),
     {
       onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
       onDone: (jobId, status, exitCode) => {
@@ -139,6 +151,31 @@ async function run(): Promise<void> {
     async (jobId, kind, params, emit, signal) => {
       void jobId;
       const hygieneCtx = { nasRoot: transport.getNasRoot(), modelctlPath: config.modelctlPath };
+      if (kind === "models-inventory") {
+        const report = await buildInventory({
+          nasRoot: transport.getNasRoot(),
+          modelctlPath: config.modelctlPath,
+          agentUser,
+        });
+        emit(JSON.stringify(report));
+        return { ok: true };
+      }
+      if (kind === "nas-delete-apply") {
+        // Dry-run plan → writability probe → apply (IRI-028): a denied object
+        // tree fails before the model is deactivated.
+        return runNasDeleteApply(
+          params,
+          {
+            nasRoot: transport.getNasRoot(),
+            pin: config.modelctlPin,
+            modelctlPath: config.modelctlPath,
+            hfToken: transport.getHfToken() ?? config.hfToken,
+            agentUser,
+          },
+          emit,
+          signal,
+        );
+      }
       if (kind === "hygiene-prevent") {
         const result = await applyDockerLogRotation(emit);
         return { ok: result.error === null };

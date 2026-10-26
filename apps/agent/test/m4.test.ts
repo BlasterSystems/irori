@@ -103,6 +103,31 @@ describe("buildCommand", () => {
   });
 });
 
+describe("delete-local cache owners (IRI-028)", () => {
+  const userCtx = {
+    ...ctx,
+    agentUser: "root",
+    resolveLocalUser: (user: string) =>
+      user === "operator" ? { home: "/home/operator", binary: "/home/operator/.local/bin/modelctl" } : null,
+  };
+
+  it("runs the agent user directly", () => {
+    const { argv } = buildCommand("delete-local", { name: "glm" }, userCtx);
+    expect(argv).toEqual(["modelctl", "delete-local", "glm"]);
+  });
+
+  it("wraps another cache owner in runuser with the resolved binary", () => {
+    const { argv } = buildCommand("delete-local", { name: "glm", user: "operator" }, userCtx);
+    expect(argv.slice(0, 6)).toEqual(["runuser", "-u", "operator", "--", "env", "-u"]);
+    expect(argv).toContain("HOME=/home/operator");
+    expect(argv.slice(-3)).toEqual(["/home/operator/.local/bin/modelctl", "delete-local", "glm"]);
+  });
+
+  it("rejects an unknown user instead of guessing a path", () => {
+    expect(() => buildCommand("delete-local", { name: "glm", user: "nobody" }, userCtx)).toThrow(/unknown local cache user/);
+  });
+});
+
 describe("JobManager", () => {
   const outputs: Array<{ jobId: string; seq: number; line: string }> = [];
   const dones: Array<{ jobId: string; status: string; exitCode: number | null }> = [];
