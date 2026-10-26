@@ -18,7 +18,10 @@ it("NodeCard keeps the DS card vocabulary", () => {
   for (const cls of ["card", "card__head", "card__body", "chip", "barrow", "bar__fill", "mono faint"]) {
     expect(nodeCardSource).toContain(cls);
   }
-  expect(nodeCardSource).toContain(":class=\"card.dotClass\"");
+  // IR-103: no status chip on healthy cards; offline is a strip + error border.
+  expect(nodeCardSource).toContain("card--offline");
+  expect(nodeCardSource).toContain("offline-strip");
+  expect(nodeCardSource).not.toContain("card.statusText");
   expect(nodeCardSource).toContain("waiting for first snapshot");
 });
 
