@@ -747,9 +747,11 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
           allNodes.find((n) => holderIds.has(n.id) && n.id !== targetId && n.enabled && online.has(n.id)) ??
           allNodes.find((n) => nasTargets.includes(n.id) && n.enabled && online.has(n.id));
         if (source !== undefined) {
+          // IR-101: dial the destination's cache user so the remote receive
+          // lands in that user's HF cache (modelctl ssh user == cache owner).
           pushStage(`${source.name} → ${target.name} (push)`, targetId, source.id, "push", {
             name: row.model,
-            hosts: [target.host],
+            hosts: [target.cacheUser ? `${target.cacheUser}@${target.host}` : target.host],
             jobs: 4,
           });
           continue;

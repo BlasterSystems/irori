@@ -1,0 +1,1 @@
+ALTER TABLE "nodes" ADD COLUMN "cache_user" text;

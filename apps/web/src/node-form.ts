@@ -4,8 +4,9 @@ import { NODE_KINDS, NODE_ROLES, type NodeCreatePayload, type NodeInfo, type Nod
 export const NODE_KIND_OPTIONS: readonly string[] = NODE_KINDS;
 export const NODE_ROLE_OPTIONS: readonly string[] = NODE_ROLES;
 
-/** Editable form state — ports/nasRoot stay strings until submit; kind/role
- *  are strings so <select v-model> typechecks (values come from the enums). */
+/** Editable form state — ports/nasRoot/cacheUser stay strings until submit;
+ *  kind/role are strings so <select v-model> typechecks (values come from the
+ *  enums). */
 export interface NodeFormState {
   name: string;
   kind: string;
@@ -13,10 +14,11 @@ export interface NodeFormState {
   host: string;
   ports: string;
   nasRoot: string;
+  cacheUser: string;
 }
 
 export function emptyNodeForm(): NodeFormState {
-  return { name: "", kind: "spark", role: "standalone", host: "", ports: "", nasRoot: "" };
+  return { name: "", kind: "spark", role: "standalone", host: "", ports: "", nasRoot: "", cacheUser: "" };
 }
 
 export function formFromNode(node: NodeInfo): NodeFormState {
@@ -27,6 +29,7 @@ export function formFromNode(node: NodeInfo): NodeFormState {
     host: node.host,
     ports: node.llmPorts.join(", "),
     nasRoot: node.nasRoot ?? "",
+    cacheUser: node.cacheUser ?? "",
   };
 }
 
@@ -59,6 +62,7 @@ export function toCreatePayload(state: NodeFormState): NodeCreatePayload {
     host: state.host.trim(),
     llmPorts: parsePorts(state.ports),
     nasRoot: state.nasRoot.trim() === "" ? null : state.nasRoot.trim(),
+    cacheUser: state.cacheUser.trim() === "" ? null : state.cacheUser.trim(),
   };
 }
 
@@ -72,5 +76,6 @@ export function toPatchPayload(state: NodeFormState): NodePatchPayload {
     host: state.host.trim(),
     llmPorts: parsePorts(state.ports),
     nasRoot: state.nasRoot.trim() === "" ? null : state.nasRoot.trim(),
+    cacheUser: state.cacheUser.trim() === "" ? null : state.cacheUser.trim(),
   };
 }

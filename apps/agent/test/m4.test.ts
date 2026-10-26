@@ -49,6 +49,84 @@ describe("buildCommand", () => {
     expect(argv).toEqual(["modelctl", "sync-local", "glm", "--source-root", "/mnt/nas", "--jobs", "4"]);
   });
 
+  it("wraps sync-local in runuser for the node's cache user (IR-101)", () => {
+    const cacheCtx = {
+      ...ctx,
+      agentUser: "root",
+      cacheUser: "piresbruno",
+      resolveLocalUser: (user: string) => ({ home: `/home/${user}`, binary: `/home/${user}/.local/bin/modelctl` }),
+    };
+    const { argv, shell } = buildCommand("sync-local", { name: "glm", jobs: 4 }, cacheCtx);
+    expect(shell).toBeUndefined();
+    expect(argv).toEqual([
+      "runuser",
+      "-u",
+      "piresbruno",
+      "--",
+      "env",
+      "-u",
+      "XDG_STATE_HOME",
+      "-u",
+      "HF_HOME",
+      "-u",
+      "HF_HUB_CACHE",
+      "HOME=/home/piresbruno",
+      "PATH=/home/piresbruno/.local/bin:/usr/local/bin:/usr/bin:/bin",
+      "/home/piresbruno/.local/bin/modelctl",
+      "sync-local",
+      "glm",
+      "--source-root",
+      "/mnt/nas",
+      "--jobs",
+      "4",
+    ]);
+  });
+
+  it("keeps sync-local unwrapped when the cache user is the agent itself (IR-101)", () => {
+    const selfCtx = { ...ctx, agentUser: "root", cacheUser: "root", resolveLocalUser: () => null };
+    const { argv } = buildCommand("sync-local", { name: "glm" }, selfCtx);
+    expect(argv).toEqual(["modelctl", "sync-local", "glm", "--source-root", "/mnt/nas"]);
+  });
+
+  it("fails sync-local with an actionable error when the cache user has no modelctl (IR-101)", () => {
+    const brokenCtx = { ...ctx, agentUser: "root", cacheUser: "piresbruno", resolveLocalUser: () => null };
+    expect(() => buildCommand("sync-local", { name: "glm" }, brokenCtx)).toThrow(/no modelctl for cache user "piresbruno"/);
+  });
+
+  it("wraps push in runuser for the source node's cache user (IR-101)", () => {
+    const cacheCtx = {
+      ...ctx,
+      agentUser: "root",
+      cacheUser: "piresbruno",
+      resolveLocalUser: (user: string) => ({ home: `/home/${user}`, binary: `/home/${user}/.local/bin/modelctl` }),
+    };
+    const { argv } = buildCommand("push", { name: "glm", hosts: ["piresbruno@10.100.24.1"], jobs: 4 }, cacheCtx);
+    expect(argv.slice(0, 13)).toEqual([
+      "runuser",
+      "-u",
+      "piresbruno",
+      "--",
+      "env",
+      "-u",
+      "XDG_STATE_HOME",
+      "-u",
+      "HF_HOME",
+      "-u",
+      "HF_HUB_CACHE",
+      "HOME=/home/piresbruno",
+      "PATH=/home/piresbruno/.local/bin:/usr/local/bin:/usr/bin:/bin",
+    ]);
+    expect(argv.slice(13)).toEqual([
+      "/home/piresbruno/.local/bin/modelctl",
+      "push",
+      "glm",
+      "--host",
+      "piresbruno@10.100.24.1",
+      "--jobs",
+      "4",
+    ]);
+  });
+
   it("maps push with repeated hosts and jobs", () => {
     const { argv } = buildCommand("push", { name: "glm", hosts: ["10.100.24.1", "10.100.25.1"], jobs: 8 }, ctx);
     expect(argv).toEqual(["modelctl", "push", "glm", "--host", "10.100.24.1", "--host", "10.100.25.1", "--jobs", "8"]);

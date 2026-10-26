@@ -246,4 +246,18 @@ describe("agent hub", () => {
     const cfg = (await handshakeConfig()) as object;
     expect("hfToken" in cfg).toBe(false);
   });
+
+  it("carries the node's cache user in config-update frames (IR-101)", async () => {
+    const { url, created, fake } = await setup();
+    await fake.store.patch(created.id, { cacheUser: "piresbruno" });
+
+    const ws = new WebSocket(url);
+    await opened(ws);
+    ws.send(hello(created.token));
+    const reply = nextMessage(ws);
+    const config = nextMessage(ws);
+    expect(await reply).toMatchObject({ type: "hello-ok" });
+    expect(await config).toMatchObject({ cacheUser: "piresbruno" });
+    ws.close();
+  });
 });

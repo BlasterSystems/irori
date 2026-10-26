@@ -23,6 +23,8 @@ export interface ModelctlCtx {
   agentUser?: string;
   /** IRI-028: resolves a cache owner for delete-local; null when unknown. */
   resolveLocalUser?: (user: string) => { home: string; binary: string } | null;
+  /** IR-101: the node's cache owner for transfers; null/absent = agent user. */
+  cacheUser?: string | null;
 }
 
 export class CommandBuildError extends Error {}
@@ -69,6 +71,46 @@ export function buildQueueYaml(entries: DownloadEntry[]): string {
 }
 
 const ROOT_FLAG = "--root";
+
+/**
+ * IR-101: transfers must land in the node's cache owner's HF cache — the
+ * registration state lives in the invoking user's home, so running as root
+ * with --cache-dir pointed at a user path would split state. When the node has
+ * a cache user, wrap modelctl in runuser with a scrubbed env (the IRI-028
+ * delete-local pattern). Home/binary resolve agent-side; the hub never sends
+ * paths. A missing user modelctl fails the build with an actionable error —
+ * it must never silently fall back to root's cache.
+ */
+function asCacheUser(argv: string[], ctx: ModelctlCtx, kind: string): { argv: string[]; raw?: boolean } {
+  const user = ctx.cacheUser?.trim();
+  if (!user || user === (ctx.agentUser ?? "root")) return { argv };
+  const resolved = ctx.resolveLocalUser?.(user) ?? null;
+  if (resolved === null) {
+    throw new CommandBuildError(
+      `${kind}: no modelctl for cache user "${user}" — install it for that user (sudo -u ${user} uv tool install "modelctl") or clear the node's cache user setting`,
+    );
+  }
+  return {
+    raw: true,
+    argv: [
+      "runuser",
+      "-u",
+      user,
+      "--",
+      "env",
+      "-u",
+      "XDG_STATE_HOME",
+      "-u",
+      "HF_HOME",
+      "-u",
+      "HF_HUB_CACHE",
+      `HOME=${resolved.home}`,
+      `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+      resolved.binary,
+      ...argv,
+    ],
+  };
+}
 
 /** Builds the argv for a job kind. Throws CommandBuildError on invalid params. */
 export function buildCommand(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string } {
@@ -142,7 +184,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       if (jobs) argv.push("--jobs", String(Math.floor(jobs)));
       const cache = str("cacheDir");
       if (cache) argv.push("--cache-dir", cache);
-      return { argv };
+      return asCacheUser(argv, ctx, "sync-local");
     }
     case "download":
     case "install": {
@@ -163,7 +205,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       if (cache) argv.push("--cache-dir", cache);
       const ssh = str("ssh");
       if (ssh) argv.push("--ssh", ssh);
-      return { argv };
+      return asCacheUser(argv, ctx, "push");
     }
     case "nas-delete": {
       const name = str("name");

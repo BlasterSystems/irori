@@ -48,6 +48,9 @@ export const nodes = pgTable(
     llmPorts: jsonb("llm_ports").notNull().default(sql`'[]'::jsonb`),
     /** NAS store root for model-ops nodes (M4); null otherwise. */
     nasRoot: text("nas_root"),
+    /** IR-101: optional cache owner — transfers (sync-local, push source) run
+     *  as this user so models land in that user's HF cache. */
+    cacheUser: text("cache_user"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -134,6 +134,7 @@ async function run(): Promise<void> {
   const jobs = new JobManager(
     () => ({
       nasRoot: transport.getNasRoot(),
+      cacheUser: transport.getCacheUser(),
       pin: config.modelctlPin,
       modelctlPath: config.modelctlPath,
       hfToken: transport.getHfToken() ?? config.hfToken,

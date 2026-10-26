@@ -132,6 +132,8 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       llmCadenceMs: row?.role === "worker" ? LLM_DETECT_CADENCE_MS : LLM_PROBE_CADENCE_MS,
       llmDetectOnly: row?.role === "worker",
       nasRoot: row?.nasRoot ?? null,
+      // IR-101: cache owner for transfers; null = the agent's own user.
+      cacheUser: row?.cacheUser ?? null,
     };
     // IRI-019: global HF token — set / clear / omit on read failure (the
     // agent keeps its current value when the key is absent).
