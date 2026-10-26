@@ -257,7 +257,7 @@ async function refreshCards(): Promise<void> {
 
 // ─── feed ───────────────────────────────────────────────────────────────────
 
-const feed = computed(() => feedLines(live.events.value, (id) => live.nodes.get(id)?.name ?? "node", 30));
+const feed = computed(() => feedLines(live.events.value, (id) => live.nodes.get(id)?.name ?? "node", 120, (jobId) => live.jobs.get(jobId)));
 
 // ─── add node + lifecycle ───────────────────────────────────────────────────
 

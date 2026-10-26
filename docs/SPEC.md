@@ -360,14 +360,15 @@ bootstrap and when the agent is off.
      drawer bottom (weekly safe-set `.pick` + one-time log-rotation state
      chip). Safety copy uses `--muted`, never `--faint`.
 
-   - **Activity** (IRI-028): a global topbar drawer lists every job across the
-     fleet — active first, then recent — with the last output line, expandable
-     output (the persisted 400-line ring) and cancel. The hub seeds it from
-     `GET /api/v1/jobs` and follows SSE `job` frames (running on dispatch,
-     terminal on settle) plus a throttled `job-progress` frame (≤1/s per job),
-     so leaving the modal that started a download never loses its log. Job
-     start/settle lines also land in the Overview Telemetry feed; progress
-     stays out of the feed ring.
+   - **Job activity** (IRI-028, reshaped by IR-102): job lifecycle lines
+     (`started`/`finished` with duration) and the throttled `job-progress`
+     output tail (≤1/s per job, deduped per line, node + kind context)
+     stream into the Overview **Telemetry** feed — there is no separate
+     Activity drawer. The feed caps at 120 lines; the hub seeds job context
+     from `GET /api/v1/jobs` and follows SSE `job` frames (running on
+     dispatch, terminal on settle). Progress lines are live-only — the
+     server's recent-events ring excludes them, so a reload keeps lifecycle
+     lines and the last known line, not the full tail.
 
 Bootstrap: server UI generates an install one-liner (or SSH-pushes the bundle
 using stored credentials): bundle + config (server URL, token) + root systemd
