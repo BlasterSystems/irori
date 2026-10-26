@@ -18,15 +18,13 @@ const card = computed(() =>
 </script>
 
 <template>
-  <a class="card card--link" :href="nodeHash(node.id)" :aria-label="`Open ${card.name} detail`">
+  <a class="card card--link" :class="{ 'card--offline': !card.online }" :href="nodeHash(node.id)" :aria-label="`Open ${card.name} detail`">
+    <div v-if="!card.online" class="offline-strip">OFFLINE</div>
     <div class="card__head">
       <div class="row">
-        <h3>{{ card.name }}</h3>
+        <h3 class="card__name">{{ card.name }}</h3>
         <span v-if="card.role !== 'standalone'" class="chip chip--accent">{{ card.role }}</span>
         <span class="chip">{{ card.kind }}</span>
-        <span class="chip" :class="card.online ? 'chip--ok' : 'chip--muted'">
-          <span class="dot" :class="card.dotClass" aria-hidden="true"></span>{{ card.statusText }}
-        </span>
       </div>
       <span v-if="card.agentVersion" class="mono faint">Agent {{ card.agentVersion }}</span>
       <span v-if="agentDrifts(card.agentVersion)" class="chip chip--warn">update</span>
@@ -48,5 +46,30 @@ const card = computed(() =>
 <style scoped>
 .card--link {
   display: block;
+}
+/* IR-103: online cards carry no status chip — liveness is the live rows.
+   Offline must be unmistakable: error border, strip, dimmed stale metrics. */
+.card--offline {
+  border-color: var(--error);
+}
+.offline-strip {
+  background: var(--error);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-align: center;
+  padding: 3px 8px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.card--offline .card__body {
+  opacity: 0.55;
+}
+.card__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 </style>
