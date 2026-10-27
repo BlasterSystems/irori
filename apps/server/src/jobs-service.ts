@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, type NodeInventory } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -46,27 +46,57 @@ async function settleCleanupRun(db: Db, jobId: string, kind: "hygiene-audit" | "
  * agent's FINAL output line, validated against the core schema) into
  * node_inventory. A failed job leaves the previous report untouched.
  */
-async function settleInventory(db: Db, nodeId: string, jobId: string): Promise<void> {
+async function settleInventory(db: Db, nodeId: string, jobId: string): Promise<NodeInventory | null> {
   const [last] = await db
     .select({ line: jobOutput.line })
     .from(jobOutput)
     .where(eq(jobOutput.jobId, jobId))
     .orderBy(desc(jobOutput.seq))
     .limit(1);
-  if (last === undefined) return;
+  if (last === undefined) return null;
   let report: unknown;
   try {
     report = JSON.parse(last.line);
   } catch {
-    return;
+    return null;
   }
   const parsed = nodeInventorySchema.safeParse(report);
-  if (!parsed.success) return;
+  if (!parsed.success) return null;
   const updatedAt = new Date();
   await db
     .insert(nodeInventory)
     .values({ nodeId, report: parsed.data, updatedAt })
     .onConflictDoUpdate({ target: nodeInventory.nodeId, set: { report: parsed.data, updatedAt } });
+  return parsed.data;
+}
+
+/**
+ * IR-105: after a succeeded models-inventory read, converge every cache user
+ * whose reported modelctl is below the hub pin — dispatch the existing
+ * version-gated `modelctl-install` job per user. Silent skips (unset pin,
+ * busy node, offline agent) just wait for the next inventory read; the
+ * install job itself skips without a transfer when the version satisfies the
+ * gate, so a stale env pin can never downgrade a newer binary.
+ */
+async function autoProvisionModelctl(
+  create: (nodeId: string, kind: string, params: Record<string, unknown>) => Promise<JobRow>,
+  getPin: () => Promise<string | null>,
+  nodeId: string,
+  report: NodeInventory,
+): Promise<void> {
+  const pin = await getPin();
+  if (pin === null) return;
+  for (const cache of report.local) {
+    const version = cache.modelctlVersion;
+    if (version === null || !/^\d+\.\d+\.\d+$/.test(version)) continue;
+    if (compareVersions(version, pin) >= 0) continue;
+    try {
+      await create(nodeId, "modelctl-install", { user: cache.user });
+    } catch (err) {
+      if (err instanceof JobBusyError || err instanceof JobDispatchError) continue;
+      throw err;
+    }
+  }
 }
 
 /**
@@ -190,8 +220,10 @@ export function createJobsService(
   sendToAgent: JobAgentSend,
   onSettled?: (event: JobSettledEvent) => void,
   onStarted?: (event: JobStartedEvent) => void,
+  /** IR-105: hub-pinned modelctl version; null/absent = no auto-provisioning. */
+  getModelctlPin?: () => Promise<string | null>,
 ): JobsService {
-  return {
+  const service: JobsService = {
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
       const [active] = await db
@@ -346,7 +378,12 @@ export function createJobsService(
       if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
         await settleCleanupRun(db, jobId, row.kind, status);
       } else if (row.kind === "models-inventory") {
-        if (status === "succeeded") await settleInventory(db, nodeId, jobId);
+        if (status === "succeeded") {
+          const report = await settleInventory(db, nodeId, jobId);
+          if (report !== null && getModelctlPin !== undefined) {
+            await autoProvisionModelctl((n, k, p) => service.create(n, k, p), getModelctlPin, nodeId, report);
+          }
+        }
       } else if (row.kind === "hygiene-prevent") {
         // Prevention state (SPEC §11.6): log rotation applied iff the agent
         // wrote daemon.json successfully.
@@ -520,4 +557,5 @@ export function createJobsService(
       return "succeeded";
     },
   };
+  return service;
 }

@@ -143,6 +143,8 @@ export class AgentTransport {
   private cacheUser: string | null = null;
   /** IRI-019: global HF token from the last config-update (null = unset/cleared). */
   private hfToken: string | null = null;
+  /** IR-105: hub-pinned modelctl version from the last config-update (null = env fallback). */
+  private modelctlPin: string | null = null;
 
   constructor(options: AgentTransportOptions) {
     this.token = options.token;
@@ -208,6 +210,11 @@ export class AgentTransport {
    */
   getHfToken(): string | null {
     return this.hfToken;
+  }
+
+  /** IR-105: hub-pinned modelctl version; null = the env pin applies. */
+  getModelctlPin(): string | null {
+    return this.modelctlPin;
   }
 
   /** Snapshots currently buffered for the next connection. */
@@ -456,6 +463,9 @@ export class AgentTransport {
     // IRI-019: string = set, null = clear (env fallback applies), absent
     // (old server) = keep the current value.
     if (msg.hfToken !== undefined) this.hfToken = msg.hfToken;
+    // IR-105: string = converge to the hub pin, null = clear (env fallback
+    // applies), absent (old server) = keep the current value.
+    if (msg.modelctlPin !== undefined) this.modelctlPin = msg.modelctlPin;
     this.log(`cadence updated to ${msg.cadenceMs} ms`);
     if (this.ready) this.startSnapshotTimer();
 

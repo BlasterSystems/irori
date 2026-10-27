@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDbHandle, jobs, modelMeta, nodeInventory, nodeModels, nodes, type Db, type DbHandle } from "@irori/db";
+import { createDbHandle, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, nodes, type Db, type DbHandle } from "@irori/db";
 import { createJobsService, type JobSettledEvent, type JobsService } from "../src/jobs-service.js";
 
 /**
@@ -126,5 +126,45 @@ d("job settle events (db integration)", () => {
     expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
 
     await db.delete(nodeModels).where(eq(nodeModels.model, name));
+  });
+
+  it("auto-provisions below-pin cache users after an inventory settle (IR-105)", async () => {
+    const withPin = createJobsService(db, () => true, (e) => settled.push(e), undefined, async () => "0.23.0");
+    const report = {
+      generatedAtMs: Date.now(),
+      store: null,
+      local: [
+        { user: "root", home: "/root", cacheDir: "/root/.cache/huggingface/hub", modelctlVersion: "0.23.0", error: null, models: [], orphans: [] },
+        { user: "operator", home: "/home/operator", cacheDir: "/home/operator/.cache/huggingface/hub", modelctlVersion: "0.20.1", error: null, models: [], orphans: [] },
+      ],
+    };
+    const inv = await withPin.create(nodeId, "models-inventory", {});
+    await db.insert(jobOutput).values({ jobId: inv.id, seq: 1, line: JSON.stringify(report) });
+    await withPin.onDone(nodeId, inv.id, "succeeded", 0);
+    const rows = await db.select().from(jobs).where(eq(jobs.nodeId, nodeId));
+    const active = (j: (typeof rows)[number]) => j.status === "queued" || j.status === "running";
+    const installs = rows.filter((j) => j.kind === "modelctl-install" && active(j));
+    // Only the below-pin user gets an install job; the satisfied one is skipped.
+    expect(installs).toHaveLength(1);
+    expect(installs[0]!.params).toEqual({ user: "operator" });
+    // Free the one-active slot: the dispatched install stays running (the
+    // fake agent never settles it).
+    await withPin.onDone(nodeId, installs[0]!.id, "succeeded", 0);
+  });
+
+  it("does not auto-provision when the pin is unset (IR-105)", async () => {
+    const withoutPin = createJobsService(db, () => true, (e) => settled.push(e));
+    const report = {
+      generatedAtMs: Date.now(),
+      store: null,
+      local: [
+        { user: "operator", home: "/home/p", cacheDir: "/home/p/.cache/huggingface/hub", modelctlVersion: "0.20.1", error: null, models: [], orphans: [] },
+      ],
+    };
+    const inv = await withoutPin.create(nodeId, "models-inventory", {});
+    await db.insert(jobOutput).values({ jobId: inv.id, seq: 1, line: JSON.stringify(report) });
+    await withoutPin.onDone(nodeId, inv.id, "succeeded", 0);
+    const rows = await db.select().from(jobs).where(eq(jobs.nodeId, nodeId));
+    expect(rows.filter((j) => j.kind === "modelctl-install" && (j.status === "queued" || j.status === "running"))).toHaveLength(0);
   });
 });

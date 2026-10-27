@@ -89,6 +89,8 @@ export interface AgentHubDeps {
    * the agent keeps its current token). Optional: hub tests may omit it.
    */
   getHfToken?: () => Promise<string | null | undefined>;
+  /** IR-105: hub-pinned modelctl version; null = unset (agents keep env), absent = getter unavailable. */
+  getModelctlPin?: () => Promise<string | null>;
   /** Injectables for tests. */
   writeFlushMs?: number;
   markSeenThrottleMs?: number;
@@ -139,6 +141,11 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     // agent keeps its current value when the key is absent).
     const hfToken = deps.getHfToken === undefined ? undefined : await deps.getHfToken().catch(() => undefined);
     if (hfToken !== undefined) msg.hfToken = hfToken;
+    // IR-105: hub-pinned modelctl version — absent on a read failure (the
+    // agent keeps its current value); null = unset, so the agent's env pin
+    // applies again.
+    const modelctlPin = deps.getModelctlPin === undefined ? undefined : await deps.getModelctlPin().catch(() => undefined);
+    if (modelctlPin !== undefined) msg.modelctlPin = modelctlPin;
     sendMsg(msg);
   };
 

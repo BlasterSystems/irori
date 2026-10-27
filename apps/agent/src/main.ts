@@ -135,7 +135,7 @@ async function run(): Promise<void> {
     () => ({
       nasRoot: transport.getNasRoot(),
       cacheUser: transport.getCacheUser(),
-      pin: config.modelctlPin,
+      pin: transport.getModelctlPin() ?? config.modelctlPin,
       modelctlPath: config.modelctlPath,
       hfToken: transport.getHfToken() ?? config.hfToken,
       serverUrl: config.serverUrl,
@@ -168,7 +168,7 @@ async function run(): Promise<void> {
           params,
           {
             nasRoot: transport.getNasRoot(),
-            pin: config.modelctlPin,
+            pin: transport.getModelctlPin() ?? config.modelctlPin,
             modelctlPath: config.modelctlPath,
             hfToken: transport.getHfToken() ?? config.hfToken,
             agentUser,

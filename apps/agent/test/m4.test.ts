@@ -185,9 +185,40 @@ describe("buildCommand", () => {
     expect(argv[0]).toBe("bash");
     // Pinned release tag + PATH export + enforced minimum version.
     expect(argv[2]).toContain('export PATH="/root/.local/bin:$PATH"');
-    expect(argv[2]).toContain('uv tool install --force "git+https://github.com/piresbruno/modelctl@v0.20.1"');
+    expect(argv[2]).toContain('PIN="0.20.1"');
+    expect(argv[2]).toContain('uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"');
     expect(argv[2]).toContain("sort -V");
+    // IR-105: the skip-if-newer pre-check runs before the install — a stale
+    // env pin on the node must never downgrade a newer binary.
+    expect(argv[2]).toContain("skipping install");
+    expect(argv[2].indexOf("skipping install")).toBeLessThan(argv[2].indexOf("uv tool install"));
     expect(() => buildCommand("modelctl-install", {}, { ...ctx, pin: "not-semver" })).toThrow(CommandBuildError);
+  });
+
+  it("provisions a cache user's modelctl via runuser (IR-105)", () => {
+    const resolved = { home: "/home/operator", binary: "/home/operator/.local/bin/modelctl" };
+    const built = buildCommand("modelctl-install", { user: "operator" }, { ...ctx, resolveLocalUser: () => resolved });
+    expect(built.raw).toBe(true);
+    expect(built.argv!.slice(0, 13)).toEqual([
+      "runuser",
+      "-u",
+      "operator",
+      "--",
+      "env",
+      "-u",
+      "XDG_STATE_HOME",
+      "-u",
+      "HF_HOME",
+      "-u",
+      "HF_HUB_CACHE",
+      "HOME=/home/operator",
+      "PATH=/home/operator/.local/bin:/usr/local/bin:/usr/bin:/bin",
+    ]);
+    expect(built.argv![13]).toBe("bash");
+    expect(built.argv![15]).toContain('export PATH="/home/operator/.local/bin:$PATH"');
+    expect(() =>
+      buildCommand("modelctl-install", { user: "ghost" }, { ...ctx, resolveLocalUser: () => null }),
+    ).toThrow(/no modelctl for cache user "ghost"/);
   });
 
   it("errors without a store root and for unknown kinds", () => {

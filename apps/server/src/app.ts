@@ -9,8 +9,9 @@ import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
 import { type InventoryService } from "./inventory-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
-import { energyCostPutSchema, tokenCostPutSchema, type EnergyCost, type TokenCost } from "@irori/core";
+import { energyCostPutSchema, tokenCostPutSchema, modelctlPinPutSchema, type EnergyCost, type TokenCost, type ModelctlPinResponse } from "@irori/core";
 import type { CostService } from "./cost.js";
+import type { ModelctlPinService } from "./modelctl-pin.js";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
 import type { UsageChats } from "./usage-chats.js";
@@ -134,6 +135,10 @@ export interface AppDeps {
   /** IRI-025: energy/token cost settings. Optional — when absent or null
    *  (degraded), the cost settings routes answer 503 like the cadence routes. */
   getCost?: () => CostService | null;
+  /** IR-105: hub-pinned modelctl version. Optional — when absent or null
+   *  (degraded), the setting routes answer 503 and no auto-provisioning is
+   *  dispatched (agents keep their env pin). */
+  getModelctlPin?: () => ModelctlPinService | null;
   getCadenceMs?: () => number;
   setCadenceMs?: (cadenceMs: number) => void;
   /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
@@ -276,6 +281,26 @@ export function createApp(deps: AppDeps): Express {
     if (!body.success) return sendZodError(res, body.error);
     await cost.setEnergy(body.data);
     res.json({ energyCost: body.data } satisfies { energyCost: EnergyCost });
+  });
+
+  // IR-105: hub-pinned modelctl version. Null = not configured — agents keep
+  // their env pin and no auto-provisioning is dispatched. A PUT pushes the
+  // new pin to every connected agent via config-update (cadence pattern).
+  app.get("/api/v1/settings/modelctl-pin", async (_req, res) => {
+    const pin = deps.getModelctlPin?.() ?? null;
+    if (pin === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ pin: await pin.get() } satisfies ModelctlPinResponse);
+  });
+
+  app.put("/api/v1/settings/modelctl-pin", async (req, res) => {
+    const pin = deps.getModelctlPin?.() ?? null;
+    if (pin === null) return res.status(503).json({ error: "database unavailable" });
+    const body = modelctlPinPutSchema.safeParse(req.body);
+    if (!body.success) return sendZodError(res, body.error);
+    await pin.set(body.data.pin);
+    const hub = deps.getHub();
+    if (hub !== null) for (const nodeId of hub.online()) void hub.refreshConfig(nodeId).catch(() => {});
+    res.json({ pin: body.data.pin } satisfies { pin: string });
   });
 
   app.get("/api/v1/settings/token-cost", async (_req, res) => {
