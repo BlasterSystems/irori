@@ -200,7 +200,11 @@ flowchart LR
   node actually holds — the modelctl store (active models + failed-delete
   leftovers) when it has a `nasRoot`, and every local HF-cache registration per
   user (modelctl local state is per user; a root agent lists each cache owner
-  through `runuser`). Rows carry size/repo/runtime and delete in place:
+  through `runuser`). Unregistered `models--*` dirs are listed as orphans with
+  a Register action that runs the modelctl 0.23 `register-local` job (IR-104,
+  ADR-0012): the entry is verified against the active store object by hash —
+  blob identity plus small-file content hashes — and registered with no
+  transfer; any mismatch refuses and writes nothing. Rows carry size/repo/runtime and delete in place:
   `nas-delete-apply` for store models, `delete-local` for a local registration,
   `gc-objects` for a leftover. `nas-delete-apply` preflights every object and
   staging directory with a create+unlink probe after the read-only `--json`
@@ -410,7 +414,7 @@ reported in every snapshot; upgrade = re-run install.
 | Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/agent-update`, `POST /api/v1/nodes/:id/token/rotate`, `GET /install-agent.sh`, `GET /irori-agent.service`, `GET /agent/irori-agent.mjs` |
 | Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE), `GET /api/v1/events/recent?limit=` (feed history, IRI-013) |
 | Inference | `GET /api/v1/nodes/:id/llm`, `PUT /:id/llm-ports`, `GET /api/v1/clusters/:id` |
-| Models | `GET /api/v1/models?q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `GET /api/v1/nodes/:id/models` + `POST /api/v1/nodes/:id/models/refresh` (per-node inventory, IRI-028), `POST /api/v1/nodes/:id/jobs` (`nas-delete-apply`, `delete-local`, `gc-objects`, `sync-local`, `push`), `GET /api/v1/placement?model=&node=` |
+| Models | `GET /api/v1/models?q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `GET /api/v1/nodes/:id/models` + `POST /api/v1/nodes/:id/models/refresh` (per-node inventory, IRI-028), `POST /api/v1/nodes/:id/jobs` (`nas-delete-apply`, `delete-local`, `register-local`, `gc-objects`, `sync-local`, `push`), `GET /api/v1/placement?model=&node=` |
 | Serving | `GET/POST /api/v1/setups`, `PATCH/DELETE /api/v1/setups/:id`, `POST /api/v1/setups/:id/start\|stop`, `GET /api/v1/setups/:id/log` (stream) |
 | Jobs | `GET /api/v1/jobs?limit=` (recent, last output line), `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel`; SSE `job` (running + terminal) and throttled `job-progress` frames |
 | Cleanup | `GET /api/v1/nodes/:id/cleanup`, `PUT /api/v1/nodes/:id/hygiene`; agent-side `hygiene-audit` / `hygiene-clean` / `hygiene-prevent` jobs (the clean still accepts `dryRun`, the UI no longer plans first) |

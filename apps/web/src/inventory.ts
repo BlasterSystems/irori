@@ -108,6 +108,25 @@ export function deleteConfirmCopy(target: DeleteTarget): { title: string; body: 
   }
 }
 
+/** IR-104: a register-local request for an unregistered cache dir. */
+export interface RegisterRequest {
+  kind: "register-local";
+  params: { name: string; user: string };
+}
+
+export function registerRequestFor(repo: string, user: string): RegisterRequest {
+  return { kind: "register-local", params: { name: repo, user } };
+}
+
+/** Human title/body for the register confirm card. */
+export function registerCopy(repo: string): { title: string; body: string; danger: string } {
+  return {
+    title: `Register ${repo} from the local cache?`,
+    body: "Verifies this cache entry against the NAS object by hash (blob identity plus small-file hashes) and writes the registration. Nothing is transferred; any mismatch refuses the registration.",
+    danger: "Register",
+  };
+}
+
 /** The snapshot storage entry backing a store root (mount prefix, longest wins). */
 export function storeMountLabel(
   nasRoot: string,
