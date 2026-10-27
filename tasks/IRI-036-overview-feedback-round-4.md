@@ -72,7 +72,8 @@ Three owner changes to the Overview page from the 2026-10-27 feedback round:
 
 ## Deploy
 
-- (pending)
+- (pending — PR #55 open, awaiting owner merge; CI verify 1m50s + docs-check green;
+  next dev tag dev-0.3.0-46)
 
 ## Review
 
