@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
+import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { SCHEMA_VERSION, type HardwareSnapshot } from "@irori/core";
 import { createAgentHub, type AgentHubDeps } from "../src/hub.js";
@@ -64,6 +65,32 @@ it("carries the hub modelctl pin in the hello config-update (IR-105)", async () 
 
 const snapshotMsg = (overrides: Partial<HardwareSnapshot> = {}) =>
   JSON.stringify({ type: "snapshot", snapshot: makeSnapshot(overrides) });
+
+it("settles job-done only after the preceding job-output has landed (IR-106)", async () => {
+  const jobId = randomUUID();
+  let outputLanded = false;
+  const dones: boolean[] = [];
+  const { url, created } = await setup({
+    jobEvents: {
+      onOutput: async () => {
+        await sleep(50);
+        outputLanded = true;
+      },
+      onDone: async () => {
+        dones.push(outputLanded);
+      },
+      onCatalog: async () => {},
+    },
+  });
+  const ws = await authenticate(url, created.token);
+  // Back-to-back: without the per-socket job chain the settle would race the
+  // insert and the models-inventory report would silently never persist.
+  ws.send(JSON.stringify({ type: "job-output", jobId, seq: 1, line: "{}" }));
+  ws.send(JSON.stringify({ type: "job-done", jobId, status: "succeeded", exitCode: 0 }));
+  await waitUntil(() => dones.length > 0);
+  expect(dones).toEqual([true]);
+  ws.close();
+});
 
 async function authenticate(url: string, token: string) {
   const ws = new WebSocket(url);
