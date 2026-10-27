@@ -309,6 +309,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     // ack) is preserved despite the async DB work.
     let setupChain = Promise.resolve();
     let usageChain = Promise.resolve();
+    // IR-106: job output and terminal frames ride their own chain — the
+    // settle reads the output row it just wrote (models-inventory report),
+    // so back-to-back frames must not race the insert.
+    let jobChain = Promise.resolve();
     ws.on("message", (raw: RawData) => {
       if (nodeId === null) return;
       const text = Buffer.isBuffer(raw)
@@ -332,13 +336,18 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       console.error(`[irori-server] agentServerFrame ${parsed.data.type} from ${nodeId}`);
       const currentId: string = nodeId;
       const frame = parsed.data;
-      if (frame.type === "job-output") {
-        void deps.jobEvents.onOutput(currentId, frame.jobId, frame.seq, frame.line).catch(() => {});
-      } else if (frame.type === "job-done") {
-        // Terminal: a transient DB failure must not strand the one-active slot.
-        void deps.jobEvents
-          .onDone(currentId, frame.jobId, frame.status, frame.exitCode)
-          .catch(() => enqueuePending(currentId, "job-done", { jobId: frame.jobId, status: frame.status, exitCode: frame.exitCode }));
+      if (frame.type === "job-output" || frame.type === "job-done") {
+        jobChain = jobChain.then(async () => {
+          try {
+            if (frame.type === "job-output") await deps.jobEvents.onOutput(currentId, frame.jobId, frame.seq, frame.line);
+            else await deps.jobEvents.onDone(currentId, frame.jobId, frame.status, frame.exitCode);
+          } catch {
+            // Terminal: a transient DB failure must not strand the one-active slot.
+            if (frame.type === "job-done") {
+              enqueuePending(currentId, "job-done", { jobId: frame.jobId, status: frame.status, exitCode: frame.exitCode });
+            }
+          }
+        });
       } else if (frame.type === "catalog") {
         void deps.jobEvents.onCatalog(currentId, frame.source, frame.entries).catch(() => {});
       } else if (frame.type === "bench-progress") {

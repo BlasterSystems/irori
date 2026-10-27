@@ -200,9 +200,14 @@ const storeMount = computed(() => {
   const root = inventory.value?.store?.root ?? node.value?.nasRoot ?? "";
   return root.length === 0 ? "" : storeMountLabel(root, snapshot.value?.storage ?? null);
 });
-const inventoryReadLabel = computed(() =>
-  inventoryUpdatedAt.value === null ? null : new Date(inventoryUpdatedAt.value).toLocaleTimeString(),
-);
+const inventoryReadLabel = computed(() => {
+  if (inventoryUpdatedAt.value === null) return null;
+  const at = new Date(inventoryUpdatedAt.value);
+  // A same-day read is unambiguous; anything older carries its date, or a
+  // day-old report masquerades as fresh (IR-106).
+  const sameDay = at.toDateString() === new Date().toDateString();
+  return sameDay ? at.toLocaleTimeString() : `${at.toLocaleDateString()} ${at.toLocaleTimeString()}`;
+});
 
 async function loadInventory(): Promise<void> {
   const seq = ++inventorySeq;
