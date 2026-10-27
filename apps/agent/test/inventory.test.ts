@@ -165,6 +165,8 @@ describe("buildInventory", () => {
     const home = join(dir, "home");
     const snapshot = join(home, ".cache/huggingface/hub/models--o--r/snapshots", "b".repeat(40));
     mkdirSync(snapshot, { recursive: true });
+    // IR-104: an unregistered models--* dir must surface as an orphan.
+    mkdirSync(join(home, ".cache/huggingface/hub/models--other--orphan"), { recursive: true });
     mkdirSync(join(home, ".cache/huggingface"), { recursive: true });
     writeFileSync(join(snapshot, "w.bin"), "1234567890");
 
@@ -192,6 +194,7 @@ describe("buildInventory", () => {
     expect(report.local).toHaveLength(1);
     expect(report.local[0]).toMatchObject({ user: "root", modelctlVersion: "0.20.1", error: null });
     expect(report.local[0]?.models).toEqual([{ name: "loc", repository: "o/r", runtime: "vllm", bytes: 10 }]);
+    expect(report.local[0]?.orphans).toEqual(["other/orphan"]);
   });
 
   it("reports a local-only node and per-cache errors", async () => {
@@ -210,5 +213,6 @@ describe("buildInventory", () => {
     expect(report.store).toBeNull();
     expect(report.local[0]?.error).toMatch(/modelctl exploded/);
     expect(report.local[0]?.models).toEqual([]);
+    expect(report.local[0]?.orphans).toEqual([]);
   });
 });

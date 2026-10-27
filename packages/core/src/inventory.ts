@@ -54,6 +54,9 @@ export const inventoryLocalCacheSchema = z.object({
   /** Non-null when this cache could not be listed (binary missing, timeout). */
   error: z.string().nullable(),
   models: z.array(inventoryModelSchema),
+  /** `models--*` dirs present but unregistered, as derivable repo ids (IR-104).
+   *  Defaulted so reports from pre-0.23 agents (and old cached rows) parse. */
+  orphans: z.array(z.string()).default([]),
 });
 
 export type InventoryLocalCache = z.infer<typeof inventoryLocalCacheSchema>;

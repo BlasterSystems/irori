@@ -5,6 +5,8 @@ import {
   filterModels,
   inventorySummary,
   leftoverLabel,
+  registerCopy,
+  registerRequestFor,
   storeMountLabel,
   type DeleteTarget,
 } from "../src/inventory";
@@ -43,6 +45,22 @@ describe("deleteConfirmCopy", () => {
       danger: "Delete from store",
     });
     expect(deleteConfirmCopy({ scope: "leftover", name: null, object: "/x", target: "o/r/a--b", bytes: null, error: null }).danger).toBe("Remove leftover");
+  });
+});
+
+describe("registerRequestFor (IR-104)", () => {
+  it("maps an orphan to a per-user register-local job", () => {
+    expect(registerRequestFor("Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit", "piresbruno")).toEqual({
+      kind: "register-local",
+      params: { name: "Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit", user: "piresbruno" },
+    });
+  });
+
+  it("states that nothing is transferred", () => {
+    const copy = registerCopy("o/r");
+    expect(copy.danger).toBe("Register");
+    expect(copy.body).toContain("Nothing is transferred");
+    expect(copy.body).toContain("refuses");
   });
 });
 

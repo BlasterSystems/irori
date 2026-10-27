@@ -113,7 +113,7 @@ function asCacheUser(argv: string[], ctx: ModelctlCtx, kind: string): { argv: st
 }
 
 /** Builds the argv for a job kind. Throws CommandBuildError on invalid params. */
-export function buildCommand(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string } {
+export function buildCommand(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string; raw?: boolean } {
   const modelctl = ctx.modelctlPath ?? "modelctl";
   const built = buildKindArgs(kind, params, ctx);
   // `raw` kinds already carry their executable (e.g. a runuser wrapper).
@@ -250,6 +250,44 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
           resolved.binary,
           "delete-local",
           name,
+        ],
+      };
+    }
+    case "register-local": {
+      const name = str("name");
+      if (!name) throw new CommandBuildError("register-local needs name");
+      const user = str("user");
+      // IR-104: register-local verifies the existing cache entry against the
+      // store (blob-identity plus small-file hashes) and writes the
+      // registration without transferring blobs — needs the store root.
+      const core = ["register-local", name, "--source-root", root()];
+      if (user === undefined || user === (ctx.agentUser ?? "root")) {
+        return { argv: core };
+      }
+      // Same per-user rule as delete-local: the registration lives in the
+      // invoking user's state dir, so a root agent runs it as the cache owner.
+      const resolved = ctx.resolveLocalUser?.(user) ?? null;
+      if (resolved === null) {
+        throw new CommandBuildError(`register-local: unknown local cache user "${user}"`);
+      }
+      return {
+        raw: true,
+        argv: [
+          "runuser",
+          "-u",
+          user,
+          "--",
+          "env",
+          "-u",
+          "XDG_STATE_HOME",
+          "-u",
+          "HF_HOME",
+          "-u",
+          "HF_HUB_CACHE",
+          `HOME=${resolved.home}`,
+          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+          resolved.binary,
+          ...core,
         ],
       };
     }

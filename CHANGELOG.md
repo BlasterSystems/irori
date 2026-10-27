@@ -8,6 +8,13 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **Register-from-cache** (IR-104, ADR-0012): the models inventory reports
+  unregistered `models--*` cache dirs per user, and the node page offers a
+  Register action that runs the modelctl 0.23 `register-local` job — the
+  entry is verified against the NAS object by hash (blob identity plus
+  small-file content hashes) and registered with **no transfer**; any
+  mismatch refuses the registration.
+
 - **Opt-in body retention** (IR-52, ADR-0010): per-setup `Keep bodies` flag
   (Serve wizard) with global caps (settings key `usage_body_retention`,
   defaults 16 MiB body / 4 MiB part); the capture proxy decomposes bodies
@@ -35,6 +42,8 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Changed
 
+- Agent modelctl pin default raised to `0.23.0` (IR-104): `register-local`
+  requires the per-user modelctl to know the verb.
 - Agent modelctl pin default raised to `0.22.0` (IR-75): modelctl now emits
   `progress:` JSONL on stderr during real downloads, lighting up the
   download-queue rows, batch totals strip and job-drawer summary shipped in

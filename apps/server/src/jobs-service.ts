@@ -104,6 +104,7 @@ const CATALOG_MUTATING_KINDS = new Set([
 const INVENTORY_MUTATING_KINDS = new Set([
   ...CATALOG_MUTATING_KINDS,
   "delete-local",
+  "register-local",
   "sync-local",
   "push",
 ]);
@@ -357,7 +358,7 @@ export function createJobsService(
       const name = typeof row.params === "object" && row.params !== null && "name" in row.params ? String((row.params as { name: unknown }).name) : "";
       // Keep the per-node model inventory in step with what actually succeeded.
       if (status === "succeeded" && name.length > 0) {
-        if (row.kind === "sync-local" || row.kind === "download" || row.kind === "push") {
+        if (row.kind === "sync-local" || row.kind === "download" || row.kind === "push" || row.kind === "register-local") {
           await db.insert(nodeModels).values({ nodeId, model: name }).onConflictDoNothing();
         } else if (row.kind === "delete-local" || row.kind === "nas-delete-apply") {
           await db.delete(nodeModels).where(and(eq(nodeModels.nodeId, nodeId), eq(nodeModels.model, name)));

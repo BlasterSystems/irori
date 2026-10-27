@@ -268,6 +268,19 @@ async function readFileText(path: string): Promise<string | null> {
   }
 }
 
+/**
+ * `models--<owner>--<name>` → `<owner>/<name>`; the first `--` after the
+ * prefix splits owner from repo, so owners with dashes (hf-internal-testing)
+ * derive correctly. Null for non-cache entries (.locks, junk).
+ */
+function repoIdFromCacheDir(entry: string): string | null {
+  if (!entry.startsWith("models--")) return null;
+  const rest = entry.slice("models--".length);
+  const idx = rest.indexOf("--");
+  if (idx <= 0 || idx + 2 >= rest.length) return null;
+  return `${rest.slice(0, idx)}/${rest.slice(idx + 2)}`;
+}
+
 /** One local cache per user that has a modelctl binary and an HF cache. */
 export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryLocalCache[]> {
   const users = ctx.users ?? discoverUsers(readPasswd(ctx.passwdPath ?? "/etc/passwd"), ctx.agentUser);
@@ -277,12 +290,23 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
     const cacheDir = join(home, ".cache", "huggingface", "hub");
     const binary = user === ctx.agentUser ? ctx.modelctlPath : localBinary(home);
     if (binary === null) {
-      caches.push({ user, home, cacheDir, modelctlVersion: null, error: "modelctl is not installed for this user", models: [] });
+      caches.push({ user, home, cacheDir, modelctlVersion: null, error: "modelctl is not installed for this user", models: [], orphans: [] });
       continue;
     }
     try {
       const version = parseModelctlVersion(await runAs(ctx, user, home, binary, ["--version"], LIST_TIMEOUT_MS));
       const listed = parseLocalList(await runAs(ctx, user, home, binary, ["list", "--local", "--json"], LIST_TIMEOUT_MS));
+      // IR-104: `models--*` dirs present but not registered — the Register
+      // action maps them to a transfer-free `modelctl register-local`.
+      const registered = new Set(listed.map((m) => m.repository.toLowerCase()));
+      const orphans: string[] = [];
+      for (const entry of await readdir(cacheDir).catch(() => [])) {
+        const repo = repoIdFromCacheDir(entry);
+        if (repo === null || registered.has(repo.toLowerCase())) continue;
+        const info = await stat(join(cacheDir, entry)).catch(() => null);
+        if (info?.isDirectory()) orphans.push(repo);
+      }
+      orphans.sort();
       const models: InventoryModel[] = [];
       for (const [index, model] of listed.entries()) {
         if (index >= MAX_SIZED_MODELS) {
@@ -299,7 +323,7 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
         }
         models.push({ ...model, bytes });
       }
-      caches.push({ user, home, cacheDir, modelctlVersion: version, error: null, models });
+      caches.push({ user, home, cacheDir, modelctlVersion: version, error: null, models, orphans });
     } catch (err) {
       caches.push({
         user,
@@ -308,6 +332,7 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
         modelctlVersion: null,
         error: err instanceof Error ? err.message : String(err),
         models: [],
+        orphans: [],
       });
     }
   }
