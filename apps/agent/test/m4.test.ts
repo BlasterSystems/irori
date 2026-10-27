@@ -183,15 +183,16 @@ describe("buildCommand", () => {
     const { argv, shell } = buildCommand("modelctl-install", {}, ctx);
     expect(shell).toBe("bash");
     expect(argv[0]).toBe("bash");
+    const script = argv[2]!;
     // Pinned release tag + PATH export + enforced minimum version.
-    expect(argv[2]).toContain('export PATH="/root/.local/bin:$PATH"');
-    expect(argv[2]).toContain('PIN="0.20.1"');
-    expect(argv[2]).toContain('uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"');
-    expect(argv[2]).toContain("sort -V");
+    expect(script).toContain('export PATH="/root/.local/bin:$PATH"');
+    expect(script).toContain('PIN="0.20.1"');
+    expect(script).toContain('uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"');
+    expect(script).toContain("sort -V");
     // IR-105: the skip-if-newer pre-check runs before the install — a stale
     // env pin on the node must never downgrade a newer binary.
-    expect(argv[2]).toContain("skipping install");
-    expect(argv[2].indexOf("skipping install")).toBeLessThan(argv[2].indexOf("uv tool install"));
+    expect(script).toContain("skipping install");
+    expect(script.indexOf("skipping install")).toBeLessThan(script.indexOf("uv tool install"));
     expect(() => buildCommand("modelctl-install", {}, { ...ctx, pin: "not-semver" })).toThrow(CommandBuildError);
   });
 
