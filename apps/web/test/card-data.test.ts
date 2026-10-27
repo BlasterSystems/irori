@@ -182,8 +182,17 @@ describe("computeCardData", () => {
       { port: 8000, host: "127.0.0.1", backend: "exl3", detected: true, model: "GLM", decodeTps: 142.3, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, e2eP95Ms: null, itlP95Ms: null, engineMeta: null, probedAtMs: 1 },
       { port: 8001, host: "127.0.0.1", backend: "unknown", detected: false, model: null, decodeTps: null, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, e2eP95Ms: null, itlP95Ms: null, engineMeta: null, probedAtMs: 1 },
     ] as LlmPortSnapshot[];
+    // IRI-034: undetected hot-added ports are hidden (idle ghosts of removed
+    // ports); configured idle ports still render.
     const head = computeCardData(nodeFixture({ role: "head" }), SNAPSHOT, { ports });
-    expect(head.inferenceLine).toBe(":8000 EXL3 · :8001 idle");
+    expect(head.inferenceLine).toBe(":8000 EXL3");
+
+    const configuredIdle = computeCardData(
+      nodeFixture({ role: "head", llmPorts: [8001] }),
+      SNAPSHOT,
+      { ports: [ports[1]!] },
+    );
+    expect(configuredIdle.inferenceLine).toBe(":8001 idle");
 
     const headWithoutProbes = computeCardData(nodeFixture({ role: "head" }), SNAPSHOT);
     expect(headWithoutProbes.inferenceLine).toBeNull();

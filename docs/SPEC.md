@@ -122,7 +122,10 @@ flowchart LR
   Edit / rotate / delete live on the node drill-down (delete is an armed
   two-click confirm). Rotation is **not** pushed live — `config-update`
   carries no token — so the env file is updated and `irori-agent` restarted;
-  the old token fails at the agent's next hello.
+  the old token fails at the agent's next hello. Saving agent-consumed
+  fields (probe ports, role, NAS root, cache user) pushes a live
+  `config-update` so the agent re-probes immediately instead of ghosting
+  removed ports until the next reconnect (IRI-034).
 - A **cluster** is a head plus its workers (recipe-declared via `NNODES` /
   `WORKER_IP`). UI grouping: cluster view is the default lens; per-node view is
   one click away.
@@ -135,7 +138,7 @@ flowchart LR
 
 - **Collect** (in-agent): GPU via `nvidia-smi` (per-card usage, temp, power,
   VRAM, clocks, throttle reasons, processes), CPU (usage, temp, package power,
-  per-core clock), memory, storage, network. GB10 unified-memory split and
+  per-core current/max clocks), memory, storage, network. GB10 unified-memory split and
   bandwidth on Sparks; RAM vs VRAM separation on discrete hosts.
 - **Stream**: agent pushes snapshots on a server-configured cadence (default
   2 s) over the WS link; server keeps per-node ring buffers, broadcasts to SSE;
@@ -156,6 +159,9 @@ flowchart LR
   running/waiting, KV-cache usage, TTFT/E2E/ITL p95 (from engine `/metrics`
   when available), loaded model id. Workers run **detection-only** probes
   (10 s cadence) so the cluster view shows what actually runs where.
+  Port panels render configured ∪ detected-hot-added: a port removed from
+  the config stops showing on the agent's next probe pass, and hot-added
+  ports surface only when they answered — idle ghosts never linger (IRI-034).
 - Head card (primary surface): serving model, decode + prefill rates, queue
   run/total. Worker card (compact): memory, CPU/GPU usage + temp, package power.
 
@@ -198,7 +204,8 @@ flowchart LR
   - **doctor / repair / catalog refresh** surfaced with two-click armed apply.
 - **Node drill-down inventory** (IRI-028): the node detail page lists what the
   node actually holds — the modelctl store (active models + failed-delete
-  leftovers) when it has a `nasRoot`, and every local HF-cache registration per
+  leftovers) on the store node (`kind: nas`; nodes that merely mount the
+  store show only their local caches, IRI-034), and every local HF-cache registration per
   user (modelctl local state is per user; a root agent lists each cache owner
   through `runuser`). Unregistered `models--*` dirs are listed as orphans with
   a Register action that runs the modelctl 0.23 `register-local` job (IR-104,

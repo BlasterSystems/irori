@@ -238,10 +238,18 @@ describe("llmSummaryLine", () => {
     expect(llmSummaryLine(null, [8000, 8001])).toBe(":8000 · :8001");
   });
 
-  it("appends hot-added ports missing from the registry", () => {
+  it("appends detected hot-added ports missing from the registry", () => {
     const ports = [portFixture({ port: 8081, backend: "tensorfold" })];
     expect(llmSummaryLine(ports, [])).toBe(":8081 TensorFold");
     expect(llmSummaryLine(ports, [8000])).toBe(":8000 · :8081 TensorFold");
+  });
+
+  it("hides undetected hot-added ports (idle ghosts of removed ports, IRI-034)", () => {
+    const ports = [
+      portFixture({ port: 8081, detected: false, backend: "llama.cpp" }),
+      portFixture({ port: 9000, backend: "tensorfold" }),
+    ];
+    expect(llmSummaryLine(ports, [])).toBe(":9000 TensorFold");
   });
 
   it("returns null when there is nothing to show", () => {

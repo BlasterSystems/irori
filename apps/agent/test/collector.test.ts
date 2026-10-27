@@ -60,6 +60,11 @@ describe("collect", () => {
         (Array.isArray(parsed.cpu.perCoreClocksKHz) &&
           parsed.cpu.perCoreClocksKHz.every((khz) => khz >= 0)),
     ).toBe(true);
+    expect(
+      parsed.cpu.perCoreMaxClocksKHz === undefined ||
+        (Array.isArray(parsed.cpu.perCoreMaxClocksKHz) &&
+          parsed.cpu.perCoreMaxClocksKHz.every((khz) => khz >= 0)),
+    ).toBe(true);
     expect(parsed.memory.totalBytes).toBeGreaterThan(0);
     expect(parsed.memory.usedBytes).toBeGreaterThan(0);
     expect(parsed.memory.usedBytes).toBeLessThanOrEqual(parsed.memory.totalBytes);

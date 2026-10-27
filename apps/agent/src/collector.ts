@@ -96,9 +96,10 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
   const [load1] = os.loadavg();
 
   const meminfo = await readMeminfo(procRoot);
-  const [tempC, perCoreClocksKHz, storage] = await Promise.all([
+  const [tempC, perCoreClocksKHz, perCoreMaxClocksKHz, storage] = await Promise.all([
     readCpuTempC(sysRoot),
     readPerCoreClocksKHz(sysRoot),
+    readPerCoreMaxClocksKHz(sysRoot),
     readStorage(procRoot),
   ]);
   const packagePowerW = window.packagePowerW ?? (await readHwmonPowerW(sysRoot));
@@ -123,6 +124,7 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
       tempC,
       packagePowerW,
       ...(perCoreClocksKHz === null ? {} : { perCoreClocksKHz }),
+      ...(perCoreMaxClocksKHz === null ? {} : { perCoreMaxClocksKHz }),
     },
     memory: {
       totalBytes: totalMem,
@@ -514,8 +516,11 @@ export async function readHwmonPowerW(sysRoot: string): Promise<number | null> {
   return null;
 }
 
-/** Per-core current frequency (kHz) from cpufreq, sorted by cpu index. */
-export async function readPerCoreClocksKHz(sysRoot: string): Promise<number[] | null> {
+/** Reads a per-cpu cpufreq kHz file (current/max), sorted by cpu index. */
+async function readPerCoreFreqKHz(
+  sysRoot: string,
+  file: "scaling_cur_freq" | "scaling_max_freq",
+): Promise<number[] | null> {
   try {
     const cpuDir = path.join(sysRoot, "devices", "system", "cpu");
     const entries = (await fs.readdir(cpuDir)).filter((e) => /^cpu\d+$/.test(e));
@@ -523,7 +528,7 @@ export async function readPerCoreClocksKHz(sysRoot: string): Promise<number[] | 
     const clocks: number[] = [];
     for (const entry of entries) {
       const raw = await fs
-        .readFile(path.join(cpuDir, entry, "cpufreq", "scaling_cur_freq"), "utf8")
+        .readFile(path.join(cpuDir, entry, "cpufreq", file), "utf8")
         .then((t) => Number.parseInt(t.trim(), 10))
         .catch(() => Number.NaN);
       if (Number.isInteger(raw) && raw >= 0) clocks.push(raw);
@@ -532,6 +537,16 @@ export async function readPerCoreClocksKHz(sysRoot: string): Promise<number[] | 
   } catch {
     return null;
   }
+}
+
+/** Per-core current frequency (kHz) from cpufreq, sorted by cpu index. */
+export async function readPerCoreClocksKHz(sysRoot: string): Promise<number[] | null> {
+  return readPerCoreFreqKHz(sysRoot, "scaling_cur_freq");
+}
+
+/** Per-core maximum frequency (kHz) from cpufreq, sorted by cpu index. */
+export async function readPerCoreMaxClocksKHz(sysRoot: string): Promise<number[] | null> {
+  return readPerCoreFreqKHz(sysRoot, "scaling_max_freq");
 }
 
 // ---------------------------------------------------------------------------
