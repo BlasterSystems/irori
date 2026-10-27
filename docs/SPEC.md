@@ -177,6 +177,14 @@ flowchart LR
     against the pinned minimum and installs/upgrades from the pinned GitHub
     release (`uv tool install --force`); the release wheel ships inside the
     agent bundle as the offline fallback. Runs before any model op on a node.
+    **IR-105 convergence**: the pin is a hub setting (`modelctl_pin`, pushed
+    via config-update — the node env stays as fallback); `modelctl-install`
+    takes a cache `user` (runuser, ADR-0011) and **skips without installing**
+    when the current version already satisfies the pin, so a stale env pin
+    never downgrades a newer binary; after every succeeded models-inventory
+    read the hub dispatches one install job per cache user whose reported
+    version is below the pin (silent skip when the pin is unset, the node is
+    busy, or the agent is offline).
   - **Search/download** on the NAS: HF id/URL → manifest generation → staged
     resumable download → validate → atomic publish → activate. GGUF
     quantization selection; mmproj/MTP companions detected. Queue YAML built
@@ -428,7 +436,7 @@ reported in every snapshot; upgrade = re-run install.
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
-| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), WS `/agent-ws` |
+| Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), `GET/PUT /api/v1/settings/modelctl-pin` (modelctl pin + auto-provisioning, IR-105), WS `/agent-ws` |
 
 ## 14. Deviations & deferred
 

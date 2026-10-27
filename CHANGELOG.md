@@ -14,6 +14,15 @@ All notable changes to Irori are recorded here. Format follows
   entry is verified against the NAS object by hash (blob identity plus
   small-file content hashes) and registered with **no transfer**; any
   mismatch refuses the registration.
+- **Modelctl convergence** (IR-106, ADR-0013): the modelctl pin is a hub
+  setting (`modelctl_pin`, `GET/PUT /api/v1/settings/modelctl-pin`, pushed to
+  agents via config-update — the node env stays as fallback);
+  `modelctl-install` provisions a cache user's own modelctl via runuser and
+  **skips without installing** when the current version already satisfies the
+  pin (a stale env pin can no longer downgrade a newer binary); the hub
+  auto-dispatches one install job per below-pin cache user after every
+  succeeded models-inventory read (silent skip when the pin is unset, the
+  node already has an active job, or the agent is offline).
 
 - **Opt-in body retention** (IR-52, ADR-0010): per-setup `Keep bodies` flag
   (Serve wizard) with global caps (settings key `usage_body_retention`,

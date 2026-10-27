@@ -15,6 +15,7 @@ import { createHfQuantsService } from "./hf-quants.js";
 import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
+import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
 import { CADENCE_MAX_MS, CADENCE_MIN_MS } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
@@ -95,6 +96,7 @@ const state: {
   usageChats: UsageChats | null;
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
+  modelctlPin: ModelctlPinService | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -102,6 +104,7 @@ const state: {
   hfToken: null,
   cadence: null,
   cost: null,
+  modelctlPin: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -150,6 +153,7 @@ const app = createApp({
   getHfToken: () => state.hfToken,
   getCadence: () => state.cadence,
   getCost: () => state.cost,
+  getModelctlPin: () => state.modelctlPin,
   getCadenceMs: () => activeCadenceMs,
   setCadenceMs: (ms) => {
     activeCadenceMs = ms;
@@ -207,6 +211,9 @@ async function boot(): Promise<void> {
   // IRI-025: energy/token cost settings (Overview cost previews).
   state.cost = createCostService(dbHandle.db);
 
+  // IR-105: hub-pinned modelctl version (config-update + auto-provisioning).
+  state.modelctlPin = createModelctlPinService(dbHandle.db);
+
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).
   let queueSettle: ((event: JobSettledEvent) => void) | null = null;
@@ -217,7 +224,7 @@ async function boot(): Promise<void> {
     // IRI-028: a job starts from many places (download queue, setups, web
     // pages) — the Activity drawer must learn about all of them.
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", exitCode: null, durationMs: null });
-  });
+  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()));
 
   const downloadQueue = createDownloadQueueService({
     db: dbHandle.db,
@@ -287,7 +294,7 @@ async function boot(): Promise<void> {
     onHello: (nodeId: string, agentVersion: string) => jobsService.settleAgentUpdate(nodeId, agentVersion),
   };
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), jobEvents, setupEvents: {
+  const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CACHE_USER_PATTERN } from "./node.js";
+import { MODELCTL_PIN_RE } from "./modelctl-pin.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmMsgSchema } from "./llm.js";
 import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
@@ -73,6 +74,12 @@ export const configUpdateMsgSchema = z.object({
    * the token never rides job params or job-output frames.
    */
   hfToken: z.string().min(1).nullish(),
+  /**
+   * IR-105: hub-pinned modelctl version agents converge to. string = use it
+   * for install jobs and the version gate, null = clear (the agent's env pin
+   * applies again), absent = no change. Older agents strip the field.
+   */
+  modelctlPin: z.string().regex(MODELCTL_PIN_RE).nullish(),
 });
 
 export const serverErrorMsgSchema = z.object({

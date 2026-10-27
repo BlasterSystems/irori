@@ -8,7 +8,7 @@ import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore, makeSnapshot } from "./helpers.js";
 
-function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; inventory?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> }; hfQuants?: { listQuants: (repo: string, token?: string | null) => Promise<unknown> } } = {}) {
+function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boolean>; jobs?: unknown; inventory?: unknown; hfToken?: { get: () => Promise<string | null>; set: (t: string | null) => Promise<void> }; hfQuants?: { listQuants: (repo: string, token?: string | null) => Promise<unknown> }; modelctlPin?: { get: () => Promise<string | null>; set: (pin: string) => Promise<void> } } = {}) {
   const fake = makeFakeStore();
   const online = new Set<string>();
   const refreshed: string[] = [];
@@ -31,6 +31,7 @@ function makeApp(opts: { store?: NodeStore | null; dbHealthy?: () => Promise<boo
     getJobs: opts.jobs === undefined ? () => null : () => (opts.jobs as never),
     getInventory: opts.inventory === undefined ? () => null : () => (opts.inventory as never),
     getHfToken: () => (opts.hfToken === undefined ? null : opts.hfToken),
+    getModelctlPin: () => (opts.modelctlPin === undefined ? null : opts.modelctlPin),
     hfQuants: (opts.hfQuants ?? { listQuants: async () => ({}) }) as never,
     version: "test",
     tag: null,
@@ -125,6 +126,34 @@ describe("app", () => {
     const res = await request(app).patch(`/api/v1/nodes/${id}`).send({ name: "renamed" });
     expect(res.status).toBe(200);
     expect(refreshed).toEqual([]);
+  });
+
+  it("answers 503 for the modelctl-pin setting when no service is wired (IR-105)", async () => {
+    const { app } = makeApp();
+    expect((await request(app).get("/api/v1/settings/modelctl-pin")).status).toBe(503);
+    expect((await request(app).put("/api/v1/settings/modelctl-pin").send({ pin: "0.23.0" })).status).toBe(503);
+  });
+
+  it("persists the modelctl pin and pushes config-update on PUT (IR-105)", async () => {
+    let stored: string | null = null;
+    const { app, fake, online, refreshed } = makeApp({
+      modelctlPin: { get: async () => stored, set: async (pin) => { stored = pin; } },
+    });
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    online.add(id);
+    const put = await request(app).put("/api/v1/settings/modelctl-pin").send({ pin: "0.23.0" });
+    expect(put.status).toBe(200);
+    expect(put.body).toEqual({ pin: "0.23.0" });
+    expect(stored).toBe("0.23.0");
+    expect(refreshed).toEqual([id]);
+    expect((await request(app).get("/api/v1/settings/modelctl-pin")).body).toEqual({ pin: "0.23.0" });
+  });
+
+  it("rejects an invalid modelctl pin with 400 (IR-105)", async () => {
+    const { app } = makeApp({ modelctlPin: { get: async () => null, set: async () => {} } });
+    const res = await request(app).put("/api/v1/settings/modelctl-pin").send({ pin: "latest" });
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.issues)).toBe(true);
   });
 
   it("404s patch/delete/rotate for unknown nodes and 400s malformed ids", async () => {
