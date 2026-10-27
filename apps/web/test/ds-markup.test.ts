@@ -96,6 +96,7 @@ it("NodeDetail keeps the M3 inference section vocabulary", () => {
 it("NodeDetail gates the store catalog to the store node and renders cpu clock notes (IRI-034)", () => {
   expect(nodeDetailSource).toContain(`inventory.store && node?.kind === 'nas'`);
   expect(nodeDetailSource).toContain(`v-for="note in detail.cpu.notes"`);
+  expect(nodeDetailSource).toContain("store catalog renders on the store node");
 });
 
 it("LlmPanel keeps the DS per-port panel vocabulary", () => {
