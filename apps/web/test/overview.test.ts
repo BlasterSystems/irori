@@ -79,13 +79,20 @@ describe("hero spark + peak", () => {
     expect(peakDecode([{ t: 1, decodeTps: null, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, samples: 0 }])).toBeNull();
   });
 
-  it("charts decode and prefill as two series over a shared zero-floored domain", () => {
+  it("charts decode and prefill as two series with independent zero-floored scales", () => {
     const chart = heroSpark(HIST, "30m");
     expect(chart.series.map((s) => s.label)).toEqual(["decode 30m", "prefill 30m"]);
     expect(chart.series[0]?.points).toEqual([100, 168, null]);
     expect(chart.series[1]?.points).toEqual([2000, null, 3100]);
-    expect(chart.yMin).toBeLessThanOrEqual(0);
+    // IR-110: each series owns its scale (decode ≤168, prefill ≤3100); the
+    // chart-level domain is the union and prefill is not flattened by decode.
+    expect(chart.series[0]?.scale).toEqual({ min: 0, max: 168 });
+    expect(chart.series[1]?.scale).toEqual({ min: 0, max: 3100 });
+    expect(chart.yMin).toBe(0);
+    expect(chart.yMax).toBe(3100);
     expect(chart.paths.length).toBe(2);
+    expect(chart.paths[0]?.d).toBe("M0.00,52.62 L300.00,0.00");
+    expect(chart.paths[1]?.d).toBe("M0.00,46.13 l0.01,0 M600.00,0.00 l0.01,0");
   });
 
   it("labels follow the selected range", () => {
@@ -236,6 +243,15 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).toContain("Add node…</button>");
     expect(OVERVIEW_SRC).toContain('class="hero-grid"');
     expect(OVERVIEW_SRC).toContain("fetchLlmHistory(nodeId, range.value)");
+  });
+
+  it("leads with nodes above power/nas and auto-scrolls the feed (IR-108/IR-109)", () => {
+    // IR-108: the nodes section swapped places with the fleet power/NAS row.
+    expect(OVERVIEW_SRC.indexOf(">Nodes</h2>")).toBeGreaterThan(-1);
+    expect(OVERVIEW_SRC.indexOf(">Nodes</h2>")).toBeLessThan(OVERVIEW_SRC.indexOf("Fleet power + NAS store"));
+    // IR-109: the newest-last feed scrolls to the latest line.
+    expect(OVERVIEW_SRC).toContain('ref="feedLog"');
+    expect(OVERVIEW_SRC).toContain("feedLog.value.scrollTop = feedLog.value.scrollHeight");
   });
 
   it("spans a single serving process across the full row (no dead column)", () => {

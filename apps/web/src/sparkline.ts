@@ -50,8 +50,10 @@ export function sparklinePath(
   width: number,
   height: number,
   domain?: SparklineDomain,
+  /** Precomputed scale used verbatim (per-series lens charts); skips derivation. */
+  fixed?: SparklineScale,
 ): string {
-  const scale = sparklineScale(points, domain);
+  const scale = fixed ?? sparklineScale(points, domain);
   if (scale === null) return "";
   const { min, max } = scale;
 

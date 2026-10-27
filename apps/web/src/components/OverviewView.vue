@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { HardwareSnapshot, NodeInfo, SetupInfo } from "@irori/core";
 import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries } from "@irori/core";
 import { live } from "../live";
@@ -259,6 +259,14 @@ async function refreshCards(): Promise<void> {
 
 const feed = computed(() => feedLines(live.events.value, (id) => live.nodes.get(id)?.name ?? "node", 120, (jobId) => live.jobs.get(jobId)));
 
+// IR-109: the feed is newest-last in a scrolling box — keep the latest line in
+// view by scrolling to the bottom whenever a line is added (owner ask).
+const feedLog = ref<HTMLElement | null>(null);
+watch(feed, async () => {
+  await nextTick();
+  if (feedLog.value !== null) feedLog.value.scrollTop = feedLog.value.scrollHeight;
+});
+
 // ─── add node + lifecycle ───────────────────────────────────────────────────
 
 const addOpen = ref(false);
@@ -432,8 +440,17 @@ function servingState(decodeTps: number | null): string {
     <span style="letter-spacing: 0; text-transform: none;">start a setup on the Serve page — it appears here while it runs</span>
   </div>
 
+  <h2 style="margin: 20px 0 10px;">Nodes</h2>
+  <section v-if="sparkNodes.length > 0" class="cols cols-3">
+    <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" :llm="live.getLlm(node.id)" />
+  </section>
+  <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
+    <span>{{ totalCount === 0 ? "no nodes yet" : "no spark nodes" }}</span>
+    <span v-if="totalCount === 0" style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
+  </div>
+
   <!-- Fleet power + NAS store -->
-  <section class="hero-grid" style="margin-bottom: 12px;">
+  <section class="hero-grid" style="margin: 20px 0 12px;">
     <article class="card">
       <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
       <div class="card__body" style="padding-top: 12px;">
@@ -501,20 +518,11 @@ function servingState(decodeTps: number | null): string {
     </article>
   </section>
 
-  <h2 style="margin: 20px 0 10px;">Nodes</h2>
-  <section v-if="sparkNodes.length > 0" class="cols cols-3">
-    <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" :llm="live.getLlm(node.id)" />
-  </section>
-  <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
-    <span>{{ totalCount === 0 ? "no nodes yet" : "no spark nodes" }}</span>
-    <span v-if="totalCount === 0" style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
-  </div>
-
   <!-- All event classes in one feed (owner decision) -->
   <section class="card" style="margin-top: 20px; margin-bottom: 12px;">
     <div class="card__head"><h3>Telemetry</h3><span class="chip">streaming</span></div>
     <div class="card__body card__body--flush">
-      <div class="log" style="border: 0; border-radius: 0 0 var(--radius) var(--radius); min-height: 120px; max-height: 220px;">
+      <div ref="feedLog" class="log" style="border: 0; border-radius: 0 0 var(--radius) var(--radius); min-height: 120px; max-height: 220px;">
         <div v-for="(line, i) in feed" :key="`${line.t}-${i}`"><span class="dim">{{ fmtBucket(line.t, "minute") }}</span> {{ line.text }}</div>
         <div v-if="feed.length === 0" class="dim">waiting for events…</div>
       </div>
