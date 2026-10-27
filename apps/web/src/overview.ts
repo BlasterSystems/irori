@@ -93,7 +93,8 @@ function heroPoint(t: number, patch: Partial<AnalyticsPoint>): AnalyticsPoint {
   };
 }
 
-/** Decode+prefill chart for one port's history over `label` (shared domain, two lines). */
+/** Decode+prefill chart for one port's history over `label` (per-series
+ *  scales, two lines — a quiet prefill stays legible next to spiky decode). */
 export function heroSpark(points: LlmHistoryPoint[], label: string, width = 600, height = 130): LensChart {
   return lensChart(
     [
@@ -103,7 +104,7 @@ export function heroSpark(points: LlmHistoryPoint[], label: string, width = 600,
     "decodeTps",
     width,
     height,
-    { valueKeys: ["decodeTps", "prefillTps"], floorZero: true },
+    { valueKeys: ["decodeTps", "prefillTps"], floorZero: true, perSeriesScale: true },
   );
 }
 

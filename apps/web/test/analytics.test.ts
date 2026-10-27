@@ -65,6 +65,54 @@ describe("lensChart", () => {
     expect(chart.series[0]!.points).toEqual([10, null]);
     expect(chart.times).toEqual([1000, 2000]);
   });
+
+  it("scales each series independently when perSeriesScale is set (IR-110)", () => {
+    const chart = lensChart(
+      [series([{ t: 1000, decodeTps: 90 }, { t: 2000, decodeTps: 10 }]), series([{ t: 1000, prefillTps: 2 }, { t: 2000, prefillTps: 1 }])],
+      "decodeTps",
+      600,
+      100,
+      { floorZero: true, valueKeys: ["decodeTps", "prefillTps"], perSeriesScale: true },
+    );
+    // The quiet prefill line gets its own domain instead of flattening under
+    // decode's; both maxima reach the top of the chart.
+    expect(chart.series[0]?.scale).toEqual({ min: 0, max: 90 });
+    expect(chart.series[1]?.scale).toEqual({ min: 0, max: 2 });
+    expect(chart.yMin).toBe(0);
+    expect(chart.yMax).toBe(90); // chart-level domain is the union
+    expect(chart.paths[0]?.d).toBe("M0.00,0.00 L600.00,88.89");
+    expect(chart.paths[1]?.d).toBe("M0.00,0.00 L600.00,50.00");
+  });
+
+  it("pins an all-zero series flat at the bottom of its own scale", () => {
+    const chart = lensChart(
+      [series([{ t: 1000, decodeTps: 90 }, { t: 2000, decodeTps: 10 }]), series([{ t: 1000, prefillTps: 0 }, { t: 2000, prefillTps: 0 }])],
+      "decodeTps",
+      600,
+      100,
+      { floorZero: true, valueKeys: ["decodeTps", "prefillTps"], perSeriesScale: true },
+    );
+    expect(chart.series[1]?.scale).toEqual({ min: 0, max: 1 });
+    expect(chart.paths[1]?.d).toBe("M0.00,100.00 L600.00,100.00");
+  });
+
+  it("centers a non-zero constant series on its own ±0.5 slack", () => {
+    const chart = lensChart([series([{ gpuMax: 40 }, { gpuMax: 40 }])], "gpuMax", 600, 100, { floorZero: true, perSeriesScale: true });
+    expect(chart.series[0]?.scale).toEqual({ min: 39.5, max: 40.5 });
+    expect(chart.paths[0]?.d).toBe("M0.00,50.00 L600.00,50.00");
+  });
+
+  it("leaves a null-scale series pathless in per-series mode", () => {
+    const chart = lensChart(
+      [series([{ t: 1000, decodeTps: 90 }, { t: 2000, decodeTps: 10 }]), series([{ t: 1000, prefillTps: null }, { t: 2000, prefillTps: null }])],
+      "decodeTps",
+      600,
+      100,
+      { floorZero: true, valueKeys: ["decodeTps", "prefillTps"], perSeriesScale: true },
+    );
+    expect(chart.series[1]?.scale).toBeUndefined();
+    expect(chart.paths).toHaveLength(1);
+  });
 });
 
 describe("fmtBucket", () => {

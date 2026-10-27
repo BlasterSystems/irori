@@ -27,9 +27,11 @@ function bucketX(index: number): number {
   return n <= 1 ? props.chart.width / 2 : (index / (n - 1)) * props.chart.width;
 }
 
-function valueY(v: number): number {
+function valueY(v: number, scale?: { min: number; max: number }): number {
   const { height, yMin, yMax } = props.chart;
-  return height - ((v - yMin) / (yMax - yMin)) * height;
+  const min = scale?.min ?? yMin;
+  const max = scale?.max ?? yMax;
+  return height - ((v - min) / (max - min)) * height;
 }
 
 function onMove(e: PointerEvent): void {
@@ -50,7 +52,7 @@ const rows = computed(() => {
     const v = s.points[h.index];
     return v === null || v === undefined
       ? []
-      : [{ label: s.label, color: s.color, dashed: s.dashed === true, value: v }];
+      : [{ label: s.label, color: s.color, dashed: s.dashed === true, scale: s.scale, value: v }];
   });
 });
 
@@ -114,7 +116,7 @@ function fmt(v: number): string {
         stroke="var(--border-strong)"
         stroke-width="1"
       />
-      <circle v-for="r in rows" :key="r.label" :cx="bucketX(hover.index)" :cy="valueY(r.value)" r="3" :fill="r.color" />
+      <circle v-for="r in rows" :key="r.label" :cx="bucketX(hover.index)" :cy="valueY(r.value, r.scale)" r="3" :fill="r.color" />
     </g>
   </svg>
   <div v-if="hover !== null" class="charttip" :style="{ left: `${hover.x}px`, top: `${hover.y}px` }" aria-hidden="true">
