@@ -544,37 +544,39 @@ onUnmounted(() => clearTimeout(deleteTimer));
       </div>
     </div>
 
-    <h2 style="margin-bottom: 10px;">Live</h2>
+    <!-- IRI-037: sensors and inference share one row; each cell carries its heading. -->
     <section class="cols cols-2" style="margin-bottom: 12px;">
-      <article class="card">
-        <div class="card__head">
-          <h3>Sensors</h3>
-          <span v-if="card" class="mono faint">{{ card.online ? "streaming" : "offline" }}</span>
-        </div>
-        <div class="card__body" style="padding-top: 12px;">
-          <template v-if="card?.hasSnapshot">
-            <div v-for="row in card.rows" :key="row.key" class="barrow">
-              <span>{{ row.label }}</span>
-              <div class="bar"><div class="bar__fill" :style="{ width: (row.barPct ?? 0) + '%' }"></div><div v-if="row.freePct !== undefined" class="bar__fill bar__fill--free" :style="{ width: row.freePct + '%' }"></div></div>
-              <span class="val" :class="{ 'metric--hot': row.warn === true }">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'metric--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
-            </div>
-          </template>
-          <p v-else class="muted">waiting for first snapshot</p>
-        </div>
-      </article>
-    </section>
-
-    <h2 style="margin-bottom: 10px;">Inference</h2>
-    <p v-if="llmPanels.length === 0" class="muted" style="margin: 0 0 12px;">no LLM ports configured</p>
-    <section v-else class="cols cols-2" style="margin-bottom: 12px;">
-      <LlmPanel
-        v-for="panel in llmPanels"
-        :key="panel.view.port"
-        :port="panel.view"
-        :decode="panel.decode"
-        :prefill="panel.prefill"
-        :range="range"
-      />
+      <div>
+        <h2 style="margin-bottom: 10px;">Live</h2>
+        <article class="card">
+          <div class="card__head">
+            <h3>Sensors</h3>
+            <span v-if="card" class="mono faint">{{ card.online ? "streaming" : "offline" }}</span>
+          </div>
+          <div class="card__body" style="padding-top: 12px;">
+            <template v-if="card?.hasSnapshot">
+              <div v-for="row in card.rows" :key="row.key" class="barrow">
+                <span>{{ row.label }}</span>
+                <div class="bar"><div class="bar__fill" :style="{ width: (row.barPct ?? 0) + '%' }"></div><div v-if="row.freePct !== undefined" class="bar__fill bar__fill--free" :style="{ width: row.freePct + '%' }"></div></div>
+                <span class="val" :class="{ 'metric--hot': row.warn === true }">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'metric--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
+              </div>
+            </template>
+            <p v-else class="muted">waiting for first snapshot</p>
+          </div>
+        </article>
+      </div>
+      <div class="inference-cell">
+        <h2 style="margin-bottom: 10px;">Inference</h2>
+        <p v-if="llmPanels.length === 0" class="muted" style="margin: 0;">no LLM ports configured</p>
+        <LlmPanel
+          v-for="panel in llmPanels"
+          :key="panel.view.port"
+          :port="panel.view"
+          :decode="panel.decode"
+          :prefill="panel.prefill"
+          :range="range"
+        />
+      </div>
     </section>
     <p
       v-if="llmState === 'error' && llmPanels.length > 0"
@@ -865,6 +867,8 @@ onUnmounted(() => clearTimeout(deleteTimer));
 </template>
 
 <style scoped>
+/* IRI-037: stacked inference panels in the shared Live/Inference row. */
+.inference-cell > .card + .card { margin-top: var(--space-3); }
 .detail-back {
   display: inline-flex;
   align-items: center;
