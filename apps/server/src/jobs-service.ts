@@ -215,6 +215,33 @@ export interface JobStartedEvent {
   startedAt: Date;
 }
 
+/** ADR-0014: a failed push whose preflight reported a provisionable gap. */
+export interface PushBlockedEvent {
+  jobId: string;
+  nodeId: string;
+  params: Record<string, unknown>;
+  output: Array<{ seq: number; line: string }>;
+}
+
+/**
+ * Classifies the agent's `IRORI_PREFLIGHT` lines (ADR-0014). null when the
+ * failure is not a remediable preflight gap — unreachable destinations and
+ * non-preflight failures (a mid-transfer modelctl error) are left alone.
+ */
+export function parsePushBlocked(output: Array<{ seq: number; line: string }>): {
+  needsKeys: boolean;
+  needsRsync: boolean;
+  needsModelctl: boolean;
+} | null {
+  const lines = output.map((o) => o.line);
+  if (!lines.some((l) => l.startsWith("IRORI_PREFLIGHT ("))) return null;
+  const needsKeys = lines.some((l) => l.includes("ssh auth failed") || l.includes("host key not pinned"));
+  const needsRsync = lines.some((l) => l.includes("rsync missing"));
+  const needsModelctl = lines.some((l) => l.includes("modelctl missing"));
+  if (!needsKeys && !needsRsync && !needsModelctl) return null;
+  return { needsKeys, needsRsync, needsModelctl };
+}
+
 export function createJobsService(
   db: Db,
   sendToAgent: JobAgentSend,
@@ -222,6 +249,8 @@ export function createJobsService(
   onStarted?: (event: JobStartedEvent) => void,
   /** IR-105: hub-pinned modelctl version; null/absent = no auto-provisioning. */
   getModelctlPin?: () => Promise<string | null>,
+  /** ADR-0014: a failed push whose preflight reported a provisionable gap. */
+  onPushBlocked?: (event: PushBlockedEvent) => void,
 ): JobsService {
   const service: JobsService = {
     async create(nodeId, kind, params) {
@@ -382,6 +411,24 @@ export function createJobsService(
           const report = await settleInventory(db, nodeId, jobId);
           if (report !== null && getModelctlPin !== undefined) {
             await autoProvisionModelctl((n, k, p) => service.create(n, k, p), getModelctlPin, nodeId, report);
+          }
+        }
+      } else if (row.kind === "push" && status === "failed" && onPushBlocked !== undefined) {
+        // ADR-0014: the preflight reported a provisionable gap (ssh trust,
+        // destination rsync/modelctl) — hand the event to the remediator,
+        // which fixes the gap and re-creates the push once (params guard).
+        const output = await db
+          .select({ seq: jobOutput.seq, line: jobOutput.line })
+          .from(jobOutput)
+          .where(eq(jobOutput.jobId, jobId))
+          .orderBy(desc(jobOutput.seq))
+          .limit(MAX_OUTPUT_LINES);
+        const parsed = parsePushBlocked(output.reverse());
+        if (parsed !== null && (row.params as { _remediated?: unknown } | null)?._remediated !== true) {
+          try {
+            onPushBlocked({ jobId, nodeId, params: (row.params ?? {}) as Record<string, unknown>, output });
+          } catch {
+            // Remediation is best-effort; the classified preflight lines stay in the job output.
           }
         }
       } else if (row.kind === "hygiene-prevent") {

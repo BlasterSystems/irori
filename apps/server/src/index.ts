@@ -9,7 +9,7 @@ import { createRings } from "./rings.js";
 import { createSseHub } from "./sse.js";
 import { createEventFeed } from "./events-feed.js";
 import { createAgentHub, type AgentHub } from "./hub.js";
-import { createJobsService, type JobSettledEvent, type JobsService } from "./jobs-service.js";
+import { createJobsService, type JobSettledEvent, type JobsService, type PushBlockedEvent } from "./jobs-service.js";
 import { createDownloadQueueService, type DownloadQueueService } from "./download-queue-service.js";
 import { createHfQuantsService } from "./hf-quants.js";
 import { createHfTokenService, type HfTokenService } from "./hf-token.js";
@@ -37,6 +37,7 @@ import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
 import { type CleanupEntry } from "./cleanup-service.js";
 import { createEnergyEngine } from "./energy.js";
 import { JobBusyError, JobDispatchError } from "./jobs-service.js";
+import { createPushRemediation } from "./push-remediation.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -217,6 +218,9 @@ async function boot(): Promise<void> {
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).
   let queueSettle: ((event: JobSettledEvent) => void) | null = null;
+  // ADR-0014: the remediator needs the jobs service; fill the mutable hook
+  // once the service exists (same pattern as queueSettle above).
+  let pushRemediation: ((event: PushBlockedEvent) => void) | null = null;
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg), (e) => {
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: e.status, exitCode: e.exitCode, durationMs: e.durationMs });
     queueSettle?.(e);
@@ -224,7 +228,14 @@ async function boot(): Promise<void> {
     // IRI-028: a job starts from many places (download queue, setups, web
     // pages) — the Activity drawer must learn about all of them.
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", exitCode: null, durationMs: null });
-  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()));
+  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e));
+
+  pushRemediation = createPushRemediation({
+    jobs: jobsService,
+    getNode: (id) => store.get(id),
+    getNodes: () => store.list(),
+    log: (message) => console.log(`[irori-server] ${message}`),
+  });
 
   const downloadQueue = createDownloadQueueService({
     db: dbHandle.db,
