@@ -100,7 +100,8 @@ describe("buildCommand", () => {
       cacheUser: "piresbruno",
       resolveLocalUser: (user: string) => ({ home: `/home/${user}`, binary: `/home/${user}/.local/bin/modelctl` }),
     };
-    const { argv } = buildCommand("push", { name: "glm", hosts: ["piresbruno@10.100.24.1"], jobs: 4 }, cacheCtx);
+    const { argv, shell } = buildCommand("push", { name: "glm", hosts: ["piresbruno@10.100.24.1"], jobs: 4 }, cacheCtx);
+    expect(shell).toBeUndefined();
     expect(argv.slice(0, 13)).toEqual([
       "runuser",
       "-u",
@@ -116,25 +117,78 @@ describe("buildCommand", () => {
       "HOME=/home/piresbruno",
       "PATH=/home/piresbruno/.local/bin:/usr/local/bin:/usr/bin:/bin",
     ]);
-    expect(argv.slice(13)).toEqual([
-      "/home/piresbruno/.local/bin/modelctl",
-      "push",
-      "glm",
-      "--host",
-      "piresbruno@10.100.24.1",
-      "--jobs",
-      "4",
-    ]);
+    expect(argv.slice(13)).toEqual(["bash", "-c", expect.any(String)]);
+    const script = argv[15]!;
+    expect(script).toContain("MCTL='/home/piresbruno/.local/bin/modelctl'");
+    expect(script).toContain("exec \"$MCTL\" push 'glm' --host 'piresbruno@10.100.24.1' --jobs 4");
+    expect(script).toContain("IRORI_PREFLIGHT");
   });
 
-  it("maps push with repeated hosts and jobs", () => {
-    const { argv } = buildCommand("push", { name: "glm", hosts: ["10.100.24.1", "10.100.25.1"], jobs: 8 }, ctx);
-    expect(argv).toEqual(["modelctl", "push", "glm", "--host", "10.100.24.1", "--host", "10.100.25.1", "--jobs", "8"]);
+  it("probes every destination before the transfer (ADR-0014)", () => {
+    const { argv, shell } = buildCommand("push", { name: "glm", hosts: ["10.100.24.1", "10.100.25.1"], jobs: 8 }, ctx);
+    expect(shell).toBe("bash");
+    const script = argv[2]!;
+    expect(script).toContain("H='10.100.24.1'");
+    expect(script).toContain("H='10.100.25.1'");
+    expect(script).toContain("-o BatchMode=yes");
+    expect(script).toContain("-o StrictHostKeyChecking=yes");
+    // modelctl's own probe paths are checked on the destination before the
+    // transfer, and the hub's remediation marker is present on failure.
+    expect(script).toContain('"$HOME/.local/bin/modelctl" /usr/local/bin/modelctl /usr/bin/modelctl');
+    expect(script).toContain("IRORI_PUSH_BLOCKED=");
+    expect(script).toContain('exec "$MCTL" push \'glm\' --host \'10.100.24.1\' --host \'10.100.25.1\' --jobs 8');
   });
 
-  it("maps push ssh and cache-dir overrides", () => {
-    const { argv } = buildCommand("push", { name: "glm", hosts: ["deploy@10.0.10.9"], ssh: "/usr/bin/ssh", cacheDir: "/home/deploy/.cache/huggingface/hub" }, ctx);
-    expect(argv).toEqual(["modelctl", "push", "glm", "--host", "deploy@10.0.10.9", "--cache-dir", "/home/deploy/.cache/huggingface/hub", "--ssh", "/usr/bin/ssh"]);
+  it("passes push ssh and cache-dir overrides through the preflight exec (ADR-0014)", () => {
+    const { argv, shell } = buildCommand("push", { name: "glm", hosts: ["deploy@10.0.10.9"], ssh: "/usr/bin/ssh", cacheDir: "/home/deploy/.cache/huggingface/hub" }, ctx);
+    expect(shell).toBe("bash");
+    const script = argv[2]!;
+    expect(script).toContain("--cache-dir '/home/deploy/.cache/huggingface/hub' --ssh '/usr/bin/ssh'");
+  });
+
+  it("installs rsync idempotently via apt (ADR-0014)", () => {
+    const { argv, shell } = buildCommand("ensure-rsync", {}, ctx);
+    expect(shell).toBe("bash");
+    const script = argv[2]!;
+    expect(script).toContain("command -v rsync >/dev/null 2>&1");
+    expect(script).toContain("apt-get install -y rsync");
+  });
+
+  it("generates the source cache user's transfer key (ADR-0014)", () => {
+    const cacheCtx = {
+      ...ctx,
+      agentUser: "root",
+      cacheUser: "piresbruno",
+      resolveLocalUser: (user: string) => ({ home: `/home/${user}`, binary: `/home/${user}/.local/bin/modelctl` }),
+    };
+    const { argv } = buildCommand("transfer-key-ensure", { user: "piresbruno" }, cacheCtx);
+    expect(argv.slice(0, 4)).toEqual(["runuser", "-u", "piresbruno", "--"]);
+    const script = argv[argv.length - 1]!;
+    expect(script).toContain('ssh-keygen -t ed25519 -N "" -C "irori-transfer"');
+    expect(script).toContain("IRORI_TRANSFER_PUBKEY=");
+  });
+
+  it("authorizes the destination cache user and reports host keys (ADR-0014)", () => {
+    const { argv } = buildCommand("transfer-key-authorize", { user: "piresbruno", publicKey: "ssh-ed25519 AAAA test" }, ctx);
+    const script = argv[argv.length - 1]!;
+    expect(script).toContain("grep -qF 'ssh-ed25519 AAAA test'");
+    expect(script).toContain("IRORI_HOSTKEY=");
+    expect(() => buildCommand("transfer-key-authorize", { user: "piresbruno", publicKey: "rm -rf /" }, ctx)).toThrow(/valid publicKey/);
+    expect(() => buildCommand("transfer-key-authorize", { user: "piresbruno" }, ctx)).toThrow(/needs a valid publicKey/);
+  });
+
+  it("pins the destination's host keys into known_hosts (ADR-0014)", () => {
+    const { argv } = buildCommand(
+      "transfer-hostkey-pin",
+      { user: "piresbruno", host: "dgx3.as267.com", hostKeys: ["dgx3.as267.com ssh-ed25519 AAAA"] },
+      ctx,
+    );
+    const script = argv[argv.length - 1]!;
+    expect(script).toContain("ssh-keygen -R 'dgx3.as267.com'");
+    expect(script).toContain("echo 'dgx3.as267.com ssh-ed25519 AAAA' >> \"$HOME/.ssh/known_hosts\"");
+    expect(() =>
+      buildCommand("transfer-hostkey-pin", { user: "piresbruno", host: "dgx3.as267.com" }, ctx),
+    ).toThrow(/needs at least one host key/);
   });
 
   it("maps download from the store by owner/model id", () => {
@@ -354,7 +408,9 @@ describe("JobManager env (IRI-019)", () => {
         { onOutput: (_jobId, _seq, line) => outputs.push(line), onDone: () => {} },
       );
       expect(jobs.start("44444444-4444-4444-8444-444444444444", "doctor", {})).toBe(true);
-      await vi.waitFor(() => expect(outputs.some((l) => l.startsWith("HF_TOKEN="))).toBe(true));
+      // The child is a real process spawn under load — the default 1s waitFor
+      // window flaked three times on 2026-10-27; give it a real budget.
+      await vi.waitFor(() => expect(outputs.some((l) => l.startsWith("HF_TOKEN="))).toBe(true), { timeout: 10_000 });
       expect(outputs.find((l) => l.startsWith("HF_TOKEN="))).toBe("HF_TOKEN=hf_x");
 
       // Empty ctx token → no HF_TOKEN in the child env at all. runStreaming
@@ -369,7 +425,7 @@ describe("JobManager env (IRI-019)", () => {
           { onOutput: (_jobId, _seq, line) => outputs.push(line), onDone: () => {} },
         );
         expect(jobs2.start("55555555-5555-4555-8555-555555555555", "doctor", {})).toBe(true);
-        await vi.waitFor(() => expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).length >= 2).toBe(true));
+        await vi.waitFor(() => expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).length >= 2).toBe(true), { timeout: 10_000 });
         expect(outputs.filter((l) => l.startsWith("HF_TOKEN=")).at(-1)).toBe("HF_TOKEN=UNSET");
       } finally {
         if (savedToken !== undefined) process.env.HF_TOKEN = savedToken;
