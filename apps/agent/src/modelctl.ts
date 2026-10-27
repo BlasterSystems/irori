@@ -152,11 +152,11 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
         throw new CommandBuildError(`IRORI_MODELCTL_PIN must be semver, got "${ctx.pin}"`);
       }
       const installUser = str("user");
-      const resolved =
-        installUser === undefined || installUser === (ctx.agentUser ?? "root")
-          ? null
-          : ctx.resolveLocalUser?.(installUser) ?? null;
-      if (installUser !== undefined && resolved === null) {
+      // The agent's own user (named or implied) runs the plain script; any
+      // other cache user is wrapped in runuser and must resolve.
+      const ownUser = installUser === undefined || installUser === (ctx.agentUser ?? "root");
+      const resolved = ownUser ? null : ctx.resolveLocalUser?.(installUser) ?? null;
+      if (!ownUser && resolved === null) {
         throw new CommandBuildError(
           `modelctl-install: no modelctl for cache user "${installUser}" — install it for that user (sudo -u ${installUser} uv tool install "modelctl") or clear the node's cache user setting`,
         );
