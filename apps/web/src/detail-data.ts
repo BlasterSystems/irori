@@ -104,10 +104,25 @@ export function computeDetailData(
   const hasHistory = points.length > 0;
 
   const cpuSrc = lastReadable(points, (p) => p.cpu);
+  // IRI-034: current CPU clock from the live snapshot, mirroring the GPU
+  // `sm` note. Max across cores; the ` / max` half appears once agents
+  // report perCoreMaxClocksKHz.
+  const cpuNotes: string[] = [];
+  if (hasHistory) {
+    const clocks = snapshot?.cpu?.perCoreClocksKHz;
+    if (clocks !== undefined && clocks.length > 0) {
+      const maxClocks = snapshot?.cpu?.perCoreMaxClocksKHz;
+      const maxPart =
+        maxClocks !== undefined && maxClocks.length > 0
+          ? ` / ${Math.round(Math.max(...maxClocks) / 1000).toLocaleString("en-US")}`
+          : "";
+      cpuNotes.push(`cpu ${Math.round(Math.max(...clocks) / 1000).toLocaleString("en-US")}${maxPart} MHz`);
+    }
+  }
   const cpu: DetailPanelData = {
     current: cpuSrc ? (formatPct(cpuSrc.cpu) ?? "") : "",
     sub: cpuSrc ? formatBand(cpuSrc.cpuTemp) : null,
-    notes: [],
+    notes: cpuNotes,
     series: points.map((p) => p.cpu),
     series2: null,
   };

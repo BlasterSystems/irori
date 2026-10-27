@@ -49,6 +49,17 @@ All notable changes to Irori are recorded here. Format follows
   download-queue rows, batch totals strip and job-drawer summary shipped in
   IR-71/74.
 
+### Fixed
+
+- **Node page UX** (IRI-034): saving probe ports (or role / NAS root / cache
+  user) pushes a live `config-update` so the agent stops probing removed
+  ports immediately instead of ghosting them until the next reconnect; port
+  panels render configured ports plus detected hot-added ports only (idle
+  ghosts hidden); the node-page store catalog renders only on the store node
+  (`kind: nas`); the History CPU card shows the current clock like the GPU
+  card (`cpu X / Y MHz` — the max half once agents report
+  `perCoreMaxClocksKHz`).
+
 ## [0.3.0] — Agent onboarding, usage capture, download queue & overview
 
 ### Added

@@ -111,6 +111,22 @@ describe("app", () => {
     expect(res.body.node).toMatchObject({ name: "renamed", enabled: false });
   });
 
+  it("pushes a config-update when a patch changes agent-consumed fields (IRI-034)", async () => {
+    const { app, fake, refreshed } = makeApp();
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const res = await request(app).patch(`/api/v1/nodes/${id}`).send({ llmPorts: [8000] });
+    expect(res.status).toBe(200);
+    expect(refreshed).toEqual([id]);
+  });
+
+  it("does not push a config-update for display-only patches", async () => {
+    const { app, fake, refreshed } = makeApp();
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const res = await request(app).patch(`/api/v1/nodes/${id}`).send({ name: "renamed" });
+    expect(res.status).toBe(200);
+    expect(refreshed).toEqual([]);
+  });
+
   it("404s patch/delete/rotate for unknown nodes and 400s malformed ids", async () => {
     const { app } = makeApp();
     const unknown = "00000000-0000-4000-8000-000000000000";
