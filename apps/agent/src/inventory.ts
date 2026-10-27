@@ -317,7 +317,11 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
         try {
           const entry = (await runAs(ctx, user, home, binary, ["path", "--local", model.name], PATH_TIMEOUT_MS)).trim();
           const snapshot = snapshotRootFromEntrypoint(entry);
-          if (snapshot !== null) bytes = await dirBytes(snapshot);
+          // IR-106: measure the MODEL dir (blobs are real files there), not
+          // the snapshot — HF snapshots are symlink farms, and the walk
+          // never follows links, so a snapshot measures as a few hundred
+          // bytes of symlink entries.
+          if (snapshot !== null) bytes = await dirBytes(join(snapshot, "..", ".."));
         } catch {
           bytes = null;
         }
