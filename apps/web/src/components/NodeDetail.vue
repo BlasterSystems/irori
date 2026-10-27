@@ -594,6 +594,18 @@ onUnmounted(() => clearTimeout(deleteTimer));
     <template v-else>
       <p v-if="inventoryError" class="banner banner--warn" style="margin-bottom: 12px;">{{ inventoryError }}</p>
 
+      <!-- IRI-034: the store card carries the Refresh affordance on the store
+           node; every other case still needs one in reach. -->
+      <div v-if="!(inventory.store && node?.kind === 'nas')" class="row row--between" style="margin-bottom: 12px;">
+        <span class="muted">
+          {{ inventoryBusy ? "reading the node's caches…" : inventory.store ? "store catalog renders on the store node" : "local caches" }}
+          <span v-if="inventoryReadLabel && !inventoryBusy" class="stat__sub faint">— read {{ inventoryReadLabel }}</span>
+        </span>
+        <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy || node?.online !== true" @click="refreshInventory">
+          {{ inventoryBusy ? "reading…" : "Refresh" }}
+        </button>
+      </div>
+
       <article v-if="inventory.store && node?.kind === 'nas'" class="card" style="margin-bottom: 12px;">
         <div class="card__head">
           <h3>Store</h3>
