@@ -67,9 +67,19 @@ A dgx→dgx push failed twice on 2026-10-27 (DGX-1 → DGX-3, 163.6 GiB): missin
 
 ## Deploy
 
-- (pending — PR open, awaiting owner merge; next dev tag dev-0.3.0-48. Post-deploy:
-  agent-update DGX-1 and DGX-3 so the new job kinds/preflight ship, then a real
-  dgx1→dgx3 push exercises the preflight ok-path.)
+- PR #59 rebase-merged to main as a5ca894; branch deleted; self-review comment
+  https://github.com/BlasterSystems/irori/pull/59#issuecomment-6455077736.
+- Tag `dev-0.3.0-48` on a5ca894; CD DEV run 40596124020 green (test + deploy, 160 s).
+- Live 10.20.30.9:3947 on dev-0.3.0-48: `/healthz` ok+db, version tag `dev-0.3.0-48`; the served
+  agent bundle (`/agent/irori-agent.mjs`, 2.48 MB) carries `ensure-rsync`, the three transfer
+  kinds, `IRORI_PREFLIGHT` and `IRORI_PUSH_BLOCKED`.
+- Agent-update DGX-1 (`c950d961`) and DGX-3 (`abb48a93`) both succeeded — the fleet runs the
+  new bundle.
+- Live smoke: `ensure-rsync` on DGX-3 → no-op "rsync present: 3.2.7" (e09a01c6);
+  `transfer-key-ensure {operator}` on DGX-1 → idempotent `IRORI_TRANSFER_PUBKEY` (76917ee6);
+  real dgx1→dgx3 push `f838556a` → preflight ok-path + transfer, exit 0 in ~9.3 min.
+- Jira: IR-113/114/115 closed Done with evidence comments (25409-25411); epic IR-112 open.
+  Next dev tag: dev-0.3.0-49.
 
 ## Review
 
