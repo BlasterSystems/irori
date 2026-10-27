@@ -11,6 +11,13 @@ export const JOB_KINDS = [
   "download",
   "sync-local",
   "push",
+  // ADR-0014: push dependency self-healing — destination rsync + hub-orchestrated
+  // transfer keys (public material rides job output; private keys never leave
+  // the node that generated them).
+  "ensure-rsync",
+  "transfer-key-ensure",
+  "transfer-key-authorize",
+  "transfer-hostkey-pin",
   "nas-delete",
   "nas-delete-apply",
   "delete-local",

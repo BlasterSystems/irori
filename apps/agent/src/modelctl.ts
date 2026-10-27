@@ -73,6 +73,123 @@ export function buildQueueYaml(entries: DownloadEntry[]): string {
 
 const ROOT_FLAG = "--root";
 
+/** Single-quote a value for safe embedding in a generated bash script. */
+function shq(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * Destination probe (ADR-0014): report the destination's modelctl binary at
+ * the ADR-0011 candidate paths plus rsync presence. Runs via `ssh host sh -c`
+ * from the preflight; the caller classifies the ssh returncode/stderr.
+ */
+const REMOTE_PROBE =
+  'cd; M=""; for p in "$HOME/.local/bin/modelctl" /usr/local/bin/modelctl /usr/bin/modelctl; do [ -x "$p" ] && M="$p" && break; done; ' +
+  'echo "IRORI_MCTL=$M"; command -v rsync >/dev/null 2>&1 && echo "IRORI_RSYNC=yes" || echo "IRORI_RSYNC=no"';
+
+/**
+ * The push job script (ADR-0014): probe every destination first — ssh auth,
+ * host key, destination modelctl and rsync — and fail in seconds with a
+ * classified `IRORI_PREFLIGHT` line per gap instead of modelctl's ambiguous
+ * "not installed" after a 163 GiB attempt (remote.py masks any nonzero ssh
+ * exit). A clean probe execs modelctl push; any gap prints
+ * `IRORI_PUSH_BLOCKED=` and exits 1 so the hub can remediate and re-push.
+ */
+function pushPreflightScript(opts: {
+  modelctlBin: string;
+  name: string;
+  hosts: string[];
+  jobs?: number;
+  cacheDir?: string;
+  ssh?: string;
+}): string {
+  const lines: string[] = [
+    "set -u",
+    `MCTL=${shq(opts.modelctlBin)}`,
+    "FAIL=0",
+    "ERR=$(mktemp)",
+  ];
+  for (const host of opts.hosts) {
+    lines.push(
+      `H=${shq(host)}`,
+      `echo "IRORI_PREFLIGHT ($H): probing destination"`,
+      `OUT=$(ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=yes "$H" sh -c ${shq(REMOTE_PROBE)} 2>"$ERR"); RC=$?`,
+      'if [ "$RC" -eq 255 ]; then',
+      '  case "$(cat "$ERR")" in',
+      '    *Permission*denied*|*publickey*)',
+      '      echo "IRORI_PREFLIGHT ($H): ssh auth failed — the transfer key is not authorized; the hub wires the pair automatically on the next push (manual: ssh-copy-id $H)" ;;',
+      '    *Host*key*verification*)',
+      '      echo "IRORI_PREFLIGHT ($H): destination host key not pinned — the hub wires the pair automatically on the next push" ;;',
+      '    *Connection*timed*out*|*Could*not*resolve*hostname*|*Connection*refused*|*No*route*to*host*)',
+      '      echo "IRORI_PREFLIGHT ($H): unreachable — $(head -n1 "$ERR")" ;;',
+      '    *)',
+      '      echo "IRORI_PREFLIGHT ($H): ssh failed — $(head -n1 "$ERR")" ;;',
+      '  esac',
+      '  FAIL=1',
+      'elif [ "$RC" -ne 0 ]; then',
+      '  echo "IRORI_PREFLIGHT ($H): probe failed (rc=$RC) — $(head -n1 "$ERR")"',
+      '  FAIL=1',
+      'else',
+      '  M="$(printf "%s\\n" "$OUT" | sed -n "s/^IRORI_MCTL=//p")"',
+      '  R="$(printf "%s\\n" "$OUT" | sed -n "s/^IRORI_RSYNC=//p")"',
+      '  if [ -z "$M" ]; then',
+      '    echo "IRORI_PREFLIGHT ($H): destination modelctl missing — provisioned automatically after the node next reads its inventory (ADR-0013)"',
+      '    FAIL=1',
+      '  elif [ "$R" != "yes" ]; then',
+      '    echo "IRORI_PREFLIGHT ($H): destination rsync missing — the hub installs it before the push (ADR-0014)"',
+      '    FAIL=1',
+      '  else',
+      '    echo "IRORI_PREFLIGHT ($H): ok"',
+      '  fi',
+      'fi',
+    );
+  }
+  lines.push(
+    'rm -f "$ERR"',
+    'if [ "$FAIL" -ne 0 ]; then',
+    '  echo "IRORI_PUSH_BLOCKED=destination not ready — the hub remediates and re-runs the push"',
+    '  exit 1',
+    'fi',
+  );
+  const exec = [`exec "$MCTL" push ${shq(opts.name)}`, ...opts.hosts.map((h) => `--host ${shq(h)}`)];
+  if (opts.jobs !== undefined) exec.push(`--jobs ${Math.floor(opts.jobs)}`);
+  if (opts.cacheDir !== undefined) exec.push(`--cache-dir ${shq(opts.cacheDir)}`);
+  if (opts.ssh !== undefined) exec.push(`--ssh ${shq(opts.ssh)}`);
+  lines.push(exec.join(" "));
+  return lines.join("\n");
+}
+
+/**
+ * Resolves a transfer user's passwd entry agent-side (the hub never sends
+ * paths); null when the job targets the agent's own user.
+ */
+function resolveTransferUser(user: string, ctx: ModelctlCtx): { home: string; binary: string } | null {
+  const ownUser = !user || user === (ctx.agentUser ?? "root");
+  return ownUser ? null : ctx.resolveLocalUser?.(user) ?? null;
+}
+
+/** Wraps a bash script in the cache-user runuser env (the ADR-0011 shape). */
+function runuserScript(user: string, resolved: { home: string; binary: string }, script: string): string[] {
+  return [
+    "runuser",
+    "-u",
+    user,
+    "--",
+    "env",
+    "-u",
+    "XDG_STATE_HOME",
+    "-u",
+    "HF_HOME",
+    "-u",
+    "HF_HUB_CACHE",
+    `HOME=${resolved.home}`,
+    `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+    "bash",
+    "-c",
+    script,
+  ];
+}
+
 /**
  * IR-101: transfers must land in the node's cache owner's HF cache — the
  * registration state lives in the invoking user's home, so running as root
@@ -242,15 +359,133 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       if (!name) throw new CommandBuildError("push needs name or repository");
       const hosts = Array.isArray(params.hosts) ? params.hosts.filter((h): h is string => typeof h === "string" && h.length > 0) : [];
       if (hosts.length === 0) throw new CommandBuildError("push needs at least one --host");
-      const argv = ["push", name];
-      for (const h of hosts) argv.push("--host", h);
       const jobs = num("jobs");
-      if (jobs) argv.push("--jobs", String(Math.floor(jobs)));
       const cache = str("cacheDir");
-      if (cache) argv.push("--cache-dir", cache);
       const ssh = str("ssh");
-      if (ssh) argv.push("--ssh", ssh);
-      return asCacheUser(argv, ctx, "push");
+      // ADR-0014: probe every destination before modelctl touches it — a
+      // 163 GiB transfer must not start against an ssh/rsync/modelctl gap,
+      // and modelctl masks every ssh failure as "not installed" (remote.py).
+      const user = ctx.cacheUser?.trim();
+      const ownUser = !user || user === (ctx.agentUser ?? "root");
+      const resolved = ownUser ? null : ctx.resolveLocalUser?.(user) ?? null;
+      if (!ownUser && resolved === null) {
+        throw new CommandBuildError(`push: no modelctl for cache user "${user}" — install it for that user (sudo -u ${user} uv tool install "modelctl") or clear the node's cache user setting`);
+      }
+      const modelctlBin = resolved === null ? (ctx.modelctlPath ?? "modelctl") : resolved.binary;
+      const script = pushPreflightScript({ modelctlBin, name, hosts, jobs, cacheDir: cache, ssh });
+      if (resolved === null) return { argv: ["bash", "-c", script], shell: "bash" };
+      return {
+        raw: true,
+        argv: [
+          "runuser",
+          "-u",
+          user!,
+          "--",
+          "env",
+          "-u",
+          "XDG_STATE_HOME",
+          "-u",
+          "HF_HOME",
+          "-u",
+          "HF_HUB_CACHE",
+          `HOME=${resolved.home}`,
+          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+          "bash",
+          "-c",
+          script,
+        ],
+      };
+    }
+    case "ensure-rsync": {
+      // ADR-0014: the push destination needs rsync. Narrow + idempotent by
+      // design — present is a no-op, apt only, and there are deliberately no
+      // params: a package list would make this an arbitrary-install surface.
+      const script = [
+        'if command -v rsync >/dev/null 2>&1; then',
+        '  echo "rsync present: $(rsync --version 2>/dev/null | head -n1)"',
+        '  exit 0',
+        'fi',
+        'if ! command -v apt-get >/dev/null 2>&1; then',
+        '  echo "no apt-get — install rsync manually"; exit 1',
+        'fi',
+        'apt-get update -qq',
+        'DEBIAN_FRONTEND=noninteractive apt-get install -y rsync',
+        'echo "rsync installed: $(rsync --version 2>/dev/null | head -n1)"',
+      ].join("\n");
+      return { argv: ["bash", "-c", script], shell: "bash" };
+    }
+    case "transfer-key-ensure": {
+      // ADR-0014: the source cache user needs an ed25519 transfer key; the
+      // private key is generated on and stays on this node. Idempotent — an
+      // existing key is reused and its public half reported for authorize.
+      const user = str("user");
+      if (!user) throw new CommandBuildError("transfer-key-ensure needs user");
+      const resolved = resolveTransferUser(user, ctx);
+      const script = [
+        "set -e",
+        'mkdir -p "$HOME/.ssh"',
+        'chmod 700 "$HOME/.ssh"',
+        'if [ ! -f "$HOME/.ssh/id_ed25519" ]; then',
+        '  ssh-keygen -t ed25519 -N "" -C "irori-transfer" -f "$HOME/.ssh/id_ed25519" >/dev/null',
+        '  echo "generated transfer key"',
+        'fi',
+        'echo "IRORI_TRANSFER_PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")"',
+      ].join("\n");
+      return resolved === null
+        ? { argv: ["bash", "-c", script], shell: "bash" }
+        : { raw: true, argv: runuserScript(user, resolved, script) };
+    }
+    case "transfer-key-authorize": {
+      // ADR-0014: append the source's public key to the destination cache
+      // user's authorized_keys (deduplicated; the key comment tags it
+      // `irori-transfer`) and report this machine's ssh host public keys.
+      const user = str("user");
+      if (!user) throw new CommandBuildError("transfer-key-authorize needs user");
+      const publicKey = str("publicKey");
+      if (!publicKey || !/^(ssh|ecdsa)-[a-z0-9@.-]+ [A-Za-z0-9+/=]+/.test(publicKey)) {
+        throw new CommandBuildError("transfer-key-authorize needs a valid publicKey");
+      }
+      const resolved = resolveTransferUser(user, ctx);
+      const script = [
+        "set -e",
+        'mkdir -p "$HOME/.ssh"',
+        'chmod 700 "$HOME/.ssh"',
+        'touch "$HOME/.ssh/authorized_keys"',
+        'chmod 600 "$HOME/.ssh/authorized_keys"',
+        `grep -qF ${shq(publicKey)} "$HOME/.ssh/authorized_keys" || echo ${shq(publicKey)} >> "$HOME/.ssh/authorized_keys"`,
+        'echo "transfer key authorized"',
+        'for f in /etc/ssh/ssh_host_*_key.pub; do [ -f "$f" ] && echo "IRORI_HOSTKEY=$(cat "$f")" || true; done',
+      ].join("\n");
+      return resolved === null
+        ? { argv: ["bash", "-c", script], shell: "bash" }
+        : { raw: true, argv: runuserScript(user, resolved, script) };
+    }
+    case "transfer-hostkey-pin": {
+      // ADR-0014: pin the destination's real host keys (relayed by the hub)
+      // into the source cache user's known_hosts — idempotent, and
+      // ssh-keygen -R clears stale pins after a reimage.
+      const user = str("user");
+      if (!user) throw new CommandBuildError("transfer-hostkey-pin needs user");
+      const host = str("host");
+      if (!host) throw new CommandBuildError("transfer-hostkey-pin needs host");
+      const hostKeys = Array.isArray(params.hostKeys)
+        ? params.hostKeys.filter((k): k is string => typeof k === "string" && /^[^\s]+\s+(ssh|ecdsa)-\S+\s+[A-Za-z0-9+/=]+/.test(k.trim()))
+        : [];
+      if (hostKeys.length === 0) throw new CommandBuildError("transfer-hostkey-pin needs at least one host key");
+      const resolved = resolveTransferUser(user, ctx);
+      const script = [
+        "set -e",
+        'mkdir -p "$HOME/.ssh"',
+        'chmod 700 "$HOME/.ssh"',
+        'touch "$HOME/.ssh/known_hosts"',
+        'chmod 600 "$HOME/.ssh/known_hosts"',
+        `ssh-keygen -R ${shq(host)} >/dev/null 2>&1 || true`,
+        ...hostKeys.map((k) => `echo ${shq(k.trim())} >> "$HOME/.ssh/known_hosts"`),
+        `echo ${shq(`host keys pinned for ${host}`)}`,
+      ].join("\n");
+      return resolved === null
+        ? { argv: ["bash", "-c", script], shell: "bash" }
+        : { raw: true, argv: runuserScript(user, resolved, script) };
     }
     case "nas-delete": {
       const name = str("name");

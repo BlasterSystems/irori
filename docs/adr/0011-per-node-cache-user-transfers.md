@@ -113,4 +113,7 @@ core schemas, setups composition, db store), plus a live smoke: a real
 
 - IR-101 / IRI-030, tasks/IRI-030-cache-user-transfers.md
 - ADR-0003 (privileged agent), ADR-0004 (modelctl engine), ADR-0009 (NAS-first
-  downloads), IRI-028 (per-user cache inventory)
+  downloads), IRI-028 (per-user cache inventory).
+- ADR-0014 automates the operating prerequisites above (modelctl installs via
+  the ADR-0013 convergence; user-level ssh via the hub-orchestrated transfer
+  key exchange).
