@@ -2,7 +2,7 @@ import type { AnalyticsPoint, AnalyticsResponse, AnalyticsSeries } from "@irori/
 
 export type { AnalyticsPoint };
 import { sparklinePath } from "./sparkline";
-import type { SparklineDomain } from "./sparkline";
+import type { SparklineDomain, SparklineScale } from "./sparkline";
 
 /**
  * Pure view-model shaping for the Analytics section (M7): per-lens series
@@ -32,6 +32,8 @@ export interface ChartSeries {
   label: string;
   color: string;
   dashed?: boolean;
+  /** Own value domain when the chart scales series independently (perSeriesScale). */
+  scale?: SparklineScale;
   points: Array<number | null>;
 }
 
@@ -72,9 +74,28 @@ export interface LensChartOptions {
   /** Per-series metric (parallel to `series`); defaults to `valueKey` for all.
    *  Lets one chart mix metrics over a shared domain (e.g. decode+prefill). */
   valueKeys?: Array<keyof AnalyticsPoint>;
+  /** Scale each series to its own min/max instead of one shared domain — keeps
+   *  a quiet line legible next to a spiky one (hero decode+prefill, IR-110).
+   *  domain/ceiling/floor/guides are chart-level and unsupported with this on. */
+  perSeriesScale?: boolean;
 }
 
-/** Shared-domain chart geometry for one lens view. */
+/** Per-series domain (IR-110): own min/max, 0-floored when `floorZero`. An
+ *  all-zero series pins to `{min: 0, max: 1}` so a flat zero line renders at
+ *  the bottom (the shared-domain look); other constants get the ±0.5 slack at
+ *  their value. null when no point is readable. */
+function seriesScale(points: Array<number | null>, floorZero: boolean): SparklineScale | null {
+  const finite = points.filter((v): v is number => v !== null && v !== undefined && Number.isFinite(v));
+  if (finite.length === 0) return null;
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  if (min === max) {
+    return floorZero && min === 0 ? { min: 0, max: 1 } : { min: min - 0.5, max: max + 0.5 };
+  }
+  return { min: floorZero ? Math.min(0, min) : min, max };
+}
+
+/** Chart geometry for lens views: one shared domain, or per-series with `perSeriesScale`. */
 export function lensChart(
   series: AnalyticsSeries[],
   valueKey: keyof AnalyticsPoint,
@@ -90,17 +111,35 @@ export function lensChart(
       points: s.points.map((p) => (typeof p[key] === "number" ? (p[key] as number) : null)),
     };
   });
+  // IR-110: per-series domains — each series scales to its own 0-floored
+  // min/max so a quiet line stays legible next to a spiky one. The chart-level
+  // domain becomes the union of the per-series scales.
+  const scales: Array<SparklineScale | null> =
+    opts.perSeriesScale === true
+      ? charts.map((c) => seriesScale(c.points, opts.floorZero === true))
+      : charts.map(() => null);
+  charts.forEach((c, i) => {
+    if (scales[i] !== null) c.scale = scales[i]!;
+  });
+  const applied = scales.filter((s): s is SparklineScale => s !== null);
   const finite = charts.flatMap((c) => c.points).filter((v): v is number => v !== null && Number.isFinite(v));
-  let yMin = finite.length > 0 ? Math.min(...finite) : 0;
-  let yMax = finite.length > 0 ? Math.max(...finite) : 1;
-  if (opts.domain?.min !== undefined) yMin = Math.min(opts.domain.min, yMin);
-  if (opts.domain?.max !== undefined) yMax = Math.max(opts.domain.max, yMax);
-  if (opts.floorZero === true) yMin = Math.min(0, yMin);
-  if (opts.floor !== undefined) yMin = Math.min(opts.floor, yMin);
-  if (opts.ceiling !== undefined) yMax = Math.max(opts.ceiling, yMax);
-  if (yMin === yMax) {
-    yMin -= 0.5;
-    yMax += 0.5;
+  let yMin: number;
+  let yMax: number;
+  if (opts.perSeriesScale === true) {
+    yMin = applied.length > 0 ? Math.min(...applied.map((s) => s.min)) : 0;
+    yMax = applied.length > 0 ? Math.max(...applied.map((s) => s.max)) : 1;
+  } else {
+    yMin = finite.length > 0 ? Math.min(...finite) : 0;
+    yMax = finite.length > 0 ? Math.max(...finite) : 1;
+    if (opts.domain?.min !== undefined) yMin = Math.min(opts.domain.min, yMin);
+    if (opts.domain?.max !== undefined) yMax = Math.max(opts.domain.max, yMax);
+    if (opts.floorZero === true) yMin = Math.min(0, yMin);
+    if (opts.floor !== undefined) yMin = Math.min(opts.floor, yMin);
+    if (opts.ceiling !== undefined) yMax = Math.max(opts.ceiling, yMax);
+    if (yMin === yMax) {
+      yMin -= 0.5;
+      yMax += 0.5;
+    }
   }
 
   const y = (v: number): number => height - ((v - yMin) / (yMax - yMin)) * height;
@@ -126,7 +165,11 @@ export function lensChart(
   }
 
   const paths = charts
-    .map((c) => ({ d: sparklinePath(c.points, width, height, { min: yMin, max: yMax }), color: c.color, dashed: c.dashed === true }))
+    .map((c, i) => ({
+      d: sparklinePath(c.points, width, height, { min: yMin, max: yMax }, scales[i] ?? undefined),
+      color: c.color,
+      dashed: c.dashed === true,
+    }))
     .filter((p) => p.d !== "");
 
   // All series share the server's bucket grid; the longest one is canonical.
