@@ -62,7 +62,13 @@ The node page renders the Sensors card and the LLM inference panel each at half 
 
 ## Deploy
 
-- (pending — PR open, awaiting owner merge; next dev tag dev-0.3.0-47)
+- PR #57 rebase-merged to main as 0e3532a; branch deleted; self-review comment
+  https://github.com/BlasterSystems/irori/pull/57#issuecomment-6450443225.
+- Tag `dev-0.3.0-47` on 0e3532a; CD DEV run 40562096389 green (test + deploy, 140 s).
+- Live 10.20.30.9:3947 on dev-0.3.0-47: `/healthz` ok+db, version tag `dev-0.3.0-47`, served bundle
+  `index-BvBGrUCw.js` carries `inference-cell`; live DGX-1 node page measured Sensors and the :8081
+  TensorFold panel on one row (top 206, 570px each), footer "dev-0.3.0-47 · updates every 1 s · 203 W".
+- Jira: IR-111 closed Done with evidence comment (25395). Next dev tag: dev-0.3.0-48.
 
 ## Review
 
