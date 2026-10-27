@@ -3,6 +3,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { MODELCTL_PIN_RE } from "@irori/core";
 
 /**
  * modelctl command building + execution (ADR-0004: Irori never mutates the
@@ -142,24 +143,68 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       // Provisioning (ADR-0004): uv → pinned GitHub release tag → version
       // gate. ~/.local/bin is off PATH on the shipped image (IRORI_MODELCTL_PATH
       // exists for exactly that reason) — export it or nothing here works.
-      if (!/^\d+\.\d+\.\d+$/.test(ctx.pin)) {
+      // IR-105: params.user provisions a cache user's own modelctl (runuser,
+      // ADR-0011 shape) — the hub auto-dispatches this after an inventory
+      // read when that user's reported version is below the pin. The
+      // pre-check skips when the current version already satisfies the pin:
+      // a stale env pin on the node must never downgrade a newer binary.
+      if (!MODELCTL_PIN_RE.test(ctx.pin)) {
         throw new CommandBuildError(`IRORI_MODELCTL_PIN must be semver, got "${ctx.pin}"`);
       }
+      const installUser = str("user");
+      const resolved =
+        installUser === undefined || installUser === (ctx.agentUser ?? "root")
+          ? null
+          : ctx.resolveLocalUser?.(installUser) ?? null;
+      if (installUser !== undefined && resolved === null) {
+        throw new CommandBuildError(
+          `modelctl-install: no modelctl for cache user "${installUser}" — install it for that user (sudo -u ${installUser} uv tool install "modelctl") or clear the node's cache user setting`,
+        );
+      }
+      const homeBin = resolved === null ? "/root/.local/bin" : `${resolved.home}/.local/bin`;
       const script = [
         "set -e",
-        // The agent unit sets no HOME (systemd default for root) — a $HOME
-        // export degrades to "/.local/bin" and uv is never found (exit 127).
-        // The uv installer itself lands in /root/.local/bin for the root agent.
-        'export PATH="/root/.local/bin:$PATH"',
+        `export PATH="${homeBin}:$PATH"`,
         "command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh",
-        `uv tool install --force "git+https://github.com/piresbruno/modelctl@v${ctx.pin}"`,
+        `PIN="${ctx.pin}"`,
+        `CURRENT="$(modelctl --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1 || true)"`,
+        'if [ -n "$CURRENT" ]; then',
+        '  LOWEST="$(printf \'%s\\n\' "$CURRENT" "$PIN" | sort -V | head -n1)"',
+        '  if [ "$LOWEST" = "$PIN" ]; then',
+        '    echo "modelctl $CURRENT satisfies the $PIN gate — skipping install"',
+        '    exit 0',
+        '  fi',
+        '  echo "modelctl $CURRENT is older than $PIN — upgrading"',
+        'fi',
+        'uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"',
         `INSTALLED="$(modelctl --version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1)"`,
         `[ -n "$INSTALLED" ] || { echo "modelctl --version produced no version"; exit 1; }`,
         `LOWEST="$(printf '%s\\n' "$INSTALLED" "${ctx.pin}" | sort -V | head -n1)"`,
         `[ "$LOWEST" = "${ctx.pin}" ] || { echo "modelctl $INSTALLED is older than required ${ctx.pin}"; exit 1; }`,
         `echo "modelctl $INSTALLED satisfies the ${ctx.pin} gate"`,
       ].join("\n");
-      return { argv: ["bash", "-c", script], shell: "bash" };
+      if (resolved === null) return { argv: ["bash", "-c", script], shell: "bash" };
+      return {
+        raw: true,
+        argv: [
+          "runuser",
+          "-u",
+          installUser!,
+          "--",
+          "env",
+          "-u",
+          "XDG_STATE_HOME",
+          "-u",
+          "HF_HOME",
+          "-u",
+          "HF_HUB_CACHE",
+          `HOME=${resolved.home}`,
+          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+          "bash",
+          "-c",
+          script,
+        ],
+      };
     }
     case "download-queue": {
       const entries = params.downloads;

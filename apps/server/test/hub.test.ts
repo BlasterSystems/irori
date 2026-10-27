@@ -50,6 +50,18 @@ async function setup(overrides: Partial<AgentHubDeps> = {}) {
 const hello = (token: string, agentVersion = "0.1.0") =>
   JSON.stringify({ type: "hello", schemaVersion: SCHEMA_VERSION, agentVersion, token, hostname: "spark1" });
 
+it("carries the hub modelctl pin in the hello config-update (IR-105)", async () => {
+  const { url, created } = await setup({ getModelctlPin: async () => "0.23.0" });
+  const ws = new WebSocket(url);
+  await opened(ws);
+  ws.send(hello(created.token));
+  const reply = nextMessage(ws);
+  const config = nextMessage(ws);
+  expect(await reply).toMatchObject({ type: "hello-ok" });
+  expect(await config).toMatchObject({ type: "config-update", modelctlPin: "0.23.0" });
+  ws.close();
+});
+
 const snapshotMsg = (overrides: Partial<HardwareSnapshot> = {}) =>
   JSON.stringify({ type: "snapshot", snapshot: makeSnapshot(overrides) });
 
