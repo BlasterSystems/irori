@@ -52,6 +52,14 @@ it("NodeDetail describes what the hygiene CTA does", () => {
   expect(nodeDetailSource).toContain("dry-run plan first, nothing deleted without a typed confirm");
 });
 
+it("NodeDetail puts the Sensors card and the inference panels side by side (IRI-037)", () => {
+  // One shared cols-2 row carries both cells (was: two half-width rows).
+  const sections = nodeDetailSource.match(/<section class="cols cols-2"/g) ?? [];
+  expect(sections.length).toBe(1); // History's grid has a v-if before the class
+  expect(nodeDetailSource).toContain('class="inference-cell"');
+  expect(nodeDetailSource).toContain(".inference-cell > .card + .card");
+});
+
 it("irori.css ships the shared drawer chrome and the hot-value accent", () => {
   for (const rule of [
     ".drawer-scrim { position: fixed; inset: 0; background: var(--overlay);",
