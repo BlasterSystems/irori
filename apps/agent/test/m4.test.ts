@@ -222,6 +222,15 @@ describe("buildCommand", () => {
     ).toThrow(/no modelctl for cache user "ghost"/);
   });
 
+  it("provisions the agent's own user by name without runuser (IR-105)", () => {
+    // The hub dispatches {user: "root"} for the agent's own cache — the job
+    // must build the plain root script, never a runuser wrapper.
+    const built = buildCommand("modelctl-install", { user: "root" }, { ...ctx, agentUser: "root" });
+    expect(built.shell).toBe("bash");
+    expect(built.argv![0]).toBe("bash");
+    expect(built.argv![2]).toContain('export PATH="/root/.local/bin:$PATH"');
+  });
+
   it("errors without a store root and for unknown kinds", () => {
     expect(() => buildCommand("doctor", {}, { nasRoot: null, pin: "0.20.1" })).toThrow(CommandBuildError);
     expect(() => buildCommand("bogus-kind", {}, ctx)).toThrow(/unknown job kind/);
