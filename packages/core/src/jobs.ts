@@ -14,6 +14,9 @@ export const JOB_KINDS = [
   "nas-delete",
   "nas-delete-apply",
   "delete-local",
+  // Register an existing local HF cache entry after verifying it against the
+  // store (modelctl 0.23 register-local) — no transfer (IR-104).
+  "register-local",
   "doctor",
   "repair-active",
   "repair-active-apply",

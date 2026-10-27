@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDbHandle, jobs, modelMeta, nodeModels, nodes, type Db, type DbHandle } from "@irori/db";
+import { createDbHandle, jobs, modelMeta, nodeInventory, nodeModels, nodes, type Db, type DbHandle } from "@irori/db";
 import { createJobsService, type JobSettledEvent, type JobsService } from "../src/jobs-service.js";
 
 /**
@@ -112,5 +112,19 @@ d("job settle events (db integration)", () => {
     await db.delete(modelMeta).where(inArray(modelMeta.name, [gone, kept]));
     await db.delete(nodeModels).where(inArray(nodeModels.model, [gone, kept]));
     await db.delete(nodes).where(eq(nodes.id, other));
+  });
+
+  it("register-local upserts the node-model row and drops the cached inventory (IR-104)", async () => {
+    const name = "jobevt-reg-model";
+    await db.delete(nodeModels).where(eq(nodeModels.model, name));
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+    await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 1, store: null, local: [] } });
+
+    const row = await service.create(nodeId, "register-local", { name, user: "operator" });
+    await service.onDone(nodeId, row.id, "succeeded", 0);
+    expect(await db.select().from(nodeModels).where(eq(nodeModels.model, name))).toHaveLength(1);
+    expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
+
+    await db.delete(nodeModels).where(eq(nodeModels.model, name));
   });
 });

@@ -147,6 +147,33 @@ describe("buildCommand", () => {
     expect(buildCommand("nas-delete-apply", { name: "m" }, ctx).argv).toEqual(["modelctl", "delete", "m", "--apply", "--yes", "--root", "/mnt/nas"]);
   });
 
+  it("maps register-local with the store root and per-user runuser (IR-104)", () => {
+    expect(buildCommand("register-local", { name: "m" }, ctx).argv).toEqual([
+      "modelctl",
+      "register-local",
+      "m",
+      "--source-root",
+      "/mnt/nas",
+    ]);
+    const perUser = buildCommand("register-local", { name: "m", user: "operator" }, {
+      ...ctx,
+      resolveLocalUser: () => ({ home: "/home/operator", binary: "/home/operator/.local/bin/modelctl" }),
+    });
+    expect(perUser.raw).toBe(true);
+    expect(perUser.argv.slice(0, 4)).toEqual(["runuser", "-u", "operator", "--"]);
+    expect(perUser.argv.slice(-5)).toEqual([
+      "/home/operator/.local/bin/modelctl",
+      "register-local",
+      "m",
+      "--source-root",
+      "/mnt/nas",
+    ]);
+    expect(() => buildCommand("register-local", { name: "m", user: "ghost" }, ctx)).toThrow(/unknown local cache user/);
+    expect(() => buildCommand("register-local", {}, ctx)).toThrow(/needs name/);
+    const noStore = { ...ctx, nasRoot: null };
+    expect(() => buildCommand("register-local", { name: "m" }, noStore)).toThrow(/needs a NAS store root/);
+  });
+
   it("maps cleanup verbs with targets and apply", () => {
     const { argv } = buildCommand("gc-objects", { targets: ["a/b/c"], apply: true }, ctx);
     expect(argv).toEqual(["modelctl", "gc-objects", "a/b/c", "--apply", "--root", "/mnt/nas"]);

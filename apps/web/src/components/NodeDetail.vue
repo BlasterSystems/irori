@@ -25,6 +25,8 @@ import {
   inventorySummary,
   leftoverLabel,
   refreshNodeInventory,
+  registerCopy,
+  registerRequestFor,
   storeMountLabel,
   type DeleteTarget,
 } from "../inventory";
@@ -318,6 +320,52 @@ async function cancelDelete(): Promise<void> {
     await cancelJob(job.job.id);
   } catch (err) {
     modelDeleteError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// IR-104: register an unregistered cache dir in place (modelctl register-local,
+// verify-then-register, no transfer). Shares the Model operation card and
+// busy/error state with the delete flow — only one model job runs at a time.
+const registerTarget = ref<{ repo: string; user: string } | null>(null);
+const registerCopyText = computed(() => (registerTarget.value === null ? null : registerCopy(registerTarget.value.repo)));
+
+function askRegister(repo: string, user: string): void {
+  registerTarget.value = { repo, user };
+  modelDeleteError.value = null;
+}
+
+async function runRegister(): Promise<void> {
+  const target = registerTarget.value;
+  if (target === null || deleteBusy.value) return;
+  const request = registerRequestFor(target.repo, target.user);
+  const epoch = nodeEpoch;
+  deleteBusy.value = true;
+  modelDeleteError.value = null;
+  deleteJob.value = null;
+  registerTarget.value = null;
+  try {
+    const job = await createJob(props.nodeId, request.kind, request.params);
+    const detail = await pollJob(
+      job.id,
+      (d) => {
+        if (epoch === nodeEpoch) deleteJob.value = d;
+      },
+      30 * 60_000,
+      () => epoch === nodeEpoch,
+    );
+    if (epoch !== nodeEpoch) return;
+    deleteJob.value = detail;
+    if (detail.job.status !== "succeeded") {
+      modelDeleteError.value = detail.output.at(-1)?.line ?? `job ${detail.job.status}`;
+    }
+    // The settle invalidates the cached inventory server-side; rebuild it.
+    inventory.value = null;
+    await loadInventory();
+  } catch (err) {
+    if (epoch !== nodeEpoch) return;
+    modelDeleteError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    if (epoch === nodeEpoch) deleteBusy.value = false;
   }
 }
 
@@ -639,6 +687,20 @@ onUnmounted(() => clearTimeout(deleteTimer));
               </tr>
             </tbody>
           </table>
+          <template v-if="cache.error === null && cache.orphans.length > 0">
+            <p class="stat__sub" style="margin: 12px 0 6px;">unregistered cache entries — verified against the NAS by hash, nothing transferred</p>
+            <table class="table">
+              <thead><tr><th>Unregistered</th><th style="text-align: right;">Register</th></tr></thead>
+              <tbody>
+                <tr v-for="repo in cache.orphans" :key="repo">
+                  <td class="model-repo" :title="repo">{{ repo }}</td>
+                  <td style="text-align: right;">
+                    <button class="btn btn--ghost btn--sm" :disabled="deleteBusy" @click="askRegister(repo, cache.user)">Register</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
         </div>
       </article>
       <p v-if="inventory.local.length === 0" class="muted" style="margin-bottom: 12px;">no HF cache found for any user on this node</p>
@@ -754,6 +816,24 @@ onUnmounted(() => clearTimeout(deleteTimer));
           <div class="row">
             <button class="btn btn--secondary btn--sm" @click="deleteTarget = null">Cancel</button>
             <button class="btn btn--danger btn--sm" :disabled="deleteBusy" @click="runDelete">{{ deleteCopy.danger }}</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- IR-104: register-from-cache confirmation (verify-then-register, no transfer) -->
+    <div v-if="registerTarget !== null && registerCopyText !== null" class="drawer-scrim" @click.self="registerTarget = null">
+      <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="registerCopyText.title">
+        <div class="card__head">
+          <h3>{{ registerCopyText.title }}</h3>
+          <button class="btn btn--secondary btn--sm" @click="registerTarget = null">Close</button>
+        </div>
+        <p class="stat__sub" style="margin: 0;">{{ registerCopyText.body }}</p>
+        <div class="row row--between">
+          <span class="stat__sub faint">verification is read-only — nothing is transferred</span>
+          <div class="row">
+            <button class="btn btn--secondary btn--sm" @click="registerTarget = null">Cancel</button>
+            <button class="btn btn--secondary btn--sm" :disabled="deleteBusy" @click="runRegister">{{ registerCopyText.danger }}</button>
           </div>
         </div>
       </section>
