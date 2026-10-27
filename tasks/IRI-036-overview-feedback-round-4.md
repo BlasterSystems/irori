@@ -72,8 +72,16 @@ Three owner changes to the Overview page from the 2026-10-27 feedback round:
 
 ## Deploy
 
-- (pending — PR #55 open, awaiting owner merge; CI verify 1m50s + docs-check green;
-  next dev tag dev-0.3.0-46)
+- PR #55 rebase-merged to main as 0775cc3 (feat) + 16c9456 (task pointer); branch deleted; self-review
+  comment https://github.com/BlasterSystems/irori/pull/55#issuecomment-6449246181.
+- Tag `dev-0.3.0-46` on 16c9456; CD DEV run 40554777329 green (test + deploy, 140 s).
+- Live 10.0.10.9:3947 on dev-0.3.0-46: `/healthz` ok+db, `/api/v1/version` tag `dev-0.3.0-46` cadenceMs 1000,
+  served bundle `index-DzH0M985.js` (identical hash to the local build) carries `feedLog`/`perSeriesScale`/`scrollHeight`.
+- Browser pass: order heroes 169 / Nodes 501 / Power 774 / Telemetry 1135, footer "dev-0.3.0-46 · updates
+  every 1 s · 211 W", hero chart shows decode and prefill each at full range on the real TensorFold engine;
+  feed auto-scroll proven overflowing (73 = 293 − 220) during the pre-merge dev-proxy pass.
+- Jira: IR-108/109/110 closed Done with evidence comments (25392-25394); epic IR-107 open (IR-78
+  precedent). Next dev tag: dev-0.3.0-47.
 
 ## Review
 
