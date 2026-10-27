@@ -93,6 +93,11 @@ it("NodeDetail keeps the M3 inference section vocabulary", () => {
   expect(nodeDetailSource).toContain("inference history unavailable");
 });
 
+it("NodeDetail gates the store catalog to the store node and renders cpu clock notes (IRI-034)", () => {
+  expect(nodeDetailSource).toContain(`inventory.store && node?.kind === 'nas'`);
+  expect(nodeDetailSource).toContain(`v-for="note in detail.cpu.notes"`);
+});
+
 it("LlmPanel keeps the DS per-port panel vocabulary", () => {
   for (const cls of ["card", "card__head", "card__body", "row", "chip", "barrow", "bar__fill", "kv", "stat__sub", "muted", "mono faint"]) {
     expect(llmPanelSource).toContain(cls);

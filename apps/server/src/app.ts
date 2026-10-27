@@ -87,6 +87,9 @@ export type HistoryBuilder = (nodeId: string, range: HistoryRange) => Promise<Hi
 /** Builds an llm history response; null while degraded (no DB wired yet). */
 export type LlmHistoryBuilder = (nodeId: string, range: HistoryRange) => Promise<LlmHistoryResponse>;
 
+/** Node-row fields the agent's config-update consumes (hub.ts sendConfigUpdate). */
+const AGENT_CONFIG_KEYS = new Set(["llmPorts", "role", "nasRoot", "cacheUser"]);
+
 export interface AppDeps {
   /** Null while degraded (no/migrating DB): store-backed routes answer 503. */
   getStore: () => NodeStore | null;
@@ -351,6 +354,13 @@ export function createApp(deps: AppDeps): Express {
     const patch = Object.fromEntries(Object.entries(body.data).filter(([k]) => requested.includes(k)));
     if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
     await store.patch(id, patch);
+    // IRI-034: agent-consumed fields changed → push a fresh config-update
+    // now; without this the agent keeps its old probe set (ghosting removed
+    // ports) until the next WS reconnect.
+    if (Object.keys(patch).some((k) => AGENT_CONFIG_KEYS.has(k))) {
+      const hub = deps.getHub();
+      if (hub !== null) void hub.refreshConfig(id).catch(() => {});
+    }
     const row = await store.get(id);
     if (row === null) return res.status(404).json({ error: "node not found" });
     res.json({ node: toNodeDto(row, onlineSet().has(id)) });
@@ -706,8 +716,8 @@ export function createApp(deps: AppDeps): Express {
     res.json(await build(id, range));
   });
 
-  // Dedicated probe-assignment endpoint: nodePatchSchema (core, out of M3
-  // scope) has no llmPorts yet — reported to Main. Body: { ports: number[] }.
+  // Dedicated probe-assignment endpoint (M3); PATCH /nodes/:id covers the
+  // same field via nodePatchSchema. Body: { ports: number[] }.
   app.put("/api/v1/nodes/:id/llm-ports", async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
@@ -719,6 +729,9 @@ export function createApp(deps: AppDeps): Express {
     const llmStore = deps.getLlmStore();
     if (llmStore === null) return res.status(503).json({ error: "database unavailable" });
     await llmStore.setNodeLlmPorts(id, ports);
+    // IRI-034: deliver the new probe set immediately, not on the next reconnect.
+    const hub = deps.getHub();
+    if (hub !== null) void hub.refreshConfig(id).catch(() => {});
     const row = await store.get(id);
     res.json({ llmPorts: nodeLlmAssignments(row) });
   });

@@ -192,8 +192,10 @@ export function llmSummaryLine(
 ): string | null {
   const snapshots = ports ?? [];
   const ordered = [...configured];
+  // Hot-added ports surface only when they answered; undetected entries are
+  // idle ghosts of ports removed from the config (IRI-034).
   for (const snap of snapshots) {
-    if (!ordered.includes(snap.port)) ordered.push(snap.port);
+    if (snap.detected && !ordered.includes(snap.port)) ordered.push(snap.port);
   }
   const parts = ordered.map((port) => {
     const snap = snapshots.find((p) => p.port === port);

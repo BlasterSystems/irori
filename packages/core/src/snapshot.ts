@@ -47,6 +47,8 @@ export const hardwareSnapshotSchema = z.object({
     packagePowerW: z.number().nullable(),
     /** Per-core current frequency in kHz, /sys cpufreq order. Optional (M2). */
     perCoreClocksKHz: z.array(z.number().nonnegative()).optional(),
+    /** Per-core maximum frequency in kHz (cpufreq scaling_max_freq), same order. Optional (IRI-034). */
+    perCoreMaxClocksKHz: z.array(z.number().nonnegative()).optional(),
   }),
   memory: z.object({
     totalBytes: z.number().nonnegative(),

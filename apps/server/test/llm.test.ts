@@ -345,7 +345,7 @@ d("llm (db integration)", () => {
     return h.db.select().from(llmBuckets).where(eq(llmBuckets.nodeId, nodeId)).orderBy(llmBuckets.port, llmBuckets.bucketStart);
   }
 
-  function makeApiApp() {
+  function makeApiApp(refreshed?: string[]) {
     return createApp({
       getStore: () => store,
       getLlmStore: () => llmStore,
@@ -354,7 +354,17 @@ d("llm (db integration)", () => {
       dbHealthy: async () => true,
       rings,
       sse: createSseHub({ heartbeatMs: 0 }),
-      getHub: () => null,
+      getHub: () =>
+        refreshed === undefined
+          ? null
+          : {
+              online: () => new Set<string>(),
+              sendToNode: () => true,
+              refreshConfig: async (nodeId: string) => {
+                refreshed.push(nodeId);
+                return true;
+              },
+            },
       version: "test",
       staticDir: null,
     });
@@ -546,6 +556,16 @@ d("llm (db integration)", () => {
       cacheUser: null,
     });
     ws.close();
+  });
+
+  it("pushes a config-update when PUT /llm-ports saves (IRI-034)", async () => {
+    const refreshed: string[] = [];
+    const app = makeApiApp(refreshed);
+    const { id: nodeId } = await makeNode("llm-push");
+
+    const res = await request(app).put(`/api/v1/nodes/${nodeId}/llm-ports`).send({ ports: [8000] });
+    expect(res.status).toBe(200);
+    expect(refreshed).toEqual([nodeId]);
   });
 
   it("persists agent llm passes into llm_snapshots through the hub", async () => {

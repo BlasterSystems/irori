@@ -177,4 +177,27 @@ describe("computeDetailData", () => {
     // memory still has a readable series (bytes are never null in these points)
     expect(d.memory.current).toBe("96.0 / 127.0 GB");
   });
+
+  it("adds a cpu clock note from the live snapshot (IRI-034)", () => {
+    const snapshot: HardwareSnapshot = {
+      ...SNAPSHOT,
+      cpu: { ...SNAPSHOT.cpu, perCoreClocksKHz: [1_800_000, 2_000_000] },
+    };
+    const d = computeDetailData(snapshot, HISTORY, "24h");
+    expect(d.cpu.notes).toEqual(["cpu 2,000 MHz"]);
+  });
+
+  it("mirrors the gpu note shape when the agent reports max clocks (IRI-034)", () => {
+    const snapshot: HardwareSnapshot = {
+      ...SNAPSHOT,
+      cpu: { ...SNAPSHOT.cpu, perCoreClocksKHz: [2_000_000], perCoreMaxClocksKHz: [2_000_000] },
+    };
+    const d = computeDetailData(snapshot, HISTORY, "24h");
+    expect(d.cpu.notes).toEqual(["cpu 2,000 / 2,000 MHz"]);
+  });
+
+  it("keeps cpu notes empty without a live snapshot (IRI-034)", () => {
+    const d = computeDetailData(null, HISTORY, "24h");
+    expect(d.cpu.notes).toEqual([]);
+  });
 });

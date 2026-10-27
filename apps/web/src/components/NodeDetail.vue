@@ -144,10 +144,15 @@ const llmPanels = computed<LlmPanelVm[]>(() => {
   const configured = node.value ? nodeLlmPorts(node.value) : [];
   const detectOnly = node.value?.role === "worker";
 
-  // Displayed ports: configured list first, then any hot-added probe ports.
+  // Displayed ports: configured list first, then hot-added ports that
+  // answered. Undetected hot-added entries are idle ghosts of removed
+  // ports — hidden (IRI-034), mirroring the Overview's detected-only rule.
   const ports: number[] = [];
-  for (const p of [...configured, ...(entry?.ports ?? []).map((s) => s.port)]) {
+  for (const p of configured) {
     if (!ports.includes(p)) ports.push(p);
+  }
+  for (const s of entry?.ports ?? []) {
+    if (s.detected && !ports.includes(s.port)) ports.push(s.port);
   }
   ports.sort((a, b) => a - b);
 
@@ -589,7 +594,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
     <template v-else>
       <p v-if="inventoryError" class="banner banner--warn" style="margin-bottom: 12px;">{{ inventoryError }}</p>
 
-      <article v-if="inventory.store" class="card" style="margin-bottom: 12px;">
+      <article v-if="inventory.store && node?.kind === 'nas'" class="card" style="margin-bottom: 12px;">
         <div class="card__head">
           <h3>Store</h3>
           <span class="chip">{{ inventory.store.source }}</span>
@@ -750,6 +755,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
           <template v-if="detail.cpu.current">
             <Sparkline :points="detail.cpu.series" :domain="{ min: 0, max: 100 }" :format="tipPct" :aria-label="`CPU usage, ${range}`" />
             <p v-if="detail.cpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.cpu.sub }}</p>
+            <p v-for="note in detail.cpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
           <p v-else class="muted">no data yet</p>
         </div>
