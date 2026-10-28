@@ -32,6 +32,7 @@ import {
 } from "../inventory";
 import type { NodeInventory } from "@irori/core";
 import { agentDrifts, serverVersion } from "../version";
+import { vScrimClose } from "../scrim";
 import LlmPanel from "./LlmPanel.vue";
 import Sparkline from "./Sparkline.vue";
 import CleanupDrawer from "./CleanupDrawer.vue";
@@ -270,113 +271,202 @@ async function pollJob(id: string, onUpdate?: (detail: JobDetail) => void, deadl
   }
 }
 
-const deleteTarget = ref<DeleteTarget | null>(null);
-const deleteJob = ref<JobDetail | null>(null);
-const deleteBusy = ref(false);
-const modelDeleteError = ref<string | null>(null);
-const deleteCopy = computed(() => (deleteTarget.value === null ? null : deleteConfirmCopy(deleteTarget.value)));
-const deleteRunning = computed(
-  () => deleteJob.value !== null && (deleteJob.value.job.status === "queued" || deleteJob.value.job.status === "running"),
-);
+/* ── Model operations (IRI-044: the IRI-043 overlay idiom) ────────────────
+ * One scrim hosts the job sheet; destructive confirms are state-driven
+ * (ModelsView's machine): host "job" renders INSIDE the sheet, host-less
+ * renders the page-level confirm card. Nothing stacks. */
+interface ConfirmAction {
+  title: string;
+  body: string;
+  danger: string;
+  /** IRI-043 idiom: "job" renders the confirm inside the sheet, not stacked. */
+  host?: "job";
+  /** Overrides the card's standing hint (e.g. the read-only register flow). */
+  hint?: string;
+  /** Register is not destructive — secondary button instead of danger. */
+  secondary?: boolean;
+  run: () => Promise<void> | void;
+}
+const confirmState = ref<ConfirmAction | null>(null);
+const confirmBusy = ref(false);
 
-function askDelete(target: DeleteTarget): void {
-  deleteTarget.value = target;
-  modelDeleteError.value = null;
+function confirmAction(a: ConfirmAction): void {
+  confirmState.value = a;
 }
 
-async function runDelete(): Promise<void> {
-  const target = deleteTarget.value;
-  if (target === null || deleteBusy.value) return;
-  const request = deleteRequestFor(target);
-  if (request === null) {
-    modelDeleteError.value = "this leftover has no derivable gc-objects target";
+async function runConfirm(): Promise<void> {
+  const a = confirmState.value;
+  if (a === null || confirmBusy.value) return;
+  confirmBusy.value = true;
+  try {
+    await a.run();
+  } finally {
+    confirmBusy.value = false;
+    // Only clear the confirm this run belongs to — a newer one opened
+    // meanwhile must survive, dismissing mid-run must not re-close it.
+    if (confirmState.value === a) confirmState.value = null;
+  }
+}
+
+function dismissConfirm(): void {
+  confirmBusy.value = false;
+  confirmState.value = null;
+}
+
+const job = ref<JobDetail | null>(null);
+const sheetVisible = ref(false);
+const jobError = ref<string | null>(null);
+const opBusy = ref(false);
+const modelOpError = ref<string | null>(null);
+let jobPoll: ReturnType<typeof setInterval> | undefined;
+let jobSeq = 0;
+const jobRunning = computed(
+  () => job.value !== null && (job.value.job.status === "queued" || job.value.job.status === "running"),
+);
+/** The compact bar shows progress without opening the sheet. */
+const jobLastLine = computed(() => job.value?.output.at(-1)?.line ?? "");
+
+function openSheet(): void {
+  sheetVisible.value = true;
+}
+
+/** The bar is spent once the job is terminal and the sheet has been seen —
+ *  clear the handle (the poll has already stopped). */
+function dismissOpBar(): void {
+  clearInterval(jobPoll);
+  jobSeq += 1;
+  job.value = null;
+  jobError.value = null;
+  sheetVisible.value = false;
+}
+
+/** Backdrop press closes the top layer first (IRI-043 contract). */
+function closeTopMost(): void {
+  if (confirmState.value !== null) {
+    dismissConfirm();
     return;
   }
-  const epoch = nodeEpoch;
-  deleteBusy.value = true;
-  modelDeleteError.value = null;
-  deleteJob.value = null;
-  deleteTarget.value = null;
+  sheetVisible.value = false;
+}
+
+/** Fetches once and polls while active; the poll survives a sheet close so
+ *  the compact bar's chip stays true, and stops at a terminal state, on a
+ *  node switch (epoch), or on unmount. A settle rebuilds the inventory —
+ *  the hub invalidates its cache on these jobs' settles. */
+async function openJob(id: string, epoch: number): Promise<void> {
+  clearInterval(jobPoll);
+  const seq = ++jobSeq;
+  sheetVisible.value = true;
   try {
-    const job = await createJob(props.nodeId, request.kind, request.params);
-    const detail = await pollJob(
-      job.id,
-      (d) => {
-        if (epoch === nodeEpoch) deleteJob.value = d;
-      },
-      30 * 60_000,
-      () => epoch === nodeEpoch,
-    );
-    if (epoch !== nodeEpoch) return;
-    deleteJob.value = detail;
-    if (detail.job.status !== "succeeded") {
-      modelDeleteError.value = detail.output.at(-1)?.line ?? `job ${detail.job.status}`;
+    job.value = await fetchJob(id);
+  } catch (err) {
+    if (seq !== jobSeq || epoch !== nodeEpoch) return;
+    const msg = err instanceof Error ? err.message : String(err);
+    // A first-fetch failure leaves no sheet to render jobError — surface it
+    // on the page banner instead of losing it.
+    if (job.value === null) modelOpError.value = msg;
+    else jobError.value = msg;
+    opBusy.value = false;
+    return;
+  }
+  if (seq !== jobSeq || epoch !== nodeEpoch) return;
+  jobPoll = setInterval(async () => {
+    if (job.value === null || epoch !== nodeEpoch) {
+      clearInterval(jobPoll);
+      return;
     }
-    // A settle invalidates the cached inventory server-side; rebuild it.
-    inventory.value = null;
-    await loadInventory();
+    const st = job.value.job.status;
+    if (st === "succeeded" || st === "failed" || st === "canceled") {
+      clearInterval(jobPoll);
+      if (epoch === nodeEpoch) {
+        opBusy.value = false;
+        inventory.value = null;
+        void loadInventory();
+      }
+      return;
+    }
+    const pollSeq = jobSeq;
+    try {
+      const next = await fetchJob(job.value.job.id);
+      if (pollSeq !== jobSeq || epoch !== nodeEpoch) return;
+      job.value = next;
+    } catch {
+      // The sheet already carries the last good output; stop hammering.
+      clearInterval(jobPoll);
+      if (epoch === nodeEpoch) opBusy.value = false;
+    }
+  }, 2000);
+}
+
+/** Shared dispatch for delete/register: confirms never stack, the sheet
+ *  opens on dispatch, and a dispatch failure surfaces in the page banner
+ *  (the sheet would otherwise never have opened). */
+async function runModelJob(request: { kind: string; params: Record<string, unknown> } | null): Promise<void> {
+  if (request === null) {
+    modelOpError.value = "this leftover has no derivable gc-objects target";
+    return;
+  }
+  if (opBusy.value) return;
+  const epoch = nodeEpoch;
+  opBusy.value = true;
+  modelOpError.value = null;
+  jobError.value = null;
+  try {
+    const view = await createJob(props.nodeId, request.kind, request.params);
+    if (epoch !== nodeEpoch) return;
+    await openJob(view.id, epoch);
   } catch (err) {
     if (epoch !== nodeEpoch) return;
-    modelDeleteError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    if (epoch === nodeEpoch) deleteBusy.value = false;
+    modelOpError.value = err instanceof Error ? err.message : String(err);
+    opBusy.value = false;
   }
 }
 
-async function cancelDelete(): Promise<void> {
-  const job = deleteJob.value;
-  if (job === null) return;
-  try {
-    await cancelJob(job.job.id);
-  } catch (err) {
-    modelDeleteError.value = err instanceof Error ? err.message : String(err);
-  }
+/** IRI-028: store / local cache / leftover deletes, inline-confirm machine. */
+function askDelete(target: DeleteTarget): void {
+  const copy = deleteConfirmCopy(target);
+  confirmAction({
+    title: copy.title,
+    body: copy.body,
+    danger: copy.danger,
+    run: () => runModelJob(deleteRequestFor(target)),
+  });
 }
 
 // IR-104: register an unregistered cache dir in place (modelctl register-local,
-// verify-then-register, no transfer). Shares the Model operation card and
-// busy/error state with the delete flow — only one model job runs at a time.
-const registerTarget = ref<{ repo: string; user: string } | null>(null);
-const registerCopyText = computed(() => (registerTarget.value === null ? null : registerCopy(registerTarget.value.repo)));
-
+// verify-then-register, no transfer). Same machine, secondary button + hint.
 function askRegister(repo: string, user: string): void {
-  registerTarget.value = { repo, user };
-  modelDeleteError.value = null;
+  const copy = registerCopy(repo);
+  confirmAction({
+    title: copy.title,
+    body: copy.body,
+    danger: copy.danger,
+    hint: "verification is read-only — nothing is transferred",
+    secondary: true,
+    run: () => runModelJob(registerRequestFor(repo, user)),
+  });
 }
 
-async function runRegister(): Promise<void> {
-  const target = registerTarget.value;
-  if (target === null || deleteBusy.value) return;
-  const request = registerRequestFor(target.repo, target.user);
-  const epoch = nodeEpoch;
-  deleteBusy.value = true;
-  modelDeleteError.value = null;
-  deleteJob.value = null;
-  registerTarget.value = null;
-  try {
-    const job = await createJob(props.nodeId, request.kind, request.params);
-    const detail = await pollJob(
-      job.id,
-      (d) => {
-        if (epoch === nodeEpoch) deleteJob.value = d;
-      },
-      30 * 60_000,
-      () => epoch === nodeEpoch,
-    );
-    if (epoch !== nodeEpoch) return;
-    deleteJob.value = detail;
-    if (detail.job.status !== "succeeded") {
-      modelDeleteError.value = detail.output.at(-1)?.line ?? `job ${detail.job.status}`;
-    }
-    // The settle invalidates the cached inventory server-side; rebuild it.
-    inventory.value = null;
-    await loadInventory();
-  } catch (err) {
-    if (epoch !== nodeEpoch) return;
-    modelDeleteError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    if (epoch === nodeEpoch) deleteBusy.value = false;
-  }
+/** IRI-043 parity: Cancel job was instant here while every other surface
+ *  guards it — the confirm now renders INSIDE the sheet (host "job"). */
+function confirmSheetCancel(): void {
+  const j = job.value?.job;
+  if (j === undefined) return;
+  const jobId = j.id;
+  confirmAction({
+    title: `Cancel this ${j.kind} job?`,
+    body: "Stops the running job; anything it already wrote stays as-is.",
+    danger: "Cancel job",
+    host: "job",
+    run: async () => {
+      try {
+        await cancelJob(jobId);
+      } catch (err) {
+        jobError.value = err instanceof Error ? err.message : String(err);
+      }
+      await openJob(jobId, nodeEpoch); // refetch terminal state into the sheet
+    },
+  });
 }
 
 watch(
@@ -391,10 +481,15 @@ watch(
     inventoryError.value = null;
     inventoryBusy.value = false;
     modelFilter.value = "";
-    deleteTarget.value = null;
-    deleteJob.value = null;
-    deleteBusy.value = false;
-    modelDeleteError.value = null;
+    clearInterval(jobPoll);
+    jobSeq += 1;
+    job.value = null;
+    sheetVisible.value = false;
+    jobError.value = null;
+    opBusy.value = false;
+    modelOpError.value = null;
+    confirmState.value = null;
+    confirmBusy.value = false;
     void loadInventory();
   },
 );
@@ -497,7 +592,12 @@ watch(
     clearTimeout(deleteTimer);
   },
 );
-onUnmounted(() => clearTimeout(deleteTimer));
+onUnmounted(() => {
+  clearTimeout(deleteTimer);
+  // IRI-044: the job-sheet poll is interval-based — stop it with the page.
+  clearInterval(jobPoll);
+  jobSeq += 1;
+});
 </script>
 
 <template>
@@ -642,7 +742,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
             <div class="row" style="gap: 8px; margin-top: 6px;">
               <button
                 class="btn btn--danger btn--sm"
-                :disabled="deleteBusy || leftover.target === null"
+                :disabled="opBusy || leftover.target === null"
                 @click="askDelete({ scope: 'leftover', name: leftover.name, object: leftover.object, target: leftover.target ?? '', bytes: leftover.bytes, error: leftover.error })"
               >Remove leftover</button>
               <span v-if="leftover.target === null" class="stat__sub faint">no gc-objects target derivable</span>
@@ -666,7 +766,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
                   <td style="text-align: right;">
                     <button
                       class="btn btn--ghost btn--sm"
-                      :disabled="deleteBusy"
+                      :disabled="opBusy"
                       @click="askDelete({ scope: 'store', name: m.name, repository: m.repository, bytes: m.bytes })"
                     >Delete</button>
                   </td>
@@ -704,7 +804,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
                 <td style="text-align: right;">
                   <button
                     class="btn btn--ghost btn--sm"
-                    :disabled="deleteBusy"
+                    :disabled="opBusy"
                     @click="askDelete({ scope: 'local', name: m.name, repository: m.repository, bytes: m.bytes, user: cache.user, cacheDir: cache.cacheDir })"
                   >Delete</button>
                 </td>
@@ -719,7 +819,7 @@ onUnmounted(() => clearTimeout(deleteTimer));
                 <tr v-for="repo in cache.orphans" :key="repo">
                   <td class="model-repo" :title="repo">{{ repo }}</td>
                   <td style="text-align: right;">
-                    <button class="btn btn--ghost btn--sm" :disabled="deleteBusy" @click="askRegister(repo, cache.user)">Register</button>
+                    <button class="btn btn--ghost btn--sm" :disabled="opBusy" @click="askRegister(repo, cache.user)">Register</button>
                   </td>
                 </tr>
               </tbody>
@@ -730,16 +830,29 @@ onUnmounted(() => clearTimeout(deleteTimer));
       <p v-if="inventory.local.length === 0" class="muted" style="margin-bottom: 12px;">no HF cache found for any user on this node</p>
     </template>
 
-    <div v-if="deleteBusy || deleteJob !== null || modelDeleteError !== null" class="card" style="margin-bottom: 12px;">
-      <div class="card__head">
-        <h3>Model operation</h3>
-        <span v-if="deleteJob" class="chip" :class="jobStatusChip(deleteJob.job.status).cls">{{ jobStatusChip(deleteJob.job.status).label }}</span>
-        <button v-if="deleteRunning" class="btn btn--danger btn--sm" @click="cancelDelete">Cancel</button>
-      </div>
-      <div class="card__body" style="padding-top: 12px;">
-        <p v-if="modelDeleteError" class="banner banner--warn">{{ modelDeleteError }}</p>
-        <pre v-if="deleteJob" class="model-log mono faint">{{ deleteJob.output.map((o) => o.line).slice(-10).join("\n") || "waiting for output…" }}</pre>
-        <p v-else-if="deleteBusy" class="stat__sub">dispatching…</p>
+    <!-- IRI-044: compact dispatch/progress handle. The job sheet auto-opens
+         on dispatch; closing it leaves this bar so the job stays reachable
+         (Show output / guarded Cancel) without a scrim. -->
+    <div
+      v-if="job === null ? opBusy || modelOpError !== null : !sheetVisible"
+      class="card"
+      style="margin-bottom: 12px;"
+    >
+      <div class="card__body" style="padding: 10px 12px;">
+        <div class="row row--between" style="flex-wrap: wrap; gap: 8px;">
+          <span class="row" style="gap: 8px; min-width: 0;">
+            <strong class="stat__sub">Model operation</strong>
+            <span v-if="job" class="chip" :class="jobStatusChip(job.job.status).cls">{{ jobStatusChip(job.job.status).label }}</span>
+            <span v-else-if="opBusy" class="chip">dispatching</span>
+            <span v-if="jobLastLine" class="stat__sub faint model-opbar__line">{{ jobLastLine }}</span>
+          </span>
+          <span class="row" style="gap: 8px;">
+            <button v-if="job !== null" class="btn btn--ghost btn--sm" @click="openSheet">Show output</button>
+            <button v-if="jobRunning" class="btn btn--danger btn--sm" @click="openSheet(); confirmSheetCancel()">Cancel</button>
+            <button v-else-if="job !== null" class="btn btn--ghost btn--sm" @click="dismissOpBar">Dismiss</button>
+          </span>
+        </div>
+        <p v-if="modelOpError" class="banner banner--warn" style="margin-top: 8px;">{{ modelOpError }}</p>
       </div>
     </div>
 
@@ -828,37 +941,61 @@ onUnmounted(() => clearTimeout(deleteTimer));
     <NodeModal v-if="rotateOpen && node !== null" mode="rotate" :node="node" @close="rotateOpen = false" />
     <CleanupDrawer v-if="cleanupOpen && node !== null" :node-id="nodeId" :node-name="node.name" @close="cleanupOpen = false" />
 
-    <!-- IRI-028: model delete confirmation (store / local cache / leftover) -->
-    <div v-if="deleteTarget !== null && deleteCopy !== null" class="drawer-scrim" @click.self="deleteTarget = null">
-      <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="deleteCopy.title">
+    <!-- IRI-044 (IRI-043 idiom): ONE scrim hosts the job sheet; the
+         job-hosted confirm renders inline inside it. No stacked modals. -->
+    <div v-if="sheetVisible && job !== null" class="drawer-scrim" v-scrim-close="closeTopMost">
+      <aside class="card drawer is-open" aria-label="Model operation output">
         <div class="card__head">
-          <h3>{{ deleteCopy.title }}</h3>
-          <button class="btn btn--secondary btn--sm" @click="deleteTarget = null">Close</button>
+          <h3>
+            {{ job.job.kind }}
+            <span class="chip" :class="jobStatusChip(job.job.status).cls">{{ jobStatusChip(job.job.status).label }}</span>
+          </h3>
+          <button class="btn btn--secondary btn--sm" @click="sheetVisible = false">Close</button>
         </div>
-        <p class="stat__sub" style="margin: 0;">{{ deleteCopy.body }}</p>
-        <div class="row row--between">
-          <span class="stat__sub faint">nothing is deleted until you confirm</span>
-          <div class="row">
-            <button class="btn btn--secondary btn--sm" @click="deleteTarget = null">Cancel</button>
-            <button class="btn btn--danger btn--sm" :disabled="deleteBusy" @click="runDelete">{{ deleteCopy.danger }}</button>
+        <p v-if="jobError" class="banner banner--warn">{{ jobError }}</p>
+        <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
+        <div v-if="confirmState !== null && confirmState.host === 'job'" class="inline-confirm" role="alertdialog" :aria-label="confirmState.title">
+          <p class="stat__sub" style="margin: 0 0 4px"><strong>{{ confirmState.title }}</strong></p>
+          <p class="stat__sub" style="margin: 0 0 8px">{{ confirmState.body }}</p>
+          <div class="row row--between">
+            <span class="stat__sub faint">{{ confirmState.hint ?? "nothing destructive runs until you confirm" }}</span>
+            <span class="row">
+              <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
+              <button
+                class="btn btn--sm"
+                :class="confirmState.secondary ? 'btn--secondary' : 'btn--danger'"
+                :disabled="confirmBusy"
+                @click="runConfirm"
+              >{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+            </span>
           </div>
         </div>
-      </section>
+        <div v-if="jobRunning" class="row row--between sheet__foot">
+          <span class="faint">streaming…</span>
+          <button class="btn btn--danger btn--sm" @click="confirmSheetCancel">Cancel job</button>
+        </div>
+      </aside>
     </div>
 
-    <!-- IR-104: register-from-cache confirmation (verify-then-register, no transfer) -->
-    <div v-if="registerTarget !== null && registerCopyText !== null" class="drawer-scrim" @click.self="registerTarget = null">
-      <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="registerCopyText.title">
+    <!-- Shared confirmation for model delete/register (page rows — no sheet
+         is open when they fire); sheet-hosted confirms render inline above. -->
+    <div v-if="confirmState !== null && confirmState.host === undefined" class="drawer-scrim" v-scrim-close="dismissConfirm">
+      <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="confirmState.title">
         <div class="card__head">
-          <h3>{{ registerCopyText.title }}</h3>
-          <button class="btn btn--secondary btn--sm" @click="registerTarget = null">Close</button>
+          <h3>{{ confirmState.title }}</h3>
+          <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Close</button>
         </div>
-        <p class="stat__sub" style="margin: 0;">{{ registerCopyText.body }}</p>
+        <p class="stat__sub" style="margin: 0">{{ confirmState.body }}</p>
         <div class="row row--between">
-          <span class="stat__sub faint">verification is read-only — nothing is transferred</span>
+          <span class="stat__sub faint">{{ confirmState.hint ?? "nothing destructive runs until you confirm" }}</span>
           <div class="row">
-            <button class="btn btn--secondary btn--sm" @click="registerTarget = null">Cancel</button>
-            <button class="btn btn--secondary btn--sm" :disabled="deleteBusy" @click="runRegister">{{ registerCopyText.danger }}</button>
+            <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Cancel</button>
+            <button
+              class="btn btn--sm"
+              :class="confirmState.secondary ? 'btn--secondary' : 'btn--danger'"
+              :disabled="confirmBusy"
+              @click="runConfirm"
+            >{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
           </div>
         </div>
       </section>
@@ -916,10 +1053,33 @@ h1 {
 .model-object {
   margin: 4px 0;
 }
-.model-log {
-  max-height: 180px;
+/* IRI-044: the job sheet + inline confirm (the IRI-043 idiom; same tokens as
+   ModelsView's scoped sheet rules — sheet chrome is component-scoped here,
+   shared drawer chrome lives in irori.css). */
+.joblog {
+  max-height: 40vh;
   overflow: auto;
   white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--surface, transparent);
+  padding: 10px;
+  border-radius: 6px;
+}
+.inline-confirm {
+  border: 1px solid var(--thread);
+  background: var(--thread-wash);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.sheet__foot {
+  padding-top: 8px;
+}
+.model-opbar__line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
 }
 .confirm-card {
   width: min(520px, 92vw);

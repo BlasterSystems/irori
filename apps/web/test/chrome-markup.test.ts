@@ -60,6 +60,30 @@ it("NodeDetail puts the Sensors card and the inference panels side by side (IRI-
   expect(nodeDetailSource).toContain(".inference-cell > .card + .card");
 });
 
+it("NodeDetail uses the IRI-043 overlay idiom — one scrim, inline sheet confirm (IRI-044)", () => {
+  // The two hand-rolled stacked confirm scrims are gone: exactly ONE
+  // confirm-card block remains, for host-less page actions.
+  expect((nodeDetailSource.match(/class="card confirm-card"/g) ?? []).length).toBe(1);
+  expect(nodeDetailSource).not.toContain("deleteTarget");
+  expect(nodeDetailSource).not.toContain("registerTarget");
+  expect(nodeDetailSource).not.toContain("model-log");
+  for (const token of [
+    'class="card drawer is-open"', // mobile body .drawer { visibility: hidden } contract
+    'v-scrim-close="closeTopMost"', // backdrop closes the top layer first
+    "confirmState.host === 'job'", // the cancel confirm renders INSIDE the sheet
+    'class="inline-confirm"',
+    'class="joblog mono"',
+    'class="row row--between sheet__foot"',
+    "Model operation",
+    "Show output",
+    "nothing destructive runs until you confirm",
+  ]) {
+    expect(nodeDetailSource).toContain(token);
+  }
+  // Cancel is guarded like every other surface — never instant.
+  expect(nodeDetailSource).toContain("@click=\"confirmSheetCancel\"");
+});
+
 it("irori.css ships the shared drawer chrome and the hot-value accent", () => {
   for (const rule of [
     ".drawer-scrim { position: fixed; inset: 0; background: var(--overlay);",
