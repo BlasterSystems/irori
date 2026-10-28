@@ -5,6 +5,7 @@
  * Vue so they unit-test directly.
  */
 import type { AnalyticsResponse, TokenTotals } from "@irori/core";
+import { fmtCount } from "./analytics";
 
 /** One By-cluster/node totals row, folded from a lens series client-side. */
 export interface SeriesTotalsRow {
@@ -45,14 +46,15 @@ export function seriesTotals(series: AnalyticsResponse["series"]): SeriesTotalsR
   return rows.sort((a, b) => b.total - a.total);
 }
 
-/** The five fleet stat tiles, display-ready values (`null` fleet → dashes). */
+/** The five fleet stat tiles, display-ready values (`null` fleet → dashes).
+ *  Counts go through fmtCount so large numbers render like the tables. */
 export function fleetTiles(fleet: TokenTotals | null): Array<{ label: string; value: string }> {
   const dash = "—";
   return [
-    { label: "Total tokens", value: fleet === null ? dash : String(fleet.total) },
-    { label: "Generated", value: fleet === null ? dash : String(fleet.generated) },
-    { label: "Input (prompt)", value: fleet === null ? dash : String(fleet.prompt) },
-    { label: "Cache", value: fleet === null ? dash : String(fleet.cached) },
+    { label: "Total tokens", value: fleet === null ? dash : fmtCount(fleet.total) },
+    { label: "Generated", value: fleet === null ? dash : fmtCount(fleet.generated) },
+    { label: "Input (prompt)", value: fleet === null ? dash : fmtCount(fleet.prompt) },
+    { label: "Cache", value: fleet === null ? dash : fmtCount(fleet.cached) },
     { label: "Cache hit", value: fmtHitPct(fleet === null ? null : fleet.cacheHitPct) },
   ];
 }

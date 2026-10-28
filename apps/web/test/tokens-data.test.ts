@@ -46,6 +46,9 @@ describe("token macro helpers (IRI-040)", () => {
   it("builds the five fleet tiles, dashed when the fleet row is absent", () => {
     const fleet: TokenTotals = { total: 445, generated: 145, prompt: 300, cached: 142, cacheHitPct: 47.3 };
     expect(fleetTiles(fleet).map((t) => t.value)).toEqual(["445", "145", "300", "142", "47.3%"]);
+    // Large counts render like the tables (fmtCount), never raw digits.
+    const big: TokenTotals = { total: 1234567, generated: 234567, prompt: 1000000, cached: 0, cacheHitPct: 0 };
+    expect(fleetTiles(big).map((t) => t.value)).toEqual(["1.2M", "234.6k", "1.0M", "0", "0.0%"]);
     expect(fleetTiles(null).every((t) => t.value === "—")).toBe(true);
   });
 

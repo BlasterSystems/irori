@@ -331,8 +331,7 @@ async function tokenModels(db: Db, since: Date, granularity: "minute" | "hour" |
     .slice(0, 100);
 }
 
-/** Setup `nodes` JSON → worker node ids. */
-export function toWorkerIds(raw: unknown): string[] {
+function toWorkerIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item) => (typeof item === "object" && item !== null && typeof (item as { nodeId?: unknown }).nodeId === "string" ? [(item as { nodeId: string }).nodeId] : []));
 }

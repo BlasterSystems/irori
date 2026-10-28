@@ -24,5 +24,4 @@ describe("parseHash", () => {
   it("round-trips nodeHash", () => {
     expect(parseHash(nodeHash("spark 1"))).toEqual({ view: "node", id: "spark 1" });
   });
-
 });
