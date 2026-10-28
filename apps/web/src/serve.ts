@@ -179,6 +179,25 @@ export function openSetupLog(setupId: string, onLine: (line: SetupLogLine) => vo
 
 /* ── Pure shaping helpers (cards, chips, stage lines) ────────────────────── */
 
+/**
+ * Pure: worker ids the server will accept (setups-service validateWorkers) —
+ * deduped (first occurrence kept, order preserved), no head-self, no
+ * NAS-kind, no unknown ids. A pre-validation setup row shipped with the NAS
+ * listed twice plus duplicated DGX workers and became uneditable: the wizard
+ * round-tripped the stored rows verbatim (IRI-041).
+ */
+export function sanitizeWorkerIds(workerIds: string[], headNodeId: string, nodes: NodeInfo[]): string[] {
+  const acceptable = new Set(nodes.filter((n) => n.kind !== "nas" && n.id !== headNodeId).map((n) => n.id));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const nodeId of workerIds) {
+    if (seen.has(nodeId) || !acceptable.has(nodeId)) continue;
+    seen.add(nodeId);
+    out.push(nodeId);
+  }
+  return out;
+}
+
 /** Pure: chip state → DS dot/chip class per the thread budget. */
 export function setupChipCls(chip: string): string {
   switch (chip) {

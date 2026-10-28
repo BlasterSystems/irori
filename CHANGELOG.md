@@ -4,6 +4,21 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — Setup edit repair (IR-119)
+
+### Fixed
+
+- **Setup edit deadlock on legacy worker rows** (IR-119, IRI-041): editing a
+  setup created before the IR-78 worker validation (e.g. the fleet's
+  `glm-5.3-flash-exl3-q4` row with DGX-2 ×1 / DGX-3 ×3 / NAS ×2) failed with
+  `NAS is a NAS node and cannot be a worker` on every save path — the wizard
+  loaded the stored rows verbatim while the TYPE step hid NAS, making the
+  invalid rows invisible and unremovable. The wizard now sanitizes the worker
+  list against the node inventory (dedupe keep-first, drop head-self,
+  NAS-kind and unknown ids) on edit/duplicate load and on every persistence
+  payload, so the first successful Save repairs the stored row; an empty
+  inventory passes through untouched and lets the server validate.
+
 ## [Unreleased] — Token macro views in Analytics (IR-118)
 
 ### Added
