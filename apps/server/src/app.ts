@@ -7,6 +7,7 @@ import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
+import { type TokenMacroService } from "./tokens-macro.js";
 import { type CleanupService } from "./cleanup-service.js";
 import { type InventoryService } from "./inventory-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
@@ -108,6 +109,8 @@ export interface AppDeps {
   getBench: () => BenchService | null;
   /** Null while degraded: analytics routes answer 503 (M7). */
   getAnalytics: () => AnalyticsService | null;
+  /** Null while degraded: the token macro route answers 503 (IRI-040). */
+  getTokenMacro: () => TokenMacroService | null;
   /** Null while degraded: cleanup routes answer 503 (M7). */
   getCleanup: () => CleanupService | null;
   /** Null while degraded: node-model inventory reads answer 503 (IRI-028). */
@@ -476,6 +479,15 @@ export function createApp(deps: AppDeps): Express {
     const build = deps.getHistory();
     if (build === null) return res.status(503).json({ error: "database unavailable" });
     res.json(await build(id, range));
+  });
+
+  // ---- IRI-040 (IR-118): token macro views — fleet / cluster / node / model ----
+  app.get("/api/v1/analytics/tokens-macro", async (req, res) => {
+    const range = analyticsRangeSchema.safeParse(req.query.range);
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const service = deps.getTokenMacro();
+    if (service === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await service.build({ range: range.data }));
   });
 
   // ---- M7: analytics (SPEC §9) — five lenses over the rollup buckets ----

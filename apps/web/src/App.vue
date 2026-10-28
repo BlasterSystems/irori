@@ -6,6 +6,7 @@ import ModelsView from "./components/ModelsView.vue";
 import ServeView from "./components/ServeView.vue";
 import BenchmarksView from "./components/BenchmarksView.vue";
 import AnalyticsView from "./components/AnalyticsView.vue";
+import TokensView from "./components/TokensView.vue";
 import OverviewView from "./components/OverviewView.vue";
 import UsageView from "./components/UsageView.vue";
 import ChatsView from "./components/ChatsView.vue";
@@ -90,6 +91,7 @@ onUnmounted(() => {
         <a href="#/models" :class="{ 'is-active': route.view === 'models' }" :aria-current="route.view === 'models' ? 'page' : undefined">Models</a>
         <a href="#/serve" :class="{ 'is-active': route.view === 'serve' }" :aria-current="route.view === 'serve' ? 'page' : undefined">Serve</a>
         <a href="#/analytics" :class="{ 'is-active': route.view === 'analytics' }" :aria-current="route.view === 'analytics' ? 'page' : undefined">Analytics</a>
+        <a href="#/tokens" :class="{ 'is-active': route.view === 'tokens' }" :aria-current="route.view === 'tokens' ? 'page' : undefined">Tokens</a>
         <a :href="usageHash()" :class="{ 'is-active': route.view === 'usage' }" :aria-current="route.view === 'usage' ? 'page' : undefined">Usage</a>
         <a :href="chatsHash()" :class="{ 'is-active': route.view === 'chats' }" :aria-current="route.view === 'chats' ? 'page' : undefined">Chats</a>
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
@@ -110,6 +112,7 @@ onUnmounted(() => {
     <ServeView v-else-if="route.view === 'serve'" />
     <BenchmarksView v-else-if="route.view === 'benchmarks'" />
     <AnalyticsView v-else-if="route.view === 'analytics'" />
+    <TokensView v-else-if="route.view === 'tokens'" />
     <UsageView v-else-if="route.view === 'usage'" />
     <ChatsView v-else-if="route.view === 'chats'" />
     <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />

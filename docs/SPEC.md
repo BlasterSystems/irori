@@ -299,6 +299,12 @@ node**, with time ranges backed by rollups:
 - Decode/prefill rates over time (per engine port, per node, per cluster).
 - Tokens: generated / cached / prompt, minute + hourly + daily (ledger per
   model) — minute rows feed the Overview 30m/4h cost preview (IRI-025).
+- **Tokens page (IRI-040/IR-118): macro token-usage views — fleet, per
+  serving cluster, per node, per model — over the standard ranges, with the
+  owner-specified metrics total (= generated + input), generated, input,
+  cache (cached), and cache hit % (= cached / input). Sourced purely from the
+  M7 ledger (engine lifetime counters via the agent probes); the capture
+  proxy is never involved. `GET /api/v1/analytics/tokens-macro?range=`.
 - Power: estimated watts (GPU board + CPU model + base overhead, clamped to
   the GB10 envelope), explicit coverage fields; monthly archive; Wh/token.
   Labeled *estimated, not wall-metered*. Constants (NVIDIA DGX Spark

@@ -24,4 +24,9 @@ describe("parseHash", () => {
   it("round-trips nodeHash", () => {
     expect(parseHash(nodeHash("spark 1"))).toEqual({ view: "node", id: "spark 1" });
   });
+
+  it("parses the tokens macro route (IRI-040)", () => {
+    expect(parseHash("#/tokens")).toEqual({ view: "tokens" });
+    expect(parseHash("#/tokens?range=24h")).toEqual({ view: "overview" }); // params not supported here
+  });
 });
