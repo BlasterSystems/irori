@@ -13,22 +13,23 @@ import { MAX_USAGE_BATCH } from "@irori/core";
 import { UsageBuffer } from "./usage-buffer.js";
 import { UsageSync } from "./usage-sync.js";
 import { CaptureProxy } from "@irori/proxy";
+import { emitUsageSpan, initOtel, shutdownOtel } from "./otel.js";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
 import { LlmPortProbe } from "./llm-probe.js";
 import { AgentTransport, type LlmRuntimeConfig } from "./transport.js";
 import { AGENT_VERSION } from "./version.js";
-
-function log(message: string): void {
-  console.log(`${new Date().toISOString()} ${message}`);
-}
+import { log, logger } from "./logger.js";
 
 function fail(message: string): never {
-  console.error(`${new Date().toISOString()} ${message}`);
+  logger.fatal(message);
   process.exit(1);
 }
 
 async function run(): Promise<void> {
   const config = loadConfig();
+  // IRI-039/IR-116: env-gated OTLP export — no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+  initOtel({ serviceName: "irori-agent", version: AGENT_VERSION, log });
+
   /** The cache owner for the agent's own modelctl registrations. */
   const agentUser = os.userInfo().username;
   log(
@@ -95,6 +96,8 @@ async function run(): Promise<void> {
         setupId,
         retention,
         onEvent: (request) => {
+          // IRI-039/IR-116: fail-open OTLP export of one GenAI span per capture.
+          emitUsageSpan(request);
           try {
             buffer.add(request);
           } catch (err) {
@@ -307,6 +310,8 @@ async function run(): Promise<void> {
     log(`${signal} received, stopping`);
     usageSync.stop();
     buffer.close();
+    // IRI-039/IR-116: flush the last batching window before exit.
+    void shutdownOtel();
     void transport.stop().then(() => process.exit(0));
   };
   process.on("SIGINT", () => shutdown("SIGINT"));

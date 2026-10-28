@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
+import { otelRequestMiddleware } from "./otel.js";
 import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, type NodeInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
@@ -163,6 +164,8 @@ export interface AppDeps {
 
 export function createApp(deps: AppDeps): Express {
   const app = express();
+  // IRI-039/IR-116: env-gated request spans — no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+  app.use(otelRequestMiddleware);
   app.use(express.json());
 
   // Degraded mode (ADR-0002): while the store is absent, store-backed routes

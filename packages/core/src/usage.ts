@@ -102,6 +102,14 @@ export const usageRequestSchema = z.object({
   resBytes: z.number().int().nonnegative(),
   /** Client socket address as seen by the proxy. */
   sourceAddr: z.string().min(1).nullable().default(null),
+  /**
+   * W3C Trace Context from the client request (IRI-039/IR-116): the agent's
+   * OTLP exporter parents the proxy's GenAI span from it so
+   * client → proxy → engine renders as one trace. Capture-path metadata
+   * only — the hub never interprets it (explicit column mapping ignores it).
+   */
+  traceparent: z.string().min(1).max(128).nullish(),
+  tracestate: z.string().min(1).max(512).nullish(),
   /** IR-52: stored body parts; empty when retention is off or nothing parsed. */
   parts: z.array(usagePartWireSchema).max(8192).default([]),
   /** IR-55 client identity (resolved server-side): header-declared then key-mapped. */

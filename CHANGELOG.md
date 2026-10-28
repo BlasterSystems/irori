@@ -4,6 +4,27 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — OpenTelemetry export (IR-116, IR-117)
+
+### Added
+
+- **Env-gated OTLP traces** (IR-116, IRI-039): with `OTEL_EXPORTER_OTLP_ENDPOINT`
+  set, the capture proxy's agent exports one GenAI span per captured request —
+  mapped from the already-parsed usage record (`gen_ai.usage.input_tokens` /
+  `output_tokens` / `cache_read.input_tokens` / `reasoning.output_tokens`,
+  `gen_ai.response.time_to_first_chunk`, finish reasons, HTTP status) and
+  **parented by the client's `traceparent`**, which the proxy now attaches to
+  the usage event and forwards verbatim; with vLLM's native
+  `--otlp-traces-endpoint` the client → proxy → engine chain renders as one
+  trace in any OTLP backend. The hub emits low-cardinality SERVER spans per
+  request (`/healthz` skipped, UUID/numeric segments → `:id`). Export is
+  fail-open (capture and traffic are never affected) and providers flush on
+  SIGTERM; unset env leaves behavior byte-identical.
+- **Pino + OTLP logs** (IR-117): both server and agent log structured JSON via
+  pino (`IRORI_LOG_LEVEL`, default `info`); when the OTLP endpoint is set, log
+  records also export via the OTLP logs pipeline. No prompt/response content
+  is ever emitted on spans or log records.
+
 ## [Unreleased] — Usage phase 2: retention, chats, tools, client identity
 
 ### Added
