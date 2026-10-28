@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Placement drawer · overlay options · IRI-043 · Irori</title>
+<link rel="stylesheet" href="irori.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  body { background: var(--paper); min-height: 100vh; }
+  .scene { margin-top: var(--space-6); }
+  .scenehead { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: 6px; flex-wrap: wrap; }
+  .scenehead h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .scenehead .why { color: var(--muted); font-size: 13px; }
+  .scenenote { color: var(--muted); font-size: 12.5px; margin: 8px 2px 0; }
+  .stage { position: relative; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper-2); overflow: hidden; }
+  .stage--flow { padding: 34px 24px; }
+  .ghostcard { position: absolute; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); opacity: .45; }
+  .scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--paper) 55%, transparent); }
+  .modal { position: relative; z-index: 2; width: min(720px, 100%); margin: 0 auto;
+    background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+    display: flex; flex-direction: column; }
+  .modal__title { font-family: var(--font-mono); font-size: 15px; font-weight: 500; }
+  .modal__meta { padding: 10px 16px 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-3); }
+  .placefoot { padding: 10px 16px 12px; border-top: 1px solid var(--border); }
+  .inline-out { margin: 12px 16px 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .inline-out__head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+  .inline-out__head .grow { flex: 1; }
+  .inline-out .log { border: 0; border-radius: 0; max-height: 168px; }
+  .inline-confirm { margin: 12px 16px 0; border: 1px solid var(--thread); background: var(--thread-wash); border-radius: var(--radius-sm); padding: 10px 12px; display: none; }
+  .inline-confirm.is-open { display: block; }
+  .bstrip { display: grid; grid-template-columns: 1fr 44px 1fr; gap: 0; align-items: stretch; padding: 26px 24px; }
+  .bpanel { position: relative; z-index: 2; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); display: flex; flex-direction: column; min-width: 0; }
+  .barrow-arrow { display: flex; align-items: center; justify-content: center; color: var(--ink-3); font-family: var(--font-mono); font-size: 18px; }
+  .steptag { position: absolute; top: -11px; left: 12px; background: var(--ink); color: var(--paper);
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 7px; border-radius: 2px; z-index: 3; }
+  .stage--c { height: 480px; }
+  .modal--c { position: absolute; left: 26px; top: 26px; bottom: 26px; width: min(600px, 58%); margin: 0; overflow: auto; }
+  .side-sheet { position: absolute; right: 0; top: 0; bottom: 0; width: 340px; background: var(--surface);
+    border-left: 1px solid var(--border-strong); display: flex; flex-direction: column; z-index: 3; }
+  .side-sheet .log { border: 0; border-radius: 0; flex: 1; }
+  .feedline { display: flex; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; align-items: baseline; }
+  .feedline:first-child { border-top: 0; }
+  .feedline .t { color: var(--ink-3); flex: none; }
+  .feedline .tx { min-width: 0; overflow-wrap: anywhere; }
+  .name { color: var(--fg); font-weight: 500; }
+  @media (max-width: 900px) {
+    .bstrip { grid-template-columns: 1fr; gap: 18px; }
+    .barrow-arrow { transform: rotate(90deg); }
+    .stage--c { height: 620px; }
+    .modal--c { width: min(600px, 92%); }
+    .side-sheet { width: min(340px, 60%); }
+  }
+
+  /* ── D · shipped shape: global telemetry dock ──────────────────────── */
+  .stage--final { height: 430px; }
+  .fakebar { position: absolute; top: 0; left: 0; right: 0; height: 44px; border-bottom: 1px solid var(--border);
+    background: var(--surface); display: flex; align-items: center; gap: 14px; padding: 0 16px; z-index: 1; }
+  .fakebar .mono { font-weight: 600; }
+  .fakechip { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+  .fakefoot { position: absolute; bottom: 0; left: 0; right: 0; height: 40px; border-top: 1px solid var(--border);
+    background: var(--surface); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 1; }
+  .tele { position: absolute; top: 44px; right: 0; bottom: 40px; width: 380px; background: var(--surface);
+    border-left: 1px solid var(--border-strong); display: flex; flex-direction: column; z-index: 2; }
+  .tele-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; background: var(--grid); }
+  .tele-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .tele-head h3 { flex: 1; font-size: 15px; margin: 0; }
+  .tele-log { flex: 1; overflow: auto; padding: 10px 12px; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.8; overflow-wrap: anywhere; }
+  .tele-log .dim { color: var(--ink-3); }
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar__in">
+  <a class="brand" href="index.html" aria-label="Irori home">
+    <span class="brand-mark" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+    <span class="brand-text"><span class="brand-name">Irori</span><span class="brand-endorsement">A BlasterSystems product</span></span>
+  </a>
+  <nav class="nav" aria-label="Primary">
+    <a href="overview.html">Overview</a>
+    <a href="nodes.html">Nodes</a>
+    <a href="models.html" class="is-active" aria-current="page">Models</a>
+    <a href="serve.html">Serve</a>
+    <a href="analytics.html">Analytics</a>
+    <a href="benchmarks.html">Benchmarks</a>
+  </nav>
+  <span class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live · 2s</span>
+  <button class="iconbtn" id="themeToggle" aria-label="Toggle theme"></button>
+</div></header>
+
+<main class="container page">
+  <div class="pagehead">
+    <div>
+      <h1>Placement drawer · overlay options</h1>
+      <p>IRI-043 — today, <strong>Push</strong> and <strong>Delete from NAS</strong> open a second modal on top of the placement modal. Three drawer-native shapes below; job output and destructive confirmations never stack. Pick one (A recommended).</p>
+    </div>
+  </div>
+
+  <!-- ── Option A ─────────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Option A">
+    <div class="scenehead">
+      <h2>A · everything lives in the hosting drawer <span class="chip chip--accent">recommended</span></h2>
+      <span class="why">one layer, ever</span>
+    </div>
+    <div class="stage stage--flow">
+      <div class="ghostcard" style="left:24px; top:20px; width:280px; height:120px;"></div>
+      <div class="ghostcard" style="left:24px; top:152px; width:280px; height:180px;"></div>
+      <div class="ghostcard" style="right:24px; top:20px; width:220px; height:90px;"></div>
+      <div class="scrim"></div>
+      <section class="modal" role="dialog" aria-modal="true" aria-label="Model placement — GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit">
+        <div class="card__head">
+          <h3 class="modal__title">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</h3>
+          <button class="btn btn--secondary btn--sm">Close</button>
+        </div>
+        <p class="modal__meta">163.6 GiB · from GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</p>
+        <table class="table">
+          <thead><tr><th>Node</th><th>Role</th><th>Action</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="mono">DGX-1</td><td><span class="chip chip--muted">head</span></td><td><span class="chip chip--ok">present</span></td><td></td></tr>
+            <tr><td class="mono">DGX-2</td><td><span class="chip chip--muted">worker</span></td><td><span class="chip chip--ok">present</span></td><td></td></tr>
+            <tr><td class="mono">DGX-3</td><td><span class="chip chip--muted">worker</span></td><td><span class="chip chip--accent">push</span> <span class="mono faint">via DGX-1</span></td>
+              <td style="text-align:right;"><button class="btn btn--primary btn--sm" id="aPush">Push</button></td></tr>
+            <tr><td class="mono">NAS</td><td><span class="chip chip--muted">standalone</span></td><td><span class="chip chip--ok">present</span></td>
+              <td style="text-align:right;"><button class="btn btn--secondary btn--sm" id="aDel">Delete from NAS</button></td></tr>
+          </tbody>
+        </table>
+        <div class="inline-confirm" id="aConfirm" role="alertdialog" aria-label="Confirm delete from NAS">
+          <p class="stat__sub" style="margin:0 0 4px;"><strong>Delete GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit from the NAS?</strong></p>
+          <p class="stat__sub" style="margin:0 0 8px;">Removes the model's objects, references and staging from the NAS store via modelctl. NAS is never written outside modelctl.</p>
+          <div class="row row--between">
+            <span class="stat__sub faint">nothing destructive runs until you confirm</span>
+            <span class="row">
+              <button class="btn btn--ghost btn--sm" id="aCancel">Cancel</button>
+              <button class="btn btn--danger btn--sm" id="aGo">Delete from NAS</button>
+            </span>
+          </div>
+        </div>
+        <div class="inline-out" id="aOut">
+          <div class="inline-out__head">
+            <span class="mono">push</span>
+            <span class="chip chip--muted">4 rsync streams</span>
+            <span class="grow"></span>
+            <span class="mono faint">succeeded · 9 m 02 s</span>
+          </div>
+          <div class="log">
+            <div><span class="dim">IRORI_PREFLIGHT</span> (operator@dgx3.lan): probing destination</div>
+            <div><span class="dim">IRORI_PREFLIGHT</span> (operator@dgx3.lan): ok</div>
+            <div><span class="dim">push:</span> transferring 94 files (+95 metadata files) to operator@dgx3.lan <span class="ok">with 4 rsync streams</span></div>
+            <div>&nbsp;&nbsp;2.15G&nbsp;&nbsp;&nbsp;5%&nbsp;&nbsp;286.39MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:00:07 (xfr#3, to-chk=48/51)</div>
+            <div>&nbsp;&nbsp;24.3G&nbsp;&nbsp;38%&nbsp;&nbsp;251.94MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:02:29</div>
+            <div>&nbsp;&nbsp;44.61G&nbsp;99%&nbsp;&nbsp;272.98MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:00:01</div>
+            <div><span class="dim">push:</span> validating and publishing on operator@dgx3.lan</div>
+          </div>
+        </div>
+        <div class="placefoot">
+          <p class="stat__sub faint" style="margin:0;">Sync/push jobs stream below · deletes confirm inline — no second modal opens, ever</p>
+        </div>
+      </section>
+    </div>
+    <p class="scenenote">Job output renders inside the placement drawer (the footer hint already promised "output below"); Delete-from-NAS becomes the inline typed-confirm block approved in the hygiene drawer (IR-120). Queue-row job opens keep the standalone job drawer when no drawer is open.</p>
+  </section>
+
+  <!-- ── Option B ─────────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Option B">
+    <div class="scenehead">
+      <h2>B · replace, with Back</h2>
+      <span class="why">still one layer; placement closes while the transfer runs</span>
+    </div>
+    <div class="stage stage--flow">
+      <div class="bstrip">
+        <div class="bpanel" role="dialog" aria-label="Step 1 — placement">
+          <span class="steptag">step 1 · placement</span>
+          <div class="card__head">
+            <h3 class="modal__title">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</h3>
+            <button class="btn btn--secondary btn--sm">Close</button>
+          </div>
+          <table class="table">
+            <thead><tr><th>Node</th><th>Role</th><th>Action</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="mono">DGX-3</td><td><span class="chip chip--muted">worker</span></td><td><span class="chip chip--accent">push</span> <span class="mono faint">via DGX-1</span></td>
+                <td style="text-align:right;"><button class="btn btn--primary btn--sm">Push</button></td></tr>
+            </tbody>
+          </table>
+          <div class="placefoot"><p class="stat__sub faint" style="margin:0;">click Push — this drawer closes</p></div>
+        </div>
+        <div class="barrow-arrow" aria-hidden="true">→</div>
+        <div class="bpanel" role="dialog" aria-label="Step 2 — job output">
+          <span class="steptag">step 2 · job output</span>
+          <div class="card__head">
+            <h3 class="modal__title">push</h3>
+            <button class="btn btn--secondary btn--sm">Close</button>
+          </div>
+          <p class="modal__meta">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit → dgx3 · 4 rsync streams</p>
+          <div class="log" style="margin:10px 16px; border:1px solid var(--log-rule);">
+            <div>&nbsp;&nbsp;2.15G&nbsp;&nbsp;&nbsp;5%&nbsp;&nbsp;286.39MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:00:07 (xfr#3, to-chk=48/51)</div>
+            <div>&nbsp;&nbsp;24.3G&nbsp;&nbsp;38%&nbsp;&nbsp;251.94MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:02:29</div>
+            <div>&nbsp;&nbsp;44.61G&nbsp;99%&nbsp;&nbsp;272.98MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:00:01</div>
+          </div>
+          <div class="placefoot" style="margin-top:auto;">
+            <p class="stat__sub faint" style="margin:0;">nothing destructive runs until you confirm</p>
+            <div class="row row--between" style="margin-top:8px;">
+              <button class="btn btn--ghost btn--sm">← Back to placement</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="scenenote">Cheapest diff — the job drawer replaces the placement drawer and a Back affordance reopens it. Placement context is lost while watching the transfer.</p>
+  </section>
+
+  <!-- ── Option C ─────────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Option C">
+    <div class="scenehead">
+      <h2>C · true side sheet</h2>
+      <span class="why">the literal "drawer" — placement stays, output slides in beside it</span>
+    </div>
+    <div class="stage stage--c">
+      <div class="ghostcard" style="left:24px; top:20px; width:280px; height:120px;"></div>
+      <div class="ghostcard" style="right:380px; bottom:20px; width:220px; height:110px;"></div>
+      <div class="scrim"></div>
+      <section class="modal modal--c" role="dialog" aria-modal="true" aria-label="Model placement — GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit">
+        <div class="card__head">
+          <h3 class="modal__title">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</h3>
+          <button class="btn btn--secondary btn--sm">Close</button>
+        </div>
+        <p class="modal__meta">163.6 GiB · from GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</p>
+        <table class="table">
+          <thead><tr><th>Node</th><th>Role</th><th>Action</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="mono">DGX-1</td><td><span class="chip chip--muted">head</span></td><td><span class="chip chip--ok">present</span></td><td></td></tr>
+            <tr><td class="mono">DGX-2</td><td><span class="chip chip--muted">worker</span></td><td><span class="chip chip--ok">present</span></td><td></td></tr>
+            <tr><td class="mono">DGX-3</td><td><span class="chip chip--muted">worker</span></td><td><span class="chip chip--accent">push</span> <span class="mono faint">via DGX-1</span></td>
+              <td style="text-align:right;"><button class="btn btn--primary btn--sm">Push</button></td></tr>
+            <tr><td class="mono">NAS</td><td><span class="chip chip--muted">standalone</span></td><td><span class="chip chip--ok">present</span></td>
+              <td style="text-align:right;"><button class="btn btn--secondary btn--sm">Delete from NAS</button></td></tr>
+          </tbody>
+        </table>
+        <div class="placefoot"><p class="stat__sub faint" style="margin:0;">placement stays open and readable while the transfer runs</p></div>
+      </section>
+      <aside class="side-sheet" role="dialog" aria-label="Job output — push">
+        <div class="card__head">
+          <h3 class="modal__title">push · running</h3>
+          <button class="btn btn--secondary btn--sm">Close</button>
+        </div>
+        <p class="modal__meta" style="padding-bottom:10px;">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit → dgx3</p>
+        <div class="log">
+          <div><span class="dim">IRORI_PREFLIGHT</span> (operator@dgx3.lan): ok</div>
+          <div><span class="dim">push:</span> transferring 94 files (+95 metadata files) <span class="ok">with 4 rsync streams</span></div>
+          <div>&nbsp;&nbsp;2.15G&nbsp;&nbsp;&nbsp;5%&nbsp;&nbsp;286.39MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:00:07 (xfr#3, to-chk=48/51)</div>
+          <div>&nbsp;&nbsp;24.3G&nbsp;&nbsp;38%&nbsp;&nbsp;251.94MB/s&nbsp;&nbsp;&nbsp;&nbsp;0:02:29</div>
+        </div>
+      </aside>
+    </div>
+    <p class="scenenote">Simultaneous visibility without occlusion — but it is a new overlay pattern (no in-repo or design-system precedent found), with the most work: two focus/scrim contexts, mobile collapse behavior, DS promotion.</p>
+  </section>
+
+  <!-- ── Telemetry labels (applies to every option) ───────────────────── -->
+  <section class="scene" aria-label="Telemetry feed labels">
+    <div class="scenehead">
+      <h2>Overview · Telemetry labels <span class="chip chip--accent">IR-121 fix, independent of the pick</span></h2>
+    </div>
+    <div class="cols cols-2">
+      <div class="card">
+        <div class="card__head"><h3 style="font-size:14px;">Feed today</h3><span class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span> no model name</span></div>
+        <div>
+          <div class="feedline"><span class="t">16:26</span><span class="tx">DGX-3 · sync-local: 38.09G 58% 113.35MB/s 0:03:57</span></div>
+          <div class="feedline"><span class="t">16:26</span><span class="tx">DGX-3 · sync-local: 38.20G 58% 111.53MB/s 0:04:00</span></div>
+          <div class="feedline"><span class="t">16:26</span><span class="tx">DGX-3 · push: 2.15G 5% 286.39MB/s 0:00:07</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card__head"><h3 style="font-size:14px;">Feed after IR-121</h3><span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span> model named</span></div>
+        <div>
+          <div class="feedline"><span class="t">16:26</span><span class="tx">DGX-3 · sync-local <span class="name">Ornith-1.5-122B-EXL3-EAQv1-4-bpw</span>: 38.09G 58% 113.35MB/s 0:03:57</span></div>
+          <div class="feedline"><span class="t">16:24</span><span class="tx">DGX-3 · push <span class="name">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</span> started</span></div>
+          <div class="feedline"><span class="t">16:33</span><span class="tx">DGX-3 · push <span class="name">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</span> succeeded · 9 m 02 s</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="scenenote">Job params already ride GET /api/v1/jobs but not the SSE <span class="mono">job</span> frame — the fix threads <span class="mono">params</span> through the frame so mid-session jobs are labeled too (research brief §3).</p>
+  </section>
+
+  <!-- ── D · shipped shape ───────────────────────────────────────────── -->
+  <section class="scene" aria-label="Final shape">
+    <div class="scenehead">
+      <h2>D · shipped shape <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span> owner pick</span></h2>
+      <span class="why">C side sheet for every secondary layer + a global telemetry dock on the footer CTA</span>
+    </div>
+    <div class="stage stage--final">
+      <div class="ghostcard" style="left:24px; top:64px; width:300px; height:130px;"></div>
+      <div class="ghostcard" style="left:24px; top:210px; width:300px; height:150px;"></div>
+      <div class="ghostcard" style="left:360px; top:64px; width:180px; height:90px;"></div>
+      <div class="fakebar"><span class="mono">Irori</span><span class="fakechip">Overview · Models · Serve · Analytics …</span><span class="fakechip" style="margin-left:auto">● Live · 2s</span></div>
+      <aside class="tele" role="dialog" aria-label="Live telemetry">
+        <div class="tele-resize" aria-hidden="true" title="drag to resize"></div>
+        <div class="tele-head"><h3>Telemetry</h3><span class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>live</span><button class="btn btn--ghost btn--sm">✕</button></div>
+        <div class="tele-log">
+          <div><span class="dim">16:26</span> DGX-3 · sync-local <span class="name">Ornith-1.5-122B-EXL3-EAQv1-4-bpw</span>: 38.09G 58% 113.35MB/s 0:03:57</div>
+          <div><span class="dim">16:24</span> DGX-3 · push <span class="name">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</span> started</div>
+          <div><span class="dim">16:33</span> DGX-3 · push <span class="name">GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit</span> succeeded · 9 m 02 s</div>
+          <div><span class="dim">16:33</span> DGX-1 · agent 0.3.0 online</div>
+        </div>
+      </aside>
+      <div class="fakefoot">
+        <span class="mono faint">Irori 0.3.0 · dev-0.3.0-51 · updates every 2 s</span>
+        <button class="btn btn--primary btn--sm">Telemetry</button>
+      </div>
+    </div>
+    <p class="scenenote">The dock lives under the topbar, above page and footer (chrome z-order), on every page; the left edge drags 320–720 px and persists; the footer CTA opens it anywhere. Feed lines carry the IR-121 model labels.</p>
+  </section>
+</main>
+
+<p class="mock-note">Static mockup · data illustrative</p>
+
+<script>
+  var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+  var SUN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  var btn = document.getElementById("themeToggle");
+  function paint(){ btn.innerHTML = document.documentElement.dataset.theme === "dark" ? SUN : MOON; }
+  btn.onclick = function(){ var d = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = d ? "light" : "dark";
+    try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} paint(); };
+  paint();
+
+  // Option A interactions: inline confirm + output section.
+  var aConfirm = document.getElementById("aConfirm");
+  document.getElementById("aDel").addEventListener("click", function(){ aConfirm.classList.add("is-open"); });
+  document.getElementById("aCancel").addEventListener("click", function(){ aConfirm.classList.remove("is-open"); });
+  document.getElementById("aGo").addEventListener("click", function(){ aConfirm.classList.remove("is-open"); });
+  document.getElementById("aPush").addEventListener("click", function(){
+    var out = document.getElementById("aOut");
+    out.style.outline = "1px solid var(--thread)";
+    setTimeout(function(){ out.style.outline = ""; }, 500);
+  });
+</script>
+</body>
+</html>
