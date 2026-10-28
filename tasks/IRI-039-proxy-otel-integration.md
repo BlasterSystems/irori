@@ -88,7 +88,7 @@ counter-diff ledger + M8 per-request capture; no pricing model.
   the wire; the AC's Jaeger recipe is documented in `DEPLOYMENT.md` once the
   owner picks.
 - Gates: `.agentic/bin/validate` rc 0; `.agentic/bin/docs-check` rc 0.
-Pending: PR CI.
+  PR #61 CI green (verify 1m35s + docs-check).
 
 ## Scope
 
