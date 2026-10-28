@@ -204,6 +204,8 @@ export interface JobSettledEvent {
   status: "succeeded" | "failed" | "canceled";
   exitCode: number | null;
   durationMs: number | null;
+  /** IR-121: rides the SSE frame so the feed can label the model. */
+  params: Record<string, unknown>;
 }
 
 /** Dispatch transition of a job — SSE `job` frame with status `running`
@@ -213,6 +215,8 @@ export interface JobStartedEvent {
   jobId: string;
   kind: string;
   startedAt: Date;
+  /** IR-121: rides the SSE frame so the feed can label the model. */
+  params: Record<string, unknown>;
 }
 
 /** ADR-0014: a failed push whose preflight reported a provisionable gap. */
@@ -298,7 +302,7 @@ export function createJobsService(
       }
       const startedAt = new Date();
       await db.update(jobs).set({ status: "running", startedAt }).where(eq(jobs.id, row.id));
-      onStarted?.({ nodeId, jobId: row.id, kind, startedAt });
+      onStarted?.({ nodeId, jobId: row.id, kind, params, startedAt });
       return { ...row, status: "running", startedAt, finishedAt: null, exitCode: null };
     },
 
@@ -366,6 +370,7 @@ export function createJobsService(
         jobId: id,
         kind: row.kind,
         status: "canceled",
+        params: (row.params ?? {}) as Record<string, unknown>,
         exitCode: row.exitCode,
         durationMs: row.startedAt !== null ? Date.now() - row.startedAt.getTime() : null,
       });
@@ -472,6 +477,7 @@ export function createJobsService(
         jobId,
         kind: row.kind,
         status,
+        params: (row.params ?? {}) as Record<string, unknown>,
         exitCode,
         durationMs: startedAt !== null && finishedAt !== null ? finishedAt.getTime() - startedAt.getTime() : null,
       });
@@ -511,7 +517,7 @@ export function createJobsService(
 
     async reapOffline(onlineNodes) {
       const active = await db
-        .select({ id: jobs.id, nodeId: jobs.nodeId, kind: jobs.kind, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
+        .select({ id: jobs.id, nodeId: jobs.nodeId, kind: jobs.kind, params: jobs.params, startedAt: jobs.startedAt, createdAt: jobs.createdAt })
         .from(jobs)
         .where(inArray(jobs.status, [...ACTIVE]));
       const now = Date.now();
@@ -540,6 +546,7 @@ export function createJobsService(
           jobId: j.id,
           kind: j.kind,
           status: "failed",
+          params: (j.params ?? {}) as Record<string, unknown>,
           exitCode: null,
           durationMs: j.startedAt !== null ? now - j.startedAt.getTime() : null,
         });
@@ -577,6 +584,7 @@ export function createJobsService(
           jobId: row.id,
           kind: "agent-update",
           status: "failed",
+          params: (row.params ?? {}) as Record<string, unknown>,
           exitCode: null,
           durationMs: row.startedAt !== null ? finishedAt.getTime() - row.startedAt.getTime() : null,
         });
@@ -598,6 +606,7 @@ export function createJobsService(
         jobId: row.id,
         kind: "agent-update",
         status: "succeeded",
+        params: (row.params ?? {}) as Record<string, unknown>,
         exitCode: 0,
         durationMs: row.startedAt !== null ? finishedAt.getTime() - row.startedAt.getTime() : null,
       });

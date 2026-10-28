@@ -90,6 +90,9 @@ export const jobEventSchema = z.object({
   status: z.enum(["running", "succeeded", "failed", "canceled"]),
   exitCode: z.number().int().nullable(),
   durationMs: z.number().nullable(),
+  // IR-121: params ride the frame so the feed can label the model mid-session
+  // (the REST seed already carries them); older hubs omit the field.
+  params: z.record(z.string(), z.unknown()).default({}),
 });
 
 /** One streamed job-output line, throttled server-side (IRI-028). The full

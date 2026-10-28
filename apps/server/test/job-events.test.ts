@@ -47,17 +47,28 @@ d("job settle events (db integration)", () => {
     const row = await service.create(nodeId, "sync-local", {});
     await service.onDone(nodeId, row.id, "succeeded", 0);
     expect(settled).toHaveLength(1);
-    expect(settled[0]).toMatchObject({ nodeId, jobId: row.id, kind: "sync-local", status: "succeeded", exitCode: 0 });
+    expect(settled[0]).toMatchObject({ nodeId, jobId: row.id, kind: "sync-local", status: "succeeded", exitCode: 0, params: {} });
     expect(settled[0]!.durationMs).not.toBeNull();
     await service.onDone(nodeId, row.id, "failed", 1);
     expect(settled).toHaveLength(1);
   });
 
+  it("threads job params through settle events (IR-121)", async () => {
+    const params = { name: "glm", hosts: ["piresbruno@dgx3"], jobs: 4 };
+    const row = await service.create(nodeId, "push", params);
+    await service.onDone(nodeId, row.id, "succeeded", 0);
+    const mine = settled.filter((s) => s.jobId === row.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.params).toEqual(params);
+  });
+
   it("emits canceled on cancel", async () => {
     const row = await service.create(nodeId, "sync-local", {});
     await service.cancel(row.id);
-    expect(settled).toHaveLength(2);
-    expect(settled[1]).toMatchObject({ jobId: row.id, kind: "sync-local", status: "canceled" });
+    // Fixture-relative: earlier tests in this suite share the settled array.
+    const mine = settled.filter((s) => s.jobId === row.id);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ jobId: row.id, kind: "sync-local", status: "canceled" });
   });
 
   it("emits failed when the reaper collects an offline node's job", async () => {
