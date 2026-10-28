@@ -31,7 +31,6 @@ import { createApp, type HistoryBuilder, type LlmHistoryBuilder } from "./app.js
 import { createSetupsService, type SetupsService } from "./setups-service.js";
 import { createBenchService, type BenchService } from "./bench-service.js";
 import { createAnalyticsService, type AnalyticsService } from "./analytics.js";
-import { createTokenMacroService, type TokenMacroService } from "./tokens-macro.js";
 import { createCleanupService, weeklySafePassParams, type CleanupService } from "./cleanup-service.js";
 import { createInventoryService, type InventoryService } from "./inventory-service.js";
 import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
@@ -92,8 +91,6 @@ const state: {
   setups: SetupsService | null;
   bench: BenchService | null;
   analytics: AnalyticsService | null;
-  /** IRI-040: token macro views (fleet / cluster / node / model). */
-  tokenMacro: TokenMacroService | null;
   cleanup: CleanupService | null;
   /** IRI-028: cached per-node model inventory reads. */
   inventory: InventoryService | null;
@@ -117,7 +114,6 @@ const state: {
   setups: null,
   bench: null,
   analytics: null,
-  tokenMacro: null,
   cleanup: null,
   inventory: null,
   usage: null,
@@ -148,7 +144,6 @@ const app = createApp({
   getSetups: () => state.setups,
   getBench: () => state.bench,
   getAnalytics: () => state.analytics,
-  getTokenMacro: () => state.tokenMacro,
   getCleanup: () => state.cleanup,
   getInventory: () => state.inventory,
   getUsage: () => state.usage,
@@ -263,7 +258,6 @@ async function boot(): Promise<void> {
 
   // M7: analytics + token ledger + energy archive + hygiene reads.
   state.analytics = createAnalyticsService(dbHandle.db);
-  state.tokenMacro = createTokenMacroService(dbHandle.db);
 
   // M7: analytics + hygiene reads (token ledger + energy engines below).
   state.analytics = createAnalyticsService(dbHandle.db);

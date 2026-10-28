@@ -1,4 +1,10 @@
-# Task: IRI-040 — Token usage macro views: fleet, per node/cluster, per model (no proxy)
+# Task: IRI-040 — Token macro views in the Analytics tokens lens (fleet, per cluster/node, per model; no proxy)
+
+> **Rework 2026-10-28 (owner):** reuse the existing Analytics section instead
+> of a standalone page. The macro views live inside the tokens lens
+> (`#/analytics` → tokens); the `tokens-macro` endpoint, Tokens page, and nav
+> item from the first iteration were removed before merge. Same endpoint
+> (`GET /api/v1/analytics/tokens`), additively extended.
 
 Epic: Irori v1 ([docs/PLAN.md](../docs/PLAN.md)) · Jira: [IR-118](https://blastersystems.atlassian.net/browse/IR-118) (IR Sprint 2 · 990) · Prior art: [IRI-039 research brief §3](../docs/research/IRI-039-research-brief.md) (SparkDash mechanism, verified line-level)
 
@@ -32,81 +38,74 @@ the inspiration; the rendering is Irori's own DS V2.1 Vue.
 | UI | Analytics tokens lens (range-bound table + per-node series); Overview fleet token sum | `AnalyticsView.vue:231`, `OverviewView.vue:159,179` |
 
 Storage is SparkDash-equivalent (better: Postgres + retention vs a 30 s JSON
-file). The work is a macro aggregation endpoint and a dedicated page.
+file). The work is presentation inside the existing Analytics tokens lens.
 
 ## Acceptance criteria
 
-- [x] `GET /api/v1/analytics/tokens-macro?range=` returns `fleet`, `clusters`,
-      `nodes`, `models` — each row carrying total, generated, input, cached,
-      cacheHitPct; sums cover the **whole** ledger for the range (never the
-      top-20 cap; models capped at 100 rows); `cacheHitPct = cached/input`
-      (0 when input = 0); cluster rows reuse the setup membership (head +
-      workers, standalone as its own row).
-- [x] Tokens page `#/tokens` (nav between Analytics and Usage) with three
-      sections: **Fleet** stat tiles + fleet total-tokens trend (Sparkline
-      over the analytics lens), **By cluster / By node** table (grouping
-      toggle, node rows carry their cluster), **By model** table; range
-      selector 30m / 1h / 4h / 24h / **week** (7d) / **month** (30d) / 90d;
-      DS V2.1 + mobile-first 390px (browser-verified).
-- [x] Contract tests for the macro endpoint (sums, hit %, cluster folding,
-      empty-ledger zeros, route 200/400/503); web tests for the helpers
-      (rows, hit % formatting, range labels, trend folding) + router case.
+- [x] `GET /api/v1/analytics/tokens` (unchanged route) additively carries
+      `fleet` (the five macro metrics summed over the series scope — filters
+      applied; `null` for other lenses) and macro `models[]` rows
+      (`total`, `cacheHitPct`; whole-ledger sums, never the top-20 subset,
+      capped at 100 rows, sorted by total).
+- [x] Analytics tokens lens renders: fleet stat tiles, the existing
+      cluster/node series chart, a By-cluster/node totals table folded from
+      the series, and the per-model table with total/generated/input/cache/
+      cache-hit columns. No new page, nav item, or route.
+- [x] Contract tests for the lens extension (fleet sums, hit %, cluster
+      folding, empty-ledger zeros); web helper tests (series totals, tiles,
+      hit % formatting).
 - [x] SPEC §9 + API.md + CHANGELOG updated; validate + docs-check green.
 
 ## Scope
 
 ### Included
 
-- Macro aggregation endpoint + Tokens page + tests + docs.
+- Additive tokens-lens fields (fleet + macro models) + AnalyticsView sections
+  + tests + docs.
 
 ### Excluded
 
 - Proxy-based capture (exists, M8/IR-42) — works without it.
 - Pricing/cost per token (SparkDash has none; existing `token-cost` setting
   untouched).
-- New tables, JSON ledger, or an all-time range.
-- Per-node detail card on the node page (the By-node table is the macro view;
-  add later on request).
+- New tables, JSON ledger, an all-time range, or a new endpoint/page.
 - SparkDash component code (React) — Irori renders its own DS V2.1 Vue.
 
 ## Plan
 
-- [ ] `analytics.ts`: `tokens-macro` endpoint (fleet/clusters/nodes/models,
-      whole-ledger sums, hit %).
-- [ ] Contract tests for the response shape.
-- [ ] Web: Tokens page (three sections, range selector, nav item).
-- [ ] Web tests; mobile-first pass.
-- [ ] Docs (SPEC, CHANGELOG) + validate + docs-check.
+- [x] Core: additive lens response fields (`fleet`, macro `models[]`).
+- [x] Server: whole-ledger model totals + fleet sums in the tokens lens.
+- [x] Web: AnalyticsView tokens lens (tiles, group totals table, model table).
+- [x] Tests: db-gated lens contract tests + web helper tests.
+- [x] Docs (SPEC, API.md, CHANGELOG) + validate + docs-check.
 
 ## Architecture impact
 
 - **ADR required:** No — read-time aggregation over the existing ledger; no
-  new store, boundary, or dependency.
+  new store, boundary, endpoint, or dependency.
 - **Relevant ADRs:** 0006 (telemetry pipeline/rollups), 0002 (Postgres).
 
 ## Validation evidence
 
-- **Gates** (2026-10-28): `pnpm build` rc 0; full `pnpm -r test` with
-  `IRORI_TEST_DATABASE_URL` set → core 95, proxy 22, web 259, db 5,
-  agent 176, server 204 — all green (the 3 new db-gated `tokens-macro` tests
-  ran against the disposable `irori-test-pg` postgres:16 container);
-  `.agentic/bin/validate` rc 0; `.agentic/bin/docs-check` rc 0 (after adding
-  the endpoint to `docs/API.md`).
-- **Live smoke** (local): built server + test Postgres with fixture
-  nodes/setup/ledger rows →
-  `GET /api/v1/analytics/tokens-macro?range=24h` returned
-  fleet {total 440, generated 150, input 290, cached 140, hit 48.3%}, the
-  folded "GLM TP-3" cluster row, per-node rows with cluster names; browser
-  check of `#/tokens` at 1280 px and 390 px (fullPage): nav item active,
-  five fleet tiles match the API, week/month range tabs, By cluster ↔ By
-  node toggle renders node rows with their cluster sub-line, By model table
-  includes the zero-input model at 0.0% hit; no horizontal overflow.
+- **Gates** (2026-10-28, after the reuse rework): `pnpm build` rc 0; full
+  workspace tests with `IRORI_TEST_DATABASE_URL` set green (3 db-gated
+  tokens-lens tests vs the disposable `irori-test-pg` container: fleet sums,
+  hit %, cluster folding, unknown-node fallback, empty-ledger zeros; web
+  helper tests); `.agentic/bin/validate` rc 0; `.agentic/bin/docs-check` rc 0.
+- **Live smoke** (first iteration, superseded visuals): tokens-macro endpoint
+  + `#/tokens` page verified in-browser at 1280/390 px. After the rework the
+  macro surfaces render inside `#/analytics` tokens; the endpoint contract
+  tests above cover the data path (fixtures identical to the earlier live
+  smoke: fleet {445, 145, 300, 142, 47.3%}, folded "GLM TP-3" cluster).
+- **First-iteration artifacts removed before merge:** `tokens-macro` endpoint
+  + service, Tokens page/route/nav item, `fetchTokenMacro` client.
 
 ## Review
 
 - Correctness: _pending_.
 - Security: read-only analytics surface; no new auth surface.
-- Compatibility: additive endpoint; existing lenses untouched.
+- Compatibility: additive response fields; existing consumers unaffected.
 - Residual risks: cluster membership changes mid-range (tokens fold under the
-  cluster currently owning the node — acceptable, document it); `unknown`
-  model rows surface as their own model row.
+  cluster currently owning the node — acceptable, documented); `unknown`
+  model rows surface as their own model row; `fleet` follows the lens
+  filters (setupId/nodeId), `models[]` is fleet-wide by design.

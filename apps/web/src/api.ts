@@ -1,6 +1,5 @@
 import {
   type AnalyticsResponse,
-  type TokenMacroResponse,
   clientIdentityCreatedSchema,
   chatDetailSchema,
   chatsResponseSchema,
@@ -543,29 +542,6 @@ export async function fetchAnalytics(
     throw new Error("GET /api/v1/analytics: unexpected payload shape");
   }
   return body as AnalyticsResponse;
-}
-
-/** IRI-040 (IR-118): macro token views — fleet / cluster / node / model. */
-export interface TokenMacroRangeName {
-  value: "30m" | "1h" | "4h" | "24h" | "7d" | "30d" | "90d";
-  label: string;
-}
-
-export async function fetchTokenMacro(
-  range: "30m" | "1h" | "4h" | "24h" | "7d" | "30d" | "90d",
-  opts: { signal?: AbortSignal } = {},
-): Promise<TokenMacroResponse> {
-  const res = await fetch(`/api/v1/analytics/tokens-macro?range=${range}`, { headers: { accept: "application/json" }, signal: opts.signal });
-  if (!res.ok) throw new Error(`GET /api/v1/analytics/tokens-macro failed: HTTP ${res.status}`);
-  const body: unknown = await res.json();
-  if (typeof body !== "object" || body === null || Array.isArray(body)) {
-    throw new Error("GET /api/v1/analytics/tokens-macro: expected an object");
-  }
-  const o = body as Record<string, unknown>;
-  if (o.range !== range || typeof o.fleet !== "object" || o.fleet === null || !Array.isArray(o.clusters) || !Array.isArray(o.nodes) || !Array.isArray(o.models)) {
-    throw new Error("GET /api/v1/analytics/tokens-macro: unexpected payload shape");
-  }
-  return body as TokenMacroResponse;
 }
 
 export interface CleanupCategoryAudit {
