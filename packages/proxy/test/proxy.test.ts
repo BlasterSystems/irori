@@ -16,6 +16,7 @@ import type { UsageRequest } from "@irori/core";
 let engine: Server;
 let enginePort: number;
 const seenAuth: string[] = [];
+const seenTrace: string[] = [];
 
 /** SSE engine: role → 3 content deltas → final usage+tensorfold chunk → DONE. */
 function startStreamEngine(): void {
@@ -37,6 +38,7 @@ function startStreamEngine(): void {
       return;
     }
     if (req.method === "POST" && req.url?.split("?")[0] === "/v1/chat/completions") {
+      seenTrace.push(String(req.headers["traceparent"] ?? ""));
       if (req.url.includes("fail=1")) {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(
@@ -143,7 +145,7 @@ afterAll(async () => {
   await new Promise<void>((resolve) => engine.close(() => resolve()));
 });
 
-function post(body: string, path = "/v1/chat/completions"): Promise<{ status: number; raw: string }> {
+function post(body: string, path = "/v1/chat/completions", extraHeaders: Record<string, string> = {}): Promise<{ status: number; raw: string }> {
   const { promise, resolve, reject } = Promise.withResolvers<{ status: number; raw: string }>();
   const req = httpRequest(
     {
@@ -151,7 +153,7 @@ function post(body: string, path = "/v1/chat/completions"): Promise<{ status: nu
       port: proxy.address!.port,
       method: "POST",
       path,
-      headers: { "content-type": "application/json", authorization: "Bearer test-key", "content-length": Buffer.byteLength(body) },
+      headers: { "content-type": "application/json", authorization: "Bearer test-key", "content-length": Buffer.byteLength(body), ...extraHeaders },
     },
     (res) => {
       let raw = "";
@@ -355,5 +357,19 @@ describe("capture proxy", () => {
     const after = await post(body);
     expect(after.status).toBe(200);
     expect(after.raw).toContain("[DONE]");
+  });
+
+  it("forwards W3C trace context upstream and attaches it to the event (IR-116)", async () => {
+    const tp = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    const body = JSON.stringify({ model: "GLM-5.3-Flash-EXL3", messages: [{ role: "user", content: "hi" }] });
+    const event = nextEvent();
+    const res = await post(body, "/v1/chat/completions", { traceparent: tp, tracestate: "irori-test=1" });
+    expect(res.status).toBe(200);
+    // The engine received the client's trace context verbatim (not hop-by-hop)
+    // so vLLM can continue the same trace.
+    expect(seenTrace).toContain(tp);
+    const e = await event;
+    expect(e.traceparent).toBe(tp);
+    expect(e.tracestate).toBe("irori-test=1");
   });
 });

@@ -21,6 +21,7 @@ import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
 import type { LlmRingEntry, Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
+import { log } from "./logger.js";
 
 /** Drop-oldest cap for buffered DB writes (snapshots, llm probe passes, terminal job/bench frames). */
 const MAX_PENDING_WRITES = 1000;
@@ -193,7 +194,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
     };
     const reject = (message: string): void => {
-      console.warn(`[irori-hub] rejected agent from ${req.socket.remoteAddress ?? "unknown"}: ${message}`);
+      log.warn(`rejected agent from ${req.socket.remoteAddress ?? "unknown"}: ${message}`);
       sendMsg({ type: "error", message });
       ws.close();
     };
@@ -330,10 +331,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       if (!parsed.success) {
         // snapshot/llm/ping/hello belong to the first handler — not an error here.
         if (agentMsgSchema.safeParse(data).success) return;
-        console.error(`[irori-server] agentServerFrame parse failed: ${text.slice(0, 120)}`);
+        log.error(`agentServerFrame parse failed: ${text.slice(0, 120)}`);
         return;
       }
-      console.error(`[irori-server] agentServerFrame ${parsed.data.type} from ${nodeId}`);
+      log.error(`agentServerFrame ${parsed.data.type} from ${nodeId}`);
       const currentId: string = nodeId;
       const frame = parsed.data;
       if (frame.type === "job-output" || frame.type === "job-done") {
