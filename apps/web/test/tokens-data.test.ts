@@ -1,47 +1,52 @@
 import { describe, expect, it } from "vitest";
-import type { TokenMacroResponse } from "@irori/core";
-import { TOKENS_RANGE_TABS, clusterRows, fmtHitPct, modelRows, nodeRows, trendValues } from "../src/tokens-data";
+import type { AnalyticsResponse, TokenTotals } from "@irori/core";
+import { fleetTiles, fmtHitPct, seriesTotals } from "../src/tokens-data";
 
-function fixture(): TokenMacroResponse {
+function fixture(): AnalyticsResponse {
   return {
+    lens: "tokens",
     range: "24h",
-    fleet: { total: 445, generated: 145, input: 300, cached: 142, cacheHitPct: 47.3 },
-    clusters: [
-      { id: "s1", name: "GLM TP-3", total: 430, generated: 140, input: 290, cached: 140, cacheHitPct: 48.3 },
-      { id: "standalone", name: "standalone", total: 15, generated: 5, input: 10, cached: 2, cacheHitPct: 20 },
-    ],
-    nodes: [
-      { id: "n1", name: "DGX-1", cluster: "GLM TP-3", total: 310, generated: 110, input: 200, cached: 50, cacheHitPct: 25 },
-      { id: "n3", name: "DGX-3", cluster: null, total: 15, generated: 5, input: 10, cached: 2, cacheHitPct: 20 },
+    groupBy: "cluster",
+    granularity: "hour",
+    fleet: { total: 445, generated: 145, prompt: 300, cached: 142, cacheHitPct: 47.3 },
+    series: [
+      {
+        key: "s1",
+        label: "GLM TP-3",
+        points: [
+          { t: 1000, generated: 100, prompt: 200, cached: 50 },
+          { t: 2000, generated: 40, prompt: 90, cached: 90 },
+        ],
+      },
+      { key: "standalone", label: "standalone", points: [{ t: 1000, generated: 5, prompt: 10, cached: 2 }] },
     ],
     models: [
-      { model: "GLM-5.3-Flash-EXL3", total: 420, generated: 130, input: 290, cached: 140, cacheHitPct: 48.3 },
-      { model: "ds4", total: 15, generated: 5, input: 10, cached: 2, cacheHitPct: 20 },
+      { model: "GLM-5.3-Flash-EXL3", total: 420, generated: 130, prompt: 290, cached: 140, cacheHitPct: 48.3 },
+      { model: "q27", total: 10, generated: 10, prompt: 0, cached: 0, cacheHitPct: 0 },
     ],
-  };
+  } as AnalyticsResponse;
 }
 
 describe("token macro helpers (IRI-040)", () => {
-  it("renders cluster rows by name", () => {
-    const rows = clusterRows(fixture());
-    expect(rows.map((r) => [r.label, r.total, r.cacheHitPct])).toEqual([
-      ["GLM TP-3", 430, 48.3],
-      ["standalone", 15, 20],
+  it("folds per-group totals from the lens series, sorted by total", () => {
+    const rows = seriesTotals(fixture().series);
+    expect(rows.map((r) => [r.label, r.total, r.generated, r.input, r.cached, r.cacheHitPct])).toEqual([
+      ["GLM TP-3", 430, 140, 290, 140, 48.3],
+      ["standalone", 15, 5, 10, 2, 20],
     ]);
   });
 
-  it("renders node rows with the cluster as the sub line, standalone marked", () => {
-    const rows = nodeRows(fixture());
-    expect(rows.map((r) => [r.label, r.sub, r.total])).toEqual([
-      ["DGX-1", "GLM TP-3", 310],
-      ["DGX-3", "standalone", 15],
-    ]);
+  it("treats missing token counters as zero in group totals", () => {
+    const rows = seriesTotals([
+      { key: "n", label: "N", points: [{ t: 1 }, { t: 2, generated: 3, prompt: 4 }] },
+    ] as AnalyticsResponse["series"]);
+    expect(rows).toEqual([{ key: "n", label: "N", total: 7, generated: 3, input: 4, cached: 0, cacheHitPct: 0 }]);
   });
 
-  it("renders model rows keyed by model name", () => {
-    const rows = modelRows(fixture());
-    expect(rows.map((r) => r.label)).toEqual(["GLM-5.3-Flash-EXL3", "ds4"]);
-    expect(rows[0]).toMatchObject({ total: 420, generated: 130, input: 290, cached: 140, cacheHitPct: 48.3 });
+  it("builds the five fleet tiles, dashed when the fleet row is absent", () => {
+    const fleet: TokenTotals = { total: 445, generated: 145, prompt: 300, cached: 142, cacheHitPct: 47.3 };
+    expect(fleetTiles(fleet).map((t) => t.value)).toEqual(["445", "145", "300", "142", "47.3%"]);
+    expect(fleetTiles(null).every((t) => t.value === "—")).toBe(true);
   });
 
   it("formats hit percentages with one decimal and an em dash for unknown", () => {
@@ -49,27 +54,5 @@ describe("token macro helpers (IRI-040)", () => {
     expect(fmtHitPct(0)).toBe("0.0%");
     expect(fmtHitPct(null)).toBe("—");
     expect(fmtHitPct(undefined)).toBe("—");
-  });
-
-  it("exposes the owner's range labels (week/month) mapped onto the standard values", () => {
-    expect(TOKENS_RANGE_TABS.map((t) => [t.value, t.label])).toEqual([
-      ["30m", "30m"],
-      ["1h", "1h"],
-      ["4h", "4h"],
-      ["24h", "24h"],
-      ["7d", "week"],
-      ["30d", "month"],
-      ["90d", "90d"],
-    ]);
-  });
-
-  it("folds the lens series into one fleet total-tokens trend (missing buckets gap)", () => {
-    expect(
-      trendValues([
-        { key: "a", label: "A", points: [{ t: 1000, generated: 10, prompt: 5 }, { t: 2000, generated: 1, prompt: 1 }] },
-        { key: "b", label: "B", points: [{ t: 1000, generated: 2, prompt: 3 }] },
-      ]),
-    ).toEqual([20, 2]);
-    expect(trendValues([])).toEqual([]);
   });
 });

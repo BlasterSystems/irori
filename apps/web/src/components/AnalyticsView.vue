@@ -23,6 +23,7 @@ import {
 } from "../analytics";
 import { GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import type { AnalyticsResponse } from "@irori/core";
+import { fleetTiles, fmtHitPct, seriesTotals } from "../tokens-data";
 import LensChart from "./LensChart.vue";
 
 const lens = ref<AnalyticsLensName>("decode");
@@ -151,6 +152,12 @@ const headline = computed(() => {
   const last = vals[vals.length - 1]!;
   return `latest ${fmtPoint(last)} · peak ${fmtPoint(peak)}`;
 });
+
+/** IRI-040: the five fleet macro tiles (tokens lens only). */
+const tokenTiles = computed(() => (data.value?.lens === "tokens" ? fleetTiles(data.value.fleet) : []));
+
+/** IRI-040: By-cluster/node macro totals, folded from the lens series. */
+const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesTotals(data.value.series) : []));
 </script>
 
 <template>
@@ -179,6 +186,19 @@ const headline = computed(() => {
   <p v-else-if="loading && data === null" class="muted">loading…</p>
 
   <template v-if="data !== null">
+    <!-- IRI-040: fleet macro tiles (tokens lens). -->
+    <section v-if="lens === 'tokens'" class="card" style="margin-bottom: 12px">
+      <div class="card__body">
+        <div class="statgrid statgrid--6">
+          <div v-for="t in tokenTiles" :key="t.label" class="stat">
+            <span class="stat__label">{{ t.label }}</span>
+            <span class="stat__value">{{ t.value }}</span>
+          </div>
+        </div>
+        <p class="stat__sub">{{ range }} · total = generated + input · cache hit = cache / input</p>
+      </div>
+    </section>
+
     <!-- Temps fleet strip: latest per node, hottest first (SPEC §9). -->
     <section v-if="lens === 'temps' && stripRows.length > 0" class="card" style="margin-bottom: 12px">
       <div class="card__head"><h3>Fleet temperatures</h3><span class="mono faint">latest snapshot · hottest first</span></div>
@@ -228,19 +248,43 @@ const headline = computed(() => {
       </div>
     </section>
 
+    <!-- IRI-040: By-cluster/node macro totals, folded from the series. -->
+    <section v-if="lens === 'tokens' && tokenGroupTotals.length > 0" class="card" style="margin-bottom: 12px">
+      <div class="card__head"><h3>Token totals — by {{ groupBy }}</h3><span class="mono faint">{{ tokenGroupTotals.length }} row{{ tokenGroupTotals.length === 1 ? "" : "s" }}</span></div>
+      <div class="card__body">
+        <table class="tbl">
+          <thead>
+            <tr><th>{{ groupBy }}</th><th>total</th><th>generated</th><th>input</th><th>cache</th><th>cache hit</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in tokenGroupTotals" :key="r.key">
+              <td class="mono">{{ r.label }}</td>
+              <td class="mono">{{ fmtCount(r.total) }}</td>
+              <td class="mono">{{ fmtCount(r.generated) }}</td>
+              <td class="mono">{{ fmtCount(r.input) }}</td>
+              <td class="mono">{{ fmtCount(r.cached) }}</td>
+              <td class="mono">{{ fmtHitPct(r.cacheHitPct) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section v-if="lens === 'tokens'" class="card" style="margin-bottom: 12px">
-      <div class="card__head"><h3>Token ledger — per model</h3><span class="mono faint">{{ range }} · generated / prompt / cached</span></div>
+      <div class="card__head"><h3>Token ledger — per model</h3><span class="mono faint">{{ range }} · total / generated / input / cache / hit</span></div>
       <div class="card__body">
         <table v-if="data.models.length > 0" class="tbl">
           <thead>
-            <tr><th>model</th><th>generated</th><th>prompt (prefill)</th><th>cached</th></tr>
+            <tr><th>model</th><th>total</th><th>generated</th><th>input (prompt)</th><th>cache</th><th>cache hit</th></tr>
           </thead>
           <tbody>
             <tr v-for="m in data.models" :key="m.model">
               <td class="mono">{{ m.model }}</td>
+              <td class="mono">{{ fmtCount(m.total) }}</td>
               <td class="mono">{{ fmtCount(m.generated) }}</td>
               <td class="mono">{{ fmtCount(m.prompt) }}</td>
               <td class="mono">{{ fmtCount(m.cached) }}</td>
+              <td class="mono">{{ fmtHitPct(m.cacheHitPct) }}</td>
             </tr>
           </tbody>
         </table>
