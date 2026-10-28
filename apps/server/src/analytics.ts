@@ -13,6 +13,7 @@ import {
   type AnalyticsPointInput,
   type AnalyticsResponse,
   type AnalyticsSeriesInput,
+  type TokenTotals,
 } from "@irori/core";
 
 /**
@@ -96,7 +97,32 @@ export function createAnalyticsService(db: Db): AnalyticsService {
       series.sort((a, b) => a.label.localeCompare(b.label));
 
       const models = query.lens === "tokens" ? await tokenModels(db, since, granularity) : [];
-      return analyticsResponseSchema.parse({ lens: query.lens, range: query.range, groupBy: query.groupBy, granularity, series, models });
+      // IRI-040: fleet macro totals — the same scope as `series` (filters
+      // applied), summed client-visibly from the folded buckets.
+      let fleet: TokenTotals | null = null;
+      if (query.lens === "tokens") {
+        let gen = 0;
+        let prompt = 0;
+        let cached = 0;
+        for (const s of series) {
+          for (const p of s.points) {
+            gen += p.generated ?? 0;
+            prompt += p.prompt ?? 0;
+            cached += p.cached ?? 0;
+          }
+        }
+        const generated = Math.round(gen);
+        const promptSum = Math.round(prompt);
+        const cachedSum = Math.round(cached);
+        fleet = {
+          total: generated + promptSum,
+          generated,
+          prompt: promptSum,
+          cached: cachedSum,
+          cacheHitPct: promptSum > 0 ? Math.round((cachedSum / promptSum) * 1000) / 10 : 0,
+        };
+      }
+      return analyticsResponseSchema.parse({ lens: query.lens, range: query.range, groupBy: query.groupBy, granularity, series, models, fleet });
     },
   };
 }
@@ -205,12 +231,14 @@ async function lensBuckets(
     return out;
   }
 
-  // tokens — ledger rows, summed across models per node
+  // tokens — ledger rows, summed across models per node (IRI-040 fix: the
+  // nodeId filter was silently ignored here — this reader bypassed push()).
   const rows = await db
     .select({ nodeId: tokenLedger.nodeId, bucketStart: tokenLedger.bucketStart, gen: tokenLedger.generatedTokens, prompt: tokenLedger.promptTokens, cached: tokenLedger.cachedTokens })
     .from(tokenLedger)
     .where(and(eq(tokenLedger.granularity, granularity), gte(tokenLedger.bucketStart, since)));
   for (const r of rows) {
+    if (query.nodeId !== undefined && r.nodeId !== query.nodeId) continue;
     const t = r.bucketStart.getTime();
     const m = out.get(r.nodeId) ?? new Map<number, Bucket>();
     out.set(r.nodeId, m);
@@ -283,15 +311,24 @@ function foldCluster(ids: string[], perNode: Map<string, Map<number, Bucket>>, l
   return points;
 }
 
+/** Tokens lens models (IRI-040): whole-ledger sums per model over the range —
+ *  never a top-N subset (capped at 100 rows, homelab scale) — with the macro
+ *  columns (total = generated + prompt; cacheHitPct = cached / prompt). */
 async function tokenModels(db: Db, since: Date, granularity: "minute" | "hour" | "day") {
   const rows = await db
     .select({ model: tokenLedger.model, gen: sql<number>`sum(${tokenLedger.generatedTokens})::float8`, prompt: sql<number>`sum(${tokenLedger.promptTokens})::float8`, cached: sql<number>`sum(${tokenLedger.cachedTokens})::float8` })
     .from(tokenLedger)
     .where(and(eq(tokenLedger.granularity, granularity), gte(tokenLedger.bucketStart, since)))
-    .groupBy(tokenLedger.model)
-    .orderBy(sql`sum(${tokenLedger.generatedTokens}) desc`)
-    .limit(20);
-  return rows.map((r) => ({ model: r.model, generated: Math.round(r.gen ?? 0), prompt: Math.round(r.prompt ?? 0), cached: Math.round(r.cached ?? 0) }));
+    .groupBy(tokenLedger.model);
+  return rows
+    .map((r) => {
+      const generated = Math.round(r.gen ?? 0);
+      const prompt = Math.round(r.prompt ?? 0);
+      const cached = Math.round(r.cached ?? 0);
+      return { model: r.model, generated, prompt, cached, total: generated + prompt, cacheHitPct: prompt > 0 ? Math.round((cached / prompt) * 1000) / 10 : 0 };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 100);
 }
 
 /** Setup `nodes` JSON → worker node ids. */

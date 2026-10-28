@@ -129,13 +129,13 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   generated/prompt/cached totals over the range from the ledger. Ledger
   columns reflect only counters the backend actually published; an unpublished
   counter is NULL-coverage, never a zero.
-- `GET /api/v1/analytics/tokens-macro?range=` (IRI-040) — macro token views:
-  `fleet`, `clusters[]` (serving setups; standalone nodes as their own row),
-  `nodes[]` (each with its `cluster` name), `models[]`; every row carries
-  `total` (= generated + input), `generated`, `input`, `cached`,
-  `cacheHitPct` (= cached / input × 100, 0 when input is 0). Whole-ledger
-  sums at the lens granularity — never a top-N subset; models capped at 100
-  rows. `503` while degraded.
+- Tokens lens macro fields (IRI-040): the response additionally carries
+  `fleet` — the five macro metrics (`total` = generated + prompt, `generated`,
+  `prompt`, `cached`, `cacheHitPct` = cached / prompt × 100, 0 when prompt is
+  0) summed over the same scope as `series` (filters applied); `models[]`
+  gains `total` and `cacheHitPct` and covers the whole ledger for the range
+  (never a top-N subset, capped at 100 rows, sorted by total). `fleet` is
+  `null` for every other lens.
 
 ## Disk hygiene (M7)
 
