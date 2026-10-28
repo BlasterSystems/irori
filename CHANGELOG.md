@@ -25,6 +25,21 @@ All notable changes to Irori are recorded here. Format follows
   records also export via the OTLP logs pipeline. No prompt/response content
   is ever emitted on spans or log records.
 
+## [Unreleased] — Token usage macro views (IR-118)
+
+### Added
+
+- **Tokens page** (`#/tokens`, nav next to Analytics): three macro views over
+  the app-standard ranges (30m / 1h / 4h / 24h / week / month / 90d) — fleet
+  stat tiles (total, generated, input, cache, cache hit %) with a fleet
+  total-tokens trend, a By cluster / By node table (grouping toggle), and a
+  By model table. Backed by the new
+  `GET /api/v1/analytics/tokens-macro?range=` endpoint, which aggregates the
+  M7 token ledger at read time (whole-ledger sums, never a top-N subset;
+  cluster membership folds head+worker tokens like the analytics lens).
+  Sourced purely from engine lifetime counters via the agent probes — no
+  capture proxy required.
+
 ## [Unreleased] — Usage phase 2: retention, chats, tools, client identity
 
 ### Added
