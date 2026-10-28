@@ -191,7 +191,7 @@ export class CaptureProxy {
       capture?.observeError(`upstream unreachable: ${err.message}`);
       if (!res.headersSent) res.statusCode = 502;
       res.end();
-      this.emit(capture);
+      this.emit(capture, req);
     });
     upstream.on("response", (upstreamRes) => {
       capture?.observeResponseStart(upstreamRes.statusCode ?? 0);
@@ -234,24 +234,30 @@ export class CaptureProxy {
         res.off("drain", pumpDrain);
         if (errorBody !== null && errorBody.length > 0) capture?.observeErrorBody(errorBody);
         res.end();
-        this.emit(capture);
+        this.emit(capture, req);
       });
       upstreamRes.on("error", (err: Error) => {
         capture?.observeError(`upstream stream failed: ${err.message}`);
         if (!clientGone) res.end();
-        this.emit(capture);
+        this.emit(capture, req);
       });
     });
   }
 
   /** Fail-open: a throwing sink or parser never affects traffic. */
-  private emit(capture: Capture | null): void {
+  private emit(capture: Capture | null, req: IncomingMessage): void {
     if (capture === null) return;
     try {
       const event = capture.finish();
       if (event !== null) {
+        // IRI-039/IR-116: the client's W3C trace context rides on the event so
+        // the agent's OTLP exporter can parent the GenAI span from it. The
+        // headers are already forwarded upstream verbatim (not hop-by-hop).
+        const traceparent = firstHeader(req.headers["traceparent"]);
+        const tracestate = firstHeader(req.headers["tracestate"]);
+        const wire = traceparent !== null ? { ...event, traceparent, tracestate } : event;
         try {
-          this.opts.onEvent(event);
+          this.opts.onEvent(wire);
         } catch (err) {
           this.opts.log(`usage sink failed (ignored): ${msg(err)}`);
         }
@@ -260,6 +266,11 @@ export class CaptureProxy {
       this.opts.log(`capture finish failed (ignored): ${msg(err)}`);
     }
   }
+}
+
+function firstHeader(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) value = value[0];
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function msg(err: unknown): string {

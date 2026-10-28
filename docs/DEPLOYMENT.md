@@ -75,6 +75,30 @@ usage capture buffer (`usage-buffer.db`, M8/ADR-0008: `IRORI_USAGE_FLUSH_MS`
 upload interval, default 30 s; `IRORI_USAGE_MAX_ROWS` buffer cap, default
 200 000) — so give it a persistent volume when containerized.
 
+### OpenTelemetry export (IR-116/IR-117, IRI-039)
+
+Both server and agent export traces and logs over OTLP when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set (OTLP/HTTP; standard `OTEL_*` variables
+apply, e.g. `OTEL_EXPORTER_OTLP_HEADERS`); unset, behavior and output are
+exactly as before. `OTEL_SERVICE_NAME` overrides the default
+(`irori-server` / `irori-agent`); `IRORI_LOG_LEVEL` (default `info`) sets the
+pino level for both the stdout JSON lines and the OTLP log stream.
+
+- **Traces:** one GenAI span per captured request from the agent's proxy
+  (`gen_ai.usage.*`, `gen_ai.response.time_to_first_chunk`, finish reasons);
+  client `traceparent`/`tracestate` ride the usage event and are forwarded
+  verbatim, so with a context-propagating client and vLLM's
+  `--otlp-traces-endpoint` the chain client → proxy → engine is one trace.
+  The hub emits low-cardinality SERVER spans per request (`/healthz`
+  skipped, UUID/numeric path segments normalized to `:id`).
+- **Logs:** pino JSON to stdout, plus OTLP log records when the endpoint is
+  set; providers flush on SIGTERM so restarts lose nothing.
+- **No content**: prompts, responses, and bodies never appear in spans or log
+  records (content stays in IR-52's opt-in body store, browsable via Chats).
+- **Backend choice is deliberately open** (Jaeger all-in-one and Grafana
+  Alloy both speak OTLP/HTTP on :4318) — point the env at whichever
+  collector runs on the docker VM.
+
 ### Release artifacts (M7)
 
 A `v*` tag triggers `.github/workflows/release.yml`: multi-arch (amd64+arm64)

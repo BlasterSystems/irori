@@ -43,7 +43,8 @@ Supersedes the four source projects it replaces: `sparkDash` (monitoring core),
   credentials and agent tokens, encrypted at rest.
 - **No ancillary integrations** — ComfyUI, Hermes Agent, Tailscale probing,
   VulnHunter, REA, Glance are dropped.
-- **No inference gateway / request tracing** in v1 (deferred — see §14).
+- **No inference gateway** (routing/fallbacks/auth) in v1; usage capture and
+  env-gated OTLP trace/log **export** shipped instead (deferred — see §14).
 - **No prompt showcase, alerts/notifications, Prometheus export, PWA** in v1.
 - **No wall-meter power measurement** — estimates, clearly labeled.
 - **No generated serve commands** — serving is user-owned recipes and scripts;
@@ -440,6 +441,14 @@ reported in every snapshot; upgrade = re-run install.
 
 ## 14. Deviations & deferred
 
+- **Shipped (IRI-039, IR-116 + IR-117):** env-gated **OpenTelemetry export** —
+  when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the capture proxy's agent emits
+  one GenAI span per captured request (parented by the client's `traceparent`,
+  which the proxy forwards verbatim — with vLLM's native OTLP exporter the
+  client → proxy → engine chain renders as one trace), the hub creates
+  request spans (`/healthz` skipped), and pino log records bridge to OTLP
+  logs. The native pipeline (`llm_requests`, `token_ledger`, ADR-0006
+  rollups) stays the source of truth; Irori stores no spans itself.
 - **Shipped (M8):** usage **capture** only — the deferred "inference gateway"
   is rescoped per the IRI-009 research brief: an in-agent pass-through proxy
   records usage; no routing, fallbacks, or auth (no gateway features).
