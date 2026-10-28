@@ -226,12 +226,12 @@ async function boot(): Promise<void> {
   // once the service exists (same pattern as queueSettle above).
   let pushRemediation: ((event: PushBlockedEvent) => void) | null = null;
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg), (e) => {
-    sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: e.status, exitCode: e.exitCode, durationMs: e.durationMs });
+    sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: e.status, params: e.params, exitCode: e.exitCode, durationMs: e.durationMs });
     queueSettle?.(e);
   }, (e) => {
     // IRI-028: a job starts from many places (download queue, setups, web
     // pages) — the Activity drawer must learn about all of them.
-    sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", exitCode: null, durationMs: null });
+    sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", params: e.params, exitCode: null, durationMs: null });
   }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e));
 
   pushRemediation = createPushRemediation({
