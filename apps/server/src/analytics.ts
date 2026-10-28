@@ -294,7 +294,8 @@ async function tokenModels(db: Db, since: Date, granularity: "minute" | "hour" |
   return rows.map((r) => ({ model: r.model, generated: Math.round(r.gen ?? 0), prompt: Math.round(r.prompt ?? 0), cached: Math.round(r.cached ?? 0) }));
 }
 
-function toWorkerIds(raw: unknown): string[] {
+/** Setup `nodes` JSON → worker node ids. */
+export function toWorkerIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item) => (typeof item === "object" && item !== null && typeof (item as { nodeId?: unknown }).nodeId === "string" ? [(item as { nodeId: string }).nodeId] : []));
 }

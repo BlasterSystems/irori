@@ -25,6 +25,50 @@ export const ANALYTICS_GROUP_BY = ["cluster", "node"] as const;
 export const analyticsGroupBySchema = z.enum(ANALYTICS_GROUP_BY);
 export type AnalyticsGroupBy = (typeof ANALYTICS_GROUP_BY)[number];
 
+/* ── Token macro views (IRI-040 / IR-118) ─────────────────────────────────── */
+
+/**
+ * One macro row: the five owner-specified metrics over a range, aggregated
+ * from the M7 token ledger (never the capture proxy). `total = generated +
+ * input`; `cacheHitPct = cached / input × 100` (0 when input is 0).
+ */
+export const tokenMacroRowSchema = z.object({
+  total: z.number().int().nonnegative(),
+  generated: z.number().int().nonnegative(),
+  input: z.number().int().nonnegative(),
+  cached: z.number().int().nonnegative(),
+  cacheHitPct: z.number().nonnegative(),
+});
+export type TokenMacroRow = z.infer<typeof tokenMacroRowSchema>;
+
+export const tokenMacroClusterSchema = tokenMacroRowSchema.extend({
+  id: z.string().min(1).max(120),
+  name: z.string().min(1).max(300),
+});
+export type TokenMacroCluster = z.infer<typeof tokenMacroClusterSchema>;
+
+export const tokenMacroNodeSchema = tokenMacroRowSchema.extend({
+  id: z.string().min(1).max(120),
+  name: z.string().min(1).max(300),
+  /** Serving cluster the node belongs to; null when in no setup. */
+  cluster: z.string().min(1).max(300).nullable(),
+});
+export type TokenMacroNode = z.infer<typeof tokenMacroNodeSchema>;
+
+export const tokenMacroModelSchema = tokenMacroRowSchema.extend({
+  model: z.string().min(1).max(300),
+});
+export type TokenMacroModel = z.infer<typeof tokenMacroModelSchema>;
+
+export const tokenMacroResponseSchema = z.object({
+  range: analyticsRangeSchema,
+  fleet: tokenMacroRowSchema,
+  clusters: z.array(tokenMacroClusterSchema),
+  nodes: z.array(tokenMacroNodeSchema),
+  models: z.array(tokenMacroModelSchema),
+});
+export type TokenMacroResponse = z.infer<typeof tokenMacroResponseSchema>;
+
 /** Ranges → bucket granularity. Temps reads minute buckets for 7d (min/max
  *  pairs preserve spikes); 30m/1h/4h read minute buckets (tokens needs them
  *  below the hour); 24h/7d use hour, 30d/90d day. */
