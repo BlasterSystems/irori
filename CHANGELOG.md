@@ -4,6 +4,39 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — Push job default, overlay sheets, telemetry labels (IR-121)
+
+### Added
+
+- **Always-available telemetry drawer** (IR-121): a footer Telemetry CTA opens
+  a right-hand dock on every page rendering the same event feed as the
+  Overview card, including the new model labels. The left edge drags to
+  resize (320–720 px, persisted per browser; full-width on mobile) and the
+  panel layers above the page but below every dialog per the chrome z-order.
+- **Job params on the SSE job frame** (IR-121): `job` events now carry the
+  job `params` (older hubs omit the field; clients keep the seed value),
+  so transfers started mid-session are labeled without a page reload — the
+  settle and started events thread them through server-side.
+
+### Changed
+
+- **Overlay layers never stack** (IR-121, IRI-043 option C): job output opens
+  as a side sheet docked beside the placement/download drawer on one shared
+  scrim instead of a second centered modal; with no drawer open the job
+  panel behaves exactly as before. Backdrop presses close the top layer
+  first.
+- **Destructive confirms are drawer-native** (IR-121): Delete-from-NAS
+  (placement drawer) and Cancel-job (job panel) confirm inline in the
+  hosting surface, mirroring the hygiene-drawer typed confirm; the shared
+  confirm dialog remains for page-level queue and catalog rows.
+- **Telemetry feed lines name the model** (IR-121): job progress and
+  lifecycle lines read `DGX-3 · sync-local <model>: …`; download batches
+  report `N models` instead of the first entry's name.
+- **Pushes default to four parallel streams** (IR-121): the agent now
+  defaults `push --jobs 4` when the hub omits the param — every hub path
+  already sent 4 explicitly; API-created pushes no longer fall back to
+  modelctl's single-stream default.
+
 ## [Unreleased] — Cache-user MODEL_PATH resolution + serve UX (IR-120)
 
 ### Fixed
