@@ -60,21 +60,20 @@ const feed = computed(() =>
   feedLines(live.events.value, (id) => live.nodes.get(id)?.name ?? "node", 200, (jobId) => live.jobs.get(jobId)),
 );
 
-// IR-109 behavior: newest-last — keep the latest line in view.
+// IR-109 behavior: newest-last — keep the latest line in view. Watch the
+// computed feed, not events.length: the ring caps at 300, past which the
+// length stops changing while lines keep rotating.
 const logEl = ref<HTMLElement | null>(null);
-watch(
-  () => live.events.value.length,
-  () => {
-    void nextTick(() => {
-      const el = logEl.value;
-      if (el !== null) el.scrollTop = el.scrollHeight;
-    });
-  },
-);
+watch(feed, () => {
+  void nextTick(() => {
+    const el = logEl.value;
+    if (el !== null) el.scrollTop = el.scrollHeight;
+  });
+});
 </script>
 
 <template>
-  <aside class="telemetry-drawer" :style="{ width: `${width}px` }">
+  <aside class="telemetry-drawer" aria-label="Live telemetry" :style="{ width: `${width}px` }">
     <div class="telemetry-resize" aria-hidden="true" @pointerdown="startResize"></div>
     <div class="telemetry-head">
       <h3>Telemetry</h3>
