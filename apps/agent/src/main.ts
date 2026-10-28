@@ -202,7 +202,7 @@ async function run(): Promise<void> {
     },
   );
 
-  const driver = new SetupDriver({
+  const driver: SetupDriver = new SetupDriver({
     stateDir: config.stateDir,
     modelctlPath: config.modelctlPath,
     cacheUser: () => transport.getCacheUser(),

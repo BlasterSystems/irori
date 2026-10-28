@@ -573,7 +573,7 @@ export class SetupDriver {
       return Promise.resolve({ path: null, error: message });
     }
     const { promise, resolve } = Promise.withResolvers<{ path: string | null; error: string | null }>();
-    execFile(argv[0], argv.slice(1), { timeout: 20_000 }, (err, stdout, stderr) => {
+    execFile(argv[0]!, argv.slice(1), { timeout: 20_000 }, (err, stdout, stderr) => {
       if (err) {
         const detail = String(stderr ?? "").split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? err.message;
         this.deps.log?.(`modelctl path --local ${name} failed: ${detail}`);
