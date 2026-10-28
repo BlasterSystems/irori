@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { buildCommand, buildQueueYaml, CommandBuildError } from "../src/modelctl.js";
+import { asCacheUser, buildCommand, buildQueueYaml, CommandBuildError } from "../src/modelctl.js";
 import { JobManager } from "../src/jobs.js";
 import { parseCatalog } from "@irori/core";
 import { parseManifestFields, readStore, scanStore } from "../src/catalog-read.js";
@@ -40,6 +40,35 @@ describe("buildQueueYaml", () => {
   it("rejects empty lists and missing sources", () => {
     expect(() => buildQueueYaml([])).toThrow(CommandBuildError);
     expect(() => buildQueueYaml([{ name: "x" } as never])).toThrow(CommandBuildError);
+  });
+});
+
+describe("asCacheUser", () => {
+  const cacheCtx = {
+    cacheUser: "piresbruno",
+    agentUser: "root",
+    resolveLocalUser: () => ({ home: "/home/piresbruno", binary: "/home/piresbruno/.local/bin/modelctl" }),
+  };
+
+  it("wraps MODEL_PATH resolution in runuser with the scrubbed env (IR-120)", () => {
+    const { argv, raw } = asCacheUser(["path", "--local", "GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit"], cacheCtx, "model-path");
+    expect(raw).toBe(true);
+    expect(argv.slice(0, 7)).toEqual(["runuser", "-u", "piresbruno", "--", "env", "-u", "XDG_STATE_HOME"]);
+    expect(argv).toContain("HOME=/home/piresbruno");
+    expect(argv).toContain("PATH=/home/piresbruno/.local/bin:/usr/local/bin:/usr/bin:/bin");
+    expect(argv.slice(-4)).toEqual(["/home/piresbruno/.local/bin/modelctl", "path", "--local", "GLM-5.3-Flash-EXL3-4bpw-TensorFold-Ablit"]);
+  });
+
+  it("leaves the argv unwrapped for the agent's own user", () => {
+    const { argv, raw } = asCacheUser(["path", "--local", "glm"], { ...cacheCtx, cacheUser: "root" }, "model-path");
+    expect(raw).toBeUndefined();
+    expect(argv).toEqual(["path", "--local", "glm"]);
+  });
+
+  it("fails the build with an actionable error when the cache user has no modelctl (IR-120)", () => {
+    expect(() => asCacheUser(["path", "--local", "glm"], { ...cacheCtx, resolveLocalUser: () => null }, "model-path")).toThrow(
+      /no modelctl for cache user "piresbruno"/,
+    );
   });
 });
 

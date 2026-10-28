@@ -4,6 +4,35 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — Cache-user MODEL_PATH resolution + serve UX (IR-120)
+
+### Fixed
+
+- **MODEL_PATH resolution now runs as the node's cache user** (IR-120,
+  IRI-042): the setup driver's `modelctl path --local` ran as the agent user
+  (root) while every transfer dials the cache user's per-user modelctl — on
+  nodes with `cacheUser` set the staged model lives in that user's HF cache,
+  so `MODEL_PATH` setups failed to start with
+  `MODEL_PATH resolution failed …` even though the model was staged (verified
+  on DGX-1: root's resolution exited nonzero while the cache user's resolved
+  the snapshot). Resolution now reuses the ADR-0011 runuser wrap (scrubbed
+  env, per-user binary); a missing per-user modelctl refuses the start with
+  that actionable reason instead of a bare banner, and resolution failures
+  carry modelctl's stderr detail. The cache user reaches the driver via a
+  getter, so runtime edits apply without an agent restart.
+
+### Changed
+
+- **Setup wizard scroll and model list** (IR-120, IRI-042): the wizard header
+  and footer are sticky and the step body scrolls instead of the whole panel;
+  the model list is scrollable (one 25-entry server page instead of a hard
+  8-item truncation), shows each entry's repository under the name, and
+  reports the total match count when the search yields more than one page.
+- **Disk-hygiene clean CTA is always visible** (IR-120, IRI-042): the typed
+  node-name confirm and `Clean N categories` button pin to the drawer bottom
+  (with the `N selected · bytes` summary) instead of sitting below the fold
+  behind the category rows; item counts pluralize.
+
 ## [Unreleased] — Setup edit repair (IR-119)
 
 ### Fixed

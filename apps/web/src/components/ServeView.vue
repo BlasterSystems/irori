@@ -378,14 +378,19 @@ function prevStep(): void {
 
 /* Step 2 — model search over the NAS catalog (chained HF handled in step 4). */
 
-const modelChoices = ref<Array<{ name: string; runtime: string; bytes: number }>>([]);
+const modelChoices = ref<Array<{ name: string; runtime: string; repository: string; bytes: number }>>([]);
 const modelSearch = ref("");
+/** Total catalog matches for the current search — the list renders one server page. */
+const modelChoicesTotal = ref(0);
 
 async function loadModelChoices(q: string): Promise<void> {
   try {
     const page = await fetchModelsPage(1, q, "name");
-    modelChoices.value = page.models.slice(0, 8).map((m) => ({ name: m.name, runtime: m.runtime, bytes: m.bytes }));
+    // The server page (25) is the cap; the list scrolls instead of truncating (IRI-042).
+    modelChoicesTotal.value = page.total;
+    modelChoices.value = page.models.map((m) => ({ name: m.name, runtime: m.runtime, repository: m.repository, bytes: m.bytes }));
   } catch {
+    modelChoicesTotal.value = 0;
     modelChoices.value = [];
   }
 }
@@ -729,7 +734,7 @@ function fmtGiB(bytes: number | null): string {
     <!-- Setup wizard: type → model → scripts → placement → review -->
     <div v-if="wizardOpen" class="drawer-scrim" v-scrim-close="closeWizard">
       <div class="wizard" role="dialog" aria-modal="true" aria-label="New setup wizard">
-        <div class="card__head row--between" style="display: flex">
+        <div class="card__head row--between wizard__head" style="display: flex">
           <div class="row"><h3>{{ wizard.editId !== null ? "Edit setup" : "New setup" }}</h3><span class="mono faint">nothing runs until you launch</span></div>
           <button class="iconbtn" aria-label="Close wizard" @click="closeWizard">✕</button>
         </div>
@@ -763,13 +768,17 @@ function fmtGiB(bytes: number | null): string {
         <section v-show="step === 2" class="step card__body">
           <div class="stack">
             <input v-model="modelSearch" class="input mono" type="search" placeholder="Search the NAS catalog…" @input="onModelSearch" />
-            <div class="stack" style="gap: 8px">
+            <div class="stack" style="gap: 8px; max-height: 320px; overflow-y: auto">
               <label v-for="m in modelChoices" :key="m.name" class="pick" :class="{ 'is-on': wizard.model === m.name }">
                 <input type="radio" name="wmodel" :checked="wizard.model === m.name" @change="onPickModel(m.name)" />
-                <strong>{{ m.name }}</strong> <span class="chip">{{ m.runtime }}</span> <span class="chip">{{ fmtGiB(m.bytes) }}</span>
+                <span style="flex: 1; min-width: 0;">
+                  <strong>{{ m.name }}</strong> <span class="chip">{{ m.runtime }}</span> <span class="chip">{{ fmtGiB(m.bytes) }}</span>
+                  <span class="stat__sub mono" style="display: block; overflow-wrap: anywhere;">{{ m.repository }}</span>
+                </span>
               </label>
               <p v-if="modelChoices.length === 0" class="faint">no catalog matches — the exact HF repo id can be typed in Review for a chained download</p>
             </div>
+            <p v-if="modelChoicesTotal > modelChoices.length" class="faint">{{ modelChoices.length }} of {{ modelChoicesTotal }} matches shown — refine the search to narrow</p>
             <div class="field"><label>Model (catalog name or HF repo id)</label><input v-model="wizard.model" class="input mono" /></div>
             <div class="field"><label>Serving port (script-defined; probed for health)</label><input v-model.number="wizardPort" class="input" type="number" min="1" max="65535" /></div>
           </div>
@@ -848,7 +857,7 @@ function fmtGiB(bytes: number | null): string {
           </dl>
         </section>
 
-        <div class="card__head row--between" style="display: flex; border-top: 1px solid var(--border); border-bottom: 0">
+        <div class="card__head row--between wizard__foot" style="display: flex; border-top: 1px solid var(--border); border-bottom: 0">
           <span class="stat__sub">step {{ step }} of 5</span>
           <div class="row">
             <button v-if="step > 1" class="btn btn--secondary btn--sm" @click="prevStep">Back</button>
@@ -904,6 +913,19 @@ function fmtGiB(bytes: number | null): string {
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding-bottom: 4px;
+}
+/* IRI-042: the wizard chrome stays pinned while the step body scrolls. */
+.wizard__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+}
+.wizard__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--surface);
 }
 .steps {
   display: flex;
