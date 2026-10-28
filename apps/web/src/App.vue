@@ -10,6 +10,7 @@ import OverviewView from "./components/OverviewView.vue";
 import UsageView from "./components/UsageView.vue";
 import ChatsView from "./components/ChatsView.vue";
 import HubSettingsModal from "./components/HubSettingsModal.vue";
+import TelemetryDrawer from "./components/TelemetryDrawer.vue";
 import { parseHash, chatsHash, usageHash, type Route } from "./router";
 import { loadServerVersion, serverCadenceMs, serverTag, serverVersion } from "./version";
 import { loadCostSettings } from "./cost-settings";
@@ -49,6 +50,9 @@ const detailNodeId = computed(() =>
 
 /** IRI-019: footer gear → hub-wide settings (global HF token). */
 const hubSettingsOpen = ref(false);
+
+/** IRI-043: footer CTA → always-available live telemetry drawer. */
+const telemetryOpen = ref(false);
 
 const isDark = ref(
   typeof document !== "undefined" &&
@@ -119,9 +123,10 @@ onUnmounted(() => {
   <footer class="foot">
     <div class="container foot__in" style="justify-content: space-between">
       <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template><template v-if="intervalText"> · {{ intervalText }}</template><template v-if="wattsText"> · {{ wattsText }}</template></span>
-      <span></span>
+      <button class="btn btn--ghost btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
     </div>
   </footer>
 
   <HubSettingsModal v-if="hubSettingsOpen" @close="hubSettingsOpen = false" />
+  <TelemetryDrawer v-if="telemetryOpen" @close="telemetryOpen = false" />
 </template>

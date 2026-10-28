@@ -172,7 +172,7 @@ describe("feedLines", () => {
   it("maps every event class into one feed", () => {
     const events: SseEvent[] = [
       nodeOnline,
-      { type: "job", serverTimeMs: 2, nodeId: "a", jobId: "j", kind: "push", status: "succeeded", exitCode: 0, durationMs: 372_000 },
+      { type: "job", serverTimeMs: 2, nodeId: "a", jobId: "j", kind: "push", status: "succeeded", exitCode: 0, durationMs: 372_000, params: {} },
       { type: "thermal", serverTimeMs: 3, nodeId: "a", gpuIndex: 0, active: [] },
       { type: "thermal", serverTimeMs: 4, nodeId: "a", gpuIndex: 0, active: ["HW Slowdown"] },
       { type: "bench", serverTimeMs: 5, nodeId: "a", runId: "r", bench: "decode", status: "completed", progress: null },
@@ -228,6 +228,28 @@ describe("feedLines", () => {
     ];
     const lines = feedLines(events, nodeName);
     expect(lines.map((l) => l.text)).toEqual(["spark1 · progress line"]);
+  });
+
+  it("labels job lines with the model from job params (IR-121)", () => {
+    const events: SseEvent[] = [
+      { type: "job", serverTimeMs: 2, nodeId: "a", jobId: "j", kind: "sync-local", status: "running", exitCode: null, durationMs: null, params: { name: "Ornith-1.5-122B-EXL3-EAQv1-4-bpw" } },
+      { type: "job-progress", serverTimeMs: 3, nodeId: "a", jobId: "j", seq: 1, line: " 38.09G 58% 113.35MB/s 0:03:57" },
+    ];
+    const lines = feedLines(events, nodeName, 30, (id) =>
+      id === "j" ? { nodeId: "a", kind: "sync-local", params: { name: "Ornith-1.5-122B-EXL3-EAQv1-4-bpw" } } : undefined,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      "spark1 · sync-local Ornith-1.5-122B-EXL3-EAQv1-4-bpw started",
+      "spark1 · sync-local Ornith-1.5-122B-EXL3-EAQv1-4-bpw:  38.09G 58% 113.35MB/s 0:03:57",
+    ]);
+  });
+
+  it("labels download batches by entry count, unnamed entries included (IR-121)", () => {
+    const events: SseEvent[] = [
+      { type: "job", serverTimeMs: 2, nodeId: "a", jobId: "j", kind: "download-queue", status: "running", exitCode: null, durationMs: null, params: { downloads: [{ source: "org/one" }, { source: "org/two", name: "two" }] } },
+    ];
+    const lines = feedLines(events, nodeName);
+    expect(lines.map((l) => l.text)).toEqual(["spark1 · download-queue 2 models started"]);
   });
 });
 

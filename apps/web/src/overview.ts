@@ -330,14 +330,32 @@ function pct(n: number | null | undefined): string {
   return typeof n === "number" ? ` · ${Math.round(n)}%` : "";
 }
 
+/** IR-121: the human suffix for a job — the model name when params carry one,
+ *  the download-queue batch size otherwise; "" when the job is unlabeled. */
+function jobLabel(params: Record<string, unknown> | undefined): string {
+  if (params === undefined) return "";
+  const name = params.name;
+  if (typeof name === "string" && name.length > 0) return ` ${name}`;
+  const downloads = params.downloads;
+  if (Array.isArray(downloads) && downloads.length > 0) {
+    if (downloads.length === 1) {
+      const d = downloads[0];
+      const n = typeof d === "object" && d !== null && typeof (d as { name?: unknown }).name === "string" ? (d as { name: string }).name : null;
+      return n !== null && n.length > 0 ? ` ${n}` : "";
+    }
+    return ` ${downloads.length} models`;
+  }
+  return "";
+}
+
 /** Maps feed frames to display lines, newest last, capped. One feed for all
  *  event classes (owner decision, mockup round 5). */
 export function feedLines(
   events: SseEvent[],
   nodeName: (id: string) => string,
   cap = 30,
-  /** IR-102: job context (node id + kind) for job-progress lines. */
-  jobById?: (jobId: string) => { nodeId: string; kind: string } | undefined,
+  /** IR-102: job context (node id + kind + params) for job-progress labels. */
+  jobById?: (jobId: string) => { nodeId: string; kind: string; params?: Record<string, unknown> } | undefined,
 ): FeedLine[] {
   const lines: FeedLine[] = [];
   for (const event of events) {
@@ -346,7 +364,7 @@ export function feedLines(
       case "job": {
         lines.push({
           t: event.serverTimeMs,
-          text: `${node} · ${event.kind} ${event.status === "running" ? "started" : event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}`,
+          text: `${node} · ${event.kind}${jobLabel(event.params)} ${event.status === "running" ? "started" : event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}`,
         });
         break;
       }
@@ -354,7 +372,7 @@ export function feedLines(
         // IR-102: the job's live output streams into the feed; the context
         // gives node and kind, falling back to the frame's node id.
         const job = jobById?.(event.jobId);
-        const label = job !== undefined ? `${nodeName(job.nodeId)} · ${job.kind}: ` : `${node} · `;
+        const label = job !== undefined ? `${nodeName(job.nodeId)} · ${job.kind}${jobLabel(job.params)}: ` : `${node} · `;
         lines.push({ t: event.serverTimeMs, text: `${label}${event.line}` });
         break;
       }

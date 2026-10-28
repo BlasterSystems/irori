@@ -420,6 +420,9 @@ interface ConfirmAction {
   body: string;
   danger: string;
   run: () => Promise<void> | void;
+  /** IRI-043: "placement"/"job" render the confirm INSIDE that surface
+   *  (no stacked modal); absent = page-level confirm-card. */
+  host?: "placement" | "job";
 }
 const confirmState = ref<ConfirmAction | null>(null);
 const confirmBusy = ref(false);
@@ -445,6 +448,18 @@ async function runConfirm(): Promise<void> {
 function dismissConfirm(): void {
   confirmBusy.value = false;
   confirmState.value = null;
+}
+
+/** IRI-043 (option C): the primary drawer and the job sheet share one scrim —
+ *  the top-most layer closes first on a backdrop press. */
+const primaryOpen = computed(() => selected.value !== null || downloadOpen.value);
+function closeTopMost(): void {
+  if (job.value !== null && primaryOpen.value) {
+    closeJob();
+    return;
+  }
+  if (selected.value !== null) closeDetail();
+  if (downloadOpen.value) downloadOpen.value = false;
 }
 
 function runRowMenu(act: string): void {
@@ -516,6 +531,7 @@ function confirmDrawerDelete(nodeId: string): void {
     title: `Delete ${name} from the NAS?`,
     body: "Removes the model's objects, references and staging from the NAS store via modelctl. NAS is never written outside modelctl.",
     danger: "Delete from NAS",
+    host: "placement", // IRI-043: confirms inside the detail drawer
     run: () => runJob(nodeId, "nas-delete-apply", { name }),
   });
 }
@@ -532,6 +548,7 @@ function confirmDrawerCancel(): void {
       ? "Stops the running modelctl batch — every entry sharing this job is marked canceled (resumable staging is kept)."
       : "Stops the running job; anything it already wrote stays as-is.",
     danger: "Cancel job",
+    host: "job", // IRI-043: confirms inside the sheet, never a stacked modal
     run: async () => {
       try {
         await cancelJob(jobId);
@@ -840,9 +857,11 @@ onBeforeUnmount(() => {
       </table>
     </section>
 
-    <!-- Model detail drawer: placement + job actions -->
-    <div v-if="selected !== null" class="drawer-scrim" @click.self="closeDetail">
-      <section class="card drawer" aria-label="Model detail">
+    <!-- IRI-043 (option C): the primary drawer and the job sheet share ONE
+         scrim — the sheet docks beside the drawer, nothing stacks. -->
+    <div v-if="primaryOpen || job !== null" class="drawer-scrim" @click.self="closeTopMost">
+      <div class="overlay-row">
+        <section v-if="selected !== null" class="card drawer" aria-label="Model detail">
         <div class="card__head">
           <h3 class="mono">{{ selected }}</h3>
           <button class="btn btn--secondary btn--sm" @click="closeDetail">Close</button>
@@ -888,8 +907,19 @@ onBeforeUnmount(() => {
               </tr>
             </tbody>
           </table>
+          <div v-if="confirmState !== null && confirmState.host === 'placement'" class="inline-confirm" role="alertdialog" :aria-label="confirmState.title">
+            <p class="stat__sub" style="margin: 0 0 4px"><strong>{{ confirmState.title }}</strong></p>
+            <p class="stat__sub" style="margin: 0 0 8px">{{ confirmState.body }}</p>
+            <div class="row row--between">
+              <span class="stat__sub faint">nothing destructive runs until you confirm</span>
+              <span class="row">
+                <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
+                <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+              </span>
+            </div>
+          </div>
           <p class="stat__sub faint">
-            Sync/push jobs stream output below · deletes apply immediately after their confirmation
+            Sync/push jobs stream in the side panel · deletes confirm inline — no second modal
           </p>
           <details class="hygiene">
             <summary class="stat__sub">Store maintenance…</summary>
@@ -907,11 +937,10 @@ onBeforeUnmount(() => {
           </details>
         </template>
       </section>
-    </div>
 
-    <!-- Job output drawer -->
-    <div v-if="job !== null" class="drawer-scrim" @click.self="closeJob">
-      <section class="card drawer" aria-label="Job output">
+      <!-- Job output: docks as a sheet beside an open drawer (IRI-043 option C);
+           standalone centered drawer when no primary is open. -->
+      <aside v-if="job !== null" class="card" :class="primaryOpen ? 'sheet' : 'drawer'" aria-label="Job output">
         <div class="card__head">
           <h3>
             {{ job.job.kind }}
@@ -932,17 +961,26 @@ onBeforeUnmount(() => {
           <p class="stat__sub faint">summary from the download queue (IR 71 progress fields) · raw output stays in the job record</p>
         </template>
         <pre v-else class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
-        <div v-if="job.job.status === 'running' || job.job.status === 'queued'" class="row row--between">
+        <div v-if="confirmState !== null && confirmState.host === 'job'" class="inline-confirm" role="alertdialog" :aria-label="confirmState.title">
+          <p class="stat__sub" style="margin: 0 0 4px"><strong>{{ confirmState.title }}</strong></p>
+          <p class="stat__sub" style="margin: 0 0 8px">{{ confirmState.body }}</p>
+          <div class="row row--between">
+            <span class="stat__sub faint">nothing destructive runs until you confirm</span>
+            <span class="row">
+              <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
+              <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+            </span>
+          </div>
+        </div>
+        <div v-if="job.job.status === 'running' || job.job.status === 'queued'" class="row row--between sheet__foot">
           <span class="faint">streaming…</span>
           <button class="btn btn--danger btn--sm" @click="confirmDrawerCancel">Cancel job</button>
         </div>
-      </section>
-    </div>
+      </aside>
 
     <!-- Download from HF modal: ALWAYS queues via POST /downloads; server picks the NAS-preferred store node.
-         IRI-016: per-row quantization/mtp + expand-quants; dl-drawer fixes the DS spacing rhythm (F2/F3/F5). -->
-    <div v-if="downloadOpen" class="drawer-scrim" @click.self="downloadOpen = false">
-      <section class="card drawer dl-drawer" aria-label="Download from Hugging Face">
+         IRI-016: per-row quantization/mtp + expand-quants. IRI-043: lives on the shared scrim; job output docks beside it. -->
+    <section v-if="downloadOpen" class="card drawer dl-drawer" aria-label="Download from Hugging Face">
         <div class="card__head">
           <h3>Download from HF to NAS</h3>
           <button class="btn btn--secondary btn--sm" @click="downloadOpen = false">Close</button>
@@ -1059,6 +1097,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
+      </div>
     </div>
 
     <!-- IRI-020: per-row actions menu (catalog + queue); closes on any outside click -->
@@ -1066,8 +1105,9 @@ onBeforeUnmount(() => {
       <button v-for="it in rowMenuItems" :key="it.act" class="btn btn--ghost btn--sm menu-item" @click="runRowMenu(it.act)">{{ it.label }}</button>
     </div>
 
-    <!-- IRI-020: shared confirmation for destructive actions (queue + catalog) -->
-    <div v-if="confirmState !== null" class="drawer-scrim" @click.self="dismissConfirm">
+    <!-- IRI-020: shared confirmation for destructive actions with no drawer
+         open (queue + catalog rows); drawer-hosted confirms render inline. -->
+    <div v-if="confirmState !== null && confirmState.host === undefined" class="drawer-scrim" @click.self="dismissConfirm">
       <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="confirmState.title">
         <div class="card__head">
           <h3>{{ confirmState.title }}</h3>
@@ -1243,6 +1283,69 @@ onBeforeUnmount(() => {
 @media (min-width: 721px) {
   .drawer-scrim {
     align-items: center;
+  }
+}
+
+/* IRI-043 (option C): one scrim hosts the primary drawer and the job sheet —
+   the sheet docks right (flex order last) instead of stacking a second modal. */
+.overlay-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  padding: 0 16px;
+  pointer-events: none;
+}
+.overlay-row > * {
+  pointer-events: auto;
+}
+.overlay-row > .drawer {
+  flex: 0 1 760px;
+}
+.overlay-row .sheet {
+  order: 2;
+  flex: 0 1 430px;
+  min-width: 300px;
+  max-height: 86vh;
+  overflow: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
+.sheet .joblog {
+  flex: 1 1 auto;
+}
+.sheet__foot {
+  padding-top: 8px;
+}
+.inline-confirm {
+  border: 1px solid var(--thread);
+  background: var(--thread-wash);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+@media (max-width: 1100px) {
+  .overlay-row > .drawer {
+    flex-basis: 540px;
+  }
+  .overlay-row .sheet {
+    flex-basis: 380px;
+    min-width: 260px;
+  }
+}
+@media (max-width: 720px) {
+  .overlay-row {
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 10px;
+  }
+  .overlay-row > .drawer,
+  .overlay-row .sheet {
+    flex: none;
+    width: 100%;
+    max-height: 44vh;
   }
 }
 </style>
