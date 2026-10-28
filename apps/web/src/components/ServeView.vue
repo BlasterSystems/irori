@@ -14,6 +14,7 @@ import {
   fmtEta,
   openSetupLog,
   patchSetup,
+  sanitizeWorkerIds,
   setupChipCls,
   setupNodeLines,
   setupSubline,
@@ -281,6 +282,15 @@ const wizard = ref<WizardState>({
   retain: false,
 });
 
+/**
+ * Sanitize worker ids against the loaded node inventory (IRI-041). An empty
+ * inventory (registry unavailable) must not wipe workers — pass through and
+ * let the server validate with a precise error instead.
+ */
+function cleanWorkerIds(workerIds: string[], headNodeId: string): string[] {
+  return nodes.value.length > 0 ? sanitizeWorkerIds(workerIds, headNodeId, nodes.value) : workerIds;
+}
+
 function openWizard(from?: SetupInfo): void {
   wizardOpen.value = true;
   step.value = 1;
@@ -295,7 +305,7 @@ function openWizard(from?: SetupInfo): void {
   w.name = from?.name ?? "";
   w.kind = from?.kind ?? "single";
   w.headNodeId = from?.headNodeId ?? firstHeadId();
-  w.workerIds = from ? from.nodes.map((n) => n.nodeId) : [];
+  w.workerIds = from ? cleanWorkerIds(from.nodes.map((n) => n.nodeId), w.headNodeId) : [];
   w.model = from?.model ?? "";
   w.scriptStart = from?.scriptStart ?? "";
   w.scriptStop = from?.scriptStop ?? "";
@@ -455,7 +465,7 @@ function wizardInput(): SetupCreateInput {
     model: w.model,
     port: wizardPort.value,
     headNodeId: w.headNodeId,
-    nodes: w.kind === "cluster" ? w.workerIds.map((nodeId) => ({ nodeId, role: "worker" as const })) : [],
+    nodes: w.kind === "cluster" ? cleanWorkerIds(w.workerIds, w.headNodeId).map((nodeId) => ({ nodeId, role: "worker" as const })) : [],
     scriptStart: w.scriptStart,
     scriptStop: w.scriptStop,
     env: {

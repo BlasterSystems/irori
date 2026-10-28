@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   fmtEta,
   fmtRate,
+  sanitizeWorkerIds,
   setupChipCls,
   setupNodeLines,
   setupSubline,
@@ -53,6 +54,35 @@ function setup(overrides: Partial<SetupInfo>): SetupInfo {
     ...overrides,
   } as SetupInfo;
 }
+
+describe("sanitizeWorkerIds", () => {
+  const HEAD = "11111111-1111-4111-8111-111111111111";
+  const DGX2 = "22222222-2222-4222-8222-222222222222";
+  const DGX3 = "33333333-3333-4333-8333-333333333333";
+  const NAS = "44444444-4444-4444-8444-444444444444";
+  const inventory: NodeInfo[] = [
+    node(HEAD, "DGX-1", true),
+    node(DGX2, "DGX-2", true),
+    node(DGX3, "DGX-3", true),
+    { ...node(NAS, "NAS", true), kind: "nas" as const },
+  ];
+
+  it("dedupes keeping the first occurrence and preserves order", () => {
+    expect(sanitizeWorkerIds([DGX3, DGX2, DGX3], HEAD, inventory)).toEqual([DGX3, DGX2]);
+  });
+
+  it("drops the head itself, NAS-kind nodes and unknown ids (IRI-041 corrupt row)", () => {
+    const unknown = "55555555-5555-4555-8555-555555555555";
+    expect(sanitizeWorkerIds([HEAD, NAS, unknown, DGX2], HEAD, inventory)).toEqual([DGX2]);
+  });
+
+  it("keeps gpu-host nodes — only nas is rejected server-side", () => {
+    const gpu = { ...node("66666666-6666-4666-8666-666666666666", "GPU-1", true), kind: "gpu-host" as const };
+    expect(sanitizeWorkerIds(["66666666-6666-4666-8666-666666666666"], HEAD, [...inventory, gpu])).toEqual([
+      "66666666-6666-4666-8666-666666666666",
+    ]);
+  });
+});
 
 describe("stage lines", () => {
   it("formats the mockup's progress triple", () => {
