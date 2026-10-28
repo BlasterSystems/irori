@@ -180,7 +180,9 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
           nodeId: event.nodeId,
           kind: event.kind,
           status: event.status,
-          params: existing?.params ?? {},
+          // IR-121: the frame carries params on new hubs — prefer it; keep the
+          // seed's params when the frame omits them (older hub / empty).
+          params: event.params && Object.keys(event.params).length > 0 ? event.params : (existing?.params ?? {}),
           exitCode: event.exitCode,
           durationMs: event.durationMs,
           createdAt: existing?.createdAt ?? at,
