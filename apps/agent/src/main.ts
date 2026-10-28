@@ -205,6 +205,9 @@ async function run(): Promise<void> {
   const driver = new SetupDriver({
     stateDir: config.stateDir,
     modelctlPath: config.modelctlPath,
+    cacheUser: () => transport.getCacheUser(),
+    agentUser,
+    resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
     events: {
       onEvent: (setupId, event) => transport.sendAgentMsg({ type: "setup-event", setupId, ...event }),
       onLog: (setupId, seq, line, ts) => transport.sendAgentMsg({ type: "setup-log", setupId, seq, line, ts }),

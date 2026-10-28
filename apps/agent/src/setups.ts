@@ -4,6 +4,7 @@ import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, st
 import { createWriteStream, type WriteStream } from "node:fs";
 import { join } from "node:path";
 import type { BodyRetention } from "@irori/core";
+import { asCacheUser, type CacheUserCtx } from "./modelctl.js";
 
 /**
  * Setup supervision on the agent (M5, SPEC §7 + ADR-0003): one start/stop
@@ -35,6 +36,13 @@ export interface SetupDriverDeps {
   stateDir: string;
   /** modelctl binary for `path --local` (MODEL_PATH resolution). */
   modelctlPath: string;
+  /** IR-120: node cache owner for MODEL_PATH resolution — a getter keeps the
+   *  value fresh across config-update frames (null/absent = the agent user). */
+  cacheUser?: () => string | null;
+  /** The agent's own user (root); a cacheUser equal to it skips the wrap. */
+  agentUser?: string;
+  /** Resolves a cache owner's home + modelctl binary; null = not installed. */
+  resolveLocalUser?: (user: string) => { home: string; binary: string } | null;
   events: SetupDriverEvents;
   /** M8 capture proxy hooks (ADR-0008 §7); absent = capture unsupported. */
   capture?: SetupCaptureHooks;
@@ -256,10 +264,13 @@ export class SetupDriver {
     const finalEnv = { ...env };
     if (modelPathName !== null) {
       const resolved = await this.resolveModelPath(modelPathName);
-      if (resolved === null) {
-        return { ok: false, error: `MODEL_PATH resolution failed for ${modelPathName} (modelctl path --local)` };
+      if (resolved.path === null) {
+        return {
+          ok: false,
+          error: `MODEL_PATH resolution failed for ${modelPathName} (modelctl path --local)${resolved.error === null ? "" : `: ${resolved.error}`}`,
+        };
       }
-      finalEnv.MODEL_PATH = resolved;
+      finalEnv.MODEL_PATH = resolved.path;
     }
 
     // Capture mode: bind the proxy BEFORE spawn; the engine gets a fresh
@@ -543,17 +554,34 @@ export class SetupDriver {
     return handle;
   }
 
-  /** `modelctl path --local NAME` → first stdout line. */
-  private resolveModelPath(name: string): Promise<string | null> {
-    const { promise, resolve } = Promise.withResolvers<string | null>();
-    execFile(this.deps.modelctlPath, ["path", "--local", name], { timeout: 20_000 }, (err, stdout) => {
+  /** `modelctl path --local NAME` → first stdout line, resolved as the node's
+   *  cache user when one is set (IR-120): the modelctl registration lives in
+   *  that user's home, so a root invocation would silently miss it. */
+  private resolveModelPath(name: string): Promise<{ path: string | null; error: string | null }> {
+    const ctx: CacheUserCtx = {
+      cacheUser: this.deps.cacheUser?.() ?? null,
+      agentUser: this.deps.agentUser,
+      resolveLocalUser: this.deps.resolveLocalUser,
+    };
+    let argv: string[];
+    try {
+      const built = asCacheUser(["path", "--local", name], ctx, "model-path");
+      argv = built.raw === true ? built.argv : [this.deps.modelctlPath, ...built.argv];
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.deps.log?.(`modelctl path --local ${name} failed: ${message}`);
+      return Promise.resolve({ path: null, error: message });
+    }
+    const { promise, resolve } = Promise.withResolvers<{ path: string | null; error: string | null }>();
+    execFile(argv[0], argv.slice(1), { timeout: 20_000 }, (err, stdout, stderr) => {
       if (err) {
-        this.deps.log?.(`modelctl path --local ${name} failed: ${err.message}`);
-        resolve(null);
+        const detail = String(stderr ?? "").split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? err.message;
+        this.deps.log?.(`modelctl path --local ${name} failed: ${detail}`);
+        resolve({ path: null, error: detail });
         return;
       }
       const line = stdout.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
-      resolve(line ?? null);
+      resolve({ path: line ?? null, error: line === undefined ? "no output" : null });
     });
     return promise;
   }

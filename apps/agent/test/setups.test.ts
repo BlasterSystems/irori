@@ -212,4 +212,23 @@ describe("SetupDriver", () => {
     expect(refusal.ok).toBe(false);
     expect(refusal.error).toContain("MODEL_PATH resolution failed");
   });
+
+  it("refuses MODEL_PATH starts with the cache-user reason when the wrap cannot build (IR-120)", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", "sleep 30");
+    const stop = script(dir, "stop.sh", "true");
+    const driver = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent-modelctl",
+      cacheUser: () => "operator",
+      agentUser: "root",
+      resolveLocalUser: () => null,
+      events: { onEvent: () => {}, onLog: () => {} },
+    });
+    driver.init();
+    const refusal = await driver.start(ID, RUN, start, stop, {}, "GLM-5.3-Flash-EXL3");
+    expect(refusal.ok).toBe(false);
+    expect(refusal.error).toContain("MODEL_PATH resolution failed");
+    expect(refusal.error).toContain(`no modelctl for cache user "operator"`);
+  });
 });

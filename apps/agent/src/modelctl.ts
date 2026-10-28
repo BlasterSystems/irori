@@ -190,6 +190,10 @@ function runuserScript(user: string, resolved: { home: string; binary: string },
   ];
 }
 
+/** The cache-user subset of ModelctlCtx the runuser wrap needs — IR-120 lets
+ *  ad-hoc call sites (MODEL_PATH resolution) reuse the same shape. */
+export type CacheUserCtx = Pick<ModelctlCtx, "cacheUser" | "agentUser" | "resolveLocalUser">;
+
 /**
  * IR-101: transfers must land in the node's cache owner's HF cache — the
  * registration state lives in the invoking user's home, so running as root
@@ -197,9 +201,10 @@ function runuserScript(user: string, resolved: { home: string; binary: string },
  * a cache user, wrap modelctl in runuser with a scrubbed env (the IRI-028
  * delete-local pattern). Home/binary resolve agent-side; the hub never sends
  * paths. A missing user modelctl fails the build with an actionable error —
- * it must never silently fall back to root's cache.
+ * it must never silently fall back to root's cache. IR-120 extends this to
+ * the setup driver's MODEL_PATH resolution.
  */
-function asCacheUser(argv: string[], ctx: ModelctlCtx, kind: string): { argv: string[]; raw?: boolean } {
+export function asCacheUser(argv: string[], ctx: CacheUserCtx, kind: string): { argv: string[]; raw?: boolean } {
   const user = ctx.cacheUser?.trim();
   if (!user || user === (ctx.agentUser ?? "root")) return { argv };
   const resolved = ctx.resolveLocalUser?.(user) ?? null;
