@@ -246,7 +246,7 @@ function catLabel(category: string): string {
                   <span v-if="!row.safe" class="chip" title="needs care — opt-in">◇ care</span>
                 </span>
                 <span class="row" style="gap: 8px">
-                  <span class="stat__sub">{{ row.itemCount }} items</span>
+                  <span class="stat__sub">{{ row.itemCount }} {{ row.itemCount === 1 ? "item" : "items" }}</span>
                   <span class="mono">{{ fmtBytes(row.reclaimableBytes) }}</span>
                 </span>
               </span>
@@ -266,12 +266,15 @@ function catLabel(category: string): string {
 
         <div class="row row--between" style="margin-top: 12px">
           <span class="stat__sub">safe categories pre-checked · care rows are opt-in</span>
-          <span class="stat__sub">{{ selectedCategories.length }} selected · {{ fmtBytes(selectedReclaimable) }}</span>
         </div>
 
-        <!-- Typed node-name confirm (SPEC §11.6) — the only destructive gate -->
-        <div class="stack" style="gap: 6px; margin-top: 8px">
-          <label class="stat__sub">type the node name to confirm: <strong>{{ nodeName }}</strong></label>
+        <!-- Typed node-name confirm (SPEC §11.6) — the only destructive gate.
+             Sticky (IRI-042): stays pinned above the scrollable category rows. -->
+        <div class="hy-confirm stack" style="gap: 6px; margin-top: 8px">
+          <div class="row row--between">
+            <label class="stat__sub">type the node name to confirm: <strong>{{ nodeName }}</strong></label>
+            <span class="stat__sub">{{ selectedCategories.length }} selected · {{ fmtBytes(selectedReclaimable) }}</span>
+          </div>
           <div class="row" style="gap: 8px">
             <input
               v-model="confirmName"
@@ -365,5 +368,15 @@ function catLabel(category: string): string {
 }
 .hy-path {
   overflow-wrap: anywhere;
+}
+/* IRI-042: the destructive gate rides the drawer's scroll container, so it
+ * pins to the visible bottom until its natural position scrolls into view. */
+.hy-confirm {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
 }
 </style>
