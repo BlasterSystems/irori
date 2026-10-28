@@ -4,6 +4,20 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — NodeDetail overlay idiom (IR-122)
+
+### Changed
+
+- **Node model operations join the IRI-043 overlay idiom** (IR-122): the two
+  hand-rolled confirm dialogs collapse into the shared confirm state machine,
+  and the page-flow "Model operation" card becomes a job sheet on one scrim —
+  job kind, status chip, full output, backdrop closes top-layer-first.
+  Closing the sheet leaves a compact bar (status chip, last output line,
+  Show output / Dismiss) so a running job stays one click away.
+- **Cancel job is guarded on the node page** (IR-122): the confirmation
+  renders inline in the sheet — the Models-page convention — instead of
+  canceling the running job instantly.
+
 ## [Unreleased] — Push job default, overlay sheets, telemetry labels (IR-121)
 
 ### Added
