@@ -236,8 +236,10 @@ describe("createLiveStore", () => {
     const jobId = "00000000-0000-4000-8000-000000000010";
     const { store, es } = await startedStore([nodeFixture()]);
 
-    es.emit(JSON.stringify({ type: "job", serverTimeMs: 10, nodeId, jobId, kind: "sync-local", status: "running", exitCode: null, durationMs: null }));
+    es.emit(JSON.stringify({ type: "job", serverTimeMs: 10, nodeId, jobId, kind: "sync-local", status: "running", exitCode: null, durationMs: null, params: { name: "glm-5.3-flash" } }));
     expect(store.jobs.get(jobId)).toMatchObject({ status: "running", kind: "sync-local" });
+    // IR-121: frame params land in the live map for the feed label.
+    expect(store.jobs.get(jobId)?.params).toEqual({ name: "glm-5.3-flash" });
     const feedAfterStart = store.events.value.length;
 
     // IR-102: a CHANGED progress line enters the feed ring (still ≤1/s per job).
@@ -255,6 +257,8 @@ describe("createLiveStore", () => {
 
     es.emit(JSON.stringify({ type: "job", serverTimeMs: 14, nodeId, jobId, kind: "sync-local", status: "succeeded", exitCode: 0, durationMs: 2000 }));
     expect(store.jobs.get(jobId)?.status).toBe("succeeded");
+    // IR-121: a frame without params keeps the earlier frame's params.
+    expect(store.jobs.get(jobId)?.params).toEqual({ name: "glm-5.3-flash" });
     expect(store.jobs.get(jobId)?.lastLine).toBe("1.2 GB/s");
     // The lifecycle frame still rides the feed.
     expect(store.events.value.length).toBe(feedAfterStart + 2);
