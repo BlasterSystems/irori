@@ -364,7 +364,10 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       if (!name) throw new CommandBuildError("push needs name or repository");
       const hosts = Array.isArray(params.hosts) ? params.hosts.filter((h): h is string => typeof h === "string" && h.length > 0) : [];
       if (hosts.length === 0) throw new CommandBuildError("push needs at least one --host");
-      const jobs = num("jobs");
+      // IR-121: 4 parallel rsync streams is the fleet default for node→node
+      // pushes — every hub path passes jobs: 4 explicitly; this default also
+      // covers API-created pushes. modelctl's own default is 1 stream.
+      const jobs = num("jobs") ?? 4;
       const cache = str("cacheDir");
       const ssh = str("ssh");
       // ADR-0014: probe every destination before modelctl touches it — a

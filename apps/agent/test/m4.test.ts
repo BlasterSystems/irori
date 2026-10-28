@@ -168,6 +168,12 @@ describe("buildCommand", () => {
     expect(script).toContain('exec "$MCTL" push \'glm\' --host \'10.40.40.1\' --host \'10.40.40.2\' --jobs 8');
   });
 
+  it("defaults push to 4 parallel streams when jobs is omitted (IR-121)", () => {
+    const { argv, shell } = buildCommand("push", { name: "glm", hosts: ["10.40.40.1"] }, ctx);
+    expect(shell).toBe("bash");
+    expect(argv[2]!).toContain('exec "$MCTL" push \'glm\' --host \'10.40.40.1\' --jobs 4');
+  });
+
   it("passes push ssh and cache-dir overrides through the preflight exec (ADR-0014)", () => {
     const { argv, shell } = buildCommand("push", { name: "glm", hosts: ["deploy@10.20.30.9"], ssh: "/usr/bin/ssh", cacheDir: "/home/deploy/.cache/huggingface/hub" }, ctx);
     expect(shell).toBe("bash");
