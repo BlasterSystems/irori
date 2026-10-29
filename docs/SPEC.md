@@ -382,8 +382,8 @@ bootstrap and when the agent is off.
      **safe categories pre-checked and needs-care rows opt-in** (diamond
      `care` chip; docker old images, HF cache, modelctl staging), zero rows
      disabled. IRI-046: the staging row carries a `NAS store` scope chip and
-     a hint that a clean frees store-volume space — not this node's disk;
-     non-store nodes never see the row. IRI-028: each category also lists its
+     a hint that a clean frees store-volume space; non-store nodes never see
+     the row. IRI-028: each category also lists its
      concrete targets
      (`details`: old images, HF incomplete blobs vs unreferenced snapshots,
      staging entries, compiler dirs, journal/tmp/core dirs) with per-target
