@@ -34,7 +34,7 @@ export interface CleanupService {
 
 const PREVENTION_PREFIX = "hygiene:";
 
-/** IRI-046: store staging lives on the store volume — only the store node's
+/** IRI-047: store staging lives on the store volume — only the store node's
  *  drawer reports it, so a compute node's reclaimable total never promises
  *  gigabytes on a volume it does not own (SPEC §11.6). */
 const STORE_ONLY_CATEGORY = "modelctl-staging";

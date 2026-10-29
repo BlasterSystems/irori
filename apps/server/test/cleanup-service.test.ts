@@ -3,7 +3,7 @@ import { stripStoreCategory } from "../src/cleanup-service.js";
 import type { CleanupEntry } from "../src/cleanup-service.js";
 
 /**
- * IRI-046 pure scoping: the modelctl-staging audit category is store-volume
+ * IRI-047 pure scoping: the modelctl-staging audit category is store-volume
  * data, so it is stripped from audit entries of non-store nodes while clean
  * rows and store-node rows pass through untouched. The pickStoreNode wiring
  * around it is covered by the m7 db integration suite.
@@ -23,7 +23,7 @@ const auditEntry = (categories: unknown, kind = "audit"): CleanupEntry => ({
 const stagingRow = { category: "modelctl-staging", safe: false, rationale: "store staging", itemCount: 1, reclaimableBytes: 253_397_553_152 };
 const buildCacheRow = { category: "docker-build-cache", safe: true, rationale: "rebuildable", itemCount: 1, reclaimableBytes: 5 };
 
-describe("stripStoreCategory (IRI-046)", () => {
+describe("stripStoreCategory (IRI-047)", () => {
   it("keeps store-node rows untouched (identity return)", () => {
     const entry = auditEntry([buildCacheRow, stagingRow]);
     expect(stripStoreCategory(entry, true)).toBe(entry);

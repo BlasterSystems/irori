@@ -4,12 +4,12 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
-## [Unreleased] — Store-scoped hygiene staging (IRI-046)
+## [Unreleased] — Store-scoped hygiene staging (IRI-047)
 
 ### Fixed
 
 - **NAS store staging no longer counts as a compute node's reclaimable disk**
-  (IRI-046): the hygiene agent audits whatever store root the node has
+  (IRI-047): the hygiene agent audits whatever store root the node has
   configured, so every node with the NAS mounted listed the store's orphaned
   staging (236 GB on DGX-1) in its own Disk hygiene drawer and "reclaimable"
   total — beside a Disk-% chip that measures only the root device (`df -kB /`).

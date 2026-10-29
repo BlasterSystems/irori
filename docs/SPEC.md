@@ -355,7 +355,7 @@ bootstrap and when the agent is off.
      hygiene drawer — not on the node card (IR-98: the card's DISK row shows
      the device disk — the fs backing `/`, mounted volumes ignored — and the
      bar trails the available space in the warn hue instead of a usage chip).
-     IRI-046: `modelctl-staging` is store-scoped — every node with the store
+     IRI-047: `modelctl-staging` is store-scoped — every node with the store
      root mounted would otherwise list the store's staging in its own drawer
      and reclaimable total (bytes that never free node disk; the Disk-% chip
      is `df` of `/`). The server strips the category from audit reads of
@@ -381,7 +381,7 @@ bootstrap and when the agent is off.
      name + safety rationale · scaled bar · item count · size — with
      **safe categories pre-checked and needs-care rows opt-in** (diamond
      `care` chip; docker old images, HF cache, modelctl staging), zero rows
-     disabled. IRI-046: the staging row carries a `NAS store` scope chip and
+     disabled. IRI-047: the staging row carries a `NAS store` scope chip and
      a hint that a clean frees store-volume space; non-store nodes never see
      the row. IRI-028: each category also lists its
      concrete targets
