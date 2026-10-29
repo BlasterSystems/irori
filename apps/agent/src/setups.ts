@@ -3,8 +3,10 @@ import { createServer } from "node:net";
 import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import type { BodyRetention } from "@irori/core";
-import { asCacheUser, type CacheUserCtx } from "./modelctl.js";
+import { asCacheUser, CommandBuildError, type CacheUserCtx } from "./modelctl.js";
+import { runuserWrap } from "./cache-user.js";
 
 /**
  * Setup supervision on the agent (M5, SPEC §7 + ADR-0003): one start/stop
@@ -43,6 +45,10 @@ export interface SetupDriverDeps {
   agentUser?: string;
   /** Resolves a cache owner's home + modelctl binary; null = not installed. */
   resolveLocalUser?: (user: string) => { home: string; binary: string } | null;
+  /** IRI-045: resolves a cache owner's passwd home (no modelctl needed);
+   *  null = unknown user. Serve execution must never silently fall back to
+   *  root when a cache user is configured. */
+  resolveCacheHome?: (user: string) => string | null;
   events: SetupDriverEvents;
   /** M8 capture proxy hooks (ADR-0008 §7); absent = capture unsupported. */
   capture?: SetupCaptureHooks;
@@ -80,6 +86,11 @@ interface DriverRecord {
   enginePort: number | null;
   /** IR-52: retention caps the proxy was started with (re-attach restores). */
   retention: BodyRetention | null;
+  /** IRI-045: the cache user the start script runs as + its passwd home
+   *  (null = agent user). Persisted so a stop after an agent restart keeps
+   *  the run's execution context, even if the node setting changes mid-run. */
+  runUser: string | null;
+  runHome: string | null;
 }
 
 interface RingEntry {
@@ -106,6 +117,32 @@ function isExecutable(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** systemd's default PATH — the fallback when the agent env has none. */
+const SYSTEMD_DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/** A cache user's serve execution context (IRI-045). */
+export interface ServeWrap {
+  user: string;
+  home: string;
+}
+
+/**
+ * Pure: spawn argv for a serve start/stop script. With a cache user the
+ * ADR-0011 runuser shape applies — scrubbed HF/XDG env, the owner's HOME —
+ * plus USER/LOGNAME (the agent unit's env has neither; `set -u` scripts
+ * dereference them) and the ambient PATH (an engine needs more than
+ * modelctl's 4-dir PATH). Without a wrap the script runs as the agent user
+ * and the HOME fallback is injected at the env level instead.
+ */
+export function serveSpawnArgv(script: string, wrap: ServeWrap | null, ambientPath: string | undefined): string[] {
+  if (wrap === null) return [script];
+  return runuserWrap(wrap.user, wrap.home, {
+    PATH: ambientPath ?? SYSTEMD_DEFAULT_PATH,
+    USER: wrap.user,
+    LOGNAME: wrap.user,
+  }, [script]);
 }
 
 /** Ephemeral free loopback port for the engine behind the capture proxy. */
@@ -261,6 +298,16 @@ export class SetupDriver {
       return { ok: false, error: `stop script is not executable: ${scriptStop} (test -x failed)` };
     }
 
+    // IRI-045: resolve the serve execution context before anything binds —
+    // a configured-but-unresolvable cache user refuses the start instead of
+    // silently running root (the ADR-0011 rule).
+    let wrap: ServeWrap | null = null;
+    try {
+      wrap = this.resolveServeWrap();
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+
     const finalEnv = { ...env };
     if (modelPathName !== null) {
       const resolved = await this.resolveModelPath(modelPathName);
@@ -290,8 +337,18 @@ export class SetupDriver {
       finalEnv.PORT = String(enginePort);
     }
 
+    // HOME fallback for the unwrapped case: the agent's systemd unit is
+    // HOME-less (systemd sets no HOME for system services), so `set -u`
+    // start/stop scripts dereferencing $HOME die unbound. Default to the
+    // agent user's passwd home; the wrapped case gets its HOME from the
+    // runuser argv instead.
+    if (wrap === null && finalEnv.HOME === undefined && process.env.HOME === undefined) {
+      finalEnv.HOME = homedir();
+    }
+
     const logPath = join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`);
-    const child = spawn(scriptStart, [], {
+    const argv = serveSpawnArgv(scriptStart, wrap, process.env.PATH);
+    const child = spawn(argv[0]!, argv.slice(1), {
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...finalEnv },
@@ -309,10 +366,15 @@ export class SetupDriver {
       proxyPort: capture !== null ? capture.proxyPort : null,
       enginePort,
       retention: capture !== null ? capture.retention ?? null : null,
+      runUser: wrap?.user ?? null,
+      runHome: wrap?.home ?? null,
     };
     this.records.set(setupId, record);
     this.children.set(setupId, child);
     this.persist([...this.records.values()]);
+    if (wrap !== null) {
+      this.pushLog(setupId, `driver: serving as cache user ${wrap.user} (HOME=${wrap.home})`);
+    }
     if (capture !== null) {
       this.pushLog(setupId, `driver: capture proxy :${capture.proxyPort} → 127.0.0.1:${enginePort} (requests captured, engine on loopback)`);
     }
@@ -529,8 +591,22 @@ export class SetupDriver {
     record: DriverRecord,
     settle: () => void,
   ): { pgid: number | null; code: number | null } {
-    const stop = spawn(record.scriptStop, [], {
-      env: { ...process.env, ...record.env },
+    // The stop script runs in the run's execution context (IRI-045): the
+    // persisted run user, even if the node's cache user changed mid-run —
+    // the script must reach an engine owned by the user that started it.
+    // typeof checks, not !== null: records persisted before IRI-045 lack the
+    // fields entirely.
+    const wrap =
+      typeof record.runUser === "string" && typeof record.runHome === "string"
+        ? { user: record.runUser, home: record.runHome }
+        : null;
+    const argv = serveSpawnArgv(record.scriptStop, wrap, process.env.PATH);
+    const env = { ...process.env, ...record.env };
+    // Pre-IRI-045 records carry no HOME; the HOME-less agent unit would break
+    // `set -u` stop scripts the same way the start did.
+    if (wrap === null && env.HOME === undefined) env.HOME = homedir();
+    const stop = spawn(argv[0]!, argv.slice(1), {
+      env,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -552,6 +628,22 @@ export class SetupDriver {
       settle();
     });
     return handle;
+  }
+
+  /** IRI-045: the node's cache user (≠ agent user) → its passwd home; null =
+   *  run as the agent user. Throws CommandBuildError when the user has no
+   *  passwd entry — never a silent root fallback (the ADR-0011 rule). Serve
+   *  needs no per-user modelctl, so resolution is passwd-only. */
+  private resolveServeWrap(): ServeWrap | null {
+    const user = (this.deps.cacheUser?.() ?? "").trim() || null;
+    if (user === null || user === (this.deps.agentUser ?? "root")) return null;
+    const home = this.deps.resolveCacheHome?.(user) ?? null;
+    if (home === null) {
+      throw new CommandBuildError(
+        `serve start: no passwd entry for cache user "${user}" — create that user on this node or clear the node's cache user setting`,
+      );
+    }
+    return { user, home };
   }
 
   /** `modelctl path --local NAME` → first stdout line, resolved as the node's

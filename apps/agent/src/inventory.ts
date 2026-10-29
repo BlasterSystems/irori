@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { InventoryLeftover, InventoryLocalCache, InventoryModel, NodeInventory } from "@irori/core";
 import { dirBytes, readStore } from "./catalog-read.js";
+import { runuserWrap } from "./cache-user.js";
 
 /**
  * Per-node model inventory (IRI-028).
@@ -32,6 +33,9 @@ export interface PasswdUser {
   user: string;
   home: string;
 }
+
+/** The ADR-0011 POSIX username pattern (API-validated; re-checked agent-side). */
+const USERNAME_RE = /^[A-Za-z_][A-Za-z0-9_-]{0,31}$/;
 
 export interface InventoryCtx {
   nasRoot: string | null;
@@ -88,12 +92,26 @@ export function resolveLocalUser(
   user: string,
   opts: { agentUser: string; modelctlPath: string; passwdPath?: string },
 ): { home: string; binary: string } | null {
-  if (!/^[A-Za-z_][A-Za-z0-9_-]{0,31}$/.test(user)) return null;
+  if (!USERNAME_RE.test(user)) return null;
   const entry = discoverUsers(readPasswd(opts.passwdPath ?? "/etc/passwd"), opts.agentUser).find((u) => u.user === user);
   if (entry === undefined) return null;
   const binary = user === opts.agentUser ? opts.modelctlPath : localBinary(entry.home);
   if (binary === null) return null;
   return { home: entry.home, binary };
+}
+
+/**
+ * Resolves a cache owner's passwd home only (IRI-045): serve execution needs
+ * the user and home, not a per-user modelctl — null when the name is invalid
+ * or has no passwd entry.
+ */
+export function resolveCacheHome(
+  user: string,
+  opts: { agentUser: string; passwdPath?: string },
+): string | null {
+  if (!USERNAME_RE.test(user)) return null;
+  const entry = discoverUsers(readPasswd(opts.passwdPath ?? "/etc/passwd"), opts.agentUser).find((u) => u.user === user);
+  return entry?.home ?? null;
 }
 
 /** argv for running modelctl as a cache owner (pure; tests pin it). */
@@ -105,23 +123,7 @@ export function userArgv(
   args: string[],
 ): string[] {
   if (user === agentUser) return [binary, ...args];
-  return [
-    "runuser",
-    "-u",
-    user,
-    "--",
-    "env",
-    "-u",
-    "XDG_STATE_HOME",
-    "-u",
-    "HF_HOME",
-    "-u",
-    "HF_HUB_CACHE",
-    `HOME=${home}`,
-    `PATH=${dirname(binary)}:/usr/local/bin:/usr/bin:/bin`,
-    binary,
-    ...args,
-  ];
+  return runuserWrap(user, home, { PATH: `${dirname(binary)}:/usr/local/bin:/usr/bin:/bin` }, [binary, ...args]);
 }
 
 /** `modelctl list --local --json` → rows (no sizes in that payload). */
