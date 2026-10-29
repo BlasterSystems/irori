@@ -38,6 +38,18 @@ export const setupStateEventSchema = z.object({
   lastError: z.string().nullable(),
 });
 
+/** IR-124: throttled engine output for the shared telemetry feed — mirror of
+ *  the job-progress tradeoff (live-only, ≤1 frame/s per setup, unchanged
+ *  lines skipped server-side). */
+export const setupLogEventSchema = z.object({
+  type: z.literal("setup-log"),
+  serverTimeMs: z.number(),
+  setupId: z.string().uuid(),
+  nodeId: z.string().uuid(),
+  name: z.string().min(1),
+  line: z.string(),
+});
+
 /** One staged-transfer stage changed or progressed (M5). */
 export const setupTransferEventSchema = z.object({
   type: z.literal("setup-transfer"),
@@ -132,6 +144,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   llmEventSchema,
   setupStateEventSchema,
   setupTransferEventSchema,
+  setupLogEventSchema,
   benchEventSchema,
   jobEventSchema,
   jobProgressEventSchema,
@@ -144,6 +157,7 @@ export type NodeStatusEvent = z.infer<typeof nodeStatusEventSchema>;
 export type HeartbeatEvent = z.infer<typeof heartbeatEventSchema>;
 export type SseEvent = z.infer<typeof sseEventSchema>;
 export type SetupStateEvent = z.infer<typeof setupStateEventSchema>;
+export type SetupLogEvent = z.infer<typeof setupLogEventSchema>;
 export type SetupTransferEvent = z.infer<typeof setupTransferEventSchema>;
 export type BenchEvent = z.infer<typeof benchEventSchema>;
 export type JobEvent = z.infer<typeof jobEventSchema>;

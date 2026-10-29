@@ -439,6 +439,11 @@ export function feedLines(
       case "setup-state":
         lines.push({ t: event.serverTimeMs, text: `setup · ${event.status}${event.health !== null ? ` · ${event.health}` : ""}${event.lastError !== null ? ` · ${event.lastError}` : ""}` });
         break;
+      case "setup-log":
+        // IR-124: the engine's own output streams into the feed while the
+        // weights load — node and setup name prefix the line.
+        lines.push({ t: event.serverTimeMs, text: `${node} · ${event.name}: ${event.line}` });
+        break;
       case "setup-transfer":
         lines.push({
           t: event.serverTimeMs,
