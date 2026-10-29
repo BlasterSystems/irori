@@ -32,9 +32,14 @@ a `hottest` token joins the page head on every tier.
 
 - [ ] Hero card head = model title + one mono meta line `tensorfold :8081 ·
       DGX-1 +1 worker` (+ `· unmanaged` for probe-detected engines with no
-      setup); no ENGINE/backend/SERVING chips while healthy; the only chip is
-      `chip--warn OFFLINE` (probe stale / setup died) or `○ starting` (setup
-      loading weights — `starting` setups enter `heroProcesses`).
+      setup); zero chips while healthy (no ENGINE/backend/SERVING).
+- [ ] The only chip is a state chip: `chip--warn OFFLINE` (probe stale /
+      setup died) or `○ starting` (setup loading weights — `starting` setups
+      enter `heroProcesses`). Probe-stale engine (data is history) additionally
+      gets `card--stale`: thread border, stat values/bars dimmed to .75 with
+      labels at full contrast (new vocabulary — no shipped precedent; the
+      node-card IR-103 offline treatment already exists and must NOT be
+      reused for stale engines).
 - [ ] The `ttft · itl appear with the first requests` line is deleted; null
       latency stats simply do not render (grid becomes 4-col).
 - [ ] Tier store (`small|medium|full` from 900/1440 px media queries,

@@ -24,8 +24,9 @@ current markup, IR-103 node-card precedent, SPEC §9 (temps), round-2 method.
 
 > **Superseded in part by round 3b below**: the `body.compact` ≤720 trigger is
 > now `html[data-tier="small"]` ≤900, the fixed bottom temps **dock is gone**
-> (inline card above the heroes on small only), and hero charts are hidden
-> below full instead of shrinking to 84 px. The rest stands.
+> (inline card above the heroes on small only), and hero charts no longer
+> shrink to 84 px — they are **hidden on small only**; medium shows them
+> (owner's round-3b final call). The rest stands.
 
 - **No ttft/itl placeholder, ever.** When `ttftP95Ms/e2eP95Ms/itlP95Ms` are
   null the stats simply do not render (grid 4-col). The first request replaces
@@ -47,8 +48,12 @@ current markup, IR-103 node-card precedent, SPEC §9 (temps), round-2 method.
     seg buttons 34 px (touch-target compromise: 44 px kept only for real
     tap targets like .btn; segmented range control allowed 34 px — a11y risk
     flagged to reviewers).
+    *(3b supersedes the specifics: head/body padding is 7/10 and 9/10 px,
+    the hero chart is hidden on small instead of 84 px, and the seg is
+    replaced by a 44 px native select below full.)*
   - hero grid stays 1-col but each card drops from ≈800 px (phone shot) to
-    ≈230 px: one head row, 2×2 stats, 84 px chart.
+    ≈230 px: one head row, 2×2 stats, 84 px chart. *(3b: chart hidden there,
+    card measures 237–262 px.)*
 - **Fleet temps card** (`Node temps`): spark nodes only, NAS excluded by
   definition (same rule as the fleet power card). One item per node:
   `DGX-1 71°/62°` (GPU/CPU, hot tier ≥70 °C in thread-ink, ≥90 critical).
@@ -97,7 +102,9 @@ the parent session in Chromium, 390×844 + 1568×900, light/dark):
 
 Measured: phone 390×844 first screen = BOTH hero cards (326px each, was
 ≈800px) + temps dock + sticky footer; zero console errors; no horizontal
-scroll 320→1568; thread used only for warn/live/avg/brand-line.
+scroll 320→1568; thread used only for warn/live/avg/brand-line and, on the
+hero chart, the decode series (matching the shipped LensChart palette,
+`analytics.ts` series 0 = thread).
 
 UX review (applied): 10px floor for `.tempitem__v em`, compact `stat__label`,
 dock label; `card--stale` dims VALUES (.75) not the whole body (labels keep
@@ -176,7 +183,7 @@ Expert UX pass over the tier system — 10/10 owner asks MET, then:
   no longer duplicates the nav landmark.
 - **F6 (fixed):** thermal glance survives medium/full as a page-head token
   `· hottest 71°C DGX-1` (thread-ink ≥70); small temps strip is
-  `auto-fit minmax(150px,1fr)` so an 8-node fleet is ~4 rows, not 8.
+  `auto-fit minmax(160px,1fr)` so an 8-node fleet is ~4 rows, not 8.
 - **F7 (fixed):** small hero head wraps; title floor `min-width: 8ch` so a
   long meta can't ellipsize the model name to nothing.
 
