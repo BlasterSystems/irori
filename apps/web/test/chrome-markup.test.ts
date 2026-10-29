@@ -52,6 +52,14 @@ it("NodeDetail describes what the hygiene CTA does", () => {
   expect(nodeDetailSource).toContain("dry-run plan first, nothing deleted without a typed confirm");
 });
 
+it("CleanupDrawer scopes staging cleanup to the store node (IRI-046)", () => {
+  // Server strips modelctl-staging from non-store audits; the row that survives
+  // is store-volume data — labeled and explained as such, never node disk.
+  expect(cleanupDrawerSource).toContain(`row.category === 'modelctl-staging'"`);
+  expect(cleanupDrawerSource).toContain(">NAS store</span>");
+  expect(cleanupDrawerSource).toContain("frees space on the store volume — not this node's disk");
+});
+
 it("NodeDetail puts the Sensors card and the inference panels side by side (IRI-037)", () => {
   // One shared cols-2 row carries both cells (was: two half-width rows).
   const sections = nodeDetailSource.match(/<section class="cols cols-2"/g) ?? [];
