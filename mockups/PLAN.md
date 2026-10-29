@@ -1,185 +1,206 @@
-# Mockup iteration plan — round 2: Models in-depth review · Serve for homelab scale
+# Mockup iteration plan — round 3: Overview density (hero chrome, mobile height, fleet temps)
 
-Status: **executed 2026-10-17** — models v2, serve v2, `setup-wizard.html`
-shipped; SPEC §6/§7/§13 + PLAN M4/M5 amended. Original plan below.
-Inputs: owner direction (this file's triggers), round-1 reviews (UX + PM,
-applied in `a9efbf0`), SPEC §6/§7/§13.
-
----
-
-## Part 1 — Models page: full reconsideration
-
-### Trigger (owner)
-
-No search, no pagination, no ordering (incl. by date added), "Repository @ rev"
-column not needed, download queue should be a modal, screen is noisy. Full
-review and reconsideration required.
-
-### Method
-
-Senior-UI/UX expert pass over `models.html` (current + v2) with the round-1
-rubric plus a JTBD/IA layer, then a v2 mockup. The expert reviews **source +
-rendered light/dark screenshots** and returns ranked findings; findings are
-applied before the round is presented.
-
-### Jobs the screen must serve (in priority order)
-
-1. Find a model and see where it lives (per node) — the 90 % case.
-2. Get a model onto a node (sync/push/download) — one click from the row.
-3. Add/remove models on the NAS (modal, armed).
-4. Trust the store (capacity, catalog freshness, modelctl/doctor) — glanceable.
-5. Create a recipe from a model (serve-command copy, HF metadata).
-
-### Proposed IA (v2) — one table, everything else on demand
-
-- **Toolbar**: search (matches name, repo, quantization — debounced, ⌘K
-  focusable) · filter chips (runtime: vllm/llama.cpp; placement: on head / on
-  any node / not synced) · sort dropdown (**Recently added** default, Name,
-  Size) · result count · `Download from HF…` (primary) · overflow menu
-  (Refresh catalog, Store hygiene…).
-- **Table** (the only always-visible block): Name (bold) with repo ·
-  quantization · companions as the **secondary line** (replaces the
-  "Repository @ rev" column); Runtime · Size · Added · Placement (compact
-  chips: `head ✓` `spark2 sync` `spark3 push`) · row actions (`Serve`,
-  `⋯` → Open details / Sync / Push / Copy serve-command / Delete…).
-  - **Pagination**: 25/page with count + pager (homelab stores are tens, not
-    thousands; search+filters keep pages short). No infinite scroll.
-  - **Row click → detail drawer** (right side, not a new page): HF card
-    metadata, revision, file list + sizes, companions (mmproj/MTP), per-node
-    placement with one-click remediations, `serve-command` copy, README/RUN.md
-    excerpt, delete (dry-run plan → armed confirm typing the model name).
-- **Download modal** (replaces the inline queue section): multi-row form
-  (source, local name, runtime, quantization, companions), preflight summary
-  (total size, capacity check vs free − reserve), `Queue download` → closes
-  into the Jobs strip.
-- **Status strip** (slim, one line): capacity bar · catalog seq + freshness ·
-  modelctl version · jobs summary — with a `Store health` popover holding
-  staging/objects/quarantine + doctor / gc-objects (dry-run → armed). Removes
-  the whole hygiene card from the canvas.
-- **Jobs strip stays** (it is the transfer surface) but collapses to one row
-  when idle; full table behind `Jobs (n)`.
-
-### Data-model note (blocking detail for "date added")
-
-`modelctl catalog.json` (schema 3) carries name/runtime/repository/bytes —
-**no timestamp**. Ordering by date added therefore needs Irori-side state:
-`models(nas_node_id, name, first_seen_at, …)` recorded when the catalog reader
-first observes a model. Cheap, no NAS writes, survives modelctl upgrades.
-Flagged to `packages/core` + `packages/db` for M4.
-
-### Deliverables & acceptance
-
-- `mockups/models.html` **v2** (toolbar/search/filters/sort/pagination,
-  secondary-line rows, drawer open state, download modal open state, hygiene
-  popover) + an **empty-search** and **zero-models** state.
-- Expert findings list (ranked) applied; light/dark screenshot verification;
-  zero console errors; single filled button per state; no thread fills.
-- SPEC §6 amended: search/sort/pagination contract, drawer, `first_seen_at`.
+Status: **reviewed + findings applied 2026-10-29** — `overview-v4.html`,
+awaiting owner approval for the Vue port.
+Inputs: owner screenshots (desktop 1568×578, phone 851×1568), `OverviewView.vue`
+current markup, IR-103 node-card precedent, SPEC §9 (temps), round-2 method.
 
 ---
 
-## Part 2 — Serve page: homelab scale (1–8 Sparks, most have 2) + setup wizard
+## Triggers (owner)
 
-### Trigger (owner)
+1. **"ttft · itl appear with the first requests" makes no sense** — the
+   placeholder line is permanent chrome for a transient fact; it never removes
+   itself early and wastes a full row on every hero card, including a second
+   line on phone width.
+2. **Too many chips in the hero header** (`ENGINE`, `TENSORFOLD :8081`,
+   `○ SERVING`) — owner wants state **only when offline**. On phone width the
+   three chips wrap to a second header row (≈40 px/card, two cards on screen).
+3. **Mobile / short width must be denser** — lower card height so more
+   information fits; plus an **always-visible card with the temps of all nodes
+   (NOT the NAS)**.
 
-Replace "Register recipe" / "Run script" with **one modal wizard**:
-setup type → model → existence check on sparks → start/stop script paths
-(validated on the head node) → model-missing placement offer (pull from NAS,
-sync to worker) → staged progress with %, rate, ETA. Think it through and name
-what's missing.
+## Decisions carried into the mockup
 
-### Scale analysis
+> **Superseded in part by round 3b below**: the `body.compact` ≤720 trigger is
+> now `html[data-tier="small"]` ≤900, the fixed bottom temps **dock is gone**
+> (inline card above the heroes on small only), and hero charts are hidden
+> below full instead of shrinking to 84 px. The rest stands.
 
-- ≤ 8 nodes ⇒ deployments never need an enterprise table with drift chips,
-  probe-join jargon, or per-row endpoint walls. **Setup cards** (one card per
-  serving setup) scale to single digits and carry per-node state naturally.
-- Most fleets: 1 head + 1 worker ⇒ the wizard must make the 2-node case the
-  fastest path (worker fields appear only when "Cluster" is chosen).
-- Card-per-setup replaces the deployments table; cluster-level jargon
-  (`server probe join · 5s poll`) moves into card sublines.
+- **No ttft/itl placeholder, ever.** When `ttftP95Ms/e2eP95Ms/itlP95Ms` are
+  null the stats simply do not render (grid 4-col). The first request replaces
+  dashes with values on its own; no instructional line. (Deletes
+  `OverviewView.vue:433` and the IRI-025 decision it came from.)
+- **Hero header = model title + plain mono meta line**
+  `tensorfold :8081 · DGX-1` (+ `· unmanaged` for probe-detected engines with
+  no setup). No chips while healthy — same IR-103 rule the node cards already
+  follow: healthy is the absence of chrome.
+  - Non-healthy states DO appear, as the only chip: `chip--warn` `OFFLINE`
+    (probe stale / setup died while the card is up) and `○ starting` while
+    weights load (transient, so the card never looks silently dead).
+- **Compact tier (≤720 px, plus any short-width config)**: page-scoped
+  `body.compact` class (media query sets it; a mock control force-enables it
+  on desktop so experts can review it):
+  - stat values 20→15 px, labels 11→10 px, card head/body padding
+    12/16→8/12 px, chart 130→84 px, power chart 96→64 px,
+    section margins 20→12 px, log max-height 220→120 px,
+    seg buttons 34 px (touch-target compromise: 44 px kept only for real
+    tap targets like .btn; segmented range control allowed 34 px — a11y risk
+    flagged to reviewers).
+  - hero grid stays 1-col but each card drops from ≈800 px (phone shot) to
+    ≈230 px: one head row, 2×2 stats, 84 px chart.
+- **Fleet temps card** (`Node temps`): spark nodes only, NAS excluded by
+  definition (same rule as the fleet power card). One item per node:
+  `DGX-1 71°/62°` (GPU/CPU, hot tier ≥70 °C in thread-ink, ≥90 critical).
+  - Desktop: node cards keep their detailed rows; the shared thermal glance is
+    the page-head `hottest 71°C DGX-1` token, so no dedicated card at
+    medium/full (round 3b).
+  - Small tier: a slim inline card ordered **above** the hero cards (node
+    cards are below the fold there). Offline node → `— OFFLINE` item.
+    (An earlier fixed bottom dock was dropped in 3b: the owner asked for the
+    strip at the top of the page, not pinned.)
 
-### Wizard flow (owner's steps + additions marked ★)
+## Method
 
-1. **Type**: Single node | Cluster (head + workers). ★ Cluster asks which
-   worker(s) — up to 8 total; per-role scripts in step 4.
-2. **Model**: pick from NAS catalog (searchable, shows size/quant) or
-   "download from HF first" (chains the Part-1 modal). ★ Also: which node
-   role serves it (head-only vs head+worker sharded).
-3. **Existence check**: per selected node → present / sync / push /
-   unavailable (reuse placement planner + capacity math `free − needs −
-   reserve`).
-4. **Scripts**: start + stop **paths on the head node**, validated via agent
-   (`test -x`) at wizard time *and re-checked at every start* (scripts move).
-   ★ Missing pieces the owner didn't mention:
-   - **Port** (default 8000, conflict-checked on the node) — needed for
-     health probe, endpoints, per-port analytics.
-   - **Worker scripts** for clusters (worker start/stop or join command),
-     validated on each worker node.
-   - **Env contract**: Irori exports `MODEL_NAME`, `PORT`, `EXTRA_ARGS` (and
-     `MODEL_PATH` via `modelctl path --local`); wizard shows exactly what will
-     be exported so self-contained scripts still work.
-   - **Health definition**: state = port answers `/v1/models` with the model
-     id; ask expected model id only if it differs; startup **timeout** with
-     "starting → healthy / failed" and engine-log tail visible during the wait
-     (big models take minutes).
-   - **Log source**: optional log command / file path; default = engine port
-     probe + process stdout ring captured by the agent.
-5. **Placement** (if model missing anywhere): plan shows the **full chain** —
-   NAS→head (`sync-local`), head→worker (`push`, CX7), or HF→NAS download
-   first if the NAS lacks it — ★ staged progress (per stage: %, MB/s, ETA,
-   cancel), not one flat bar; ★ warns if a node already has an active job;
-   capacity check inline; "force from HF" stays a ghost option.
-6. **Review & launch**: summary (type, model, nodes, scripts, port, env) →
-   `Create & start` (primary) or `Create only`. Setup appears as a card;
-   stop stays armed (typed confirmation), restart re-runs stop→start.
+Senior UI/UX + senior PM parallel review of `overview-v4.html` (rubric per
+round 2), light/dark + desktop/compact screenshots; findings applied before
+presenting to owner.
 
-### Still missing from the owner's list (product decisions to confirm)
+## Deliberately out of scope
 
-- Edit vs duplicate an existing setup (common: same shape, new model).
-- What "stop" runs when the operator never gave a stop script — wizard should
-  *require* stop (armed stop is a core promise) or fall back to killing the
-  recorded pidfile/process group.
-- Naming: auto `model-name` (editable) — no gateway, but logs/jobs reference it.
-- Setup detail: drawer with engine log tail, per-node placement history,
-  edit/duplicate/delete — confirm drawer vs expandable card.
-- Script *changes on disk* (user edits start.sh): no git-drift tracking in v1
-  (dropped with the recipe table) — re-validation at start covers existence,
-  not content; document that.
+- Telemetry drawer/streaming (IR-124), power/NAS card content (unchanged),
+  node card internals (unchanged), topbar density (flagged, not changed).
 
-### New Serve page IA (v2)
+## Round-3 review outcomes (applied 2026-10-29)
 
-- Header: `New setup…` (primary, opens wizard) · summary chips (`2 running ·
-  1 idle`) · `Jobs (n)` opener.
-- **Setup cards**: model + quant, node chips with per-node state dots
-  (■ present+healthy · ○ starting/transfer · ◆ stopped/foreign · halt square
-  = stopped), port, last log line (1 line, mono), actions: `Logs` `Restart`
-  `Stop…` `⋯` (Edit/Duplicate/Remove). Running transfers render an inline
-  staged-progress strip on the card.
-- Card click → detail drawer: full engine log tail (streamed), endpoints
-  (direct), placement per node, scripts with last-validated timestamp,
-  env contract, run history.
+PM + UX expert reviews (PM verified live-hub facts; layout numbers measured by
+the parent session in Chromium, 390×844 + 1568×900, light/dark):
 
-### SPEC / task impacts
+- **starting state** (MAJOR): the third hero scenario — `○ starting` chip
+  (dot--run, not warn) while weights load; latency stats hidden. The Vue port
+  MUST include `status === "starting"` setups in `heroProcesses` (today's
+  `running` filter hides the hero for the whole load).
+- **dock vs sticky footer** (MAJOR): app footer is `position: sticky;
+  bottom: 0` (version·tag promise). Dock sits `bottom: var(--dock-foot-h)`
+  (measured footer height, JS-set) — both visible, verified.
+- **critical tier**: `≥90 °C` renders `.crit` (thread-ink 600 + ▫ prefix) —
+  warn and critical no longer identical (matches Analytics glyph convention).
+- **unreadable temp**: online node with null temp renders `— gpu — cpu`,
+  sorts below hot nodes; `— OFFLINE` reserved for node-down.
+- **node-down cascade**: fleet-down also stale-marks that node's hero card.
+- compact touch targets raised to 36px seg / 34px btn; power chart 64px in
+  compact; `+1 worker` spelled out; dock right-edge fade signals overflow;
+  density control stays reachable in forced compact.
+- **tip::after** hidden via `display:none` (not opacity) — otherwise the
+  300px tooltip box creates phantom horizontal scroll (measured: 426 at 390).
+  Same defect likely latent in every mockup using the shared `.tip` pattern.
 
-- SPEC §7 rewrite: "recipes with dispatch verbs + git drift" → "setups =
-  model + nodes + validated script pair + port + env contract"; §13 API
-  (`/api/v1/setups` CRUD + `POST /:id/start|stop`); §5 data model `Setup`.
-- PLAN: M5 acceptance rewritten around the wizard; M4 gains
-  `first_seen_at` note.
+Measured: phone 390×844 first screen = BOTH hero cards (326px each, was
+≈800px) + temps dock + sticky footer; zero console errors; no horizontal
+scroll 320→1568; thread used only for warn/live/avg/brand-line.
 
-### Deliverables & acceptance
+UX review (applied): 10px floor for `.tempitem__v em`, compact `stat__label`,
+dock label; `card--stale` dims VALUES (.75) not the whole body (labels keep
+AA contrast); `.tip` gains `tabindex=0` + `:focus-visible::after`; dock is
+`role=region` + `role=list/listitem` and values read `71°C gpu`; compact
+`.hero__meta { flex:none }` so `· unmanaged` never truncates first;
+`--dock-foot-h` re-measured on `document.fonts.ready` + resize; section/h2
+margins moved from inline styles to `.section-gap`/`.h2-gap` so the compact
+tier reaches them (12px); node-down stale now survives a heroSeg scenario
+click; compact `.hero__title` 15px ≥ stat value; mock-note hidden compact.
+Card height after typography floor: 329px (still 2 heroes + dock + footer).
+Not applied: NIT-9 (36/34px targets accepted — WCAG 2.5.8's 24px floor, the
+44px one-hander tradeoff is a plan-level owner decision); NIT-10 (chart
+series identity comes from the ported LensChart hover labels); NIT-11
+(fleet-count line stays — removing the count loses info for 24px).
 
-- `mockups/serve.html` **v2** (setup cards, one running transfer inline,
-  detail drawer) + **`setup-wizard.html`** (5 steps, cluster variant, staged
-  progress state, failure state).
-- Expert findings applied; light/dark verification; wizard reachable from
-  both serve and models (download modal shared).
+## Round 3b — explicit tiers (owner second pass, 2026-10-29)
 
----
+Owner screenshots: 772×1568 (smallest) and 1318×1568 (medium) plus the full
+width, with per-tier demands. Implemented as `html[data-tier]`
+(`auto|small|medium|full`) set from media queries in JS + a mock tier control.
 
-## Execution order
+| | small ≤900 | medium 901–1440 | full >1440 |
+|---|---|---|---|
+|hero grid|1 col|2 col|2 col|
+|hero sparkline|hidden|**shown** (owner final call)|shown|
+|range filter|`<select>`|`<select>`|seg buttons|
+|nav|hamburger menu|hamburger menu|inline row|
+|fleet temps card|**shown, above the heroes**|hidden|hidden|
+|gutter|12px|24px|centered 1200|
 
-1. Part-1 expert review of current models.html → findings.
-2. Models v2 (+ drawer/modal/popover states) → verify light/dark.
-3. Part-2 scale pass on serve.html → v2 + wizard → verify.
-4. SPEC §6/§7/§13 amendments + IRI-001 evidence update → commit.
+Breakpoint choice: **900px, not 720** — the shipped `.hero-grid` already
+collapses to one column at 900 (`OverviewView.vue`), which is exactly the
+single-column layout the owner screenshotted at 772. Temps survive only on
+small because there the node cards (which already print GPU/CPU temp per row)
+are below the fold; on medium/full the strip was duplicate information.
+
+Two real bugs found while measuring, both fixed:
+
+- **Flush edges 721–1200** (owner ask 1): `.page`'s `padding` shorthand zeroes
+  `.container`'s 24px left/right — equal specificity, later in `irori.css`.
+  Fixed with `main.container { padding-left/right }` (element+class wins),
+  and the small tier needs `width: 100%` because on a flex item
+  `.container`'s `margin: 0 auto` disables cross-axis stretch and shrink-wrapped
+  `main` to its content (that produced the oversized asymmetric side space).
+- **Min-content blowout**: small tier used `grid-template-columns: 1fr`, whose
+  min-content floor let a long model name widen the whole card past the
+  viewport (457px at 390). Now `minmax(0,1fr)` like the base rule; the title
+  ellipsizes instead.
+
+Verified in Chromium at 320/390/600/720/772/900/901/1318/1440/1441/1568:
+tier assignment, gutter symmetry, 1- vs 2-col hero, chart/seg/select/nav
+visibility per tier all correct; no horizontal page scroll anywhere; 4 hero
+cards with 47-char titles truncate without overflowing; 8-node temps strip
+wraps (no h-scroll); hamburger opens a 210×318 menu with 7 links,
+`aria-expanded` wired, Escape and click-outside close it; the range `<select>`
+and the seg drive one `applyRange` state. Hero cards at small: 262/237px
+(329 with charts). Zero console errors.
+
+## Round-3b review outcomes (applied 2026-10-29)
+
+Expert UX pass over the tier system — 10/10 owner asks MET, then:
+
+- **MAJOR (fixed): node card carried a healthy-state `ONLINE` chip.** The
+  shipped `NodeCard.vue` IR-103 rule is *no chip while online*; offline is
+  error border + full-width `.offline-strip` + dimmed body. Mockup now mirrors
+  that exactly; `card--stale` (thread border) is reserved for probe-stale
+  engines only.
+- **F2 (fixed):** small-tier footer was flush (its own `padding: 8px 0` beat
+  `.container`) and 64px dead gap above it — now `8px 12px` + `margin-top:
+  space-3`; topbar inset aligned 16→12 to match the content gutter (N2).
+- **F4 (fixed):** 44px touch floor restored on the phone `<select>` and
+  "Add node…"; medium-tier burger enlarged to 44px (tablets live in medium).
+- **F5 (fixed):** menu closes on link activation (SPA keeps the topbar
+  mounted), Escape returns focus to the burger, `aria-label="Primary menu"`
+  no longer duplicates the nav landmark.
+- **F6 (fixed):** thermal glance survives medium/full as a page-head token
+  `· hottest 71°C DGX-1` (thread-ink ≥70); small temps strip is
+  `auto-fit minmax(150px,1fr)` so an 8-node fleet is ~4 rows, not 8.
+- **F7 (fixed):** small hero head wraps; title floor `min-width: 8ch` so a
+  long meta can't ellipsize the model name to nothing.
+
+**Accepted tradeoffs (do not relitigate in the port):**
+- Hero sparklines shown at medium (owner's final call 2026-10-29: "show the
+  decode/prefill charts on medium"); hidden only on small, where `peak` +
+  Analytics are the substitute.
+- The inherited `irori.css` ≤1080 block still steps `.statgrid--6` to 3-col
+  and `.cols-3` to 2-col inside medium — pre-existing shipped behavior,
+  intended.
+- Port must keep `.hero-grid--single` (one process spans the row) and the
+  empty-state ghost grid, and expect `#connChip` to wrap in the ≤720 topbar.
+
+## Deliverables & acceptance
+
+- `mockups/overview-v4.html` — tier control (auto / small / medium / full),
+  2nd-hero scenarios (serving / starting / no requests / engine offline /
+  unmanaged), fleet scenarios (online / DGX-3 offline / DGX-2 no sensor),
+  range on both surfaces.
+- Light/dark × 320→1568 screenshots, zero console errors.
+- Vue-port notes: delete the ttft placeholder line; hero chips → meta line +
+  state-only chip (incl. `starting` setups in `heroProcesses`); a tier store
+  (`small|medium|full` from the 900/1440 breakpoints) driving hero-chart
+  render, seg-vs-select, nav-vs-menu, and the temps card (rendered only on
+  small, ordered above the heroes); port `mockups/irori.css` gutter fix
+  (`.page` shorthand zeroes `.container`); `minmax(0,…)` on every track that
+  holds a truncating title; test-pin updates in `overview.test.ts`.
