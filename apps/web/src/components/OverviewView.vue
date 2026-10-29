@@ -56,6 +56,8 @@ interface HeroProcess {
   kind: "single" | "cluster" | "engine";
   nodeId: string;
   nodeName: string;
+  /** Cluster workers beyond the head (0 for single setups and engines). */
+  workers: number;
   hero: HeroData;
 }
 
@@ -97,6 +99,7 @@ const heroProcesses = computed<HeroProcess[]>(() => {
       kind: s.kind,
       nodeId: s.headNodeId,
       nodeName: live.nodes.get(s.headNodeId)?.name ?? "node",
+      workers: s.nodes.length,
       hero: snap === null ? { ...EMPTY_HERO, port: s.port, model: s.model } : heroDataForPort(snap),
     });
   }
@@ -113,6 +116,7 @@ const heroProcesses = computed<HeroProcess[]>(() => {
         kind: "engine",
         nodeId: node.id,
         nodeName: node.name,
+        workers: 0,
         hero: heroDataForPort(p),
       });
     }
@@ -388,8 +392,34 @@ const avgLineY = computed(() => {
   return BAR_BOTTOM - ((BAR_BOTTOM - BAR_TOP) * Math.min(100, (avg / GB10_SYSTEM_ENVELOPE_W) * 100)) / 100;
 });
 
-function servingState(decodeTps: number | null): string {
-  return decodeTps !== null ? "serving" : "starting";
+// ─── hero head (IR-127): title + one mono meta line; chips only when degraded
+// IR-103 rule: healthy is the absence of chrome — the only chips are a state
+// chip (probe stale / weights loading) and never kind/backend/SERVING.
+
+/** "tensorfold :8081 · DGX-1 +1 worker" (+ "· unmanaged" for probe-detected
+ *  engines with no setup). An unprobed backend (weights still loading) is
+ *  simply omitted — ":8081 · DGX-1". */
+function heroMeta(p: HeroProcess): string {
+  const backend = p.hero.backend === "unknown" ? "" : `${p.hero.backend} `;
+  const workers = p.kind === "cluster" && p.workers > 0 ? ` +${p.workers} worker${p.workers === 1 ? "" : "s"}` : "";
+  const unmanaged = p.kind === "engine" ? " · unmanaged" : "";
+  return `${backend}:${p.hero.port} · ${p.nodeName}${workers}${unmanaged}`;
+}
+
+/** A process whose node stopped answering has history, not live data. */
+function isProbeStale(p: HeroProcess): boolean {
+  const node = live.nodes.get(p.nodeId);
+  return node !== undefined && !node.online;
+}
+
+type HeroStateView = { cls: string; dot: string; label: string } | null;
+
+/** The only chip a hero may render: OFFLINE when the probe went stale,
+ *  "starting" while weights load (no probe data yet). Null while healthy. */
+function heroStateView(p: HeroProcess): HeroStateView {
+  if (isProbeStale(p)) return { cls: "chip--warn", dot: "dot--warn", label: "OFFLINE" };
+  if (p.hero.decodeTps === null) return { cls: "", dot: "dot--run", label: "starting" };
+  return null;
 }
 </script>
 
@@ -411,15 +441,13 @@ function servingState(decodeTps: number | null): string {
 
   <!-- Serving processes: one card per running setup, then detected engines -->
   <section v-if="heroProcesses.length > 0" class="hero-grid" :class="{ 'hero-grid--single': heroProcesses.length === 1 }" style="margin-bottom: 12px;">
-    <article v-for="p in heroProcesses" :key="p.key" class="card">
+    <article v-for="p in heroProcesses" :key="p.key" class="card" :class="{ 'card--stale': isProbeStale(p) }">
       <div class="card__head">
-        <div class="row hero-head">
-          <h3 :title="p.title">{{ p.title }}</h3>
-          <span class="chip chip--accent">{{ p.kind }}</span>
-          <span class="chip chip--ok">{{ p.hero.backend }} :{{ p.hero.port }}</span>
-          <span class="chip"><span class="dot dot--run" aria-hidden="true"></span> {{ servingState(p.hero.decodeTps) }}</span>
+        <div class="row" style="min-width: 0;">
+          <h3 class="hero__title" :title="p.title">{{ p.title }}</h3>
+          <span class="hero__meta">{{ heroMeta(p) }}</span>
+          <span v-if="heroStateView(p) !== null" class="chip hero__state" :class="heroStateView(p)!.cls"><span class="dot" :class="heroStateView(p)!.dot" aria-hidden="true"></span> {{ heroStateView(p)!.label }}</span>
         </div>
-        <span class="mono faint hero-node">{{ p.nodeName }}</span>
       </div>
       <div class="card__body">
         <div :class="heroGridClass(p.hero)">
@@ -430,7 +458,6 @@ function servingState(decodeTps: number | null): string {
           <div v-if="showTtft(p.hero)" class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">{{ ms(p.hero.ttftP95Ms) }}</span><span v-if="p.hero.e2eP95Ms !== null" class="stat__sub">E2E {{ Math.round(p.hero.e2eP95Ms) }} ms</span></div>
           <div v-if="showItl(p.hero)" class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
         </div>
-        <p v-if="!showTtft(p.hero) || !showItl(p.hero)" class="stat__sub" style="margin-top: 8px;">ttft · itl appear with the first requests</p>
         <LensChartVue v-if="charts.get(p.key) !== undefined" :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
       </div>
     </article>
@@ -544,17 +571,38 @@ function servingState(decodeTps: number | null): string {
   grid-template-columns: 1fr;
 }
 /* Hero heads: long model names truncate, the node label never breaks. */
-.hero-head {
+.hero__title {
   min-width: 0;
-}
-.hero-head h3 {
+  flex: 0 1 auto;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.hero-node {
+/* One mono meta line carries backend :port · node · workers (IR-127). */
+.hero__meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.hero__state {
+  margin-left: auto;
   flex: none;
+}
+/* Stale engine (IR-127): the probe stopped answering — data is history.
+   Dim the VALUES only; labels/units keep AA contrast. Thread border, distinct
+   from the node-card IR-103 offline treatment (error border + strip). */
+.card--stale {
+  border-color: var(--thread);
+}
+.card--stale .stat__value,
+.card--stale .bar__fill,
+.card--stale .barrow .val {
+  opacity: 0.75;
 }
 .rule {
   border: 0;
