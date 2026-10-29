@@ -54,10 +54,13 @@ it("NodeDetail describes what the hygiene CTA does", () => {
 
 it("CleanupDrawer scopes staging cleanup to the store node (IRI-046)", () => {
   // Server strips modelctl-staging from non-store audits; the row that survives
-  // is store-volume data — labeled and explained as such, never node disk.
+  // is store-volume data — labeled and explained as such. The hint names the
+  // store volume (true on every node that can see the row), never claims
+  // anything about this node's disk.
   expect(cleanupDrawerSource).toContain(`row.category === 'modelctl-staging'"`);
   expect(cleanupDrawerSource).toContain(">NAS store</span>");
-  expect(cleanupDrawerSource).toContain("frees space on the store volume — not this node's disk");
+  expect(cleanupDrawerSource).toContain("frees space on the store volume");
+  expect(cleanupDrawerSource).not.toContain("not this node's disk");
 });
 
 it("NodeDetail puts the Sensors card and the inference panels side by side (IRI-037)", () => {
