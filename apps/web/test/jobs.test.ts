@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobElapsed, jobLiveFromSummary, type JobLive } from "../src/jobs";
+import { jobElapsed, jobLabel, jobLiveFromSummary, jobStreams, type JobLive } from "../src/jobs";
 
 function job(overrides: Partial<JobLive> = {}): JobLive {
   return {
@@ -8,6 +8,8 @@ function job(overrides: Partial<JobLive> = {}): JobLive {
     kind: "sync-local",
     status: "running",
     params: {},
+    progress: null,
+    cancelRequestedAt: null,
     exitCode: null,
     durationMs: null,
     createdAt: "2026-10-26T06:00:00.000Z",
@@ -17,6 +19,23 @@ function job(overrides: Partial<JobLive> = {}): JobLive {
     ...overrides,
   };
 }
+
+describe("jobStreams + jobLabel (IR-131)", () => {
+  it("counts push as 4 streams by default and honors explicit jobs", () => {
+    expect(jobStreams("push", {})).toBe(4);
+    expect(jobStreams("push", { jobs: 8 })).toBe(8);
+    expect(jobStreams("sync-local", {})).toBe(1);
+    expect(jobStreams("sync-local", { jobs: 4 })).toBe(4);
+    expect(jobStreams("download", { jobs: 4 })).toBe(1);
+  });
+
+  it("labels jobs by model name or batch size", () => {
+    expect(jobLabel({ name: "glm" })).toBe(" glm");
+    expect(jobLabel({ downloads: [{ source: "a" }, { source: "b" }] })).toBe(" 2 models");
+    expect(jobLabel({})).toBe("");
+    expect(jobLabel(undefined)).toBe("");
+  });
+});
 
 describe("jobElapsed", () => {
   const now = Date.parse("2026-10-26T06:05:00.000Z");

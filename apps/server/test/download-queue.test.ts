@@ -134,6 +134,8 @@ d("download queue (db integration)", () => {
     expect(entry.status).toBe("pending");
     expect(entry.jobId).toBeNull();
     await jobsService.cancel(busy.id);
+    // IR-131: cancel no longer frees the slot — the agent's terminal report does.
+    await jobsService.onDone(NAS_ID, busy.id, "canceled", null);
     await queue.dispatchIfIdle();
     const dispatched = await rowFor(entry.id);
     expect(dispatched?.status).toBe("running");
@@ -160,6 +162,8 @@ d("download queue (db integration)", () => {
     const c = await queue.enqueue({ source: "org/eta", jobs: 4 });
     for (const e of [a, b, c]) expect(e.status).toBe("pending");
     await jobsService.cancel(busy.id);
+    // IR-131: cancel no longer frees the slot — the agent's terminal report does.
+    await jobsService.onDone(NAS_ID, busy.id, "canceled", null);
     await queue.dispatchIfIdle();
     const rowA0 = await rowFor(a.id);
     expect(rowA0?.status).toBe("running");
@@ -189,7 +193,13 @@ d("download queue (db integration)", () => {
     const a = await queue.enqueue({ source: "org/theta", jobs: 4 });
     expect(a.status).toBe("running");
     const ok = await jobsService.cancel(a.jobId!);
-    expect(ok).toBe(true);
+    expect(ok).toEqual({ ok: true });
+    // IR-131 verify-before-write: the batch is untouched until the agent
+    // reports the kill — a premature canceled write would free the slot.
+    const unsettled = await db.select().from(jobs).where(eq(jobs.id, a.jobId!));
+    expect(unsettled[0]!.status).toBe("running");
+    expect(unsettled[0]!.cancelRequestedAt).not.toBeNull();
+    await jobsService.onDone(NAS_ID, a.jobId!, "canceled", null);
     await queue.onJobSettled({ nodeId: NAS_ID, jobId: a.jobId!, kind: "download-queue", status: "canceled", exitCode: null, durationMs: null });
     const row = await rowFor(a.id);
     expect(row?.status).toBe("canceled");
@@ -290,6 +300,8 @@ d("download queue (db integration)", () => {
     const b = await queue.enqueue({ source: "org/quebec", jobs: 4 });
     for (const e of [a, b]) expect(e.status).toBe("pending");
     await jobsService.cancel(busy.id);
+    // IR-131: cancel no longer frees the slot — the agent's terminal report does.
+    await jobsService.onDone(NAS_ID, busy.id, "canceled", null);
     await queue.dispatchIfIdle();
     const rowA0 = await rowFor(a.id);
     expect(rowA0?.status).toBe("running");
@@ -388,6 +400,8 @@ d("download queue (db integration)", () => {
     const b = await queue.enqueue({ source: "org/uniform", jobs: 4 });
     for (const e of [a, b]) expect(e.status).toBe("pending");
     await jobsService.cancel(busy.id);
+    // IR-131: cancel no longer frees the slot — the agent's terminal report does.
+    await jobsService.onDone(NAS_ID, busy.id, "canceled", null);
     await queue.dispatchIfIdle();
     const rowA0 = await rowFor(a.id);
     expect(rowA0?.status).toBe("running");

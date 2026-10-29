@@ -183,6 +183,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
           // IR-121: the frame carries params on new hubs — prefer it; keep the
           // seed's params when the frame omits them (older hub / empty).
           params: event.params && Object.keys(event.params).length > 0 ? event.params : (existing?.params ?? {}),
+          progress: existing?.progress ?? null,
+          cancelRequestedAt: existing?.cancelRequestedAt ?? null,
           exitCode: event.exitCode,
           durationMs: event.durationMs,
           createdAt: existing?.createdAt ?? at,
@@ -202,6 +204,9 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
         const changed = job !== undefined && job.lastLine !== event.line;
         if (job !== undefined) {
           job.lastLine = event.line;
+          // IR-131: parsed transfer progress rides the frame when the hub
+          // could parse the line — a real bar without polling.
+          if (event.progress !== undefined) job.progress = event.progress;
           if (job.status === "queued") job.status = "running";
         }
         if (changed && event.line.trim() !== "") pushEvent(event);

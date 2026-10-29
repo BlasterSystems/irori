@@ -134,6 +134,13 @@
       "when": 1793017744089,
       "tag": "0018_add-cache-user",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1798243200000,
+      "tag": "0019_job_canceling_progress",
+      "breakpoints": true
     }
   ]
 }

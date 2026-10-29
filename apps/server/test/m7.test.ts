@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, isNull } from "drizzle-orm";
-import { createDbHandle, llmBuckets, llmSnapshots, nodes, snapshotBuckets, tokenLedger, cleanupRuns } from "@irori/db";
+import { createDbHandle, llmBuckets, llmSnapshots, nodes, snapshotBuckets, tokenLedger, cleanupRuns, jobs as jobsTable } from "@irori/db";
 import type { Db } from "@irori/db";
 import { pickStoreNode } from "@irori/core";
 import { createTokenLedgerEngine, pruneTokenLedger } from "../src/ledger.js";
@@ -162,11 +162,18 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
     const report = run!.report as { categories: Array<{ category: string }> };
     expect(report.categories[0]!.category).toBe("docker-build-cache");
 
-    // Cancel path marks the run canceled.
+    // Cancel path (IR-131): the request is marked but the run stays running —
+    // the cleanup run settles only when the agent's terminal report lands.
     const job2 = await jobs.create(nodeId, "hygiene-clean", { categories: ["docker-build-cache"], dryRun: false });
     await jobs.cancel(job2.id);
+    const [pendingRow] = await db.select().from(jobsTable).where(eq(jobsTable.id, job2.id));
+    expect(pendingRow!.status).toBe("running");
+    expect(pendingRow!.cancelRequestedAt).not.toBeNull();
     const [run2] = await db.select().from(cleanupRuns).where(eq(cleanupRuns.jobId, job2.id));
-    expect(run2!.status).toBe("canceled");
+    expect(run2!.status).toBe("running");
+    await jobs.onDone(nodeId, job2.id, "canceled", null);
+    const [run3] = await db.select().from(cleanupRuns).where(eq(cleanupRuns.jobId, job2.id));
+    expect(run3!.status).toBe("canceled");
   });
 
   it("archives monthly energy clamped to the GB10 envelope", async () => {

@@ -186,14 +186,47 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 
 ## Job activity (IRI-028)
 
+- SSE `setup-log` `{setupId, nodeId, name, line}` (IR-124): throttled engine
+  output for the shared telemetry feed — ≤1 frame/s per setup, identical
+  consecutive lines skipped, live-only (excluded from
+  `/api/v1/events/recent`; `GET /api/v1/setups/:id/log` stays the backfill
+  source). Older web bundles ignore it.
 - `GET /api/v1/jobs?limit=` → `{jobs: [{...jobInfo, lastLine}]}` — recent jobs
-  across every node, newest first (limit 1–100, default 20).
+  across every node, newest first (limit 1–100, default 20). Rows carry
+  `progress` (parsed transfer progress, see below) and
+  `cancelRequestedAt` (ISO timestamp when a cancel is in flight).
 - SSE `job` frames now also fire on dispatch with `status: "running"`
   (`exitCode`/`durationMs` null); terminal frames are unchanged.
 - SSE `job-progress` `{nodeId, jobId, seq, line}` carries at most one output
-  line per second per job. It is not recorded in `/api/v1/events/recent`
-  (the full 400-line ring stays in `job_output`). Older web bundles ignore
-  both frames.
+  line per second per job. For single-stream `sync-local`/`push` jobs it also
+  carries an optional `progress` object (`bytes`, `percent`,
+  `rateBytesPerSec`, `etaSeconds`) parsed from the rsync line — multi-stream
+  jobs (`--jobs > 1`) never get one, because their interleaved per-stream
+  lines would show a misleading fraction of one stream. It is not recorded in
+  `/api/v1/events/recent` (the full 400-line ring stays in `job_output`).
+  Older web bundles ignore both frames.
+
+## Job cancel (IR-131)
+
+- `POST /api/v1/jobs/:id/cancel` no longer writes `canceled` speculatively:
+  it sends the agent the cancel frame and marks the row with
+  `cancel_requested_at` (the row STAYS running, so the one-active slot stays
+  held). The row settles `canceled` on the agent's `job-cancel-ack` (the kill
+  signal was issued) or its terminal `job-done {canceled}` — whichever lands
+  first; a repeated terminal frame is a no-op.
+- Honest failures (all `409` with `{"error": ...}`): `job not found`,
+  `job not cancelable` (terminal), `cancel already in flight`,
+  `agent-update cancel is not supported` (ADR-0007: settlement is
+  hello-driven), and `node offline — the transfer process may still be
+  running` (the frame could not be delivered; the row is untouched and the
+  reaper still owns it).
+- Agent restarts no longer strand rows: the agent persists its active jobs
+  (`{jobId, pgid, kind, startedAt}` under `IRORI_STATE_DIR`), kills the
+  persisted process groups on boot, reports them failed, and its hello
+  carries `activeJobs` — the hub settles any running/canceling row the fresh
+  agent does not report. Old agents send no `activeJobs`; for those the hub
+  skips the reconcile (a ws reconnect without a restart still has live jobs
+  the old agent cannot report).
 
 ## Nodes
 
