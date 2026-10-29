@@ -96,7 +96,7 @@
   .navmenu a { padding: 10px 12px; font-size: 14px; font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
   .navmenu a:hover { color: var(--fg); background: var(--surface-2); }
   .navmenu a.is-active { color: var(--fg); box-shadow: inset 2px 0 0 var(--ink); }
-  html[data-tier="small"] .navmenu { right: 16px; }
+  html[data-tier="small"] .navmenu { right: 12px; }
 
   /* ── Tier: range filter seg → dropdown (medium + small) ─────────────── */
   .range-select { display: none; width: auto; min-width: 96px; font-family: var(--font-mono); font-size: 12.5px; }
@@ -146,7 +146,9 @@
   html[data-tier="small"] .log { font-size: 11px; line-height: 1.5; padding: 8px 10px; min-height: 96px !important; max-height: 118px !important; }
   html[data-tier="small"] .mock-note { display: none; }
   html[data-tier="small"] .range-select { min-height: 44px; }
-  html[data-tier="medium"] .navtoggle { width: 44px; height: 44px; }
+  /* 44px below full on both tiers — the shared 44px iconbtn floor only
+     applies at ≤720, leaving the 721–900 small band with a 34px burger. */
+  html[data-tier="medium"] .navtoggle, html[data-tier="small"] .navtoggle { width: 44px; height: 44px; }
 
   /* temps above the serving cards (owner ask 4), below the page head */
   html[data-tier="small"] .pagehead { order: -3; }
@@ -290,8 +292,10 @@
           <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub" style="display:inline">ms</span></span></div>
         </div>
         <svg class="hero__chart" viewBox="0 0 600 120" preserveAspectRatio="none" aria-hidden="true">
-          <polyline fill="none" stroke="var(--ink-3)" stroke-width="1.5" points="0,78 40,72 80,84 120,66 160,74 200,58 240,70 280,50 320,64 360,44 400,58 440,38 480,52 520,30 560,44 600,18"/>
-          <polyline fill="none" stroke="var(--thread)" stroke-width="1.5" points="0,104 60,102 120,106 180,100 240,103 300,98 360,101 420,96 480,99 540,94 600,97"/>
+          <!-- series colors follow the shipped LensChart palette (analytics.ts
+               COLORS): decode = series 0 = thread, prefill = series 1 = ink-2 -->
+          <polyline data-series="decode" fill="none" stroke="var(--thread)" stroke-width="1.5" points="0,78 40,72 80,84 120,66 160,74 200,58 240,70 280,50 320,64 360,44 400,58 440,38 480,52 520,30 560,44 600,18"/>
+          <polyline data-series="prefill" fill="none" stroke="var(--ink-2)" stroke-width="1.5" points="0,104 60,102 120,106 180,100 240,103 300,98 360,101 420,96 480,99 540,94 600,97"/>
         </svg>
       </div>
     </article>
