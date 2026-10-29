@@ -444,7 +444,11 @@ export class LlmPortProbe {
       lms.body.data.length > 0
     ) {
       this.model = firstString(lms.body.data, "id");
-      return { backend: "lmstudio", detected: true, at: this.now() };
+      // TensorFold 1.1+ serves an LM-Studio-compatible /api/v0/models; prefer
+      // the owned_by classification so its metrics keep flowing (the lmstudio
+      // applier is a no-op and would blank the card).
+      const ownedBy = ownedByToBackend(firstString(lms.body.data, "owned_by") ?? "");
+      return { backend: ownedBy ?? "lmstudio", detected: true, at: this.now() };
     }
 
     // 3. Ollama /api/tags — top-level models array.
@@ -877,6 +881,24 @@ export class LlmPortProbe {
     const free = num(body.pool_free_tokens);
     if (pool !== null && free !== null && pool > 0) {
       out.kvCachePct = round2(Math.min(100, Math.max(0, (1 - free / pool) * 100)));
+    }
+
+    // Native builds (1.1+) dropped the health counter/pool block: queue depth
+    // and KV live only in /metrics (same tensorfold: family as the classic
+    // health fields the branches above consume).
+    if (running === null || out.kvCachePct === undefined) {
+      const m = await this.getText("/metrics");
+      if (m !== null) {
+        const series = parsePromText(m.text);
+        if (running === null) {
+          const queue = promSum(series, "tensorfold:requests_running");
+          if (queue !== null) out.queueRunning = queue;
+        }
+        if (out.kvCachePct === undefined) {
+          const kv = promSum(series, "tensorfold:kv_cache_usage_ratio");
+          if (kv !== null) out.kvCachePct = round2(Math.min(100, Math.max(0, kv * 100)));
+        }
+      }
     }
 
     if (live !== null) engineMeta.live = live;
