@@ -211,3 +211,28 @@ Expert UX pass over the tier system — 10/10 owner asks MET, then:
   small, ordered above the heroes); port `mockups/irori.css` gutter fix
   (`.page` shorthand zeroes `.container`); `minmax(0,…)` on every track that
   holds a truncating title; test-pin updates in `overview.test.ts`.
+
+## IRI-048 — transfer surfaces options round (2026-10-29)
+
+Owner report: closing the Models job sheet strands a running sync-local/push —
+no list, no bar, no cancel anywhere (screenshot against dev-0.3.0-57).
+IR-131 carries the plan (tasks/IRI-048-transfer-tracking-and-cancel.md); this
+mockup decides the SURFACE shape.
+
+- `mockups/IRI-048-transfer-surfaces.html` — five scenes: (1) shared row
+  anatomy (running single-stream, 4-stream aggregate, totals-pending honest
+  state, queued, canceling, canceled+staging, failed+remediation, succeeded;
+  inline confirm with blast-radius copy), (2) shape A Models strip + op bar,
+  (3) shape B global transfers dock (Telemetry-dock idiom, footer CTA +
+  count bubble), (4) shape C #/transfers route (filters, pinned active),
+  (5) tradeoffs table.
+- New page-scoped vocabulary: `.xrow-main` 5-col grid, `.dock` rows,
+  `.opbar`, `.countbub`, `.xconfirm`/`.dconfirm` inline confirms.
+  Promote to irori.css only after the owner pick.
+- Verified: light/dark full-page shots, zero console errors, width sweep
+  320→1568 clean (fixed: xrow grid mins overflowed at 721 → flush bodies now
+  always `overflow-x:auto`; topbar nav overflowed 721–900 → brand
+  endorsement hidden + nav tightened ≤900). Interactions green: row confirm
+  open/close, dock toggle, disabled Output on the canceling row.
+- Open owner decision: shape A / B / C (recommendation A+B now, C as B's
+  history target later).

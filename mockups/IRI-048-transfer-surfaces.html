@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Transfer surfaces · IRI-048 · Irori</title>
+<link rel="stylesheet" href="irori.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  body { background: var(--paper); min-height: 100vh; }
+  .scene { margin-top: var(--space-6); }
+  .scenehead { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: 6px; flex-wrap: wrap; }
+  .scenehead h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .scenehead .why { color: var(--muted); font-size: 13px; }
+  .scenenote { color: var(--muted); font-size: 12.5px; margin: 8px 2px 0; }
+  .stage { position: relative; border: 1px solid var(--border); border-radius: var(--radius); background: var(--paper-2); overflow: hidden; }
+  .ghostcard { position: absolute; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); opacity: .45; }
+  .fakebar { position: absolute; top: 0; left: 0; right: 0; height: 44px; border-bottom: 1px solid var(--border);
+    background: var(--surface); display: flex; align-items: center; gap: 14px; padding: 0 16px; z-index: 1; }
+  .fakebar .mono { font-weight: 600; }
+  .fakechip { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+  .fakenav { display: flex; gap: 10px; margin-left: 8px; }
+  .fakenav a { font-size: 13px; color: var(--muted); text-decoration: none; padding: 2px 6px; }
+  .fakenav a.is-active { color: var(--fg); box-shadow: inset 0 -2px 0 0 var(--ink); }
+  .fakefoot { position: absolute; bottom: 0; left: 0; right: 0; height: 40px; border-top: 1px solid var(--border);
+    background: var(--surface); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 1; }
+  .countbub { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 4px;
+    margin-left: 5px; border: 1px solid var(--border-strong); border-radius: 8px;
+    font-family: var(--font-mono); font-size: 10px; color: var(--fg); background: var(--surface); }
+
+  /* ── Transfer row anatomy (shared by every shape) ──────────────────── */
+  .card__body--flush { overflow-x: auto; }
+  .xrow { min-width: 640px; }
+  .xrow-main { display: grid; grid-template-columns: minmax(200px, 1.5fr) minmax(130px, 1fr) 180px minmax(88px, auto) 168px;
+    gap: 10px 14px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .xrow:last-child .xrow-main { border-bottom: 0; }
+  .xid { font-family: var(--font-mono); font-size: 12px; color: var(--fg); min-width: 0; }
+  .xid .xmodel { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .xid .xroute { font-size: 11px; color: var(--faint); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .xbytes { font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin-top: 3px; }
+  .xrate { font-family: var(--font-mono); font-size: 12px; color: var(--fg); white-space: nowrap; }
+  .xrate .xleft { color: var(--faint); }
+  .xelapsed { font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+  .xacts { text-align: right; white-space: nowrap; }
+  .xnote { margin: 8px 12px 0; }
+  .xrow-main .chip { justify-self: start; }
+  .xconfirm { display: none; margin: 0 12px 10px; border: 1px solid var(--thread); background: var(--thread-wash);
+    border-radius: var(--radius-sm); padding: 10px 12px; }
+  .xconfirm.is-open { display: block; }
+  .xsub { padding: 8px 12px 2px; }
+  .xsub .label { display: block; margin-bottom: 6px; }
+
+  /* ── Compact op bar (IRI-044 parity, scene A) ──────────────────────── */
+  .opbar { position: absolute; left: 16px; right: 16px; top: 56px; display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius); z-index: 2; }
+  .opbar .xmodel { font-family: var(--font-mono); font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opbar .xlast { font-family: var(--font-mono); font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Shape B · transfers dock ──────────────────────────────────────── */
+  .dock { position: absolute; top: 44px; right: 0; bottom: 40px; width: 400px; background: var(--surface);
+    border-left: 1px solid var(--border-strong); display: none; flex-direction: column; z-index: 2; }
+  .dock.is-open { display: flex; }
+  .dock-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .dock-head h3 { flex: 1; font-size: 15px; margin: 0; }
+  .dock-body { flex: 1; overflow: auto; }
+  .dockrow { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  .dockrow-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .dockrow-top .xmodel { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dockrow-route { font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin-top: 2px; }
+  .dockrow .bar { margin-top: 8px; }
+  .dockrow-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+  .dockrow-meta .xacts { text-align: right; }
+  .dconfirm { display: none; margin-top: 8px; border: 1px solid var(--thread); background: var(--thread-wash);
+    border-radius: var(--radius-sm); padding: 8px 10px; }
+  .dconfirm.is-open { display: block; }
+  @media (max-width: 900px) {
+    .topbar .brand-text .brand-endorsement { display: none; }
+    .topbar .nav { gap: 2px; }
+    .topbar .nav a { padding: 6px 6px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar"><div class="topbar__in">
+  <a class="brand" href="index.html" aria-label="Irori home">
+    <span class="brand-mark" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+    <span class="brand-text"><span class="brand-name">Irori</span><span class="brand-endorsement">A BlasterSystems product</span></span>
+  </a>
+  <nav class="nav" aria-label="Primary">
+    <a href="overview.html">Overview</a>
+    <a href="nodes.html">Nodes</a>
+    <a href="models.html" class="is-active" aria-current="page">Models</a>
+    <a href="serve.html">Serve</a>
+    <a href="analytics.html">Analytics</a>
+    <a href="benchmarks.html">Benchmarks</a>
+  </nav>
+  <span class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>Live · 2s</span>
+  <button class="iconbtn" id="themeToggle" aria-label="Toggle theme"></button>
+</div></header>
+
+<main class="container page">
+  <div class="pagehead">
+    <div>
+      <h1>Transfer surfaces · IRI-048</h1>
+      <p>One shared row anatomy · three surface shapes · owner pick. Problem today: closing the job sheet strands a running <span class="mono">sync-local</span>/<span class="mono">push</span> — no list, no bar, no cancel anywhere.</p>
+    </div>
+  </div>
+
+  <!-- ── 1 · Row anatomy ─────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Row anatomy">
+    <div class="scenehead">
+      <h2>1 · Row anatomy <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span> shared by every shape</span></h2>
+      <span class="why">structured progress instead of raw rsync text; honest states; guarded cancel with blast radius</span>
+    </div>
+    <div class="card">
+      <div class="card__body card__body--flush">
+        <div class="xrow">
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f24 · sync-local GLM-5.3-Flash-EXL3-4bpw-TensorFold</div><div class="xroute">nas → DGX-3 · 1 stream · store → local cache</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:61%"></div></div><div class="xbytes">99.8 / 163.6 GiB</div></div>
+            <div class="xrate">108 MB/s <span class="xleft">· ~10m 30s left</span><div class="xelapsed">running 12m</div></div>
+            <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm" data-confirm="c1">Cancel…</button></div>
+          </div>
+          <div class="xconfirm" id="c1" role="alertdialog" aria-label="Cancel transfer">
+            <p class="stat__sub" style="margin:0 0 4px"><strong>Cancel this sync-local?</strong></p>
+            <p class="stat__sub" style="margin:0 0 8px">Stops modelctl on DGX-3 — 99.8 GiB already moved stays as resumable staging (store hygiene reclaims it).</p>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button class="btn btn--ghost btn--sm" data-confirm-close="c1">Keep running</button>
+              <button class="btn btn--danger btn--sm" data-confirm-close="c1">Cancel transfer</button>
+            </div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f22 · push GLM-5.3-Flash-EXL3</div><div class="xroute">DGX-1 → DGX-2 · cx70+cx71 · 4 streams (summed)</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><div class="xbytes">25.2 / 68.2 GB</div></div>
+            <div class="xrate">184 MB/s <span class="xleft">· ~6m left</span><div class="xelapsed">running 3m 40s</div></div>
+            <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f21 · push DeepSeek-V4-Flash</div><div class="xroute">DGX-1 → DGX-3 · cx70 · 4 streams</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:6%"></div></div><div class="xbytes">totals pending</div></div>
+            <div class="xrate"><span class="xleft">no aggregate yet</span><div class="xelapsed">running 22s</div></div>
+            <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f19 · queue download (2 entries)</div><div class="xroute">HF → nas · /mnt/nas/llm-models</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:12%"></div></div><div class="xbytes">10.6 / 88.0 GB</div></div>
+            <div class="xrate">96 MB/s <span class="xleft">· ~14m left</span><div class="xelapsed">running 41m</div></div>
+            <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f18 · push GLM-5.3-Flash-EXL3-4bpw-TensorFold</div><div class="xroute">DGX-1 → DGX-2 · cancel requested 14:02</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:44%"></div></div><div class="xbytes">72.0 / 163.6 GiB</div></div>
+            <div class="xrate"><span class="xleft">stop signal sent</span><div class="xelapsed">canceling 8s</div></div>
+            <span class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span>canceling</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm" disabled>Output</button></div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f11 · sync-local qwen3-8b-q4</div><div class="xroute">nas → DGX-2 · canceled 13:41</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:23%"></div></div><div class="xbytes">1.2 / 5.1 GB · staging kept</div></div>
+            <div class="xrate"><span class="xleft">resumable</span><div class="xelapsed">ran 2m 10s</div></div>
+            <span class="chip"><span class="dot dot--halt" aria-hidden="true"></span>canceled</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--secondary btn--sm">Resume…</button></div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f07 · push DeepSeek-V4-Flash</div><div class="xroute">DGX-3 → DGX-2 · failed 13:12</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:9%"></div></div><div class="xbytes">3.7 / 41.5 GB · staging kept</div></div>
+            <div class="xrate"><span class="xleft">ssh auth failed (DGX-2)</span><div class="xelapsed">keys re-pinned · re-dispatch pending</div></div>
+            <span class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span>failed</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--secondary btn--sm">Retry</button></div>
+          </div>
+
+          <div class="xrow-main">
+            <div class="xid"><div class="xmodel">j-4f02 · register-local glm-5.3-flash-exl3-q4</div><div class="xroute">DGX-1 · local cache · no transfer</div></div>
+            <div><div class="bar bar--lg"><div class="bar__fill" style="width:100%"></div></div><div class="xbytes">41.5 GB registered</div></div>
+            <div class="xrate"><span class="xleft">—</span><div class="xelapsed">41s</div></div>
+            <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>succeeded</span>
+            <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="scenenote">Bars come from the ticket's progress work: <span class="mono">parseTransferProgress</span> persisted on the job row + the modelctl sync/push aggregate emitter (4 streams summed — today modelctl prints interleaved per-stream percents or nothing). The <span class="mono">canceling</span> chip is the cancel-honesty state: the row stays running until the agent's terminal frame confirms, and says so when the node is unreachable. Canceled/failed transfers keep resumable staging — "Resume…" re-creates the job (modelctl resumes from staging), "Retry…" re-dispatches after ADR-0014 remediation.</p>
+  </section>
+
+  <!-- ── 2 · Shape A ─────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Shape A">
+    <div class="scenehead">
+      <h2>2 · Shape A <span class="chip">Models strip + op bar</span></h2>
+      <span class="why">IRI-044 parity in ModelsView + the Jobs strip card. Page-local — visible only while Models is open.</span>
+    </div>
+    <div class="stage" style="height: 430px;">
+      <div class="fakebar"><span class="mono">Irori</span><span class="fakenav"><a class="is-active">Models</a><a>Serve</a><a>Analytics</a></span><span class="fakechip" style="margin-left:auto">● Live · 2s</span></div>
+      <div class="ghostcard" style="left:16px; top:56px; right:16px; height:56px;"></div>
+      <div class="ghostcard" style="left:16px; top:124px; width:30%; height:210px;"></div>
+      <div class="opbar" role="status" aria-label="Model operation">
+        <strong class="stat__sub" style="margin:0">Model operation</strong>
+        <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+        <span class="xmodel">sync-local GLM-5.3-Flash-EXL3-4bpw-TensorFold</span>
+        <span class="xlast">61% · 99.8/163.6 GiB · 108 MB/s · ~10m 30s</span>
+        <span class="row" style="gap:8px; margin-left:auto;">
+          <button class="btn btn--ghost btn--sm">Show output</button>
+          <button class="btn btn--danger btn--sm">Cancel</button>
+        </span>
+      </div>
+      <div class="card" style="position:absolute; left:16px; right:16px; top:124px; bottom:16px; display:flex; flex-direction:column;">
+        <div class="card__head"><h3>Jobs</h3><div class="row"><span class="mono faint">3 running · 2 settled today</span><button class="btn btn--ghost btn--sm">All jobs…</button></div></div>
+        <div class="card__body card__body--flush" style="flex:1; overflow:auto;">
+          <div class="xrow">
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f24 · sync-local GLM-5.3-Flash-EXL3-4bpw-TensorFold</div><div class="xroute">nas → DGX-3 · 1 stream</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:61%"></div></div><div class="xbytes">99.8 / 163.6 GiB</div></div>
+              <div class="xrate">108 MB/s <span class="xleft">· ~10m 30s left</span></div>
+              <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f22 · push GLM-5.3-Flash-EXL3</div><div class="xroute">DGX-1 → DGX-2 · 4 streams</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><div class="xbytes">25.2 / 68.2 GB</div></div>
+              <div class="xrate">184 MB/s <span class="xleft">· ~6m left</span></div>
+              <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f11 · sync-local qwen3-8b-q4</div><div class="xroute">nas → DGX-2 · canceled 13:41 · staging kept</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:23%"></div></div><div class="xbytes">1.2 / 5.1 GB</div></div>
+              <div class="xrate"><span class="xleft">resumable</span></div>
+              <span class="chip"><span class="dot dot--halt" aria-hidden="true"></span>canceled</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--secondary btn--sm">Resume…</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="scenenote">Smallest change, fixes the exact screenshot: the op bar survives closing the sheet (the NodeDetail idiom), and the strip lists what is moving. Limits: nothing updates while you are on Overview/Nodes/Serve; a reload rebuilds from <span class="mono">GET /api/v1/jobs</span> (lastLine + new progress field) — fine, but there is no home for filters or longer history.</p>
+  </section>
+
+  <!-- ── 3 · Shape B ─────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Shape B">
+    <div class="scenehead">
+      <h2>3 · Shape B <span class="chip">Global transfers dock</span></h2>
+      <span class="why">the Telemetry-dock idiom (IRI-043 D): footer CTA + draggable right dock, on every page</span>
+    </div>
+    <div class="stage" style="height: 500px;">
+      <div class="fakebar"><span class="mono">Irori</span><span class="fakenav"><a>Overview</a><a>Nodes</a><a>Models</a></span><span class="fakechip" style="margin-left:auto">● Live · 2s</span></div>
+      <div class="ghostcard" style="left:16px; top:60px; width:300px; height:130px;"></div>
+      <div class="ghostcard" style="left:16px; top:204px; width:300px; height:150px;"></div>
+      <div class="ghostcard" style="left:332px; top:60px; width:180px; height:90px;"></div>
+      <aside class="dock is-open" role="dialog" aria-label="Transfers">
+        <div class="dock-head"><h3>Transfers</h3><span class="chip chip--ok"><span class="pulse" aria-hidden="true"></span>live</span><button class="btn btn--ghost btn--sm" id="dockClose">✕</button></div>
+        <div class="dock-body">
+          <div class="xsub"><span class="label">Active · 3</span></div>
+          <div class="dockrow">
+            <div class="dockrow-top"><span class="chip chip--ok" style="flex:none"><span class="dot dot--run" aria-hidden="true"></span>sync</span><span class="xmodel">GLM-5.3-Flash-EXL3-4bpw-TensorFold</span><button class="btn btn--danger btn--sm" data-confirm="d1">Cancel…</button></div>
+            <div class="dockrow-route">nas → DGX-3 · j-4f24 · 1 stream</div>
+            <div class="bar"><div class="bar__fill" style="width:61%"></div></div>
+            <div class="dockrow-meta"><span>99.8 / 163.6 GiB · 108 MB/s</span><span>~10m 30s · 12m</span></div>
+            <div class="dconfirm" id="d1" role="alertdialog" aria-label="Cancel transfer">
+              <p class="stat__sub" style="margin:0 0 6px">Cancel this sync-local? 99.8 GiB stays as resumable staging on DGX-3.</p>
+              <div class="row" style="justify-content:flex-end; gap:8px;">
+                <button class="btn btn--ghost btn--sm" data-confirm-close="d1">Keep running</button>
+                <button class="btn btn--danger btn--sm" data-confirm-close="d1">Cancel transfer</button>
+              </div>
+            </div>
+          </div>
+          <div class="dockrow">
+            <div class="dockrow-top"><span class="chip chip--ok" style="flex:none"><span class="dot dot--run" aria-hidden="true"></span>push</span><span class="xmodel">GLM-5.3-Flash-EXL3</span><button class="btn btn--danger btn--sm">Cancel…</button></div>
+            <div class="dockrow-route">DGX-1 → DGX-2 · cx70+cx71 · 4 streams · j-4f22</div>
+            <div class="bar"><div class="bar__fill" style="width:37%"></div></div>
+            <div class="dockrow-meta"><span>25.2 / 68.2 GB · 184 MB/s summed</span><span>~6m · 3m 40s</span></div>
+          </div>
+          <div class="dockrow">
+            <div class="dockrow-top"><span class="chip chip--ok" style="flex:none"><span class="dot dot--run" aria-hidden="true"></span>queue</span><span class="xmodel">queue download (2 entries)</span><button class="btn btn--danger btn--sm">Cancel…</button></div>
+            <div class="dockrow-route">HF → nas · j-4f19</div>
+            <div class="bar"><div class="bar__fill" style="width:12%"></div></div>
+            <div class="dockrow-meta"><span>10.6 / 88.0 GB · 96 MB/s</span><span>~14m · 41m</span></div>
+          </div>
+          <div class="xsub"><span class="label">Earlier today</span></div>
+          <div class="dockrow">
+            <div class="dockrow-top"><span class="chip" style="flex:none"><span class="dot dot--halt" aria-hidden="true"></span>canceled</span><span class="xmodel">qwen3-8b-q4</span><button class="btn btn--secondary btn--sm">Resume…</button></div>
+            <div class="dockrow-route">nas → DGX-2 · j-4f11 · 1.2/5.1 GB staging kept</div>
+          </div>
+          <div class="dockrow">
+            <div class="dockrow-top"><span class="chip chip--ok" style="flex:none"><span class="dot dot--ok" aria-hidden="true"></span>done</span><span class="xmodel">register-local glm-5.3-flash-exl3-q4</span></div>
+            <div class="dockrow-route">DGX-1 · j-4f02 · 41s</div>
+          </div>
+        </div>
+        <div class="dock-head" style="border-bottom:0; border-top:1px solid var(--border);"><span class="fakechip">updates live · survives navigation & reload</span><button class="btn btn--ghost btn--sm">History…</button></div>
+      </aside>
+      <div class="fakefoot">
+        <span class="mono faint">Irori 0.3.0 · dev-0.3.0-57 · updates every 2 s</span>
+        <span class="row" style="gap:8px;">
+          <button class="btn btn--secondary btn--sm">Telemetry</button>
+          <button class="btn btn--primary btn--sm" id="dockOpen">Transfers <span class="countbub">3</span></button>
+        </span>
+      </div>
+    </div>
+    <p class="scenenote">One click from anywhere, on every page — the dock re-seeds from <span class="mono">GET /api/v1/jobs</span> on load and rides the <span class="mono">job</span>/<span class="mono">job-progress</span> SSE frames, so closing every modal anywhere never strands a transfer again. Condensed rows (kind chip + model + route + bar + meta); Output opens the existing job sheet. Left edge draggable 320–720 px like Telemetry. The count bubble doubles as the "something is moving" glance.</p>
+  </section>
+
+  <!-- ── 4 · Shape C ─────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Shape C">
+    <div class="scenehead">
+      <h2>4 · Shape C <span class="chip">#/transfers route</span></h2>
+      <span class="why">full page: filters, pinned active rows, complete history. Most build; pairs with B later.</span>
+    </div>
+    <div class="stage" style="height: 560px;">
+      <div class="fakebar"><span class="mono">Irori</span><span class="fakenav"><a>Overview</a><a>Nodes</a><a>Models</a><a class="is-active">Transfers <span class="countbub">3</span></a><a>Serve</a></span><span class="fakechip" style="margin-left:auto">● Live · 2s</span></div>
+      <div class="card" style="position:absolute; left:16px; right:16px; top:60px; bottom:16px; display:flex; flex-direction:column;">
+        <div class="card__head"><h3>Transfers</h3><div class="row">
+          <span class="chip chip--ok is-on">active</span><span class="chip">push</span><span class="chip">sync</span><span class="chip">queue</span>
+          <select class="select" aria-label="Node" style="min-height:28px; max-width:130px;"><option>any node</option><option>DGX-1</option><option>DGX-2</option><option>DGX-3</option><option>nas</option></select>
+        </div></div>
+        <div class="card__body card__body--flush" style="flex:1; overflow:auto;">
+          <div class="xrow">
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f24 · sync-local GLM-5.3-Flash-EXL3-4bpw-TensorFold</div><div class="xroute">nas → DGX-3 · 1 stream · started 13:58</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:61%"></div></div><div class="xbytes">99.8 / 163.6 GiB</div></div>
+              <div class="xrate">108 MB/s <span class="xleft">· ~10m 30s left</span></div>
+              <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f22 · push GLM-5.3-Flash-EXL3</div><div class="xroute">DGX-1 → DGX-2 · cx70+cx71 · 4 streams · started 14:07</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><div class="xbytes">25.2 / 68.2 GB</div></div>
+              <div class="xrate">184 MB/s <span class="xleft">· ~6m left</span></div>
+              <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f19 · queue download (2 entries)</div><div class="xroute">HF → nas · started 13:26</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:12%"></div></div><div class="xbytes">10.6 / 88.0 GB</div></div>
+              <div class="xrate">96 MB/s <span class="xleft">· ~14m left</span></div>
+              <span class="chip chip--ok"><span class="dot dot--run" aria-hidden="true"></span>running</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--danger btn--sm">Cancel…</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f11 · sync-local qwen3-8b-q4</div><div class="xroute">nas → DGX-2 · canceled 13:41 · staging kept</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:23%"></div></div><div class="xbytes">1.2 / 5.1 GB</div></div>
+              <div class="xrate"><span class="xleft">resumable</span></div>
+              <span class="chip"><span class="dot dot--halt" aria-hidden="true"></span>canceled</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--secondary btn--sm">Resume…</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f07 · push DeepSeek-V4-Flash</div><div class="xroute">DGX-3 → DGX-2 · failed 13:12 · remediation re-pinned keys</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:9%"></div></div><div class="xbytes">3.7 / 41.5 GB</div></div>
+              <div class="xrate"><span class="xleft">ssh auth failed</span></div>
+              <span class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span>failed</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button> <button class="btn btn--secondary btn--sm">Retry</button></div>
+            </div>
+            <div class="xrow-main">
+              <div class="xid"><div class="xmodel">j-4f02 · register-local glm-5.3-flash-exl3-q4</div><div class="xroute">DGX-1 · no transfer · 12:58</div></div>
+              <div><div class="bar bar--lg"><div class="bar__fill" style="width:100%"></div></div><div class="xbytes">41.5 GB registered</div></div>
+              <div class="xrate"><span class="xleft">—</span></div>
+              <span class="chip chip--ok"><span class="dot dot--ok" aria-hidden="true"></span>succeeded</span>
+              <div class="xacts"><button class="btn btn--ghost btn--sm">Output</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="card__body" style="border-top:1px solid var(--border); padding:8px 12px;"><span class="fakechip">older than today → GET /api/v1/jobs pagination (limit ≤ 100)</span></div>
+      </div>
+    </div>
+    <p class="scenenote">The durable home: every transfer ever, filterable by kind/node/state, active rows pinned on top. Costs a route, nav item, and pagination on the list endpoint (today capped at 100). Best as the "History…" target behind shape B's dock footer rather than a rival.</p>
+  </section>
+
+  <!-- ── 5 · Decision ────────────────────────────────────────────────── -->
+  <section class="scene" aria-label="Decision">
+    <div class="scenehead"><h2>5 · Tradeoffs</h2><span class="why">backend work (progress columns, honest cancel, orphan pgid) is common to all three</span></div>
+    <div class="card"><div class="card__body card__body--flush">
+      <table class="table">
+        <thead><tr><th>Shape</th><th>Reachable</th><th>Fixes the screenshot</th><th>Cost</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td><strong>A</strong> · Models strip + op bar</td><td>Models page only</td><td class="mono">yes</td><td class="mono">smallest</td><td>IRI-044 parity is owed to ModelsView regardless</td></tr>
+          <tr><td><strong>B</strong> · Global dock</td><td class="mono">every page, 1 click</td><td class="mono">yes</td><td class="mono">medium</td><td>reuses the Telemetry-dock idiom; re-seeds on reload</td></tr>
+          <tr><td><strong>C</strong> · #/transfers route</td><td class="mono">every page, 1 click</td><td class="mono">yes</td><td class="mono">largest</td><td>needs list pagination; best as B's history target</td></tr>
+        </tbody>
+      </table>
+    </div></div>
+    <p class="scenenote">Recommendation: A + B now (A is owed anyway; B makes cancel reachable everywhere), C deferred until history matters. All shapes share scene 1's row anatomy and the backend items already scoped in tasks/IRI-048-transfer-tracking-and-cancel.md / IR-131.</p>
+  </section>
+</main>
+
+<p class="mock-note">Static mockup · data illustrative</p>
+
+<script>
+  var MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>';
+  var SUN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+  var btn = document.getElementById("themeToggle");
+  function paint(){ btn.innerHTML = document.documentElement.dataset.theme === "dark" ? SUN : MOON; }
+  btn.onclick = function(){ var d = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = d ? "light" : "dark";
+    try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} paint(); };
+  paint();
+
+  // Inline confirms (row + dock).
+  document.querySelectorAll("[data-confirm]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var box = document.getElementById(b.getAttribute("data-confirm"));
+      if (box) box.classList.add("is-open");
+    });
+  });
+  document.querySelectorAll("[data-confirm-close]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var box = document.getElementById(b.getAttribute("data-confirm-close"));
+      if (box) box.classList.remove("is-open");
+    });
+  });
+
+  // Shape B dock toggle.
+  var dock = document.querySelector(".dock");
+  document.getElementById("dockOpen").addEventListener("click", function(){ dock.classList.add("is-open"); });
+  document.getElementById("dockClose").addEventListener("click", function(){ dock.classList.remove("is-open"); });
+</script>
+</body>
+</html>
