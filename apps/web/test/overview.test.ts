@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { tierFromWidth } from "../src/tiers";
-import type { AnalyticsPoint, AnalyticsSeries, LlmPortSnapshot, SseEvent } from "@irori/core";
+import type { AnalyticsPoint, AnalyticsSeries, HardwareSnapshot, LlmPortSnapshot, SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "../src/api";
 import {
   binFleetPower,
@@ -10,6 +10,7 @@ import {
   feedLines,
   fleetEnergyKwh,
   fleetPowerSeries,
+  fleetTemps,
   fmtEnergy,
   heroDataForPort,
   heroSpark,
@@ -307,6 +308,17 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).toContain('html[data-tier="small"] .hero-grid');
     expect(OVERVIEW_SRC).not.toContain("@media (max-width: 900px)"); // superseded by the tier store
   });
+
+  it("fleet temps strip renders above the heroes on small only; hottest joins the page head (IR-129)", () => {
+    const tempsIdx = OVERVIEW_SRC.indexOf('class="card tempscard');
+    const heroesIdx = OVERVIEW_SRC.indexOf('class="hero-grid section-gap"');
+    expect(tempsIdx).toBeGreaterThan(-1);
+    expect(tempsIdx).toBeLessThan(heroesIdx); // ordered above the serving cards
+    expect(OVERVIEW_SRC).toContain('html[data-tier="medium"] .tempscard'); // small-tier only
+    expect(OVERVIEW_SRC).toContain("— OFFLINE");
+    expect(OVERVIEW_SRC).toContain("hottest <span"); // page-head token on every tier
+    expect(OVERVIEW_SRC).toContain("fleetTemps(");
+  });
 });
 
 describe("width tier store (IR-128)", () => {
@@ -316,6 +328,45 @@ describe("width tier store (IR-128)", () => {
     expect(tierFromWidth(901)).toBe("medium");
     expect(tierFromWidth(1440)).toBe("medium");
     expect(tierFromWidth(1441)).toBe("full");
+  });
+});
+
+describe("fleet temperatures (IR-129)", () => {
+  function snap(gpuTemps: Array<number | null>, cpuTemp: number | null): HardwareSnapshot {
+    return {
+      schemaVersion: 1,
+      agentVersion: "0.3.0",
+      hostname: "h",
+      transport: "ws",
+      timestampMs: 1,
+      cpu: { model: "GB10", cores: 10, usagePct: 10, tempC: cpuTemp, packagePowerW: null },
+      memory: { totalBytes: 1, usedBytes: 0, swapTotalBytes: null, swapUsedBytes: null },
+      unifiedMemory: null,
+      storage: [],
+      network: [],
+      gpus: gpuTemps.map((tempC, index) => ({ index, name: `GPU ${index}`, uuid: null, usagePct: null, tempC, memUsedBytes: null, memTotalBytes: null, powerW: null, powerLimitW: null, smClockMHz: null, smClockMaxMHz: null, throttleReasons: [], processes: [] })),
+    };
+  }
+  const node = (id: string, name: string, online: boolean, snapshot: HardwareSnapshot | null) => ({ id, name, online, snapshot });
+
+  it("orders hottest first across gpu and cpu readings", () => {
+    const r = fleetTemps([
+      node("a", "DGX-1", true, snap([71], 62)),
+      node("b", "DGX-2", true, snap([63], 61)),
+      node("c", "DGX-3", true, snap([58, 88], 57)), // hottest GPU wins the item max
+    ]);
+    expect(r.items.map((i) => i.name)).toEqual(["DGX-3", "DGX-1", "DGX-2"]);
+    expect(r.hottest).toEqual({ name: "DGX-3", tempC: 88 });
+  });
+
+  it("sinks offline nodes and marks sensor-less axes with null", () => {
+    const r = fleetTemps([
+      node("a", "DGX-1", false, snap([50], 50)), // offline: data is history
+      node("b", "DGX-2", true, snap([], null)), // online, no readable sensors
+    ]);
+    expect(r.items[0]).toMatchObject({ name: "DGX-2", gpu: null, cpu: null, max: -1, online: true });
+    expect(r.items[1]).toMatchObject({ name: "DGX-1", online: false, max: -2 });
+    expect(r.hottest).toBeNull();
   });
 });
 
