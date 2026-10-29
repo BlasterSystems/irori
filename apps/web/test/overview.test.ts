@@ -286,6 +286,18 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).not.toContain('aria-label="Lens"');
     expect(OVERVIEW_SRC).not.toContain("60m window");
   });
+
+  it("hero head is title + one mono meta line, chips only when degraded (IR-127)", () => {
+    expect(OVERVIEW_SRC).toContain('class="hero__title"');
+    expect(OVERVIEW_SRC).toContain('class="hero__meta"');
+    expect(OVERVIEW_SRC).toContain("heroStateView");
+    expect(OVERVIEW_SRC).toContain("card--stale");
+    // healthy is the absence of chrome (IR-103 rule): no kind/backend/SERVING
+    expect(OVERVIEW_SRC).not.toContain('">{{ p.kind }}');
+    expect(OVERVIEW_SRC).not.toContain("{{ servingState(");
+    // the ttft/itl placeholder is deleted — null latency stats simply don't render
+    expect(OVERVIEW_SRC).not.toContain("appear with the first requests");
+  });
 });
 
 describe("overview range filter + fleet aggregation (IRI-025)", () => {
