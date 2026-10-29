@@ -4,6 +4,34 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — Cache-user serve execution (IRI-045)
+
+### Fixed
+
+- **Serve start/stop scripts now run as the node's cache user** (IRI-045,
+  ADR-0015): the setup driver spawned scripts as the agent user (root) — on
+  nodes with a `cacheUser` set the engine ran as root even though MODEL_PATH
+  resolved from that user's HF cache. Start **and** stop scripts now run
+  through the ADR-0011 `runuser` shape (scrubbed `XDG_STATE_HOME`/`HF_HOME`/
+  `HF_HUB_CACHE`, the owner's `HOME`, `USER`/`LOGNAME`, ambient `PATH`);
+  the resolved run context persists on the driver record, so a stop after an
+  agent restart — or a mid-run setting change — still stops the engine in the
+  user that started it. A cache user without a passwd entry refuses the start
+  with an actionable error instead of silently running root. Prerequisite:
+  the cache user needs GPU device access and owns the model paths.
+- **`set -u` start scripts no longer die on `$HOME`** (IRI-045): the agent's
+  systemd unit is HOME-less (`./scripts/config.sh: line 340: HOME: unbound
+  variable` → start exit 1 on DGX-1); the driver now injects the agent user's
+  passwd home as `HOME` when neither the ambient env nor the setup env has
+  one, for wrapped and unwrapped starts and stops alike.
+
+### Changed
+
+- **One shared runuser wrap** (IRI-045): the ADR-0011 argv shape moved from
+  four inline copies (`modelctl.ts` ×3, `inventory.ts`) into
+  `apps/agent/src/cache-user.ts` (`runuserWrap`); transfer, local-op, and
+  inventory argv are byte-identical to before.
+
 ## [Unreleased] — TensorFold-native probe classification (IR-125)
 
 ### Fixed

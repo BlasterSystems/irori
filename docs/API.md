@@ -275,6 +275,15 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `MODEL_PATH` and the model is not staged on the head's local store — stage
   transfers first; the agent-side `modelctl path --local` refusal would only
   leave a failed run row behind.
+- **Serve execution user** (IRI-045, ADR-0015): the head agent runs a setup's
+  start and stop scripts as the head node's `cacheUser` when one is set —
+  ADR-0011 `runuser` shape, scrubbed `XDG_STATE_HOME`/`HF_HOME`/`HF_HUB_CACHE`,
+  the owner's `HOME`/`USER`/`LOGNAME`, ambient `PATH`. A cache user without a
+  passwd entry refuses the start (actionable error, never a root fallback);
+  the run context persists so a stop after an agent restart keeps it. Without
+  a cache user scripts run as the agent user with a `HOME` fallback (the
+  systemd unit is HOME-less). The cache user needs GPU device access and read
+  access to the model paths.
 - Identical driver-state replies are not re-announced: an unchanged
   `(status, health, lastError)` produces no `setup-state` SSE event and no row
   write, so the driver-truth poll cannot flood the event feed.
