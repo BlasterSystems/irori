@@ -1,7 +1,8 @@
 # Task: IRI-046 — Overview density tiers (hero chrome, width tiers, fleet temps)
 
 - **Tickets:** IR-127 (hero chrome), IR-128 (width tiers), IR-129 (fleet temps) — sprint 990 (IR Sprint 2)
-- **Status:** mockup approved; implementation not started
+- **Umbrella:** [IR-132](https://blastersystems.atlassian.net/browse/IR-132) — the single implementation pickup; children are linked (Relates) and close with it (2026-10-29)
+- **Status:** mockup approved; implementation not started (reviewed 2026-10-29: zero apps/web commits since the mockup merge 76215e4 — IR-132 records the evidence)
 - **Mockup:** `mockups/overview-v4.html` + `mockups/PLAN.md` (rounds 3 and 3b are the approved spec)
 
 ## Objective
