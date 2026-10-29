@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { HardwareSnapshot, NodeInfo, SetupInfo } from "@irori/core";
 import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries } from "@irori/core";
 import { live } from "../live";
+import { tier } from "../tiers";
 import NodeCard from "./NodeCard.vue";
 import NodeModal from "./NodeModal.vue";
 import Tip from "./Tip.vue";
@@ -432,15 +433,23 @@ function heroStateView(p: HeroProcess): HeroStateView {
       </p>
     </div>
     <div class="row">
-      <div class="seg" role="group" aria-label="History range">
+      <!-- IR-128: one shared range state, two surfaces — seg at full, native
+           select below full (mockups/overview-v4.html). -->
+      <div v-if="tier === 'full'" class="seg" role="group" aria-label="History range">
         <button v-for="r in OVERVIEW_RANGES" :key="r.value" :class="{ 'is-active': range === r.value }" @click="range = r.value">{{ r.label }}</button>
       </div>
+      <template v-else>
+        <label class="visually-hidden" for="rangeSelect">History range</label>
+        <select id="rangeSelect" v-model="range" class="select range-select">
+          <option v-for="r in OVERVIEW_RANGES" :key="r.value" :value="r.value">{{ r.label }}</option>
+        </select>
+      </template>
       <button class="btn btn--primary" @click="addOpen = true">Add node…</button>
     </div>
   </div>
 
   <!-- Serving processes: one card per running setup, then detected engines -->
-  <section v-if="heroProcesses.length > 0" class="hero-grid" :class="{ 'hero-grid--single': heroProcesses.length === 1 }" style="margin-bottom: 12px;">
+  <section v-if="heroProcesses.length > 0" class="hero-grid section-gap" :class="{ 'hero-grid--single': heroProcesses.length === 1 }">
     <article v-for="p in heroProcesses" :key="p.key" class="card" :class="{ 'card--stale': isProbeStale(p) }">
       <div class="card__head">
         <div class="row" style="min-width: 0;">
@@ -458,7 +467,9 @@ function heroStateView(p: HeroProcess): HeroStateView {
           <div v-if="showTtft(p.hero)" class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">{{ ms(p.hero.ttftP95Ms) }}</span><span v-if="p.hero.e2eP95Ms !== null" class="stat__sub">E2E {{ Math.round(p.hero.e2eP95Ms) }} ms</span></div>
           <div v-if="showItl(p.hero)" class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
         </div>
-        <LensChartVue v-if="charts.get(p.key) !== undefined" :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
+        <!-- IR-128: sparklines hidden ONLY on small — shown on medium and
+             full (owner final call). -->
+        <LensChartVue v-if="tier !== 'small' && charts.get(p.key) !== undefined" :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
       </div>
     </article>
   </section>
@@ -467,7 +478,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
     <span style="letter-spacing: 0; text-transform: none;">start a setup on the Serve page — it appears here while it runs</span>
   </div>
 
-  <h2 style="margin: 20px 0 10px;">Nodes</h2>
+  <h2 class="h2-gap">Nodes</h2>
   <section v-if="sparkNodes.length > 0" class="cols cols-3">
     <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" :llm="live.getLlm(node.id)" />
   </section>
@@ -477,11 +488,11 @@ function heroStateView(p: HeroProcess): HeroStateView {
   </div>
 
   <!-- Fleet power + NAS store -->
-  <section class="hero-grid" style="margin: 20px 0 12px;">
+  <section class="hero-grid section-gap">
     <article class="card">
       <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
       <div class="card__body" style="padding-top: 12px;">
-        <div class="statgrid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+        <div class="statgrid statgrid--3">
           <div class="stat"><span class="stat__label">Fleet now<Tip text="fleet = sparks only · the NAS is excluded (no power telemetry)" /></span><span class="stat__value">{{ fleetNowText }}</span></div>
           <div class="stat"><span class="stat__label">Energy · {{ rangeLabel }}<Tip text="average draw across the window" /></span><span class="stat__value">{{ energyKwhText ?? "—" }}<template v-if="energyKwhText !== null"> <span class="stat__sub" style="display: inline;">kWh</span></template></span></div>
           <div class="stat"><span class="stat__label">Cost · {{ rangeLabel }}<Tip v-if="energyCost !== null" :text="`@ ${energyCost.pricePerKwh} ${CURRENCY_SYMBOL[energyCost.currency]}/kWh · hub setting`" /></span><span class="stat__value">{{ costText ?? "—" }}</span></div>
@@ -496,7 +507,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
         <div style="margin-top: 14px;">
           <span class="label">fleet draw<Tip text="selected window · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average · hover a bar for its slot and energy" /></span>
-          <svg viewBox="0 0 600 90" preserveAspectRatio="none" style="width: 100%; height: 96px; display: block; margin-top: 6px;" aria-hidden="true" @pointermove="onBarMove" @pointerleave="barHover = null">
+          <svg class="powerchart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true" @pointermove="onBarMove" @pointerleave="barHover = null">
             <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" :opacity="barHover === null || barHover.index === i ? 1 : 0.45" />
             <line x1="0" :y1="BAR_TOP" :x2="600" :y2="BAR_TOP" stroke="var(--border-strong)" stroke-width="1.25" stroke-dasharray="4 3" />
             <line v-if="avgLineY !== null" x1="0" :y1="avgLineY" :x2="600" :y2="avgLineY" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3" />
@@ -535,7 +546,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
         <div class="row row--between">
           <span class="label">Tokens · {{ rangeLabel }}<Tip v-if="tokenCost !== null" :text="tokenPriceTip" /></span>
         </div>
-        <div class="statgrid" style="grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 8px;">
+        <div class="statgrid" style="margin-top: 8px;">
           <div class="stat"><span class="stat__label">Input</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.input) }}</span></div>
           <div class="stat"><span class="stat__label">Cached</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.cached) }}</span></div>
           <div class="stat"><span class="stat__label">Output</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.generated) }}</span></div>
@@ -546,10 +557,10 @@ function heroStateView(p: HeroProcess): HeroStateView {
   </section>
 
   <!-- All event classes in one feed (owner decision) -->
-  <section class="card" style="margin-top: 20px; margin-bottom: 12px;">
+  <section class="card section-gap">
     <div class="card__head"><h3>Telemetry</h3><span class="chip">streaming</span></div>
     <div class="card__body card__body--flush">
-      <div ref="feedLog" class="log" style="border: 0; border-radius: 0 0 var(--radius) var(--radius); min-height: 120px; max-height: 220px;">
+      <div ref="feedLog" class="log feedlog">
         <div v-for="(line, i) in feed" :key="`${line.t}-${i}`"><span class="dim">{{ fmtBucket(line.t, "minute") }}</span> {{ line.text }}</div>
         <div v-if="feed.length === 0" class="dim">waiting for events…</div>
       </div>
@@ -609,9 +620,49 @@ function heroStateView(p: HeroProcess): HeroStateView {
   border-top: 1px solid var(--border);
   margin: 14px 0;
 }
-@media (max-width: 900px) {
-  .hero-grid {
-    grid-template-columns: 1fr;
-  }
+/* Page rhythm classes (IR-128): CSS-reachable so the small tier can tighten
+   them — inline margins could not be overridden. */
+.section-gap { margin: 20px 0 12px; }
+.h2-gap { margin: 20px 0 10px; }
+.powerchart { width: 100%; height: 96px; display: block; margin-top: 6px; }
+.feedlog { border: 0; border-radius: 0 0 var(--radius) var(--radius); min-height: 120px; max-height: 220px; }
+/* ── IR-128: width tiers. The tier store (src/tiers.ts) mirrors small ≤900 /
+   medium 901–1440 / full >1440 onto <html data-tier>; 900 matches the old
+   .hero-grid media collapse. ── */
+html[data-tier="small"] .hero-grid {
+  grid-template-columns: 1fr;
 }
+/* Small tier: compact reflow. 12px page gutters live in iroiri.css; real
+   44px tap targets are preserved (the 34px compromise applied only to the old
+   seg buttons, never to the select or the CTA). */
+html[data-tier="small"] .section-gap { margin: 12px 0; }
+html[data-tier="small"] .h2-gap { margin: 12px 0 8px; }
+html[data-tier="small"] .pagehead { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; margin-bottom: var(--space-3); }
+html[data-tier="small"] .pagehead h1 { font-size: 18px; }
+html[data-tier="small"] .pagehead p { font-size: 11.5px; margin: 0; width: 100%; order: 3; }
+html[data-tier="small"] .pagehead > .row { width: 100%; }
+html[data-tier="small"] .btn { min-height: 44px; padding: 0 12px; font-size: 12px; }
+html[data-tier="small"] .card__head { padding: 7px 10px; }
+html[data-tier="small"] .card__body { padding: 9px 10px; }
+html[data-tier="small"] h2 { font-size: 15px; }
+html[data-tier="small"] h3 { font-size: 14px; }
+/* The meta must not squeeze the title to nothing; the head row wraps instead. */
+html[data-tier="small"] .hero__title { font-size: 15px; min-width: 8ch; }
+html[data-tier="small"] .hero__meta { font-size: 10.5px; flex: none; }
+html[data-tier="small"] .card__head .row { flex-wrap: wrap; }
+html[data-tier="small"] .statgrid { gap: 7px 10px; }
+html[data-tier="small"] .statgrid,
+html[data-tier="small"] .statgrid--3,
+html[data-tier="small"] .statgrid--6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+html[data-tier="small"] .stat__label { font-size: 10px; letter-spacing: 0.07em; }
+html[data-tier="small"] .stat__value { font-size: 15px; line-height: 1.15; }
+html[data-tier="small"] .stat__sub { font-size: 10px; }
+html[data-tier="small"] .statgrid .stat__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html[data-tier="small"] .bar { height: 5px; }
+html[data-tier="small"] .powerchart { height: 64px; }
+html[data-tier="small"] .barrow { font-size: 11px; grid-template-columns: 46px 1fr auto; gap: 8px; }
+html[data-tier="small"] .barrow + .barrow { margin-top: 6px; }
+html[data-tier="small"] .log { font-size: 11px; line-height: 1.5; padding: 8px 10px; }
+html[data-tier="small"] .feedlog { min-height: 96px; max-height: 118px; }
+html[data-tier="small"] .range-select { min-height: 44px; }
 </style>
