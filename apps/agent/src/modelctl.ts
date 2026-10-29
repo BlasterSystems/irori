@@ -541,7 +541,7 @@ export interface RunOutcome {
 export function runStreaming(
   argv: string[],
   opts: { cwd?: string; env?: Record<string, string>; onLine: (line: string) => void },
-): { done: Promise<RunOutcome>; cancel: () => void } {
+): { done: Promise<RunOutcome>; pid?: number; cancel: () => void } {
   const child: ChildProcess = spawn(argv[0]!, argv.slice(1), {
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -582,6 +582,9 @@ export function runStreaming(
   });
   return {
     done,
+    // IR-131: the detached group leader's pid — the negative of it is the pgid
+    // the persisted active-job registry uses to kill orphans after a crash.
+    pid: child.pid,
     cancel: () => {
       canceled = true;
       const pid = child.pid;

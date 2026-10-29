@@ -264,4 +264,17 @@ describe("createLiveStore", () => {
     expect(store.events.value.length).toBe(feedAfterStart + 2);
     store.stop();
   });
+
+  it("stores parsed transfer progress from the job-progress frame (IR-131)", async () => {
+    const nodeId = nodeFixture().id;
+    const jobId = "00000000-0000-4000-8000-000000000011";
+    const { store, es } = await startedStore([nodeFixture()]);
+    es.emit(JSON.stringify({ type: "job", serverTimeMs: 10, nodeId, jobId, kind: "push", status: "running", exitCode: null, durationMs: null, params: { name: "glm", jobs: 1 } }));
+    es.emit(JSON.stringify({ type: "job-progress", serverTimeMs: 11, nodeId, jobId, seq: 1, line: " 2,713,533  45%  1.00MB/s  0:00:03", progress: { bytes: 2_713_533, percent: 45, rateBytesPerSec: 1_048_576, etaSeconds: 3 } }));
+    expect(store.jobs.get(jobId)?.progress).toEqual({ bytes: 2_713_533, percent: 45, rateBytesPerSec: 1_048_576, etaSeconds: 3 });
+    // A raw-only frame (multi-stream hub) leaves the last parsed value alone.
+    es.emit(JSON.stringify({ type: "job-progress", serverTimeMs: 12, nodeId, jobId, seq: 2, line: "another stream line" }));
+    expect(store.jobs.get(jobId)?.progress).toEqual({ bytes: 2_713_533, percent: 45, rateBytesPerSec: 1_048_576, etaSeconds: 3 });
+    store.stop();
+  });
 });

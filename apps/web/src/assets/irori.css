@@ -135,6 +135,11 @@ button { font: inherit; color: inherit; }
 .iconbtn:hover { color: var(--fg); border-color: var(--ink); }
 .iconbtn svg { width: 16px; height: 16px; }
 
+/* ── Transfer count bubble (IR-131, promoted from mockups/IRI-048) ─── */
+.countbub { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 4px;
+  margin-left: 5px; border: 1px solid var(--border-strong); border-radius: 8px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--fg); background: var(--surface); }
+
 /* ── Tier chrome (IR-128) ──────────────────────────────────────────── */
 /* Below full width the topbar hosts a hamburger disclosure menu; the range
    seg yields to a native select (v-if in the views — the class carries the

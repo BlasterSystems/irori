@@ -7,6 +7,7 @@ import lensChartSource from "../src/components/LensChart.vue?raw";
 import sparklineSource from "../src/components/Sparkline.vue?raw";
 import analyticsViewSource from "../src/components/AnalyticsView.vue?raw";
 import modelsViewSource from "../src/components/ModelsView.vue?raw";
+import transfersDockSource from "../src/components/TransfersDock.vue?raw";
 import appSource from "../src/App.vue?raw";
 import llmPanelSource from "../src/components/LlmPanel.vue?raw";
 
@@ -161,4 +162,19 @@ it("nav collapses to a 44px hamburger disclosure below full width (IR-128)", () 
   expect(appSource).toContain("navToggleBtn.value?.focus()"); // Escape returns focus (APG)
   expect(cssSource).toContain(".navmenu {");
   expect(cssSource).toContain('html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }');
+});
+
+it("transfers stay reachable after every close: dock + op bar + honest cancel (IR-131)", () => {
+  // Shape B: the global dock re-seeds from GET /api/v1/jobs and never shows a
+  // fake percent for multi-stream transfers.
+  expect(transfersDockSource).toContain("void live.refreshJobs(); // reload/reopen re-seed");
+  expect(transfersDockSource).toContain("no progress available");
+  expect(transfersDockSource).toContain('role="alertdialog"');
+  expect(transfersDockSource).toContain("await cancelJob(job.id);");
+  // Shape A: ModelsView keeps the IRI-044 parity bar after closeJob().
+  expect(modelsViewSource).toContain('aria-label="Active transfer"');
+  expect(modelsViewSource).toContain("confirmOpBarCancel");
+  // Shape B entry: the footer CTA with the live count bubble.
+  expect(appSource).toContain('aria-label="Open transfers"');
+  expect(cssSource).toContain(".countbub {");
 });

@@ -289,24 +289,30 @@ async function boot(): Promise<void> {
   // staged-transfer engine (progress parsing + stage chaining).
   const jobEvents = {
     onOutput: async (nodeId: string, jobId: string, seq: number, line: string) => {
-      await jobsService.onOutput(nodeId, jobId, seq, line);
+      const progress = await jobsService.onOutput(nodeId, jobId, seq, line);
       await setupsService.onJobOutput(nodeId, jobId, seq, line);
       // IRI-017: modelctl progress events → download_queue byte/speed columns.
       await downloadQueue.onJobOutput(jobId, line);
       const now = Date.now();
       if (now - (progressSentAt.get(jobId) ?? 0) >= 1000) {
         progressSentAt.set(jobId, now);
-        sse.send({ type: "job-progress", serverTimeMs: now, nodeId, jobId, seq, line });
+        // IR-131: parsed percent/rate/ETA ride the frame when the hub could
+        // parse the line (single-stream transfers); raw line otherwise.
+        sse.send({ type: "job-progress", serverTimeMs: now, nodeId, jobId, seq, line, ...(progress !== null ? { progress } : {}) });
       }
+      return progress;
     },
     onDone: async (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => {
       progressSentAt.delete(jobId);
       await jobsService.onDone(nodeId, jobId, status, exitCode);
       await setupsService.onJobDone(nodeId, jobId, status, exitCode);
     },
+    onCancelAck: (nodeId: string, jobId: string) => jobsService.onCancelAck(nodeId, jobId),
     onCatalog: jobsService.onCatalog,
     // IRI-012 (ADR-0007): the fresh hello's agentVersion settles update jobs.
     onHello: (nodeId: string, agentVersion: string) => jobsService.settleAgentUpdate(nodeId, agentVersion),
+    // IR-131: rows the fresh agent no longer runs are dead processes.
+    onOrphans: (nodeId: string, activeJobs: Array<{ jobId: string }> | undefined) => jobsService.settleOrphansOnHello(nodeId, activeJobs),
   };
 
   const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, setupEvents: {

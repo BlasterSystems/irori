@@ -62,9 +62,13 @@ d("job settle events (db integration)", () => {
     expect(mine[0]!.params).toEqual(params);
   });
 
-  it("emits canceled on cancel", async () => {
+  it("emits canceled only once the agent confirms the kill (IR-131)", async () => {
     const row = await service.create(nodeId, "sync-local", {});
-    await service.cancel(row.id);
+    const result = await service.cancel(row.id);
+    expect(result).toEqual({ ok: true });
+    // Verify-before-write: no settle event until the ack or job-done.
+    expect(settled.filter((s) => s.jobId === row.id)).toHaveLength(0);
+    await service.onCancelAck(nodeId, row.id);
     // Fixture-relative: earlier tests in this suite share the settled array.
     const mine = settled.filter((s) => s.jobId === row.id);
     expect(mine).toHaveLength(1);

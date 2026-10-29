@@ -65,6 +65,8 @@ function serializeJob(job: {
   kind: string;
   status: string;
   params: unknown;
+  progress: { bytes: number | null; percent: number | null; rateBytesPerSec: number | null; etaSeconds: number | null } | null;
+  cancelRequestedAt: Date | null;
   exitCode: number | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -76,6 +78,8 @@ function serializeJob(job: {
     kind: job.kind,
     status: job.status,
     params: job.params,
+    progress: job.progress,
+    cancelRequestedAt: job.cancelRequestedAt?.toISOString() ?? null,
     exitCode: job.exitCode,
     createdAt: job.createdAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
@@ -823,9 +827,18 @@ export function createApp(deps: AppDeps): Express {
     if (id === null) return res.status(400).json({ error: "invalid job id" });
     const jobs = deps.getJobs();
     if (jobs === null) return res.status(503).json({ error: "database unavailable" });
-    const ok = await jobs.cancel(id);
-    if (!ok) return res.status(409).json({ error: "job not cancelable" });
-    res.status(204).end();
+    const result = await jobs.cancel(id);
+    if (result.ok) return res.status(204).end();
+    // IR-131: honest failures — the UI must never believe a transfer stopped
+    // when its process is still running (offline node / already canceling).
+    const messages: Record<Exclude<(typeof result)["reason"], "ok">, string> = {
+      missing: "job not found",
+      terminal: "job not cancelable",
+      canceling: "cancel already in flight",
+      "agent-update": "agent-update cancel is not supported",
+      offline: "node offline — the transfer process may still be running",
+    };
+    return res.status(409).json({ error: messages[result.reason] });
   });
 
   // ---- IRI-014: server-side download queue ----

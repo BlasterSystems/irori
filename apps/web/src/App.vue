@@ -11,6 +11,7 @@ import UsageView from "./components/UsageView.vue";
 import ChatsView from "./components/ChatsView.vue";
 import HubSettingsModal from "./components/HubSettingsModal.vue";
 import TelemetryDrawer from "./components/TelemetryDrawer.vue";
+import TransfersDock from "./components/TransfersDock.vue";
 import { parseHash, chatsHash, usageHash, type Route } from "./router";
 import { tier } from "./tiers";
 import { loadServerVersion, serverCadenceMs, serverTag, serverVersion } from "./version";
@@ -79,6 +80,16 @@ const hubSettingsOpen = ref(false);
 
 /** IRI-043: footer CTA → always-available live telemetry drawer. */
 const telemetryOpen = ref(false);
+
+/** IR-131 shape B: footer CTA → the cross-page transfers dock. */
+const transfersOpen = ref(false);
+const activeTransfers = computed(() => {
+  let n = 0;
+  for (const job of live.jobs.values()) {
+    if (job.status === "queued" || job.status === "running") n++;
+  }
+  return n;
+});
 
 const isDark = ref(
   typeof document !== "undefined" &&
@@ -165,12 +176,16 @@ onUnmounted(() => {
   <footer class="foot">
     <div class="container foot__in" style="justify-content: space-between">
       <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template><template v-if="intervalText"> · {{ intervalText }}</template><template v-if="wattsText"> · {{ wattsText }}</template></span>
-      <button class="btn btn--ghost btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
+      <span class="row" style="gap: 8px;">
+        <button class="btn btn--ghost btn--sm" aria-label="Open transfers" @click="transfersOpen = true">Transfers<span v-if="activeTransfers > 0" class="countbub">{{ activeTransfers }}</span></button>
+        <button class="btn btn--ghost btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
+      </span>
     </div>
   </footer>
 
   <HubSettingsModal v-if="hubSettingsOpen" @close="hubSettingsOpen = false" />
   <TelemetryDrawer v-if="telemetryOpen" @close="telemetryOpen = false" />
+  <TransfersDock v-if="transfersOpen" @close="transfersOpen = false" />
 </template>
 
 <style scoped>

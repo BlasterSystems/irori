@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes } from "../api";
+import { live } from "../live";
+import { jobLabel } from "../jobs";
 import { fetchSetups } from "../serve";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo } from "@irori/core";
 import {
@@ -688,6 +690,40 @@ async function runJob(nodeId: string, kind: string, params: Record<string, unkno
 }
 
 let jobSeq = 0;
+/** IR-131 IRI-044 parity: the last transfer opened here stays reachable after
+ *  the sheet closes. The bar reads the SSE-updated live store, so it survives
+ *  closeJob() and every drawer; the global dock covers cross-page reach. */
+const lastTransferId = ref<string | null>(null);
+const opDismissedFor = ref<string | null>(null);
+const opBarJob = computed(() => {
+  const id = lastTransferId.value;
+  if (id === null) return null;
+  const j = live.jobs.get(id);
+  if (j === undefined || (j.status !== "queued" && j.status !== "running")) return null;
+  if (job.value?.job.id === id) return null; // the sheet is showing it
+  if (opDismissedFor.value === id) return null;
+  return j;
+});
+function confirmOpBarCancel(): void {
+  const j = opBarJob.value;
+  if (j === null) return;
+  const isBatch = j.kind === "download-queue";
+  confirmAction({
+    title: isBatch ? "Cancel this download batch?" : `Cancel this ${j.kind} transfer?`,
+    body: isBatch
+      ? "Stops the running modelctl batch — every entry sharing this job is marked canceled (resumable staging is kept)."
+      : "Stops the running transfer; whatever it already wrote stays as resumable staging.",
+    danger: "Cancel transfer",
+    run: async () => {
+      try {
+        await cancelJob(j.id);
+      } catch (err) {
+        jobError.value = err instanceof Error ? err.message : String(err);
+      }
+      await refreshQueue();
+    },
+  });
+}
 /** IRI-018: delayed catalog refetch after a terminal delete job (cleared on unmount). */
 let deleteReloadTimer: ReturnType<typeof setTimeout> | undefined;
 async function openJob(id: string): Promise<void> {
@@ -701,6 +737,11 @@ async function openJob(id: string): Promise<void> {
     return;
   }
   if (seq !== jobSeq) return; // a newer drawer opened while fetching
+  // Track the transfer for the persistent op bar (IR-131).
+  if (["sync-local", "push", "download-queue"].includes(job.value.job.kind)) {
+    lastTransferId.value = job.value.job.id;
+    opDismissedFor.value = null;
+  }
   jobPoll = setInterval(async () => {
     if (job.value === null) return;
     if (job.value.job.status === "succeeded" || job.value.job.status === "failed" || job.value.job.status === "canceled") {
@@ -751,13 +792,31 @@ onBeforeUnmount(() => {
       <p class="mono faint">NAS store · catalog.json (schema 3) · no store writes outside modelctl</p>
     </header>
 
+    <!-- IR-131 IRI-044 parity: the last transfer opened here stays reachable
+         after every drawer/sheet close — guarded cancel, live status line. -->
+    <div v-if="opBarJob !== null" class="card" style="margin-bottom: 12px;" aria-label="Active transfer">
+      <div class="card__body" style="padding: 10px 12px;">
+        <div class="row row--between" style="flex-wrap: wrap; gap: 8px;">
+          <span class="row" style="gap: 8px; min-width: 0;">
+            <strong class="stat__sub">Transfer</strong>
+            <span class="chip" :class="opBarJob.cancelRequestedAt !== null ? 'chip--warn' : ''"><span class="dot dot--run" aria-hidden="true"></span> {{ opBarJob.cancelRequestedAt !== null ? "canceling" : opBarJob.kind }}</span>
+            <span class="stat__sub faint" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ jobLabel(opBarJob.params).slice(1) || opBarJob.kind }} · {{ opBarJob.lastLine ?? "waiting for output…" }}</span>
+          </span>
+          <span class="row" style="gap: 8px;">
+            <button class="btn btn--ghost btn--sm" @click="openJob(opBarJob.id)">Show output</button>
+            <button v-if="opBarJob.cancelRequestedAt === null" class="btn btn--danger btn--sm" @click="confirmOpBarCancel">Cancel</button>
+            <button class="btn btn--ghost btn--sm" @click="opDismissedFor = opBarJob!.id">Dismiss</button>
+          </span>
+        </div>
+      </div>
+    </div>
+
     <div class="row row--between row--wrap" style="margin-bottom: 12px">
       <input
         v-model="search"
         class="search"
         type="search"
         placeholder="Search name or repository…"
-        aria-label="Search models"
         @input="onSearchInput"
       />
       <div class="row" style="gap: 8px">

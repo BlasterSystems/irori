@@ -160,6 +160,11 @@ export const llmBuckets = pgTable(
 /** Jobs subsystem: one active job per node (409 otherwise), M4. */
 export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "succeeded", "failed", "canceled"]);
 
+/** Parsed rsync progress for transfer jobs (IR-131); null when the job is
+ *  multi-stream (`--jobs > 1`, interleaved per-stream lines are misleading)
+ *  or modelctl emitted nothing parseable. */
+const jobProgress = jsonb("progress");
+
 export const jobs = pgTable(
   "jobs",
   {
@@ -170,6 +175,11 @@ export const jobs = pgTable(
     kind: text("kind").notNull(),
     status: jobStatusEnum("status").notNull().default("queued"),
     params: jsonb("params").notNull().default(sql`'{}'::jsonb`),
+    progress: jobProgress,
+    /** IR-131: cancel requested but not yet confirmed — the row STAYS running
+     *  (the partial unique index keeps holding the one-active slot) until the
+     *  agent's job-cancel-ack or job-done settles it. */
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
     exitCode: integer("exit_code"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),

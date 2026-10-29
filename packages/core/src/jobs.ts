@@ -60,6 +60,17 @@ export const jobInfoSchema = z.object({
   status: jobStatusSchema,
   /** Structured parameters (paths, model names, flags — no credentials). */
   params: z.record(z.string(), z.unknown()).default({}),
+  /** IR-131: parsed transfer progress (single-stream sync-local/push). */
+  progress: z
+    .object({
+      bytes: z.number().nullable(),
+      percent: z.number().nullable(),
+      rateBytesPerSec: z.number().nullable(),
+      etaSeconds: z.number().nullable(),
+    })
+    .nullish(),
+  /** IR-131: cancel requested but unconfirmed — the row is still running. */
+  cancelRequestedAt: z.string().datetime({ offset: true }).nullish(),
   exitCode: z.number().int().nullable(),
   createdAt: z.string().datetime({ offset: true }),
   startedAt: z.string().datetime({ offset: true }).nullable(),

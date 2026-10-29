@@ -18,6 +18,11 @@ export const helloMsgSchema = z.object({
   agentVersion: z.string().min(1),
   token: z.string().min(1),
   hostname: z.string().min(1),
+  /** IR-131: job ids this agent process is (still) running, from its
+   *  in-memory registry. Absent on pre-IR-131 agents — the hub must NOT
+   *  settle running rows when the field is missing (a ws reconnect without
+   *  a restart still has live jobs the old agent cannot report). */
+  activeJobs: z.array(z.object({ jobId: z.string().uuid(), kind: z.string() })).optional(),
 });
 
 export const snapshotMsgSchema = z.object({

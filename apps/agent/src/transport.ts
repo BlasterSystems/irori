@@ -74,6 +74,8 @@ export interface AgentTransportOptions {
   onUsageAck?: (ids: string[]) => void;
   /** Called after hello-ok on every (re)connection — replay triggers. */
   onReconnect?: () => void;
+  /** IR-131: job ids this agent process is running, reported in every hello. */
+  getActiveJobIds?: () => Array<{ jobId: string; kind: string }>;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -113,6 +115,7 @@ export class AgentTransport {
   private readonly onSetupValidate?: (validateId: string, scripts: string[]) => void;
   private readonly onUsageAck?: (ids: string[]) => void;
   private readonly onReconnect?: () => void;
+  private readonly getActiveJobIds?: () => Array<{ jobId: string; kind: string }>;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -168,6 +171,7 @@ export class AgentTransport {
     this.onSetupValidate = options.onSetupValidate;
     this.onUsageAck = options.onUsageAck;
     this.onReconnect = options.onReconnect;
+    this.getActiveJobIds = options.getActiveJobIds;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -318,6 +322,9 @@ export class AgentTransport {
         agentVersion: this.agentVersion,
         token: this.token,
         hostname: this.hostname,
+        // IR-131: pre-ack agents omit the field; the hub then skips its
+        // orphan reconcile (a blip reconnect still has live jobs).
+        ...(this.getActiveJobIds !== undefined ? { activeJobs: this.getActiveJobIds() } : {}),
       });
     } catch {
       // handleClose takes over; nothing else to do here.
