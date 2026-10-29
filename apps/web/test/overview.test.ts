@@ -195,6 +195,20 @@ describe("feedLines", () => {
     ]);
   });
 
+  it("renders throttled setup-log engine lines with node and setup name (IR-124)", () => {
+    const lines = feedLines(
+      [
+        { type: "setup-log", serverTimeMs: 9, setupId: "s", nodeId: "a", name: "glm-main", line: "loading weights shard 3/4" },
+        { type: "setup-log", serverTimeMs: 10, setupId: "s", nodeId: "zzz", name: "qwen", line: "AVG decode 37.9 tok/s" },
+      ] as SseEvent[],
+      nodeName,
+    );
+    expect(lines.map((l) => l.text)).toEqual([
+      "spark1 · glm-main: loading weights shard 3/4",
+      "node · qwen: AVG decode 37.9 tok/s",
+    ]);
+  });
+
   it("caps at the requested length, newest last", () => {
     const events: SseEvent[] = Array.from({ length: 40 }, (_, i) => ({ ...nodeOnline, serverTimeMs: i }) as SseEvent);
     const lines = feedLines(events, nodeName, 30);

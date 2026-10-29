@@ -196,6 +196,31 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     }
   };
 
+  // IR-124: engine output also enters the shared feed, throttled to ≤1 frame
+  // per second per setup with identical consecutive lines skipped — the same
+  // live-only tradeoff as job-progress (a freshly opened drawer waits for the
+  // next line; GET /api/v1/setups/:id/log remains the backfill source).
+  const feedLogState = new Map<string, { lastLine: string; lastMs: number }>();
+  const nameBySetup = new Map<string, string>();
+  const nameOf = async (setupId: string): Promise<string | null> => {
+    const cached = nameBySetup.get(setupId);
+    if (cached !== undefined) return cached;
+    const [row] = await deps.db.select({ name: setups.name }).from(setups).where(eq(setups.id, setupId)).limit(1);
+    if (!row) return null;
+    nameBySetup.set(setupId, row.name);
+    return row.name;
+  };
+  const emitSharedSetupLog = (setupId: string, nodeId: string, line: string): void => {
+    void nameOf(setupId).then((name) => {
+      if (name === null) return;
+      const st = feedLogState.get(setupId);
+      const nowMs = Date.now();
+      if (st !== undefined && (st.lastLine === line || nowMs - st.lastMs < 1000)) return;
+      feedLogState.set(setupId, { lastLine: line, lastMs: nowMs });
+      deps.sse.send({ type: "setup-log", serverTimeMs: nowMs, setupId, nodeId, name, line } satisfies SseEvent);
+    });
+  };
+
   const announce = (setupId: string, status: SetupStatus, health: SetupInfo["health"], lastError: string | null): void => {
     deps.sse.send({ type: "setup-state", serverTimeMs: Date.now(), setupId, status, health, lastError } satisfies SseEvent);
   };
@@ -395,6 +420,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         })
         .returning();
       if (!row) throw new Error("setup insert returned no row");
+      nameBySetup.set(row.id, row.name);
       // The head's LLM probe must watch the script-defined port from now on.
       await ensurePortAssigned(row.headNodeId, row.port);
       return toInfo(row);
@@ -404,6 +430,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const [row] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
       if (!row) throw new SetupNotFoundError("setup not found");
       if (patch.nodes !== undefined) await validateWorkers(patch.nodes, row.headNodeId);
+      if (patch.name !== undefined) nameBySetup.set(id, patch.name);
       await updateRow(id, {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
         ...(patch.port !== undefined ? { port: patch.port } : {}),
@@ -642,6 +669,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const head = await headOf(msg.setupId);
       if (head === null || head !== senderNodeId) return;
       pushLog(msg.setupId, msg.seq, msg.line, msg.ts);
+      emitSharedSetupLog(msg.setupId, head, msg.line);
     },
 
     attachLog(res, setupId) {

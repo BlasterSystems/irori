@@ -562,4 +562,35 @@ d("setups service", () => {
     expect(transfer.stages[0]!.kind).toBe("push");
     expect((transfer.stages[0]!.params as { hosts: string[] }).hosts).toEqual(["piresbruno@spark4.lan"]);
   });
+
+  it("streams throttled, deduped setup-log frames to the shared hub (IR-124)", async () => {
+    const feedSetup = await ctx.service.create({
+      name: "feed-log-setup",
+      kind: "single",
+      model: "Feed-Log-Model",
+      port: 9124,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    const sendSpy = vi.spyOn(sse, "send");
+    const log = (seq: number, line: string) => ctx.service.onDriverLog({ type: "setup-log", setupId: feedSetup.id, seq, line, ts: seq }, ids.head);
+    const setupLogFrames = () => sendSpy.mock.calls.map((c) => c[0]).filter((e) => e.type === "setup-log");
+
+    await log(1, "loading weights shard 3/4");
+    await log(2, "loading weights shard 3/4"); // unchanged line → skipped
+    await log(3, "AVG decode 37.9 tok/s"); // <1s since the last emit → skipped
+    expect(setupLogFrames()).toHaveLength(1);
+    expect(setupLogFrames()[0]).toMatchObject({ type: "setup-log", nodeId: ids.head, name: "feed-log-setup", line: "loading weights shard 3/4" });
+
+    // Real delay, not fake timers: this suite runs against the embedded
+    // Postgres, whose driver wedges under vi.useFakeTimers. The throttle
+    // window is Date.now()-based, so the 1.1s wait IS the behavior under test.
+    await new Promise((r) => setTimeout(r, 1100));
+    await log(4, "AVG decode 37.9 tok/s"); // changed line after the window → emitted
+    expect(setupLogFrames()).toHaveLength(2);
+    sendSpy.mockRestore();
+  });
 });
