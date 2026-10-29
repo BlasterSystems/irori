@@ -244,7 +244,7 @@ function catLabel(category: string): string {
                 <span>
                   <strong>{{ catLabel(row.category) }}</strong>
                   <span v-if="!row.safe" class="chip" title="needs care — opt-in">◇ care</span>
-                  <span v-if="row.category === 'modelctl-staging'" class="chip chip--accent" title="store-volume scope — only the store node reports staging (IRI-046)">NAS store</span>
+                  <span v-if="row.category === 'modelctl-staging'" class="chip chip--accent" title="store-volume scope — only the store node reports staging (IRI-047)">NAS store</span>
                 </span>
                 <span class="row" style="gap: 8px">
                   <span class="stat__sub">{{ row.itemCount }} {{ row.itemCount === 1 ? "item" : "items" }}</span>

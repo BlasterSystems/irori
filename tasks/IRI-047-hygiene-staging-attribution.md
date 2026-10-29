@@ -1,4 +1,11 @@
-# Task: IRI-046 — scope disk-hygiene staging cleanup to the store node
+# Task: IRI-047 — scope disk-hygiene staging cleanup to the store node
+
+- **Ticket:** IR-130 (sprint 990)
+- **Numbering:** originally filed as IRI-046; renumbered to IRI-047 on
+  2026-10-29 because `tasks/IRI-046-overview-density-tiers.md` (Overview
+  density, merged earlier the same day via PR #70) already held that number.
+  Renumbering commit also updates code comments/test titles, SPEC §11.6, the
+  CHANGELOG entry and the research-brief filename.
 
 ## Objective
 
@@ -7,7 +14,7 @@ reclaimable disk. The `modelctl-staging` hygiene category is attributed to the
 store node only (Option A of the research brief); compute nodes with the store
 mounted stop listing duplicate store-staging rows and stop counting store bytes
 in their reclaimable totals. Design decisions live in
-`docs/research/IRI-046-hygiene-staging-nas-attribution-research-brief.md`.
+`docs/research/IRI-047-hygiene-staging-nas-attribution-research-brief.md`.
 
 ## Product manager summary
 
@@ -21,7 +28,7 @@ in their reclaimable totals. Design decisions live in
 - **Success metric:** Only the store node's drawer reports `modelctl-staging`;
   its row is labeled as store scope; compute-node audits and totals exclude it.
 - **Dependencies & constraints:** Confirm the NAS node runs an agent + modelctl
-  (IRI-014) so store-side staging keeps a home; IRI-046 number confirmed free in
+  (IRI-014) so store-side staging keeps a home; IRI-047 number confirmed free in
   the tracker.
 
 ## Acceptance criteria
@@ -85,7 +92,7 @@ in their reclaimable totals. Design decisions live in
   `irori-test-pg`, postgres:16-alpine) — exit 0: apps/server 24 files /
   215 tests (new: `test/cleanup-service.test.ts` ×5 pure scoping; m7 scoping
   integration ×1, expectations follow the shared-DB `pickStoreNode` answer),
-  apps/agent 192, web markup guards including the new IRI-046 block.
+  apps/agent 192, web markup guards including the new IRI-047 block.
 - Build: `pnpm build` — exit 0 (server tsc, agent esbuild, web vite).
 - Documentation check: `.agentic/bin/docs-check` — no gaps.
 - Live smoke: built server (`apps/server/dist`) on a fresh disposable DB;

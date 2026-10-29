@@ -1,7 +1,7 @@
-# IRI-046 research brief — disk hygiene shows NAS staging cleanup on compute nodes
+# IRI-047 research brief — disk hygiene shows NAS staging cleanup on compute nodes
 
 - **Date:** 2026-10-29
-- **Ticket:** IRI-046 (proposed — next free number in this checkout; IRI-046..122 may exist outside it, confirm before filing)
+- **Ticket:** IRI-047 (proposed — next free number in this checkout; IRI-047..122 may exist outside it, confirm before filing)
 - **Owner question:** DGX1's Disk hygiene drawer lists "modelctl staging ◇ care — 3 items — 236 GB" with three `orphaned` rows whose paths are all `/mnt/nas/.staging/...`. Two questions: where is the CTA, and why does DGX1 show cleanup opportunities that belong to the NAS?
 
 ## 2. Current state (evidence)
@@ -57,14 +57,14 @@ Single task (not an epic):
 
 1. **Server:** store-node scoping/filter for `modelctl-staging` in audit persistence + `GET /api/v1/nodes/:id/cleanup` (Option A) — with a repo test (server tests already cover hygiene persistence, `apps/server/src/test/m7.test.ts`).
 2. **Web:** `CleanupDrawer.vue` — scope badge, exclude store-scoped staging from per-node totals, CTA hint line; extend `chrome-markup.test.ts` / `ds-markup.test.ts` guards.
-3. **Docs:** SPEC §11.6 staging paragraph + CHANGELOG; task file `tasks/IRI-046-*.md` from `tasks/task-template.md`.
+3. **Docs:** SPEC §11.6 staging paragraph + CHANGELOG; task file `tasks/IRI-047-*.md` from `tasks/task-template.md`.
 
 ## 6. Risks & open questions
 
 - Confirm the NAS node runs an agent + modelctl so store-side staging keeps a home after scoping (IRI-014 says it exists; verify its config). If the store agent is offline, staging orphans become invisible — acceptable? (fallback: keep last non-store audit flagged stale).
 - Which option: A (server scoping, slightly bigger) vs B (display-only). Decision needed before implementation.
 - `[INFERENCE]` Verify DGX2/DGX3 config (both `nasRoot` and `modelctlPath`) to size the duplication claim.
-- Numbering: confirm IRI-046 is free in the tracker (this checkout tops out at IRI-045 task files + an IRI-123 brief from another stream).
+- Numbering: confirm IRI-047 is free in the tracker (this checkout tops out at IRI-045 task files + an IRI-123 brief from another stream). **Resolved 2026-10-29:** this work was filed as IRI-046 but collided with the Overview density task file (IRI-046, shipped same day via PR #70); renumbered to IRI-047 in PR (see `tasks/IRI-047-hygiene-staging-attribution.md` Notes).
 
 ## 7. Jira overlap
 

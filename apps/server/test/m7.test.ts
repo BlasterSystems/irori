@@ -187,7 +187,7 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
     expect(rows[0]!.total_wh).toBe(240 + 240); // clamped per bucket before integration
   });
 
-  it("scopes the modelctl-staging audit category to the store node (IRI-046)", async () => {
+  it("scopes the modelctl-staging audit category to the store node (IRI-047)", async () => {
     // The disposable DB is shared by parallel suites, which may hold their own
     // kind:"nas" rows — expectations follow the SAME pickStoreNode answer the
     // service reads, so whichever NAS node resolves, both branches hold.
