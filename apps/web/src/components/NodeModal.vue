@@ -186,7 +186,7 @@ async function copyToken(): Promise<void> {
             <div class="field">
               <label>Model cache user (optional)</label>
               <input v-model="form.cacheUser" class="input mono" placeholder="operator" />
-              <p class="stat__sub">Model transfers and serve engines run as this user (ADR-0011/0015); it needs its own modelctl and GPU access. Empty = the agent user (root).</p>
+              <p class="stat__sub">Model transfers and serve engines run as this user; it needs its own modelctl and GPU access. Empty = the agent user (root).</p>
             </div>
           </div>
         </template>
