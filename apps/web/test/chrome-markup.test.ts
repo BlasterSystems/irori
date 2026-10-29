@@ -7,6 +7,7 @@ import lensChartSource from "../src/components/LensChart.vue?raw";
 import sparklineSource from "../src/components/Sparkline.vue?raw";
 import analyticsViewSource from "../src/components/AnalyticsView.vue?raw";
 import modelsViewSource from "../src/components/ModelsView.vue?raw";
+import appSource from "../src/App.vue?raw";
 import llmPanelSource from "../src/components/LlmPanel.vue?raw";
 
 // vitest's css pipeline returns "" for *.css?raw — read the stylesheet directly.
@@ -150,4 +151,14 @@ it("charts show a hover tooltip; call sites pass unit formatters", () => {
   expect(nodeDetailSource).toContain(':format="tipRate"');
   expect(cssSource).toContain(".charttip {");
   expect(cssSource).toContain("z-index: 6");
+});
+
+it("nav collapses to a 44px hamburger disclosure below full width (IR-128)", () => {
+  expect(appSource).toContain(`v-if="tier === 'full'" class="nav"`);
+  expect(appSource).toContain('class="iconbtn navtoggle"');
+  expect(appSource).toContain(':aria-expanded="navOpen ? \'true\' : \'false\'"');
+  expect(appSource).toContain('id="navMenu"');
+  expect(appSource).toContain("navToggleBtn.value?.focus()"); // Escape returns focus (APG)
+  expect(cssSource).toContain(".navmenu {");
+  expect(cssSource).toContain('html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }');
 });
