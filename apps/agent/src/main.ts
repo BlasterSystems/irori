@@ -7,7 +7,7 @@ import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
 import { runNasDeleteApply } from "./delete-preflight.js";
 import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
-import { JobManager } from "./jobs.js";
+import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
 import { MAX_USAGE_BATCH } from "@irori/core";
 import { UsageBuffer } from "./usage-buffer.js";
@@ -142,6 +142,7 @@ async function run(): Promise<void> {
       modelctlPath: config.modelctlPath,
       hfToken: transport.getHfToken() ?? config.hfToken,
       serverUrl: config.serverUrl,
+      stateDir: config.stateDir,
       agentUser,
       resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
     }),
@@ -255,7 +256,11 @@ async function run(): Promise<void> {
         transport.sendAgentServer({ type: "job-done", jobId, status: "failed", exitCode: null });
       }
     },
-    onJobCancel: (jobId) => jobs.cancel(jobId),
+    onJobCancel: (jobId) => {
+      // IR-131: ack only when the kill signal was actually issued — the hub
+      // settles the row canceled on this, or on the eventual job-done.
+      if (jobs.cancel(jobId)) transport.sendAgentServer({ type: "job-cancel-ack", jobId });
+    },
     onBenchRun: (runId, bench, cfg) => {
       if (!benches.start({ runId, bench, config: cfg })) {
         transport.sendAgentServer({ type: "bench-done", runId, status: "failed", error: "another benchmark is active on this node" });
@@ -300,6 +305,7 @@ async function run(): Promise<void> {
     },
     onUsageAck: (ids) => usageAckHandler?.(ids),
     onReconnect: () => void usageSync.flush(),
+    getActiveJobIds: () => jobs.activeJobs(),
     log,
   });
   // Persisted-driver re-attach runs only after `transport` exists: init
@@ -307,6 +313,12 @@ async function run(): Promise<void> {
   // it — invoked earlier they hit the TDZ and crash-looped dgx3 (IR-125).
   driver.init();
   ensureProbes(config.llmTargets);
+  // IR-131: kill orphans left by a previous process BEFORE the first hello —
+  // the job-done frames buffer offline and replay on hello-ok.
+  await reconcileOrphanedJobs(config.stateDir, {
+    onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
+    onDone: (jobId) => transport.sendAgentServer({ type: "job-done", jobId, status: "failed", exitCode: null }),
+  });
   transport.connect(config.serverUrl);
   usageSync.start();
 

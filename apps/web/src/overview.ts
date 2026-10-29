@@ -1,4 +1,5 @@
 import { GB10_SYSTEM_ENVELOPE_W, type AnalyticsPoint, type AnalyticsSeries, type HardwareSnapshot, type LlmPortSnapshot, type SseEvent } from "@irori/core";
+import { jobLabel } from "./jobs";
 import type { LlmHistoryPoint } from "./api";
 import { fmtBucket, lensChart, type LensChart } from "./analytics";
 
@@ -372,24 +373,6 @@ function fmtDuration(ms: number | null): string {
 
 function pct(n: number | null | undefined): string {
   return typeof n === "number" ? ` · ${Math.round(n)}%` : "";
-}
-
-/** IR-121: the human suffix for a job — the model name when params carry one,
- *  the download-queue batch size otherwise; "" when the job is unlabeled. */
-function jobLabel(params: Record<string, unknown> | undefined): string {
-  if (params === undefined) return "";
-  const name = params.name;
-  if (typeof name === "string" && name.length > 0) return ` ${name}`;
-  const downloads = params.downloads;
-  if (Array.isArray(downloads) && downloads.length > 0) {
-    if (downloads.length === 1) {
-      const d = downloads[0];
-      const n = typeof d === "object" && d !== null && typeof (d as { name?: unknown }).name === "string" ? (d as { name: string }).name : null;
-      return n !== null && n.length > 0 ? ` ${n}` : "";
-    }
-    return ` ${downloads.length} models`;
-  }
-  return "";
 }
 
 /** Maps feed frames to display lines, newest last, capped. One feed for all

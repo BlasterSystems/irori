@@ -18,6 +18,10 @@ export interface JobLive {
   kind: string;
   status: JobInfo["status"];
   params: Record<string, unknown>;
+  /** IR-131: parsed transfer progress when the hub could parse the line. */
+  progress: JobInfo["progress"];
+  /** IR-131: cancel requested but unconfirmed — the job is still running. */
+  cancelRequestedAt: string | null;
   exitCode: number | null;
   durationMs: number | null;
   createdAt: string;
@@ -33,6 +37,8 @@ export function jobLiveFromSummary(summary: JobSummary): JobLive {
     kind: summary.kind,
     status: summary.status,
     params: summary.params,
+    progress: summary.progress ?? null,
+    cancelRequestedAt: summary.cancelRequestedAt ?? null,
     exitCode: summary.exitCode,
     durationMs: null,
     createdAt: summary.createdAt,
@@ -40,6 +46,36 @@ export function jobLiveFromSummary(summary: JobSummary): JobLive {
     finishedAt: summary.finishedAt,
     lastLine: summary.lastLine,
   };
+}
+
+/** IR-121: the human suffix for a job — the model name when params carry one,
+ *  the download-queue batch size otherwise; "" when the job is unlabeled.
+ *  Shared by the Overview feed, the transfer op bar and the dock. */
+export function jobLabel(params: Record<string, unknown> | undefined): string {
+  if (params === undefined) return "";
+  const name = params.name;
+  if (typeof name === "string" && name.length > 0) return ` ${name}`;
+  const downloads = params.downloads;
+  if (Array.isArray(downloads) && downloads.length > 0) {
+    if (downloads.length === 1) {
+      const d = downloads[0];
+      const n = typeof d === "object" && d !== null && typeof (d as { name?: unknown }).name === "string" ? (d as { name: string }).name : null;
+      return n !== null && n.length > 0 ? ` ${n}` : "";
+    }
+    return ` ${downloads.length} models`;
+  }
+  return "";
+}
+
+/** IR-131: rsync streams a transfer job runs with — push defaults to 4 (the
+ *  IR-121 fleet default), sync-local to 1. Multi-stream output interleaves
+ *  per-stream progress2 lines, so the UI must not parse a percent of one
+ *  stream; the dock renders an explicit "no progress" state instead. */
+export function jobStreams(kind: string, params: Record<string, unknown> | undefined): number {
+  if (kind !== "sync-local" && kind !== "push") return 1;
+  const jobsParam = (params ?? {}).jobs;
+  if (typeof jobsParam === "number" && Number.isFinite(jobsParam) && jobsParam >= 1) return Math.floor(jobsParam);
+  return kind === "push" ? 4 : 1;
 }
 
 export async function fetchRecentJobs(limit = 20, signal?: AbortSignal): Promise<JobSummary[]> {

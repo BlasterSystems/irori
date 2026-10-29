@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, type NodeInventory } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type TransferProgress } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -145,6 +145,11 @@ export interface JobRow {
   kind: string;
   status: "queued" | "running" | "succeeded" | "failed" | "canceled";
   params: unknown;
+  /** IR-131: parsed transfer progress for sync-local/push (null otherwise). */
+  progress: { bytes: number | null; percent: number | null; rateBytesPerSec: number | null; etaSeconds: number | null } | null;
+  /** IR-131: cancel requested but unconfirmed — the row stays running (slot
+   *  held) until the agent's ack or job-done settles it. */
+  cancelRequestedAt: Date | null;
   exitCode: number | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -167,10 +172,23 @@ export interface JobsService {
   list(nodeId: string, limit?: number): Promise<JobRow[]>;
   /** Recent jobs across every node, newest first, with their last output line. */
   listAll(limit?: number): Promise<JobSummary[]>;
-  cancel(id: string): Promise<boolean>;
+  /** IR-131: request cancel — marks `canceling` and frames the agent; the row
+   *  settles canceled on the agent's ack or job-done, never speculatively. */
+  cancel(id: string): Promise<CancelResult>;
   /** Agent frame routing (hub calls these). */
-  onOutput(nodeId: string, jobId: string, seq: number, line: string): Promise<void>;
+  onOutput(nodeId: string, jobId: string, seq: number, line: string): Promise<TransferProgress | null>;
   onDone(nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null): Promise<void>;
+  /** IR-131: the agent confirmed the process-group kill — settle canceled. */
+  onCancelAck(nodeId: string, jobId: string): Promise<void>;
+  /**
+   * IR-131: settle rows this agent process can no longer be running. On every
+   * hello the agent reports its in-memory active jobs; rows of this node that
+   * are running/canceling but NOT reported belong to a dead process (the
+   * agent restarted) — settle them failed so the one-active slot frees.
+   * Old agents send no `activeJobs`; then this is a no-op (a ws reconnect
+   * without a restart still has live jobs the old agent cannot report).
+   */
+  settleOrphansOnHello(nodeId: string, activeJobs: Array<{ jobId: string }> | undefined): Promise<void>;
   onCatalog(nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>): Promise<void>;
   /** NAS catalog entries from the model_meta cache, sorted by name. */
   listModels(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date }>>;
@@ -195,6 +213,24 @@ export class JobBusyError extends Error {}
 export class JobDispatchError extends Error {}
 
 const ACTIVE = ["queued", "running"] as const;
+
+/** IR-131: rsync streams a transfer job runs with. push defaults to 4 (IR-121
+ *  fleet default — every hub path passes jobs: 4); sync-local defaults to 1.
+ *  Multi-stream output interleaves per-stream progress2 lines, so the hub
+ *  refuses to parse a "percent of one stream" for it. */
+function transferStreams(kind: string, params: unknown): number {
+  if (kind !== "sync-local" && kind !== "push") return 1;
+  const jobsParam = ((params ?? {}) as { jobs?: unknown }).jobs;
+  if (typeof jobsParam === "number" && Number.isFinite(jobsParam) && jobsParam >= 1) return Math.floor(jobsParam);
+  return kind === "push" ? 4 : 1;
+}
+
+/** Result of a cancel request (IR-131). The row is NOT terminal until the
+ *  agent acks the kill or reports job-done — an offline node is a 409, never
+ *  a silent canceled write. */
+export type CancelResult =
+  | { ok: true }
+  | { ok: false; reason: "missing" | "terminal" | "canceling" | "agent-update" | "offline" };
 
 /** Terminal transition of a job — emitted as an SSE `job` frame (IRI-013). */
 export interface JobSettledEvent {
@@ -330,7 +366,8 @@ export function createJobsService(
     async listAll(limit = 20) {
       const capped = Math.min(Math.max(Math.trunc(limit), 1), 100);
       const rows = (await db.execute(sql`
-        select j.id, j.node_id as "nodeId", j.kind, j.status, j.params,
+        select j.id, j.node_id as "nodeId", j.kind, j.status, j.params, j.progress as "progress",
+               j.cancel_requested_at as "cancelRequestedAt",
                j.exit_code as "exitCode", j.created_at as "createdAt",
                j.started_at as "startedAt", j.finished_at as "finishedAt",
                (select o.line from job_output o where o.job_id = j.id order by o.seq desc limit 1) as "lastLine"
@@ -343,6 +380,8 @@ export function createJobsService(
         kind: string;
         status: JobRow["status"];
         params: unknown;
+        progress: JobRow["progress"];
+        cancelRequestedAt: Date | string | null;
         exitCode: number | null;
         createdAt: Date | string;
         startedAt: Date | string | null;
@@ -354,45 +393,78 @@ export function createJobsService(
         createdAt: new Date(row.createdAt),
         startedAt: row.startedAt === null ? null : new Date(row.startedAt),
         finishedAt: row.finishedAt === null ? null : new Date(row.finishedAt),
+        cancelRequestedAt: row.cancelRequestedAt === null ? null : new Date(row.cancelRequestedAt),
       }));
     },
 
-    async cancel(id) {
-      // Best-effort: the agent also gets the cancel frame (send happens via
-      // the job's node; the hub routes it by the job's node id).
+    async cancel(id): Promise<CancelResult> {
       const [row] = await db.select().from(jobs).where(eq(jobs.id, id)).limit(1);
-      if (!row) return false;
-      if (row.status === "succeeded" || row.status === "failed" || row.status === "canceled") return false;
-      sendToAgent(row.nodeId, { type: "job-cancel", jobId: id });
-      await db.update(jobs).set({ status: "canceled", finishedAt: new Date() }).where(eq(jobs.id, id));
-      onSettled?.({
-        nodeId: row.nodeId,
-        jobId: id,
-        kind: row.kind,
-        status: "canceled",
-        params: (row.params ?? {}) as Record<string, unknown>,
-        exitCode: row.exitCode,
-        durationMs: row.startedAt !== null ? Date.now() - row.startedAt.getTime() : null,
-      });
-      if (row.kind === "hygiene-audit" || row.kind === "hygiene-clean") {
-        await db
-          .update(cleanupRuns)
-          .set({ status: "canceled", finishedAt: new Date() })
-          .where(and(eq(cleanupRuns.jobId, id), eq(cleanupRuns.status, "running")));
-      }
-      return true;
+      if (!row) return { ok: false, reason: "missing" };
+      if (row.status === "succeeded" || row.status === "failed" || row.status === "canceled") return { ok: false, reason: "terminal" };
+      if (row.status === "canceling") return { ok: false, reason: "canceling" };
+      // ADR-0007: agent-update settlement is hello-driven (the restart severs
+      // the socket); killing the update child would brick the agent.
+      if (row.kind === "agent-update") return { ok: false, reason: "agent-update" };
+      // Honest cancel (IR-131): the frame goes first — an offline node never
+      // silently becomes canceled, because the detached modelctl child would
+      // keep running with no row tracking it.
+      if (!sendToAgent(row.nodeId, { type: "job-cancel", jobId: id })) return { ok: false, reason: "offline" };
+      // Verify-before-write: the row STAYS running — the partial unique index
+      // keeps holding the one-active slot until the terminal write (ack or
+      // job-done). The request marker drives the UI's canceling state.
+      const updated = await db
+        .update(jobs)
+        .set({ cancelRequestedAt: new Date() })
+        .where(and(eq(jobs.id, id), inArray(jobs.status, [...ACTIVE])))
+        .returning({ id: jobs.id });
+      if (updated.length === 0) return { ok: false, reason: "terminal" };
+      return { ok: true };
     },
 
-    async onOutput(nodeId, jobId, seq, line) {
+    async onOutput(nodeId, jobId, seq, line): Promise<TransferProgress | null> {
       // Frames are keyed by jobId alone on the wire; verify the job belongs to
       // the sending node so a rogue agent cannot forge another node's output.
-      const [owner] = await db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
-      if (!owner || owner.nodeId !== nodeId) return;
+      const [owner] = await db.select({ nodeId: jobs.nodeId, kind: jobs.kind, params: jobs.params }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
+      if (!owner || owner.nodeId !== nodeId) return null;
       await db.insert(jobOutput).values({ jobId, seq, line });
       // Ring: drop anything beyond the cap for this job.
       await db.execute(sql`
         DELETE FROM job_output WHERE job_id = ${jobId} AND seq <= ${seq - MAX_OUTPUT_LINES}
       `);
+      // IR-131: persist parsed progress for single-stream transfers only —
+      // --jobs>1 interleaves per-stream progress2 lines, and a percent of ONE
+      // stream would be a lie (the modelctl aggregate emitter rides its own PR).
+      if (transferStreams(owner.kind, owner.params) === 1) {
+        const progress = parseTransferProgress(line);
+        if (progress !== null) {
+          await db.update(jobs).set({ progress }).where(eq(jobs.id, jobId));
+          return progress;
+        }
+      }
+      return null;
+    },
+
+    async onCancelAck(nodeId, jobId) {
+      const [owner] = await db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
+      if (!owner || owner.nodeId !== nodeId) return;
+      // The kill signal is issued; settle through the shared terminal path so
+      // cleanup/inventory/feed effects run exactly once (a later job-done
+      // {canceled} hits the settled guard).
+      await service.onDone(nodeId, jobId, "canceled", null);
+    },
+
+    async settleOrphansOnHello(nodeId, activeJobs) {
+      if (activeJobs === undefined) return; // pre-IR-131 agent: no signal
+      const reported = new Set(activeJobs.map((j) => j.jobId));
+      const rows = await db
+        .select({ id: jobs.id, kind: jobs.kind, params: jobs.params, startedAt: jobs.startedAt })
+        .from(jobs)
+        .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])));
+      for (const j of rows) {
+        if (reported.has(j.id)) continue;
+        await db.insert(jobOutput).values({ jobId: j.id, seq: MAX_OUTPUT_LINES, line: "error: agent restarted mid-job — the process is gone" });
+        await service.onDone(nodeId, j.id, "failed", null);
+      }
     },
 
     async onDone(nodeId, jobId, status, exitCode) {

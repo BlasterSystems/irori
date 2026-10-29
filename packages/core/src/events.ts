@@ -116,6 +116,16 @@ export const jobProgressEventSchema = z.object({
   jobId: z.string().uuid(),
   seq: z.number().int().nonnegative(),
   line: z.string(),
+  /** IR-131: parsed transfer progress when the hub could parse the line
+   *  (single-stream sync-local/push); absent for raw-only jobs. */
+  progress: z
+    .object({
+      bytes: z.number().nullable(),
+      percent: z.number().nullable(),
+      rateBytesPerSec: z.number().nullable(),
+      etaSeconds: z.number().nullable(),
+    })
+    .optional(),
 });
 
 /** GPU throttle-reason set changed for one card — computed server-side from

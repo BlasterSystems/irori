@@ -14,6 +14,7 @@ import {
   type SetupEventMsg,
   type SetupLogMsg,
   type SetupValidateResultMsg,
+  type TransferProgress,
   type UsageRequest,
 } from "@irori/core";
 import type { NodeStore } from "@irori/db";
@@ -60,11 +61,15 @@ export interface AgentHubDeps {
   serverVersion: string;
   /** Agent frame routing for the jobs subsystem + catalog cache (M4). */
   jobEvents: {
-    onOutput: (nodeId: string, jobId: string, seq: number, line: string) => Promise<void>;
+    onOutput: (nodeId: string, jobId: string, seq: number, line: string) => Promise<TransferProgress | null>;
     onDone: (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => Promise<void>;
+    /** IR-131: the agent confirmed the process-group kill. */
+    onCancelAck: (nodeId: string, jobId: string) => Promise<void>;
     onCatalog: (nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>) => Promise<void>;
     /** IRI-012: fires on every authenticated hello — settles agent-update jobs. */
     onHello?: (nodeId: string, agentVersion: string) => Promise<unknown>;
+    /** IR-131: settles running rows the freshly-connected agent no longer runs. */
+    onOrphans?: (nodeId: string, activeJobs: Array<{ jobId: string }> | undefined) => Promise<unknown>;
   };
   /** Setup supervision frames (M5): acks, driver events, log lines. All are
    *  verified against the sending node so a rogue agent cannot forge frames
@@ -255,6 +260,8 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         // IRI-012: settle any in-flight agent-update from the fresh version.
         // markSeen is throttled, so this hook is the only unthrottled spot.
         if (deps.jobEvents?.onHello) void deps.jobEvents.onHello(id, msg.agentVersion).catch(() => {});
+        // IR-131: rows the fresh agent no longer runs are dead processes.
+        if (deps.jobEvents?.onOrphans) void deps.jobEvents.onOrphans(id, msg.activeJobs).catch(() => {});
         deps.sse.send({ type: "node-online", serverTimeMs: Date.now(), nodeId: id, agentVersion });
         // Hello is once per connection: record the version immediately (the
         // update gate and drift views read it). Snapshots stay throttled.
@@ -337,10 +344,11 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       log.error(`agentServerFrame ${parsed.data.type} from ${nodeId}`);
       const currentId: string = nodeId;
       const frame = parsed.data;
-      if (frame.type === "job-output" || frame.type === "job-done") {
+      if (frame.type === "job-output" || frame.type === "job-done" || frame.type === "job-cancel-ack") {
         jobChain = jobChain.then(async () => {
           try {
             if (frame.type === "job-output") await deps.jobEvents.onOutput(currentId, frame.jobId, frame.seq, frame.line);
+            else if (frame.type === "job-cancel-ack") await deps.jobEvents.onCancelAck(currentId, frame.jobId);
             else await deps.jobEvents.onDone(currentId, frame.jobId, frame.status, frame.exitCode);
           } catch {
             // Terminal: a transient DB failure must not strand the one-active slot.

@@ -131,9 +131,20 @@ export const setupValidateResultMsgSchema = z.object({
   results: z.array(z.object({ script: z.string(), ok: z.boolean(), error: z.string().nullable() })),
 });
 
+/** Agent → server: the job-cancel frame was received and the kill signal
+ *  (SIGTERM to the process group) has been issued (IR-131). The terminal
+ *  `job-done {canceled}` follows once the process is actually gone; a hub
+ *  that receives neither (agent death) settles via the reaper or the hello
+ *  reconcile. Absent on pre-ack agents — the hub falls back to job-done. */
+export const jobCancelAckMsgSchema = z.object({
+  type: z.literal("job-cancel-ack"),
+  jobId: z.string().uuid(),
+});
+
 export const agentServerMsgSchema = z.discriminatedUnion("type", [
   jobOutputMsgSchema,
   jobDoneMsgSchema,
+  jobCancelAckMsgSchema,
   catalogMsgSchema,
   benchProgressMsgSchema,
   benchDoneMsgSchema,
@@ -147,6 +158,7 @@ export const agentServerMsgSchema = z.discriminatedUnion("type", [
 export type AgentServerMsg = z.infer<typeof agentServerMsgSchema>;
 export type JobRequestMsg = z.infer<typeof jobRequestMsgSchema>;
 export type JobCancelMsg = z.infer<typeof jobCancelMsgSchema>;
+export type JobCancelAckMsg = z.infer<typeof jobCancelAckMsgSchema>;
 export type CatalogRequestMsg = z.infer<typeof catalogRequestMsgSchema>;
 export type JobOutputMsg = z.infer<typeof jobOutputMsgSchema>;
 export type JobDoneMsg = z.infer<typeof jobDoneMsgSchema>;
