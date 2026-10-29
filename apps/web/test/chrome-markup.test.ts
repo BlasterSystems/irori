@@ -52,7 +52,7 @@ it("NodeDetail describes what the hygiene CTA does", () => {
   expect(nodeDetailSource).toContain("dry-run plan first, nothing deleted without a typed confirm");
 });
 
-it("CleanupDrawer scopes staging cleanup to the store node (IRI-046)", () => {
+it("CleanupDrawer scopes staging cleanup to the store node (IRI-047)", () => {
   // Server strips modelctl-staging from non-store audits; the row that survives
   // is store-volume data — labeled and explained as such. The hint names the
   // store volume (true on every node that can see the row), never claims
