@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { createDbHandle, llmBuckets, llmSnapshots, nodes, snapshotBuckets, tokenLedger, cleanupRuns } from "@irori/db";
 import type { Db } from "@irori/db";
+import { pickStoreNode } from "@irori/core";
 import { createTokenLedgerEngine, pruneTokenLedger } from "../src/ledger.js";
 import { createEnergyEngine } from "../src/energy.js";
 import { createAnalyticsService } from "../src/analytics.js";
 import { createJobsService } from "../src/jobs-service.js";
+import { createCleanupService } from "../src/cleanup-service.js";
 
 /**
  * M7 integration: token ledger deltas, analytics folding, energy archive and
@@ -183,5 +185,65 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
     `);
     const rows = res as unknown as Array<{ total_wh: number }>;
     expect(rows[0]!.total_wh).toBe(240 + 240); // clamped per bucket before integration
+  });
+
+  it("scopes the modelctl-staging audit category to the store node (IRI-046)", async () => {
+    // The disposable DB is shared by parallel suites, which may hold their own
+    // kind:"nas" rows — expectations follow the SAME pickStoreNode answer the
+    // service reads, so whichever NAS node resolves, both branches hold.
+    const nasId = randomUUID();
+    await db.insert(nodes).values({
+      id: nasId,
+      name: `m7-nas-${nasId.slice(0, 8)}`,
+      kind: "nas",
+      role: "standalone",
+      host: "nas",
+      agentTokenHash: "x",
+      agentTokenEnc: "x",
+      nasRoot: "/mnt/store",
+    });
+    const auditReport = {
+      generatedAtMs: 1,
+      totalBytes: 1000,
+      freeBytes: 100,
+      categories: [
+        { category: "docker-build-cache", safe: true, rationale: "rebuildable", itemCount: 1, reclaimableBytes: 5 },
+        { category: "modelctl-staging", safe: false, rationale: "store staging", itemCount: 1, reclaimableBytes: 253_397_553_152 },
+      ],
+    };
+    await db.insert(cleanupRuns).values([
+      { nodeId, kind: "audit", status: "succeeded", report: auditReport },
+      { nodeId: nasId, kind: "audit", status: "succeeded", report: auditReport },
+      // Clean rows keep their requested categories (factual history).
+      { nodeId, kind: "clean", status: "succeeded", categories: ["modelctl-staging"], report: { startedAtMs: 1, finishedAtMs: 2, dryRun: false, outcomes: [] } },
+    ]);
+    const cleanup = createCleanupService(db);
+    const store = pickStoreNode(await db.select().from(nodes))!.id;
+
+    const categoriesOf = async (id: string): Promise<string[]> => {
+      const entry = await cleanup.latestAudit(id);
+      // Test-seam cast: the stored jsonb shape is pinned by the pure suite.
+      const report = entry!.report as { categories: Array<{ category: string }> } | null;
+      return (report?.categories ?? []).map((c) => c.category);
+    };
+    // The spark node under test never carries the store root — staging stripped.
+    expect(await categoriesOf(nodeId)).toEqual(["docker-build-cache"]);
+    // The NAS row keeps staging iff it is the resolved store node.
+    const nasCats = await categoriesOf(nasId);
+    if (nasId === store) expect(nasCats).toContain("modelctl-staging");
+    else expect(nasCats).toEqual(["docker-build-cache"]);
+
+    // History audit rows are scoped the same way; clean rows stay factual.
+    const history = await cleanup.history(nodeId);
+    for (const row of history.filter((r) => r.kind === "audit")) {
+      const report = row.report as { categories?: Array<{ category: string }> } | null;
+      expect((report?.categories ?? []).map((c) => c.category)).not.toContain("modelctl-staging");
+    }
+    expect(history.find((r) => r.kind === "clean")!.categories).toEqual(["modelctl-staging"]);
+
+    // Scoped cleanup: this suite's jobId-less rows + the NAS node (cascades).
+    await db.delete(cleanupRuns).where(and(eq(cleanupRuns.nodeId, nasId), isNull(cleanupRuns.jobId)));
+    await db.delete(nodes).where(eq(nodes.id, nasId));
+    await db.delete(cleanupRuns).where(and(eq(cleanupRuns.nodeId, nodeId), isNull(cleanupRuns.jobId)));
   });
 });

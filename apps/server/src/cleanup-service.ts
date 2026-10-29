@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "@irori/db";
 import { cleanupRuns, nodes, settings } from "@irori/db";
-import { HYGIENE_SAFE_CATEGORIES, hygieneCleanParamsSchema } from "@irori/core";
+import { HYGIENE_SAFE_CATEGORIES, hygieneCleanParamsSchema, pickStoreNode } from "@irori/core";
 
 /**
  * Disk-hygiene reads + per-node prevention settings (M7, SPEC §11.6).
@@ -34,6 +34,27 @@ export interface CleanupService {
 
 const PREVENTION_PREFIX = "hygiene:";
 
+/** IRI-046: store staging lives on the store volume — only the store node's
+ *  drawer reports it, so a compute node's reclaimable total never promises
+ *  gigabytes on a volume it does not own (SPEC §11.6). */
+const STORE_ONLY_CATEGORY = "modelctl-staging";
+
+/** Drops the store-scoped staging category from an audit entry unless the row
+ *  belongs to the store node (or no store node resolves — nothing filtered).
+ *  Clean rows keep their requested categories: factual history. Pure — the db
+ *  integration test covers the pickStoreNode wiring around it. */
+export function stripStoreCategory(entry: CleanupEntry, isStoreNode: boolean): CleanupEntry {
+  if (isStoreNode || entry.kind !== "audit") return entry;
+  const report = entry.report;
+  if (report === null || typeof report !== "object" || Array.isArray(report)) return entry;
+  if (!("categories" in report) || !Array.isArray(report.categories)) return entry;
+  const kept = report.categories.filter(
+    (c) => !(typeof c === "object" && c !== null && "category" in c && c.category === STORE_ONLY_CATEGORY),
+  );
+  if (kept.length === report.categories.length) return entry;
+  return { ...entry, report: { ...report, categories: kept } };
+}
+
 interface PreventionState {
   weeklySafePass?: boolean;
   logRotationApplied?: boolean;
@@ -65,12 +86,18 @@ export function createCleanupService(db: Db): CleanupService {
         .where(and(eq(cleanupRuns.nodeId, nodeId), eq(cleanupRuns.kind, "audit")))
         .orderBy(desc(cleanupRuns.createdAt))
         .limit(1);
-      return row ? shape(row) : null;
+      if (!row) return null;
+      // Attribution is by identity, not availability — no online filter
+      // (same pickStoreNode call shape as setups-service).
+      const store = pickStoreNode(await db.select().from(nodes))?.id ?? null;
+      return stripStoreCategory(shape(row), store === null || row.nodeId === store);
     },
 
     async history(nodeId, limit = 20) {
       const rows = await db.select().from(cleanupRuns).where(eq(cleanupRuns.nodeId, nodeId)).orderBy(desc(cleanupRuns.createdAt)).limit(limit);
-      return rows.map(shape);
+      if (rows.length === 0) return [];
+      const store = pickStoreNode(await db.select().from(nodes))?.id ?? null;
+      return rows.map((row) => stripStoreCategory(shape(row), store === null || row.nodeId === store));
     },
 
     async prevention(nodeId) {
