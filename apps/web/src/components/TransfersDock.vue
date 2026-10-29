@@ -119,7 +119,7 @@ async function runCancel(job: JobLive): Promise<void> {
         <div v-if="job.progress?.percent !== null && job.progress?.percent !== undefined" class="bar dockrow-bar">
           <div class="bar__fill" :style="{ width: `${job.progress.percent}%` }"></div>
         </div>
-        <p v-else-if="job.kind === 'sync-local' || job.kind === 'push'" class="stat__sub dockrow-noprogress">no progress available{{ jobStreams(job.kind, job.params) > 1 ? ` (${jobStreams(job.kind, job.params)} streams)` : "" }}</p>
+        <p v-if="job.progress?.percent === null || job.progress?.percent === undefined" class="stat__sub dockrow-noprogress">no progress available{{ jobStreams(job.kind, job.params) > 1 ? ` (${jobStreams(job.kind, job.params)} streams)` : job.kind === "download-queue" ? " (batch)" : "" }}</p>
         <div class="dockrow-meta">
           <span>{{ progressText(job) ?? "—" }}</span>
           <span>{{ [etaText(job), jobElapsed(job, now)].filter((s) => s !== null).join(" · ") }}</span>
