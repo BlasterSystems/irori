@@ -413,6 +413,36 @@ it("detects TensorFold; live{} is used as-is; counters diff when absent", async 
   expect(cacheTurn.prefillTps).toBe(0); // computed Δ100 − cached Δ600 < 0
 });
 
+it("detects TensorFold-native via /api/v0 owned_by; queue/KV fall back to /metrics", async () => {
+  const clock = makeClock();
+  const live = { connections: 1, waiting: 2, decode_tokens_per_second: 0, prefill_tokens_per_second: 0 };
+  const state = {
+    health: { status: "ok", model: "Qwen3.8-Flash-Next", live, version: "1.1.4", backend: "cuda" } as Record<string, unknown>,
+    metrics: "tensorfold:requests_running 0\ntensorfold:kv_cache_usage_ratio{pool=\"0\"} 0.42\n",
+  };
+  const srv = await startTracked({
+    // 1.1+ answers the LM Studio probe with owned_by: tensorfold.
+    "/api/v0/models": () => ({ json: { object: "list", data: [{ id: "Qwen3.8-Flash-Next", owned_by: "tensorfold" }] } }),
+    "/health": () => ({ json: state.health }),
+    "/metrics": () => ({ text: state.metrics }),
+  });
+  const probe = new LlmPortProbe({ port: srv.port, now: clock.now });
+
+  const seed = parseSnapshot(await probe.probe(false));
+  expect(seed.backend).toBe("tensorfold"); // not lmstudio — its applier is a no-op
+  expect(seed.model).toBe("Qwen3.8-Flash-Next");
+  expect(seed.decodeTps).toBe(0);
+  expect(seed.queueRunning).toBe(0); // from /metrics, health has no counters
+  expect(seed.queueWaiting).toBe(2); // live.waiting
+  expect(seed.kvCachePct).toBe(42); // ratio 0.42 → pct
+
+  clock.advance(2000);
+  state.health = { ...state.health, live: { ...live, decode_tokens_per_second: 33.3, prefill_tokens_per_second: 120.5 } };
+  const liveSnap = parseSnapshot(await probe.probe(false));
+  expect(liveSnap.decodeTps).toBe(33.3);
+  expect(liveSnap.prefillTps).toBe(120.5);
+});
+
 // ─── llama.cpp ────────────────────────────────────────────────────────────
 
 it("detects llama.cpp from /slots and diffs slot counters", async () => {
