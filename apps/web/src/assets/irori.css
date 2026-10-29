@@ -135,6 +135,22 @@ button { font: inherit; color: inherit; }
 .iconbtn:hover { color: var(--fg); border-color: var(--ink); }
 .iconbtn svg { width: 16px; height: 16px; }
 
+/* ── Tier chrome (IR-128) ──────────────────────────────────────────── */
+/* Below full width the topbar hosts a hamburger disclosure menu; the range
+   seg yields to a native select (v-if in the views — the class carries the
+   shared sizing). 44px tap-target floors live with the components. */
+.topbar__in { position: relative; }
+.range-select { width: auto; min-width: 96px; font-family: var(--font-mono); font-size: 12.5px; }
+.navmenu { display: none; position: absolute; top: calc(100% - 6px); right: 24px; z-index: 21;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  min-width: 210px; padding: 6px; grid-auto-flow: row; }
+.navmenu.is-open { display: grid; gap: 2px; }
+.navmenu a { padding: 10px 12px; font-size: 14px; font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
+.navmenu a:hover { color: var(--fg); background: var(--surface-2); }
+.navmenu a.is-active { color: var(--fg); box-shadow: inset 2px 0 0 var(--ink); }
+/* Phones get 12px page gutters (the mockup's small-tier density). */
+html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
+
 /* ── Buttons ───────────────────────────────────────────────────────── */
 .btn { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 34px; padding: 0 14px;
   border-radius: var(--radius-sm); border: 1px solid transparent; font-size: 13px; font-weight: 500; cursor: pointer; background: none; white-space: nowrap; }

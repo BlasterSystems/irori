@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { tierFromWidth } from "../src/tiers";
 import type { AnalyticsPoint, AnalyticsSeries, LlmPortSnapshot, SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "../src/api";
 import {
@@ -263,7 +264,7 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).toContain("statgrid statgrid--6");
     expect(OVERVIEW_SRC).toContain(">Telemetry</h3>");
     expect(OVERVIEW_SRC).toContain("Add node…</button>");
-    expect(OVERVIEW_SRC).toContain('class="hero-grid"');
+    expect(OVERVIEW_SRC).toContain('class="hero-grid section-gap"');
     expect(OVERVIEW_SRC).toContain("fetchLlmHistory(nodeId, range.value)");
   });
 
@@ -297,6 +298,24 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).not.toContain("{{ servingState(");
     // the ttft/itl placeholder is deleted — null latency stats simply don't render
     expect(OVERVIEW_SRC).not.toContain("appear with the first requests");
+  });
+
+  it("width tiers: one range state with two surfaces, sparkline hidden only on small (IR-128)", () => {
+    expect(OVERVIEW_SRC).toContain(`v-if="tier === 'full'" class="seg"`);
+    expect(OVERVIEW_SRC).toContain('class="select range-select"');
+    expect(OVERVIEW_SRC).toContain("tier !== 'small' && charts.get(p.key) !== undefined");
+    expect(OVERVIEW_SRC).toContain('html[data-tier="small"] .hero-grid');
+    expect(OVERVIEW_SRC).not.toContain("@media (max-width: 900px)"); // superseded by the tier store
+  });
+});
+
+describe("width tier store (IR-128)", () => {
+  it("bounds the tiers at 900 and 1440 to match the shipped hero-grid collapse", () => {
+    expect(tierFromWidth(320)).toBe("small");
+    expect(tierFromWidth(900)).toBe("small");
+    expect(tierFromWidth(901)).toBe("medium");
+    expect(tierFromWidth(1440)).toBe("medium");
+    expect(tierFromWidth(1441)).toBe("full");
   });
 });
 
