@@ -4,7 +4,7 @@ import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
-import { buildInventory, resolveLocalUser } from "./inventory.js";
+import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
 import { runNasDeleteApply } from "./delete-preflight.js";
 import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager } from "./jobs.js";
@@ -208,6 +208,7 @@ async function run(): Promise<void> {
     cacheUser: () => transport.getCacheUser(),
     agentUser,
     resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
+    resolveCacheHome: (user) => resolveCacheHome(user, { agentUser }),
     events: {
       onEvent: (setupId, event) => transport.sendAgentMsg({ type: "setup-event", setupId, ...event }),
       onLog: (setupId, seq, line, ts) => transport.sendAgentMsg({ type: "setup-log", setupId, seq, line, ts }),

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { MODELCTL_PIN_RE } from "@irori/core";
+import { runuserWrap } from "./cache-user.js";
 
 /**
  * modelctl command building + execution (ADR-0004: Irori never mutates the
@@ -168,26 +169,14 @@ function resolveTransferUser(user: string, ctx: ModelctlCtx): { home: string; bi
   return ownUser ? null : ctx.resolveLocalUser?.(user) ?? null;
 }
 
+/** Path env for a per-user modelctl child (uv installs to ~/.local/bin). */
+function userBinaryPath(binary: string): string {
+  return `${dirname(binary)}:/usr/local/bin:/usr/bin:/bin`;
+}
+
 /** Wraps a bash script in the cache-user runuser env (the ADR-0011 shape). */
 function runuserScript(user: string, resolved: { home: string; binary: string }, script: string): string[] {
-  return [
-    "runuser",
-    "-u",
-    user,
-    "--",
-    "env",
-    "-u",
-    "XDG_STATE_HOME",
-    "-u",
-    "HF_HOME",
-    "-u",
-    "HF_HUB_CACHE",
-    `HOME=${resolved.home}`,
-    `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
-    "bash",
-    "-c",
-    script,
-  ];
+  return runuserWrap(user, resolved.home, { PATH: userBinaryPath(resolved.binary) }, ["bash", "-c", script]);
 }
 
 /** The cache-user subset of ModelctlCtx the runuser wrap needs — IR-120 lets
@@ -215,23 +204,7 @@ export function asCacheUser(argv: string[], ctx: CacheUserCtx, kind: string): { 
   }
   return {
     raw: true,
-    argv: [
-      "runuser",
-      "-u",
-      user,
-      "--",
-      "env",
-      "-u",
-      "XDG_STATE_HOME",
-      "-u",
-      "HF_HOME",
-      "-u",
-      "HF_HUB_CACHE",
-      `HOME=${resolved.home}`,
-      `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
-      resolved.binary,
-      ...argv,
-    ],
+    argv: runuserWrap(user, resolved.home, { PATH: userBinaryPath(resolved.binary) }, [resolved.binary, ...argv]),
   };
 }
 
@@ -306,27 +279,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
         `echo "modelctl $INSTALLED satisfies the ${ctx.pin} gate"`,
       ].join("\n");
       if (resolved === null) return { argv: ["bash", "-c", script], shell: "bash" };
-      return {
-        raw: true,
-        argv: [
-          "runuser",
-          "-u",
-          installUser!,
-          "--",
-          "env",
-          "-u",
-          "XDG_STATE_HOME",
-          "-u",
-          "HF_HOME",
-          "-u",
-          "HF_HUB_CACHE",
-          `HOME=${resolved.home}`,
-          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
-          "bash",
-          "-c",
-          script,
-        ],
-      };
+      return { raw: true, argv: runuserScript(installUser!, resolved, script) };
     }
     case "download-queue": {
       const entries = params.downloads;
@@ -382,27 +335,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       const modelctlBin = resolved === null ? (ctx.modelctlPath ?? "modelctl") : resolved.binary;
       const script = pushPreflightScript({ modelctlBin, name, hosts, jobs, cacheDir: cache, ssh });
       if (resolved === null) return { argv: ["bash", "-c", script], shell: "bash" };
-      return {
-        raw: true,
-        argv: [
-          "runuser",
-          "-u",
-          user!,
-          "--",
-          "env",
-          "-u",
-          "XDG_STATE_HOME",
-          "-u",
-          "HF_HOME",
-          "-u",
-          "HF_HUB_CACHE",
-          `HOME=${resolved.home}`,
-          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
-          "bash",
-          "-c",
-          script,
-        ],
-      };
+      return { raw: true, argv: runuserScript(user!, resolved, script) };
     }
     case "ensure-rsync": {
       // ADR-0014: the push destination needs rsync. Narrow + idempotent by
@@ -521,24 +454,11 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       }
       return {
         raw: true,
-        argv: [
-          "runuser",
-          "-u",
-          user,
-          "--",
-          "env",
-          "-u",
-          "XDG_STATE_HOME",
-          "-u",
-          "HF_HOME",
-          "-u",
-          "HF_HUB_CACHE",
-          `HOME=${resolved.home}`,
-          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
+        argv: runuserWrap(user, resolved.home, { PATH: userBinaryPath(resolved.binary) }, [
           resolved.binary,
           "delete-local",
           name,
-        ],
+        ]),
       };
     }
     case "register-local": {
@@ -560,23 +480,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       }
       return {
         raw: true,
-        argv: [
-          "runuser",
-          "-u",
-          user,
-          "--",
-          "env",
-          "-u",
-          "XDG_STATE_HOME",
-          "-u",
-          "HF_HOME",
-          "-u",
-          "HF_HUB_CACHE",
-          `HOME=${resolved.home}`,
-          `PATH=${dirname(resolved.binary)}:/usr/local/bin:/usr/bin:/bin`,
-          resolved.binary,
-          ...core,
-        ],
+        argv: runuserWrap(user, resolved.home, { PATH: userBinaryPath(resolved.binary) }, [resolved.binary, ...core]),
       };
     }
     case "doctor":

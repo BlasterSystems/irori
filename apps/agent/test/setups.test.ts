@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { SetupDriver, type SetupDriverEvent } from "../src/setups.js";
+import { serveSpawnArgv, SetupDriver, type SetupDriverEvent } from "../src/setups.js";
 
 /** The harness records the setupId alongside the event (the source splits them). */
 type RecordedEvent = SetupDriverEvent & { setupId: string };
@@ -223,6 +223,7 @@ describe("SetupDriver", () => {
       cacheUser: () => "operator",
       agentUser: "root",
       resolveLocalUser: () => null,
+      resolveCacheHome: () => "/home/operator",
       events: { onEvent: () => {}, onLog: () => {} },
     });
     driver.init();
@@ -230,5 +231,155 @@ describe("SetupDriver", () => {
     expect(refusal.ok).toBe(false);
     expect(refusal.error).toContain("MODEL_PATH resolution failed");
     expect(refusal.error).toContain(`no modelctl for cache user "operator"`);
+  });
+
+  it("builds the runuser wrap argv for a cache user and passes unwrapped scripts through (IRI-045)", () => {
+    expect(serveSpawnArgv("/opt/serve/start.sh", { user: "operator", home: "/home/operator" }, "/usr/bin:/bin")).toEqual([
+      "runuser",
+      "-u",
+      "operator",
+      "--",
+      "env",
+      "-u",
+      "XDG_STATE_HOME",
+      "-u",
+      "HF_HOME",
+      "-u",
+      "HF_HUB_CACHE",
+      "HOME=/home/operator",
+      "PATH=/usr/bin:/bin",
+      "USER=operator",
+      "LOGNAME=operator",
+      "/opt/serve/start.sh",
+    ]);
+    expect(serveSpawnArgv("/opt/serve/start.sh", null, undefined)).toEqual(["/opt/serve/start.sh"]);
+    // No ambient PATH → systemd's default (the agent unit sets none itself).
+    expect(serveSpawnArgv("/s.sh", { user: "u", home: "/h" }, undefined)).toContain(
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    );
+  });
+
+  it("skips the wrap when the cache user getter returns null (IRI-045)", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", 'echo "ran HOME=$HOME"; sleep 60');
+    const stop = script(dir, "stop.sh", "true");
+    const logs: RecordedLog[] = [];
+    const driver = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent-modelctl",
+      cacheUser: () => null, // hub without the node setting (IR-101 default)
+      agentUser: "root",
+      resolveCacheHome: () => {
+        throw new Error("must not resolve a home when there is no cache user");
+      },
+      events: { onEvent: () => {}, onLog: (s, seq, line, ts) => logs.push({ setupId: s, seq, line, ts }) },
+    });
+    driver.init();
+    const result = await driver.start(ID, RUN, start, stop, {}, null);
+    expect(result.ok).toBe(true);
+    await waitFor(() => logs.some((l) => l.line.includes("ran HOME=")));
+    expect(logs.some((l) => l.line.includes("serving as cache user"))).toBe(false);
+    await driver.stop(ID, 1000);
+  });
+
+  it("refuses to start when the configured cache user has no passwd entry (IRI-045)", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", "sleep 30");
+    const stop = script(dir, "stop.sh", "true");
+    const driver = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent-modelctl",
+      cacheUser: () => "ghost",
+      agentUser: "root",
+      resolveCacheHome: () => null,
+      events: { onEvent: () => {}, onLog: () => {} },
+    });
+    driver.init();
+    const refusal = await driver.start(ID, RUN, start, stop, {}, null);
+    expect(refusal.ok).toBe(false);
+    expect(refusal.error).toContain(`no passwd entry for cache user "ghost"`);
+    // Refusal happens before anything binds or persists.
+    expect(existsSync(join(dir, "setups.json"))).toBe(false);
+  });
+
+  it("runs the start and stop scripts as the cache user through the wrap (IRI-045)", async () => {
+    const dir = makeDir();
+    // A faithful test double for runuser (there is no setuid tool tests may
+    // call on macOS/CI): applies the env modifications, then execs.
+    const bin = makeDir();
+    const fakeRunuser = join(bin, "runuser");
+    writeFileSync(
+      fakeRunuser,
+      [
+        "#!/bin/bash",
+        "# test double: runuser -u USER -- env [-u NAME]... [K=V]... CMD...",
+        "[ \"$1\" = \"-u\" ] && shift 2",
+        "[ \"$1\" = \"--\" ] && shift",
+        "[ \"$1\" = \"env\" ] && shift",
+        "while [ \"$1\" = \"-u\" ]; do unset \"$2\"; shift 2; done",
+        'while [ $# -gt 0 ] && [ "${1#*=}" != "$1" ]; do export "$1"; shift; done',
+        'exec "$@"',
+      ].join("\n"),
+    );
+    chmodSync(fakeRunuser, 0o755);
+
+    const oldPath = process.env.PATH;
+    const oldHfHome = process.env.HF_HOME;
+    process.env.PATH = `${bin}:${oldPath ?? ""}`;
+    process.env.HF_HOME = "/root/.cache/huggingface"; // must be scrubbed for the wrapped child
+    const events: RecordedEvent[] = [];
+    const logs: RecordedLog[] = [];
+    try {
+      const start = script(dir, "start.sh", 'echo "start HOME=$HOME USER=$USER LOGNAME=$LOGNAME"; echo "HF_HOME=${HF_HOME-UNSET}"; sleep 60');
+      const stop = script(dir, "stop.sh", 'echo "stop HOME=$HOME USER=$USER"');
+      const driver = new SetupDriver({
+        stateDir: dir,
+        modelctlPath: "/nonexistent-modelctl",
+        cacheUser: () => "operator",
+        agentUser: "root",
+        resolveCacheHome: () => "/home/operator",
+        events: { onEvent: (setupId, event) => events.push({ setupId, ...event }), onLog: (s, seq, line, ts) => logs.push({ setupId: s, seq, line, ts }) },
+      });
+      driver.init();
+      const result = await driver.start(ID, RUN, start, stop, {}, null);
+      expect(result.ok).toBe(true);
+      expect(logs.some((l) => l.line.includes("driver: serving as cache user operator (HOME=/home/operator)"))).toBe(true);
+      await waitFor(() => logs.some((l) => l.line.includes("start HOME=/home/operator USER=operator LOGNAME=operator")));
+      // The root agent's HF_HOME must not leak into the wrapped engine.
+      expect(logs.some((l) => l.line.includes("HF_HOME=UNSET"))).toBe(true);
+      // The run context persists so a stop after an agent restart keeps it.
+      const persisted = JSON.parse(readFileSync(join(dir, "setups.json"), "utf8")) as Array<{ runUser: string | null }>;
+      expect(persisted[0]!.runUser).toBe("operator");
+
+      const stopped = await driver.stop(ID, 2000);
+      expect(stopped.ok).toBe(true);
+      await waitFor(() => events.some((e) => e.state === "stopped"));
+      expect(logs.some((l) => l.line.includes("stop HOME=/home/operator USER=operator"))).toBe(true);
+    } finally {
+      if (oldPath !== undefined) process.env.PATH = oldPath;
+      else delete process.env.PATH;
+      if (oldHfHome !== undefined) process.env.HF_HOME = oldHfHome;
+      else delete process.env.HF_HOME;
+    }
+  });
+
+  it("injects a HOME fallback for unwrapped starts when the agent env has none (IRI-045)", async () => {
+    const dir = makeDir();
+    const start = script(dir, "start.sh", 'echo "HOME=$HOME"; sleep 60');
+    const stop = script(dir, "stop.sh", "true");
+    const oldHome = process.env.HOME;
+    delete process.env.HOME; // the systemd agent unit ships no HOME
+    try {
+      const expected = homedir();
+      const result = await h.driver.start(ID, RUN, start, stop, {}, null);
+      expect(result.ok).toBe(true);
+      await waitFor(() => h.logs.some((l) => l.line === `HOME=${expected}`));
+      // Persisted on the record so the stop script inherits it too.
+      const persisted = JSON.parse(readFileSync(join(h.dir, "setups.json"), "utf8")) as Array<{ env: Record<string, string> }>;
+      expect(persisted[0]!.env.HOME).toBe(expected);
+    } finally {
+      if (oldHome !== undefined) process.env.HOME = oldHome;
+    }
+    await h.driver.stop(ID, 1000);
   });
 });
