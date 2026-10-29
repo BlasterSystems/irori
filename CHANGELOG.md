@@ -4,6 +4,18 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
+## [Unreleased] — TensorFold-native probe classification (IR-125)
+
+### Fixed
+
+- **TensorFold 1.1+ engines misclassified as LM Studio** (IR-125): the probe's
+  `/api/v0/models` branch now prefers the `owned_by` classification, so
+  tensorfold-native builds (new health schema, LM-Studio-compatible model
+  list) keep their identity and metrics instead of collapsing to the no-op
+  lmstudio applier. Queue depth and KV fall back to the shared
+  `tensorfold:` prometheus series when the health payload lacks the classic
+  counter/pool block.
+
 ## [Unreleased] — NodeDetail overlay idiom (IR-122)
 
 ### Changed
