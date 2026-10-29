@@ -15,6 +15,11 @@ All notable changes to Irori are recorded here. Format follows
   lmstudio applier. Queue depth and KV fall back to the shared
   `tensorfold:` prometheus series when the health payload lacks the classic
   counter/pool block.
+- **Agent boot crash-looped on nodes with persisted setup state** (IR-125):
+  the setup-driver re-attach ran before the transport existed while its
+  re-announce callbacks close over it, so any node with a `setups.json`
+  record fataled with "Cannot access 'transport' before initialization"
+  on every restart. Driver init now runs after the transport is built.
 
 ## [Unreleased] — NodeDetail overlay idiom (IR-122)
 

@@ -215,7 +215,6 @@ async function run(): Promise<void> {
     capture: captureHooks,
     log,
   });
-  driver.init();
 
   const benches = new BenchRunner(
     {
@@ -302,6 +301,10 @@ async function run(): Promise<void> {
     onReconnect: () => void usageSync.flush(),
     log,
   });
+  // Persisted-driver re-attach runs only after `transport` exists: init
+  // re-announces live records through the event callbacks, which close over
+  // it — invoked earlier they hit the TDZ and crash-looped dgx3 (IR-125).
+  driver.init();
   ensureProbes(config.llmTargets);
   transport.connect(config.serverUrl);
   usageSync.start();
