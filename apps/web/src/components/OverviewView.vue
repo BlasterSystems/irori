@@ -20,6 +20,7 @@ import {
   feedLines,
   fleetEnergyKwh,
   fleetPowerSeries,
+  fleetTemps,
   fmtEnergy,
   granularityMs,
   heroDataForPort,
@@ -28,6 +29,8 @@ import {
   peakDecode,
   powerBarSlot,
   relativeTime,
+  TEMP_CRIT_C,
+  TEMP_WARN_C,
   tokenCostOf,
   tokenTotals,
   type FleetPowerPoint,
@@ -43,6 +46,14 @@ const onlineCount = computed(() => sortedNodes.value.filter((n) => n.online).len
 /** Every spark node - heads included (they serve too); the NAS keeps its own card. */
 const sparkNodes = computed(() => sortedNodes.value.filter((n) => n.kind !== "nas"));
 const sparkIds = computed(() => new Set(sparkNodes.value.map((n) => n.id)));
+
+// ─── fleet temperatures (IR-129): one always-on thermal surface; spark nodes
+// only (the NAS has no thermal telemetry), hottest first, offline last.
+const fleetTempData = computed(() =>
+  fleetTemps(
+    sparkNodes.value.map((n) => ({ id: n.id, name: n.name, online: n.online, snapshot: live.snapshots.get(n.id) })),
+  ),
+);
 
 // ─── range filter (IRI-025): drives the hero charts and the power/token cards
 const range = ref<OverviewRange>("30m");
@@ -429,7 +440,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
     <div>
       <h1>Overview</h1>
       <p>
-        <span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online · {{ heroProcesses.length }} serving</span>
+        <span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online · {{ heroProcesses.length }} serving<template v-if="fleetTempData.hottest !== null"> · hottest <span :class="{ hot: fleetTempData.hottest.tempC >= TEMP_WARN_C }">{{ fleetTempData.hottest.tempC }}°C {{ fleetTempData.hottest.name }}</span></template></span>
       </p>
     </div>
     <div class="row">
@@ -447,6 +458,30 @@ function heroStateView(p: HeroProcess): HeroStateView {
       <button class="btn btn--primary" @click="addOpen = true">Add node…</button>
     </div>
   </div>
+
+  <!-- ── Fleet temperatures (IR-129): small tier only, ordered above the
+       heroes — on phones the node cards are below the fold. Spark nodes only;
+       the NAS is excluded (no power or thermal telemetry). ── -->
+  <section class="card tempscard section-gap" aria-label="Fleet temperatures">
+    <div class="card__head">
+      <div class="row"><h3>Fleet temperatures</h3><Tip text="latest snapshot per node · GPU / CPU package · warn ≥70 °C · critical ≥90 °C · the NAS is excluded (no power or thermal telemetry)" /></div>
+      <span class="mono faint">hottest first</span>
+    </div>
+    <div class="card__body tempsbody">
+      <div class="temps" role="list" aria-label="Fleet temperatures">
+        <span v-for="item in fleetTempData.items" :key="item.id" class="tempitem" :class="{ 'tempitem--down': !item.online }" role="listitem">
+          <span class="tempitem__name">{{ item.name }}</span>
+          <template v-if="item.online">
+            <span v-if="item.gpu === null" class="tempitem__v">— <em>gpu</em></span>
+            <span v-else class="tempitem__v" :class="{ hot: item.gpu >= TEMP_WARN_C, crit: item.gpu >= TEMP_CRIT_C }">{{ item.gpu }}°C <em>gpu</em></span>
+            <span v-if="item.cpu === null" class="tempitem__v">— <em>cpu</em></span>
+            <span v-else class="tempitem__v" :class="{ hot: item.cpu >= TEMP_WARN_C, crit: item.cpu >= TEMP_CRIT_C }">{{ item.cpu }}°C <em>cpu</em></span>
+          </template>
+          <span v-else class="tempitem__v hot">— OFFLINE</span>
+        </span>
+      </div>
+    </div>
+  </section>
 
   <!-- Serving processes: one card per running setup, then detected engines -->
   <section v-if="heroProcesses.length > 0" class="hero-grid section-gap" :class="{ 'hero-grid--single': heroProcesses.length === 1 }">
@@ -620,6 +655,24 @@ function heroStateView(p: HeroProcess): HeroStateView {
   border-top: 1px solid var(--border);
   margin: 14px 0;
 }
+/* ── Fleet temperatures (IR-129): small tier only ──────────────────────
+   Medium and full drop the strip: every node card already shows GPU/CPU
+   temperature with its bar, so the strip is duplicate information there. */
+.hot { color: var(--thread-ink); }
+.tempsbody { padding-top: 10px; padding-bottom: 10px; }
+.temps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px var(--space-4); }
+.tempitem { display: flex; align-items: baseline; gap: 10px; min-width: 0; font-family: var(--font-mono); font-size: 12.5px; }
+.tempitem__name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tempitem__v { color: var(--muted); white-space: nowrap; }
+.tempitem__v em { font-style: normal; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-left: 3px; }
+.tempitem__v.crit { color: var(--thread-ink); font-weight: 600; }
+.tempitem__v.crit::before { content: "▫ "; font-size: 8px; }
+.tempitem--down .tempitem__name { color: var(--thread-ink); }
+html[data-tier="medium"] .tempscard,
+html[data-tier="full"] .tempscard { display: none; }
+html[data-tier="small"] .temps { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px 10px; }
+html[data-tier="small"] .tempitem { gap: 6px; }
+html[data-tier="small"] .tempitem__name { flex: none; }
 /* Page rhythm classes (IR-128): CSS-reachable so the small tier can tighten
    them — inline margins could not be overridden. */
 .section-gap { margin: 20px 0 12px; }

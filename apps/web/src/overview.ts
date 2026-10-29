@@ -309,6 +309,50 @@ export function relativeTime(iso: string | null, nowMs: number): string | null {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// ─── fleet temperatures (IR-129) ────────────────────────────────────────────
+
+/** Warn/crit thresholds (°C) for the fleet-temperature surfaces. */
+export const TEMP_WARN_C = 70;
+export const TEMP_CRIT_C = 90;
+
+export interface FleetTempItem {
+  id: string;
+  name: string;
+  /** Hottest GPU package temp; null when the node reports no sensor. */
+  gpu: number | null;
+  /** CPU package temp; null when the node reports no sensor. */
+  cpu: number | null;
+  /** Ordering key: max(gpu, cpu); offline nodes sink via -2, sensor-less via -1. */
+  max: number;
+  online: boolean;
+}
+
+export interface FleetTemps {
+  /** Hottest first (offline nodes last). */
+  items: FleetTempItem[];
+  /** The hottest readable node — the page-head token; null when nothing reads. */
+  hottest: { name: string; tempC: number } | null;
+}
+
+/** Fleet thermal snapshot over the given nodes (callers pass spark nodes
+ *  only — the NAS has no power/thermal telemetry). An offline node is a
+ *  `— OFFLINE` item; an online node without sensors reports `—` per axis. */
+export function fleetTemps(
+  nodes: Array<{ id: string; name: string; online: boolean; snapshot: HardwareSnapshot | null | undefined }>,
+): FleetTemps {
+  const items: FleetTempItem[] = nodes.map((n) => {
+    if (!n.online) return { id: n.id, name: n.name, gpu: null, cpu: null, max: -2, online: false };
+    const gpuReadings = (n.snapshot?.gpus ?? []).map((g) => g.tempC).filter((t): t is number => t !== null);
+    const gpu = gpuReadings.length > 0 ? Math.max(...gpuReadings) : null;
+    const cpu = typeof n.snapshot?.cpu?.tempC === "number" ? (n.snapshot.cpu.tempC as number) : null;
+    const max = gpu === null && cpu === null ? -1 : Math.max(gpu ?? -1, cpu ?? -1);
+    return { id: n.id, name: n.name, gpu, cpu, max, online: true };
+  });
+  items.sort((a, b) => b.max - a.max);
+  const hottest = items.find((i) => i.max >= 0);
+  return { items, hottest: hottest === undefined ? null : { name: hottest.name, tempC: hottest.max } };
+}
+
 // ─── telemetry feed ─────────────────────────────────────────────────────────
 
 export interface FeedLine {
