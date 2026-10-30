@@ -80,7 +80,7 @@
       "mutable": false
     },
     ".github/workflows/docs-check.yml": {
-      "sha256": "b2b61146ac997d683eef7315a264f83308a51c517ad3860c95b69b802115d364",
+      "sha256": "03a5883f038ce981b3c20c88359d6a25be21bd0456e7adf660350d647a7e5f4e",
       "executable": false,
       "mutable": false
     },
