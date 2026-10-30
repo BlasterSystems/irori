@@ -1,5 +1,5 @@
 import { and, eq, lt, sql } from "drizzle-orm";
-import { nodes, snapshots } from "./schema.js";
+import { nodes, setups, snapshots } from "./schema.js";
 import type { Db } from "./client.js";
 import type { NodeCreateInput, NodePatchInput } from "@irori/core";
 import { encryptSecret, generateToken, sha256Hex } from "./crypto.js";
@@ -99,7 +99,20 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
     },
 
     async remove(id) {
-      await db.delete(nodes).where(eq(nodes.id, id));
+      // IR-138: the FK cascades only setups the node heads; setups where it
+      // was a WORKER would keep the dead uuid in their nodes jsonb forever
+      // (ghost worker rows on setup cards). Strip it in the same transaction
+      // so surviving setups stay parseable through setupNodeSchema.
+      await db.transaction(async (tx) => {
+        await tx.delete(nodes).where(eq(nodes.id, id));
+        const rows = await tx.select({ id: setups.id, nodes: setups.nodes }).from(setups);
+        for (const row of rows) {
+          const members = Array.isArray(row.nodes) ? (row.nodes as Array<{ nodeId?: unknown }>) : [];
+          const kept = members.filter((m) => m?.nodeId !== id);
+          if (kept.length === members.length) continue;
+          await tx.update(setups).set({ nodes: kept, updatedAt: new Date() }).where(eq(setups.id, row.id));
+        }
+      });
     },
 
     async rotateToken(id) {
