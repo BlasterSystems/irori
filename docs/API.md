@@ -246,6 +246,17 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   the request body are applied (absent `llmPorts` never wipes stored values).
   `cacheUser` follows the same rule; `null` clears it. The hub hands the value
   to the agent in every `config-update`.
+- `role` (`head|worker|standalone`) is **derived from serving-setup
+  membership** (IRI-050): on setup create/patch/remove the server re-derives
+  roles over all setups — `head` if the node is any setup's `headNodeId`
+  (taking precedence over worker claims), else `worker` if it appears in any
+  setup's worker list, else `standalone` — and pushes a fresh
+  `config-update` per changed node (workers probe detection-only at 10 s).
+  Only the changed members of the edited setup are written, so a manual
+  `PATCH /api/v1/nodes/:id` role (e.g. marking a non-setup engine `head`)
+  survives until that node's own membership changes. Deleting a node strips
+  its id from surviving setups' worker lists (the FK only cascades setups it
+  heads).
 - `PUT /api/v1/nodes/:id/llm-ports` (`{ports: number[]}`) remains the
   dedicated probe-assignment endpoint and hardcodes the probe host to
   `127.0.0.1`.
