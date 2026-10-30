@@ -163,7 +163,13 @@ export const jobStatusEnum = pgEnum("job_status", ["queued", "running", "succeed
 /** Parsed rsync progress for transfer jobs (IR-131); null when the job is
  *  multi-stream (`--jobs > 1`, interleaved per-stream lines are misleading)
  *  or modelctl emitted nothing parseable. */
-const jobProgress = jsonb("progress");
+export interface JobProgress {
+  bytes: number | null;
+  percent: number | null;
+  rateBytesPerSec: number | null;
+  etaSeconds: number | null;
+}
+const jobProgress = jsonb("progress").$type<JobProgress | null>();
 
 export const jobs = pgTable(
   "jobs",
