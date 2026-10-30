@@ -2,6 +2,8 @@
 
 **Jira: [IR-131](https://blastersystems.atlassian.net/browse/IR-131)** (Task, IR Sprint 2 / sprint 990, assignee Bruno).
 
+> **Status: implemented in PR #73 (shape A+B per the recorded recommendation), live on DEV as dev-0.3.0-59 (2026-10-30); Jira evidence comment 25671.** The aggregate modelctl emitter rides its own PR; shape C (`#/transfers` route) remains the dock's future history target.
+
 ## Goal
 
 Owner asks from 2026-10-29 (with a Models-view screenshot of the placement modal + a `sync-local` job sheet):

@@ -2,7 +2,7 @@
 
 - **Tickets:** IR-127 (hero chrome), IR-128 (width tiers), IR-129 (fleet temps) — sprint 990 (IR Sprint 2)
 - **Umbrella:** [IR-132](https://blastersystems.atlassian.net/browse/IR-132) — the single implementation pickup; children are linked (Relates) and close with it (2026-10-29)
-- **Status:** mockup approved; implementation not started (reviewed 2026-10-29: zero apps/web commits since the mockup merge 76215e4 — IR-132 records the evidence)
+- **Status:** implemented in PR #73 (IR-127/128/129), live on DEV as dev-0.3.0-59 (2026-10-30); Jira evidence comments 25667-25669 + IR-132 closed
 - **Mockup:** `mockups/overview-v4.html` + `mockups/PLAN.md` (rounds 3 and 3b are the approved spec)
 
 ## Objective
