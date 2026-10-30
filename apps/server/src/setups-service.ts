@@ -211,14 +211,16 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     return row.name;
   };
   const emitSharedSetupLog = (setupId: string, nodeId: string, line: string): void => {
-    void nameOf(setupId).then((name) => {
-      if (name === null) return;
-      const st = feedLogState.get(setupId);
-      const nowMs = Date.now();
-      if (st !== undefined && (st.lastLine === line || nowMs - st.lastMs < 1000)) return;
-      feedLogState.set(setupId, { lastLine: line, lastMs: nowMs });
-      deps.sse.send({ type: "setup-log", serverTimeMs: nowMs, setupId, nodeId, name, line } satisfies SseEvent);
-    });
+    void nameOf(setupId)
+      .then((name) => {
+        if (name === null) return;
+        const st = feedLogState.get(setupId);
+        const nowMs = Date.now();
+        if (st !== undefined && (st.lastLine === line || nowMs - st.lastMs < 1000)) return;
+        feedLogState.set(setupId, { lastLine: line, lastMs: nowMs });
+        deps.sse.send({ type: "setup-log", serverTimeMs: nowMs, setupId, nodeId, name, line } satisfies SseEvent);
+      })
+      .catch(() => {}); // a DB blip on the name lookup must not crash the hub
   };
 
   const announce = (setupId: string, status: SetupStatus, health: SetupInfo["health"], lastError: string | null): void => {
