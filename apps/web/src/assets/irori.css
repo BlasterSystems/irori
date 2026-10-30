@@ -248,7 +248,10 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .pick input { width: 16px; height: 16px; }
 
 /* ── Forms ─────────────────────────────────────────────────────────── */
-.field { display: grid; gap: 5px; }
+/* align-content: start — a .field sharing a .cols row with a taller sibling
+ * (e.g. one carrying helper text) must not stretch its own rows and shove
+ * its control to the bottom (IRI-050 NodeModal Role helper). */
+.field { display: grid; gap: 5px; align-content: start; }
 .field > label { font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .input, .select { width: 100%; min-height: 32px; padding: 5px 10px; font: inherit; font-size: 13.5px; color: var(--fg);
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
