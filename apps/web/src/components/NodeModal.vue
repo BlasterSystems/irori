@@ -178,6 +178,7 @@ async function copyToken(): Promise<void> {
                 <select v-model="form.role" class="select">
                   <option v-for="r in NODE_ROLE_OPTIONS" :key="r" :value="r">{{ r }}</option>
                 </select>
+                <p class="stat__sub">Auto-adjusted when serving setups change (head, worker, standalone). A manual choice persists until this node's membership changes.</p>
               </div>
             </div>
             <div class="field"><label>Host / IP</label><input v-model="form.host" class="input mono" placeholder="10.20.30.5 or dgx1.example.com" /></div>
