@@ -55,3 +55,64 @@ export type NodePatchInput = z.infer<typeof nodePatchSchema>;
 export type NodeCreatePayload = z.input<typeof nodeCreateSchema>;
 /** Wire payload for PATCH /api/v1/nodes/:id (every key optional). */
 export type NodePatchPayload = z.input<typeof nodePatchSchema>;
+
+/* ── Role derivation (IRI-050) ──────────────────────────────────────────────
+ * Roles follow serving-setup membership instead of hand maintenance: on every
+ * membership-changing setup op the server re-derives roles over ALL setups
+ * and writes only the diffs. Manual override (PATCH /nodes/:id) stays and is
+ * simply overwritten the next time that node's membership changes. */
+
+/** Minimal membership view: a setup's head plus its worker rows. Setups rows
+ *  and SetupInfo both project onto this shape. */
+export interface SetupMembership {
+  headNodeId: string;
+  nodes: ReadonlyArray<{ nodeId: string }>;
+}
+
+/**
+ * Derives nodeId → role over the given setup set, defined only for
+ * `nodeIds` (the existing node rows): `head` if the node is headNodeId of any
+ * setup, else `worker` if it appears in any setup's worker list, else
+ * `standalone`. Head-over-worker precedence resolves multi-membership (a node
+ * may legally head setup A and serve as worker of setup B). Worker ids absent
+ * from `nodeIds` (dangling, e.g. pre-hygiene jsonb) are ignored. Pure: same
+ * inputs, same map, no I/O.
+ */
+export function deriveNodeRoles(
+  setups: ReadonlyArray<SetupMembership>,
+  nodeIds: ReadonlySet<string>,
+): Map<string, NodeRole> {
+  const roles = new Map<string, NodeRole>();
+  for (const id of nodeIds) roles.set(id, "standalone");
+  for (const setup of setups) {
+    if (nodeIds.has(setup.headNodeId)) roles.set(setup.headNodeId, "head");
+  }
+  for (const setup of setups) {
+    for (const member of setup.nodes) {
+      // Dangling worker id (row no longer exists): ignored, never derived.
+      if (!nodeIds.has(member.nodeId)) continue;
+      if (roles.get(member.nodeId) !== "head") roles.set(member.nodeId, "worker");
+    }
+  }
+  return roles;
+}
+
+/**
+ * Write-only diff: the subset of `derived` whose role differs from
+ * `current`. `scope` limits the comparison to the caller's affected set —
+ * without it a setup op would also rewrite unrelated nodes' manual overrides
+ * (e.g. a hand-marked head of a non-setup engine). Keys missing from
+ * `current` count as changed (unknown current role).
+ */
+export function diffNodeRoles(
+  derived: ReadonlyMap<string, NodeRole>,
+  current: ReadonlyMap<string, NodeRole>,
+  scope?: ReadonlySet<string>,
+): Map<string, NodeRole> {
+  const changed = new Map<string, NodeRole>();
+  for (const [id, role] of derived) {
+    if (scope !== undefined && !scope.has(id)) continue;
+    if (current.get(id) !== role) changed.set(id, role);
+  }
+  return changed;
+}
