@@ -182,4 +182,28 @@ d("job settle events (db integration)", () => {
     const rows = await db.select().from(jobs).where(eq(jobs.nodeId, nodeId));
     expect(rows.filter((j) => j.kind === "modelctl-install" && (j.status === "queued" || j.status === "running"))).toHaveLength(0);
   });
+
+  it("reports canceling on a second cancel and never goes terminal unconfirmed (IR-131)", async () => {
+    const row = await service.create(nodeId, "sync-local", {});
+    expect(await service.cancel(row.id)).toEqual({ ok: true });
+    expect(await service.cancel(row.id)).toEqual({ ok: false, reason: "canceling" });
+    const [r] = await db.select().from(jobs).where(eq(jobs.id, row.id));
+    expect(r!.status).toBe("running");
+    expect(r!.cancelRequestedAt).not.toBeNull();
+    await service.onDone(nodeId, row.id, "canceled", null); // settle: shared DB hygiene
+  });
+
+  it("hello reconcile settles unreported rows but never agent-update rows (IR-131)", async () => {
+    const orphan = await service.create(nodeId, "sync-local", {});
+    await service.settleOrphansOnHello(nodeId, []); // fresh agent reports nothing running
+    const [settled1] = await db.select().from(jobs).where(eq(jobs.id, orphan.id));
+    expect(settled1!.status).toBe("failed");
+    // ADR-0007: an agent-update row is owned by the hello version check, not
+    // the orphan path — even though the update child is never reported.
+    const update = await service.create(nodeId, "agent-update", { expectedVersion: "0.4.0" });
+    await service.settleOrphansOnHello(nodeId, []);
+    const [settled2] = await db.select().from(jobs).where(eq(jobs.id, update.id));
+    expect(settled2!.status).toBe("running");
+    await service.onDone(nodeId, update.id, "failed", null); // settle: shared DB hygiene
+  });
 });

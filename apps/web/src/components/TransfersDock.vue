@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "../live";
 import { cancelJob } from "../models";
 import { jobElapsed, jobLabel, jobStreams, type JobLive } from "../jobs";
@@ -30,9 +30,10 @@ const recent = computed(() =>
 );
 
 const now = ref(Date.now());
-setInterval(() => {
+const tick = setInterval(() => {
   now.value = Date.now();
 }, 1000);
+onUnmounted(() => clearInterval(tick));
 
 const KIND_CHIP: Record<string, string> = { "sync-local": "sync", push: "push", "download-queue": "queue" };
 
