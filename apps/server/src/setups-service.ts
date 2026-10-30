@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import {
+  deriveNodeRoles,
+  diffNodeRoles,
   envExportsSchema,
   modelIdMatches,
   parseTransferProgress,
@@ -364,6 +366,32 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     await deps.refreshNodeConfig(headNodeId);
   };
 
+  /**
+   * IRI-050: roles follow serving-setup membership. Derives over ALL setups
+   * (head > worker > standalone) but writes only `affected` diffs — manual
+   * overrides of unrelated nodes survive until their own membership changes.
+   * Pushes a fresh config-update per changed node; offline resolves to false
+   * harmlessly (reconnect re-derives via hello). Callers run this BEFORE
+   * ensurePortAssigned so its config-update already carries the new role.
+   */
+  const applyDerivedRoles = async (affected: Iterable<string>): Promise<void> => {
+    const [rows, allNodes] = await Promise.all([
+      deps.db.select({ head: setups.headNodeId, nodes: setups.nodes }).from(setups),
+      deps.getNodes(),
+    ]);
+    const nodeIds = new Set(allNodes.map((n) => n.id));
+    const derived = deriveNodeRoles(
+      rows.map((row) => ({ headNodeId: row.head, nodes: toNodes(row.nodes) })),
+      nodeIds,
+    );
+    const current = new Map(allNodes.map((n) => [n.id, n.role]));
+    const changed = diffNodeRoles(derived, current, new Set(affected));
+    for (const [id, role] of changed) {
+      await deps.db.update(nodes).set({ role, updatedAt: new Date() }).where(eq(nodes.id, id));
+      await deps.refreshNodeConfig(id);
+    }
+  };
+
   const evaluateHealth = async (row: typeof setups.$inferSelect): Promise<void> => {
     const snap = latestPortSnap(row.headNodeId, row.port);
     let health = row.health;
@@ -423,6 +451,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         .returning();
       if (!row) throw new Error("setup insert returned no row");
       nameBySetup.set(row.id, row.name);
+      // IRI-050: membership changed — head + workers re-derive BEFORE the
+      // port push so its config-update carries the new role.
+      await applyDerivedRoles([row.headNodeId, ...toNodes(row.nodes).map((n) => n.nodeId)]);
       // The head's LLM probe must watch the script-defined port from now on.
       await ensurePortAssigned(row.headNodeId, row.port);
       return toInfo(row);
@@ -443,6 +474,13 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         ...(patch.captureProxy !== undefined ? { captureProxy: patch.captureProxy } : {}),
         ...(patch.bodyRetention !== undefined ? { bodyRetention: patch.bodyRetention } : {}),
       });
+      if (patch.nodes !== undefined) {
+        // IRI-050: membership changed both ways — old ∪ new members plus the
+        // head re-derive, before any port-change config-update (same reason
+        // as create).
+        const oldIds = toNodes(row.nodes).map((n) => n.nodeId);
+        await applyDerivedRoles([row.headNodeId, ...oldIds, ...patch.nodes.map((n) => n.nodeId)]);
+      }
       if (patch.port !== undefined && patch.port !== row.port) {
         await ensurePortAssigned(row.headNodeId, patch.port);
       }
@@ -458,6 +496,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       }
       await deps.db.delete(setups).where(eq(setups.id, id));
       headBySetup.delete(id);
+      // IRI-050: freed members re-derive over the surviving setups — a node
+      // still claimed elsewhere keeps its role (head-over-worker precedence).
+      await applyDerivedRoles([row.headNodeId, ...toNodes(row.nodes).map((n) => n.nodeId)]);
     },
 
     async start(id) {
