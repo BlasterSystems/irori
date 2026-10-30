@@ -3,9 +3,17 @@
 ## Dev CD (Proxmox docker VM) — INSTALLED & VERIFIED 2026-10-17
 
 First real deploy: tag `dev-0.1.0-dev.2` → run 39080561043 **success**
-(test gate on GitHub runners → deploy on `iroiri-dev-vm`) — container
+(test gate on the self-hosted runner → deploy on `iroiri-dev-vm`) — container
 `irori-dev` up on **10.0.10.9:3947**, `/healthz` ok, SPA served
 (`IRORI_STATIC_DIR=/srv/irori-web`), `deploy/.env` preserved.
+
+**2026-10-30: all jobs (test gate included) run on the self-hosted runner**
+— GitHub-hosted build minutes are exhausted (billing), so `ubuntu-latest` was
+replaced everywhere except `release.yml`. The Postgres service container was
+replaced by a throwaway cluster: the runner VM (LXC 110) has `postgresql-17`
+binaries installed (default cluster service disabled) and each job `initdb`s
+a fresh cluster into a temp dir, points `IRORI_TEST_DATABASE_URL` at it, and
+stops/deletes it in an `always()` step.
 
 Topology (corrected): the **deploy VM is LXC 106 `docker` = 10.0.10.9**
 (deploy user, docker 29.8.2); the **runner VM is LXC 110 `gh-runner` =
@@ -20,8 +28,9 @@ Pipeline: `.github/workflows/cd-dev.yml` — trigger by pushing a `dev-*` tag
 `dev-0.3.0-dev.13`; only the `dev-*` prefix is load-bearing, nothing parses
 the rest, and historical tags keep their names) (or run manually with a ref).
 It runs the full verify gate (typecheck, tests
-against a real Postgres service, validate, docs-check) on GitHub runners, then
-deploys from the self-hosted runner on the runner VM (LXC 110):
+against a throwaway Postgres cluster on the runner VM, validate, docs-check)
+on the self-hosted runner (LXC 110), then
+deploys from the same runner:
 
 1. Test gate passes → runner creates a git bundle of the exact commit.
 2. SSH (localhost from the runner VM to 10.0.10.9) → fetch bundle into

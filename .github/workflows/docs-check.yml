@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   docs-check:
-    runs-on: ubuntu-latest
+    # Self-hosted runner (LXC 110): GitHub-hosted build minutes are exhausted.
+    runs-on: iroiri-dev-vm
     steps:
       - uses: actions/checkout@v4
         with:
