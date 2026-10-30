@@ -21,6 +21,7 @@ import { createLlmStore, type LlmStore } from "../src/llm-store.js";
 import { runLlmRetention } from "../src/retention.js";
 import { createApp } from "../src/app.js";
 import { createAgentHub, type AgentHubDeps } from "../src/hub.js";
+import { createSetupsService } from "../src/setups-service.js";
 import { createRings, type Rings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import {
@@ -556,6 +557,86 @@ d("llm (db integration)", () => {
       cacheUser: null,
     });
     ws.close();
+  });
+
+  it("pushes the derived worker cadence over a real WS when a setup is created (IRI-050)", async () => {
+    const head = await makeNode("ir-ws-head", "worker"); // previously a worker — ordering pin
+    const worker = await makeNode("ir-ws-worker", "standalone");
+    const hub = createAgentHub({
+      store,
+      llmStore,
+      rings,
+      sse: createSseHub({ heartbeatMs: 0 }),
+      getCadenceMs: () => 2000,
+      serverVersion: "test",
+    });
+    const server = createServer();
+    hub.attach(server);
+    const wsPort = await listen(server);
+    cleanups.push(() => {
+      hub.stop();
+      server.close();
+      server.closeAllConnections();
+    });
+
+    const setups = createSetupsService({
+      db: h.db,
+      rings,
+      sse: createSseHub({ heartbeatMs: 0 }),
+      getNode: async (id) => (await store.get(id)) ?? null,
+      getNodes: () => store.list(),
+      online: () => new Set([head.id, worker.id]),
+      sendToNode: (nodeId, msg) => hub.sendToNode(nodeId, msg),
+      refreshNodeConfig: (nodeId) => hub.refreshConfig(nodeId),
+      jobs: {
+        create: async () => {
+          throw new Error("unused: no transfers in this test");
+        },
+        cancel: async () => true,
+        findModel: async () => null,
+        presentNodesFor: async () => [],
+      },
+    });
+
+    // Connect both agents first so pushes land on open sockets (the
+    // handshakes consume hello-ok + the pre-create config-update).
+    const headSock = await handshake(`ws://127.0.0.1:${wsPort}/agent-ws`, head.token);
+    const workerSock = await handshake(`ws://127.0.0.1:${wsPort}/agent-ws`, worker.token);
+
+    await setups.create({
+      name: "ir-ws-cluster",
+      kind: "cluster",
+      model: "Roles-WS-Model",
+      port: 8123,
+      headNodeId: head.id,
+      nodes: [{ nodeId: worker.id, role: "worker" }],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+
+    // Worker: the pushed config-update carries the derived detect-only cadence.
+    expect(await nextMessage(workerSock.ws)).toMatchObject({
+      type: "config-update",
+      llmCadenceMs: 10_000,
+      llmDetectOnly: true,
+    });
+    // The head had role "worker" before the create — its FIRST push must
+    // already carry the derived head cadence (role writes run before the
+    // ensurePortAssigned push, IRI-050 G7).
+    expect(await nextMessage(headSock.ws)).toMatchObject({
+      type: "config-update",
+      llmDetectOnly: false,
+    });
+
+    const roles = await h.db
+      .select({ id: nodes.id, role: nodes.role })
+      .from(nodes)
+      .where(inArray(nodes.id, [head.id, worker.id]));
+    expect(roles.find((r) => r.id === head.id)!.role).toBe("head");
+    expect(roles.find((r) => r.id === worker.id)!.role).toBe("worker");
+    workerSock.ws.close();
+    headSock.ws.close();
   });
 
   it("pushes a config-update when PUT /llm-ports saves (IRI-034)", async () => {

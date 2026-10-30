@@ -593,4 +593,123 @@ d("setups service", () => {
     expect(setupLogFrames()).toHaveLength(2);
     sendSpy.mockRestore();
   });
+
+  // IRI-050: fresh nodes for role-derivation tests — direct insert like the
+  // spark4 case above; registered in extraOwned so getNodes surfaces them.
+  async function makeRoleNode(name: string, role: "head" | "worker" | "standalone"): Promise<string> {
+    const id = randomUUID();
+    await h.db.insert(nodes).values({
+      id,
+      name: `${name}-${Math.random().toString(36).slice(2, 8)}`,
+      kind: "spark",
+      role,
+      host: `${name}.test`,
+      agentTokenHash: "x",
+      agentTokenEnc: "x",
+    });
+    extraOwned.push(id);
+    return id;
+  }
+
+  const roleOf = async (id: string): Promise<string> => {
+    const [row] = await h.sql<{ role: string }[]>`select role from nodes where id = ${id}`;
+    return row!.role;
+  };
+
+  const scripts = {
+    scriptStart: "/s/start.sh",
+    scriptStop: "/s/stop.sh",
+    env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+  } as const;
+
+  it("derives roles on create — head → head, workers → worker (IRI-050)", async () => {
+    const head = await makeRoleNode("ir-head", "standalone");
+    const stale = await makeRoleNode("ir-stale", "worker"); // stale manual role is corrected too
+    const setup = await ctx.service.create({
+      name: "roles-create",
+      kind: "cluster",
+      model: "Roles-Create-Model",
+      port: 9130,
+      headNodeId: head,
+      nodes: [{ nodeId: stale, role: "worker" }],
+      ...scripts,
+    });
+    expect(await roleOf(head)).toBe("head");
+    expect(await roleOf(stale)).toBe("worker");
+    // Write-only diff: `stale` already had role "worker", so no redundant
+    // write or config-update push happens for it — only the changed head is
+    // refreshed.
+    expect(ctx.refreshed).not.toContain(stale);
+    expect(ctx.refreshed).toContain(head);
+    await ctx.service.remove(setup.id);
+  });
+
+  it("patch flips worker roles both ways (IRI-050)", async () => {
+    const head = await makeRoleNode("ir-p-head", "standalone");
+    const w1 = await makeRoleNode("ir-p-w1", "standalone");
+    const w2 = await makeRoleNode("ir-p-w2", "standalone");
+    const setup = await ctx.service.create({
+      name: "roles-patch",
+      kind: "cluster",
+      model: "Roles-Patch-Model",
+      port: 9131,
+      headNodeId: head,
+      nodes: [{ nodeId: w1, role: "worker" }],
+      ...scripts,
+    });
+    await ctx.service.patch(setup.id, { nodes: [{ nodeId: w1, role: "worker" }, { nodeId: w2, role: "worker" }] });
+    expect(await roleOf(w2)).toBe("worker");
+    await ctx.service.patch(setup.id, { nodes: [{ nodeId: w1, role: "worker" }] });
+    expect(await roleOf(w2)).toBe("standalone");
+    expect(ctx.refreshed).toContain(w2);
+    await ctx.service.remove(setup.id);
+  });
+
+  it("remove returns members to standalone unless another setup claims them (IRI-050)", async () => {
+    const h1 = await makeRoleNode("ir-m-h1", "standalone");
+    const both = await makeRoleNode("ir-m-both", "standalone");
+    // `both` is worker of A and head of B — legal multi-membership.
+    const a = await ctx.service.create({
+      name: "roles-a",
+      kind: "cluster",
+      model: "Roles-A-Model",
+      port: 9132,
+      headNodeId: h1,
+      nodes: [{ nodeId: both, role: "worker" }],
+      ...scripts,
+    });
+    const b = await ctx.service.create({
+      name: "roles-b",
+      kind: "single",
+      model: "Roles-B-Model",
+      port: 9133,
+      headNodeId: both,
+      nodes: [],
+      ...scripts,
+    });
+    expect(await roleOf(both)).toBe("head"); // head over worker precedence
+    await ctx.service.remove(a.id);
+    expect(await roleOf(both)).toBe("head"); // still claimed by B
+    expect(await roleOf(h1)).toBe("standalone"); // freed by A's removal
+    await ctx.service.remove(b.id);
+    expect(await roleOf(both)).toBe("standalone");
+  });
+
+  it("manual role override survives unrelated setup ops (IRI-050)", async () => {
+    const override = await makeRoleNode("ir-override", "head"); // manual head of a non-setup engine
+    const head = await makeRoleNode("ir-o-head", "standalone");
+    const setup = await ctx.service.create({
+      name: "roles-override",
+      kind: "single",
+      model: "Roles-Override-Model",
+      port: 9134,
+      headNodeId: head,
+      nodes: [],
+      ...scripts,
+    });
+    expect(await roleOf(override)).toBe("head"); // unrelated op leaves the manual role alone
+    await ctx.service.patch(setup.id, { nodes: [{ nodeId: override, role: "worker" }] });
+    expect(await roleOf(override)).toBe("worker"); // override ends when ITS membership changes
+    await ctx.service.remove(setup.id);
+  });
 });
