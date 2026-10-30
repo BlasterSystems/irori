@@ -134,7 +134,7 @@ async function run(): Promise<void> {
     log,
   });
 
-  const jobs = new JobManager(
+  const jobs: JobManager = new JobManager(
     () => ({
       nasRoot: transport.getNasRoot(),
       cacheUser: transport.getCacheUser(),

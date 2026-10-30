@@ -147,6 +147,7 @@ export async function reconcileOrphanedJobs(stateDir: string, events: Pick<JobEv
 export class JobManager {
   private active: {
     jobId: string;
+    kind: string;
     cancel: () => void;
   } | null = null;
 
@@ -175,7 +176,7 @@ export class JobManager {
       }
       const ctrl = new AbortController();
       let seq = 0;
-      this.active = { jobId, cancel: () => ctrl.abort() };
+      this.active = { jobId, kind, cancel: () => ctrl.abort() };
       void this.runner(jobId, kind, params, (line) => this.events.onOutput(jobId, seq++, line), ctrl.signal)
         .then((result) => {
           if (this.active?.jobId === jobId) this.active = null;
@@ -222,7 +223,7 @@ export class JobManager {
       env: jobEnv,
       onLine: (line) => this.events.onOutput(jobId, seq++, line),
     });
-    this.active = { jobId, cancel: run.cancel };
+    this.active = { jobId, kind, cancel: run.cancel };
     // IR-131: persist the process-group handle BEFORE the first output line —
     // the child can outlive the agent (detached), and a crash must leave a
     // killable registry entry. agent-update runs under systemd-run (own
