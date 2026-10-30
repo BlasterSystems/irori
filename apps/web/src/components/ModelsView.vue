@@ -817,6 +817,7 @@ onBeforeUnmount(() => {
         class="search"
         type="search"
         placeholder="Search name or repository…"
+        aria-label="Search models"
         @input="onSearchInput"
       />
       <div class="row" style="gap: 8px">

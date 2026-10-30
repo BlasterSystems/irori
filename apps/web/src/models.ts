@@ -80,7 +80,9 @@ export async function createJob(nodeId: string, kind: string, params: Record<str
 
 export async function cancelJob(id: string): Promise<void> {
   const res = await fetch(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
-  if (!res.ok && res.status !== 204) throw new Error(`cancel failed (${res.status})`);
+  // IR-131: honest failures — the 409 body carries the actionable copy
+  // ("node offline — the transfer process may still be running", …).
+  if (!res.ok && res.status !== 204) throw new Error(await errorFrom(res));
 }
 
 /** Server error text from an `{ error }` body, with an HTTP fallback. */

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
 import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type TransferProgress } from "@irori/core";
@@ -401,7 +401,6 @@ export function createJobsService(
       const [row] = await db.select().from(jobs).where(eq(jobs.id, id)).limit(1);
       if (!row) return { ok: false, reason: "missing" };
       if (row.status === "succeeded" || row.status === "failed" || row.status === "canceled") return { ok: false, reason: "terminal" };
-      if (row.status === "canceling") return { ok: false, reason: "canceling" };
       // ADR-0007: agent-update settlement is hello-driven (the restart severs
       // the socket); killing the update child would brick the agent.
       if (row.kind === "agent-update") return { ok: false, reason: "agent-update" };
@@ -411,13 +410,20 @@ export function createJobsService(
       if (!sendToAgent(row.nodeId, { type: "job-cancel", jobId: id })) return { ok: false, reason: "offline" };
       // Verify-before-write: the row STAYS running — the partial unique index
       // keeps holding the one-active slot until the terminal write (ack or
-      // job-done). The request marker drives the UI's canceling state.
+      // job-done). The request marker drives the UI's canceling state; a
+      // concurrent second cancel (marker already set) reports `canceling`.
       const updated = await db
         .update(jobs)
         .set({ cancelRequestedAt: new Date() })
-        .where(and(eq(jobs.id, id), inArray(jobs.status, [...ACTIVE])))
+        .where(and(eq(jobs.id, id), inArray(jobs.status, [...ACTIVE]), isNull(jobs.cancelRequestedAt)))
         .returning({ id: jobs.id });
-      if (updated.length === 0) return { ok: false, reason: "terminal" };
+      if (updated.length === 0) {
+        const [fresh] = await db.select({ status: jobs.status, cancelRequestedAt: jobs.cancelRequestedAt }).from(jobs).where(eq(jobs.id, id)).limit(1);
+        if (fresh !== undefined && fresh.cancelRequestedAt !== null && (fresh.status === "running" || fresh.status === "queued")) {
+          return { ok: false, reason: "canceling" };
+        }
+        return { ok: false, reason: "terminal" };
+      }
       return { ok: true };
     },
 
@@ -461,8 +467,15 @@ export function createJobsService(
         .from(jobs)
         .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])));
       for (const j of rows) {
-        if (reported.has(j.id)) continue;
-        await db.insert(jobOutput).values({ jobId: j.id, seq: MAX_OUTPUT_LINES, line: "error: agent restarted mid-job — the process is gone" });
+        // agent-update settlement is hello-driven (ADR-0007): the fresh
+        // agent's version check owns those rows — never the orphan path
+        // (the update child is not a JobManager job and is never reported).
+        if (reported.has(j.id) || j.kind === "agent-update") continue;
+        try {
+          await db.insert(jobOutput).values({ jobId: j.id, seq: MAX_OUTPUT_LINES, line: "error: agent restarted mid-job — the process is gone" });
+        } catch {
+          // A colliding seq (long output ring) must not strand the remaining rows.
+        }
         await service.onDone(nodeId, j.id, "failed", null);
       }
     },
