@@ -30,7 +30,7 @@ jobs:
           PGDATA=$(mktemp -d /tmp/irori-pgdata.XXXXXX)
           "$INITDB" -D "$PGDATA" -U postgres --auth=trust -E utf8
           PGCTL=$(ls /usr/lib/postgresql/*/bin/pg_ctl | sort -V | tail -1)
-          "$PGCTL" -D "$PGDATA" -o "-p 54329 -c listen_addresses=127.0.0.1" -l /tmp/irori-pg.log -w start
+          "$PGCTL" -D "$PGDATA" -o "-p 54329 -c listen_addresses=127.0.0.1 -c unix_socket_directories=/tmp" -l /tmp/irori-pg.log -w start
           echo "IRORI_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:54329/postgres" >> "$GITHUB_ENV"
           echo "IRORI_PGDATA=$PGDATA" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
