@@ -712,4 +712,51 @@ d("setups service", () => {
     expect(await roleOf(override)).toBe("worker"); // override ends when ITS membership changes
     await ctx.service.remove(setup.id);
   });
+
+  it("node delete strips dangling worker ids and cascades headed setups (IR-138)", async () => {
+    const store = createNodeStore(h.db, "a".repeat(64));
+    const head = await makeRoleNode("ir-d-head", "standalone");
+    const w1 = await makeRoleNode("ir-d-w1", "standalone");
+    const s1 = await ctx.service.create({
+      name: "roles-del",
+      kind: "cluster",
+      model: "Roles-Del-Model",
+      port: 9135,
+      headNodeId: head,
+      nodes: [{ nodeId: w1, role: "worker" }],
+      ...scripts,
+    });
+    const h2 = await makeRoleNode("ir-d-h2", "standalone");
+    const s2 = await ctx.service.create({
+      name: "roles-del-cascade",
+      kind: "single",
+      model: "Roles-Del-Cascade-Model",
+      port: 9136,
+      headNodeId: h2,
+      nodes: [],
+      ...scripts,
+    });
+
+    // Delete a worker of s1: no dangling id survives in the jsonb, and the
+    // row still parses through setupNodeSchema (service round-trip).
+    await store.remove(w1);
+    const [row] = await h.sql<{ nodes: Array<{ nodeId: string }> }[]>`select nodes from setups where id = ${s1.id}`;
+    expect(row!.nodes.map((n) => n.nodeId)).not.toContain(w1);
+    expect((await ctx.service.get(s1.id))!.nodes).toEqual([]);
+
+    // Delete the head of s2: the FK cascade removes the setup row.
+    await store.remove(h2);
+    expect(await ctx.service.get(s2.id)).toBeNull();
+
+    // Belt and braces: a dangling id re-injected into jsonb is ignored by
+    // derivation — no role write is attempted for the deleted row.
+    await h.sql`update setups set nodes = ${JSON.stringify([{ nodeId: w1, role: "worker" }])}::jsonb where id = ${s1.id}`;
+    const refreshedBefore = ctx.refreshed.length;
+    await ctx.service.patch(s1.id, { nodes: [] });
+    expect(ctx.refreshed.slice(refreshedBefore)).not.toContain(w1);
+    expect((await ctx.service.get(s1.id))!.nodes).toEqual([]);
+
+    await ctx.service.remove(s1.id); // s1 is now empty — its head re-derives too
+    expect(await roleOf(head)).toBe("standalone");
+  });
 });
