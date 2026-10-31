@@ -45,9 +45,14 @@ const search = ref("");
 const page = ref(1);
 // IRI-051: the toggle choice persists — the owner flips to Name A-Z once and
 // it sticks. Default stays "recently added" (new downloads belong on top).
-const sort = ref<"recent" | "name">(
-  localStorage.getItem("irori.models.sort") === "name" ? "name" : "recent",
-);
+// Storage access is guarded: browsers throw when site data is blocked.
+const sort = ref<"recent" | "name">((() => {
+  try {
+    return localStorage.getItem("irori.models.sort") === "name" ? "name" : "recent";
+  } catch {
+    return "recent";
+  }
+})());
 const modelsPage = ref<ModelsPage | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -91,7 +96,11 @@ async function load(): Promise<void> {
 
 function onSortToggle(): void {
   sort.value = sort.value === "recent" ? "name" : "recent";
-  localStorage.setItem("irori.models.sort", sort.value);
+  try {
+    localStorage.setItem("irori.models.sort", sort.value);
+  } catch {
+    /* storage blocked — the choice stays session-only */
+  }
   page.value = 1;
   void load();
 }
