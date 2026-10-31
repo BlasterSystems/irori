@@ -23,6 +23,8 @@ import {
   startSetup,
   stopSetup,
   validateScripts,
+  composeScriptPath,
+  splitRecipePaths,
   type SetupCreateInput,
   type SetupInfo,
   type SetupLogLine,
@@ -251,8 +253,11 @@ interface WizardState {
   headNodeId: string;
   workerIds: string[];
   model: string;
-  scriptStart: string;
-  scriptStop: string;
+  /** IRI-051: scripts are entered as a recipe folder plus start/stop names;
+   *  the stored full paths are composed on submit (composeScriptPath). */
+  recipeFolder: string;
+  startName: string;
+  stopName: string;
   envModelName: boolean;
   envPort: boolean;
   envExtraArgs: boolean;
@@ -271,8 +276,9 @@ const wizard = ref<WizardState>({
   headNodeId: "",
   workerIds: [],
   model: "",
-  scriptStart: "",
-  scriptStop: "",
+  recipeFolder: "",
+  startName: "",
+  stopName: "",
   envModelName: false,
   envPort: true,
   envExtraArgs: false,
@@ -281,6 +287,10 @@ const wizard = ref<WizardState>({
   capture: false,
   retain: false,
 });
+
+/** IRI-051: the stored full paths, composed from the recipe folder + names. */
+const composedStart = computed(() => composeScriptPath(wizard.value.recipeFolder, wizard.value.startName));
+const composedStop = computed(() => composeScriptPath(wizard.value.recipeFolder, wizard.value.stopName));
 
 /**
  * Sanitize worker ids against the loaded node inventory (IRI-041). An empty
@@ -311,8 +321,12 @@ function openWizard(from?: SetupInfo): void {
   // ref was never assigned in openWizard, so edits submitted 8080 (or a value
   // stale from a previous wizard session).
   wizardPort.value = from?.port ?? 8080;
-  w.scriptStart = from?.scriptStart ?? "";
-  w.scriptStop = from?.scriptStop ?? "";
+  // IRI-051: split stored paths into folder + names; differing dirnames fall
+  // back to full paths in the name fields (compose passes them verbatim).
+  const split = splitRecipePaths(from?.scriptStart ?? "", from?.scriptStop ?? "");
+  w.recipeFolder = split.folder;
+  w.startName = split.startName;
+  w.stopName = split.stopName;
   if (from) {
     w.envModelName = from.env.modelName;
     w.envPort = from.env.port;
@@ -363,8 +377,12 @@ function nextStep(): void {
     wizardError.value = "pick a model";
     return;
   }
-  if (step.value === 3 && (wizard.value.scriptStart === "" || wizard.value.scriptStop === "")) {
+  if (step.value === 3 && (composedStart.value === "" || composedStop.value === "")) {
     wizardError.value = "a stop script is required — both paths are needed";
+    return;
+  }
+  if (step.value === 3 && (composedStart.value.length > 1024 || composedStop.value.length > 1024)) {
+    wizardError.value = "script path too long — the head caps script paths at 1024 characters";
     return;
   }
   if (step.value < 5) {
@@ -416,7 +434,7 @@ async function onValidate(): Promise<void> {
   validation.value = null;
   wizardError.value = null;
   try {
-    validation.value = await validateScripts(wizard.value.headNodeId, [wizard.value.scriptStart, wizard.value.scriptStop]);
+    validation.value = await validateScripts(wizard.value.headNodeId, [composedStart.value, composedStop.value]);
   } catch (err) {
     wizardError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -471,8 +489,8 @@ function wizardInput(): SetupCreateInput {
     port: wizardPort.value,
     headNodeId: w.headNodeId,
     nodes: w.kind === "cluster" ? cleanWorkerIds(w.workerIds, w.headNodeId).map((nodeId) => ({ nodeId, role: "worker" as const })) : [],
-    scriptStart: w.scriptStart,
-    scriptStop: w.scriptStop,
+    scriptStart: composedStart.value,
+    scriptStop: composedStop.value,
     env: {
       modelName: w.envModelName,
       port: w.envPort,
@@ -785,8 +803,11 @@ function fmtGiB(bytes: number | null): string {
 
         <section v-show="step === 3" class="step card__body">
           <div class="stack">
-            <div class="field"><label>Start script — path on the head</label><input v-model="wizard.scriptStart" class="input mono" placeholder="/home/me/glm/start.sh" /></div>
-            <div class="field"><label>Stop script — required (armed stop is a core promise)</label><input v-model="wizard.scriptStop" class="input mono" placeholder="/home/me/glm/stop.sh" /></div>
+            <div class="field"><label>Recipe folder — path on the head</label><input v-model="wizard.recipeFolder" class="input mono" placeholder="~/developer/recipes/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold" /></div>
+            <div class="cols cols-2" style="gap: 10px">
+              <div class="field"><label>Start script</label><input v-model="wizard.startName" class="input mono" placeholder="start-tp3.sh" /></div>
+              <div class="field"><label>Stop script — required (armed stop is a core promise)</label><input v-model="wizard.stopName" class="input mono" placeholder="stop.sh" /></div>
+            </div>
             <div class="row">
               <button class="btn btn--secondary btn--sm" :disabled="validating" @click="onValidate">{{ validating ? "validating…" : "Validate on head (test -x)" }}</button>
               <template v-if="validation !== null">
@@ -797,15 +818,15 @@ function fmtGiB(bytes: number | null): string {
               </template>
             </div>
             <div class="field"><label>Optional env exports for the scripts</label>
-              <div class="stack" style="gap: 6px">
+              <div class="env-grid">
                 <label class="pick" :class="{ 'is-on': wizard.envModelName }"><input v-model="wizard.envModelName" type="checkbox" /> MODEL_NAME</label>
                 <label class="pick" :class="{ 'is-on': wizard.envPort }"><input v-model="wizard.envPort" type="checkbox" /> PORT</label>
-                <label class="pick" :class="{ 'is-on': wizard.envModelPath }"><input v-model="wizard.envModelPath" type="checkbox" /> MODEL_PATH <span class="stat__sub">resolved on the head via modelctl path --local</span></label>
+                <label class="pick" :class="{ 'is-on': wizard.envModelPath }"><input v-model="wizard.envModelPath" type="checkbox" /> MODEL_PATH <span class="stat__sub">via modelctl path --local</span></label>
                 <label class="pick" :class="{ 'is-on': wizard.envExtraArgs }"><input v-model="wizard.envExtraArgs" type="checkbox" /> EXTRA_ARGS</label>
-                <input v-if="wizard.envExtraArgs" v-model="wizard.extraArgs" class="input mono" placeholder="--thinking --vision …" />
-                <label class="pick" :class="{ 'is-on': wizard.capture }"><input v-model="wizard.capture" type="checkbox" @change="onCaptureToggle" /> Capture usage <span class="stat__sub">serves the engine on loopback; the agent proxies the LAN port and records per-request usage. The start script must honor $PORT.</span></label>
-                <label v-if="wizard.capture" class="pick" :class="{ 'is-on': wizard.retain }"><input v-model="wizard.retain" type="checkbox" /> Keep bodies <span class="stat__sub">stores gzip-deduplicated request/response bodies on the server for chat reconstruction; capped per body and per part.</span></label>
               </div>
+              <input v-if="wizard.envExtraArgs" v-model="wizard.extraArgs" class="input mono" style="margin-top: 6px" placeholder="--thinking --vision …" />
+              <label class="pick" :class="{ 'is-on': wizard.capture }" style="margin-top: 6px"><input v-model="wizard.capture" type="checkbox" @change="onCaptureToggle" /> Capture usage <span class="stat__sub">agent proxies the LAN port, records per-request usage; the start script must honor $PORT.</span></label>
+              <label v-if="wizard.capture" class="pick" :class="{ 'is-on': wizard.retain }" style="margin-top: 6px"><input v-model="wizard.retain" type="checkbox" /> Keep bodies <span class="stat__sub">stores deduped request/response bodies for chat reconstruction (capped).</span></label>
             </div>
           </div>
         </section>
@@ -850,7 +871,7 @@ function fmtGiB(bytes: number | null): string {
             <dt>type</dt><dd>{{ wizard.kind === "cluster" ? `cluster — head + ${wizard.workerIds.length} worker(s)` : "single node" }}</dd>
             <dt>model</dt><dd class="mono">{{ wizard.model }}</dd>
             <dt>port</dt><dd>{{ wizardPort }} · probed for health (/v1/models with the model id) · timeout 15 m</dd>
-            <dt>scripts</dt><dd class="mono">{{ wizard.scriptStart }} · {{ wizard.scriptStop }} <span class="faint">(re-validated at every start)</span></dd>
+            <dt>scripts</dt><dd class="mono">{{ composedStart }} · {{ composedStop }} <span class="faint">(re-validated at every start)</span></dd>
             <dt>env</dt><dd>{{ [wizard.envModelName ? "MODEL_NAME" : null, wizard.envPort || wizard.capture ? "PORT" : null, wizard.envExtraArgs && wizard.extraArgs !== "" ? "EXTRA_ARGS" : null, wizard.envModelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}<template v-if="wizard.capture"> · capture on ($PORT is the loopback engine port)</template><template v-if="wizard.retain"> · bodies kept</template></dd>
             <dt>log</dt><dd>streamed into telemetry (ring + persisted run log)</dd>
           </dl>
@@ -993,8 +1014,16 @@ function fmtGiB(bytes: number | null): string {
 .pick-grid .pick {
   align-items: flex-start;
 }
+/* IRI-051: env exports as a compact two-column checkbox grid. */
+.env-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  align-content: start;
+}
 @media (max-width: 720px) {
-  .pick-grid {
+  .pick-grid,
+  .env-grid {
     grid-template-columns: 1fr;
   }
 }
