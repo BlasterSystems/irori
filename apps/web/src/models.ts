@@ -8,7 +8,9 @@ import {
   placementResponseSchema,
   type DownloadQueueEntry,
   type JobView,
+  type ModelEntry,
   type ModelsPage,
+  type PlacementRow,
   type PlacementResponse,
   type HfQuantsResult,
 } from "@irori/core";
@@ -31,6 +33,29 @@ export async function fetchModelsPage(page: number, q: string, sort: "recent" | 
   const parsed = modelsPageSchema.safeParse(await getJson(url, signal));
   if (!parsed.success) throw new Error("malformed models response");
   return parsed.data;
+}
+
+/** IRI-051: collation-proof, numeric-aware model-name order — 2.75bpw sorts
+ *  before 4bpw before 10bpw and case variants stay family-adjacent, which the
+ *  DB collation (ORDER BY model_meta.name) does not guarantee. */
+export function modelNameCompare(a: { name: string }, b: { name: string }): number {
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+}
+
+/**
+ * IRI-051: the wizard picker needs the WHOLE catalog name-ordered — a single
+ * server page (25 rows) is collation-selected and truncates, so family
+ * members outside the window were unreachable without a search. Fetches page
+ * after page (name sort) until the server reports exhaustion, then sorts.
+ */
+export async function fetchAllModelsNamed(q: string, signal?: AbortSignal): Promise<ModelEntry[]> {
+  const out: ModelEntry[] = [];
+  for (let page = 1; ; page++) {
+    const res = await fetchModelsPage(page, q, "name", signal);
+    out.push(...res.models);
+    if (res.models.length === 0 || out.length >= res.total) break;
+  }
+  return out.sort(modelNameCompare);
 }
 
 export async function fetchPlacement(model: string, signal?: AbortSignal): Promise<PlacementResponse> {
