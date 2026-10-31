@@ -329,3 +329,53 @@ export function setupSubline(setup: SetupInfo): string {
   if (setup.health === "timeout") return setup.lastError ?? "startup timeout";
   return "";
 }
+
+/**
+ * IRI-051: composes a script path from an optional recipe folder and a script
+ * name. A path-shaped name (starts with `/` or `~`, or contains `/`) is used
+ * VERBATIM with the folder ignored — pasting a full path into the name field
+ * is always safe; an empty folder yields the name as-is; a trailing slash on
+ * the folder never produces double slashes.
+ */
+export function composeScriptPath(folder: string, name: string): string {
+  const n = name.trim();
+  const f = folder.trim().replace(/\/+$/, "");
+  if (n === "") return "";
+  if (n.startsWith("/") || n.startsWith("~") || n.includes("/")) return n;
+  if (f === "") return n;
+  return `${f}/${n}`;
+}
+
+export interface RecipeSplit {
+  folder: string;
+  startName: string;
+  stopName: string;
+}
+
+/**
+ * IRI-051: splits stored start/stop paths into recipe-folder + name fields for
+ * the wizard prefill. Shared dirname → folder + basenames (round-trips through
+ * composeScriptPath); differing dirnames (or paths without a folder) → empty
+ * folder and the full paths as names, which compose passes through verbatim.
+ */
+export function splitRecipePaths(start: string, stop: string): RecipeSplit {
+  const s = start.trim();
+  const t = stop.trim();
+  const dirOf = (p: string): string => {
+    const i = p.lastIndexOf("/");
+    return i <= 0 ? "" : p.slice(0, i);
+  };
+  const baseOf = (p: string): string => {
+    const i = p.lastIndexOf("/");
+    return i <= 0 ? p : p.slice(i + 1);
+  };
+  if (s === "" && t === "") return { folder: "", startName: "", stopName: "" };
+  if (s === "" || t === "") {
+    const only = s !== "" ? s : t;
+    return { folder: dirOf(only), startName: s === "" ? t : s, stopName: s === "" ? s : t };
+  }
+  const ds = dirOf(s);
+  const dt = dirOf(t);
+  if (ds === dt) return { folder: ds, startName: baseOf(s), stopName: baseOf(t) };
+  return { folder: "", startName: s, stopName: t };
+}

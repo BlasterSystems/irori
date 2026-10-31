@@ -1,16 +1,59 @@
 import { describe, expect, it } from "vitest";
 import {
+  composeScriptPath,
   fmtEta,
   fmtRate,
   sanitizeWorkerIds,
   setupChipCls,
   setupNodeLines,
   setupSubline,
+  splitRecipePaths,
   stagePercent,
   stageVal,
   type SetupInfo,
 } from "../src/serve";
 import type { NodeInfo } from "@irori/core";
+
+describe("composeScriptPath / splitRecipePaths (IRI-051)", () => {
+  it("composes folder plus name and normalizes trailing slashes", () => {
+    expect(composeScriptPath("~/developer/recipes/X", "start-tp3.sh")).toBe("~/developer/recipes/X/start-tp3.sh");
+    expect(composeScriptPath("~/developer/recipes/X/", "start.sh")).toBe("~/developer/recipes/X/start.sh");
+    expect(composeScriptPath("  ~/recipes/X  ", "  stop.sh ")).toBe("~/recipes/X/stop.sh");
+  });
+
+  it("uses a path-shaped name verbatim and ignores the folder", () => {
+    expect(composeScriptPath("~/other", "/opt/recipes/X/start.sh")).toBe("/opt/recipes/X/start.sh");
+    expect(composeScriptPath("~/other", "~/recipes/X/start.sh")).toBe("~/recipes/X/start.sh");
+    expect(composeScriptPath("~/other", "sub/dir/start.sh")).toBe("sub/dir/start.sh");
+  });
+
+  it("falls back to the bare name when the folder is empty", () => {
+    expect(composeScriptPath("", "start.sh")).toBe("start.sh");
+    expect(composeScriptPath("", "")).toBe("");
+  });
+
+  it("splits a shared dirname into folder plus basenames and round-trips", () => {
+    const split = splitRecipePaths("~/developer/recipes/X/start-tp3.sh", "~/developer/recipes/X/stop.sh");
+    expect(split).toEqual({ folder: "~/developer/recipes/X", startName: "start-tp3.sh", stopName: "stop.sh" });
+    expect(composeScriptPath(split.folder, split.startName)).toBe("~/developer/recipes/X/start-tp3.sh");
+    expect(composeScriptPath(split.folder, split.stopName)).toBe("~/developer/recipes/X/stop.sh");
+  });
+
+  it("falls back to full paths in the name fields when dirnames differ", () => {
+    const split = splitRecipePaths("/a/start.sh", "~/b/stop.sh");
+    expect(split.folder).toBe("");
+    expect(split.startName).toBe("/a/start.sh");
+    expect(split.stopName).toBe("~/b/stop.sh");
+    expect(composeScriptPath(split.folder, split.startName)).toBe("/a/start.sh");
+  });
+
+  it("handles bare names and empty inputs", () => {
+    expect(splitRecipePaths("start.sh", "stop.sh")).toEqual({ folder: "", startName: "start.sh", stopName: "stop.sh" });
+    expect(splitRecipePaths("", "")).toEqual({ folder: "", startName: "", stopName: "" });
+    const one = splitRecipePaths("/opt/start.sh", "");
+    expect(one).toEqual({ folder: "/opt", startName: "/opt/start.sh", stopName: "" });
+  });
+});
 
 function node(id: string, name: string, online: boolean): NodeInfo {
   return {
