@@ -5,6 +5,7 @@ import {
   jobInfoSchema,
   jobKindSchema,
   modelsPageSchema,
+  parseTransferProgress,
   placementResponseSchema,
   type DownloadQueueEntry,
   type JobView,
@@ -13,7 +14,9 @@ import {
   type PlacementRow,
   type PlacementResponse,
   type HfQuantsResult,
+  type TransferProgress,
 } from "@irori/core";
+import { jobStreams } from "./jobs";
 
 /**
  * Models v2 + jobs API clients and pure shaping helpers. Server payloads are
@@ -426,15 +429,56 @@ export function formatGiB(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
 }
 
-/** Pure: placement action → chip label + class per the DS thread budget. */
+/**
+ * IRI-051: the aggregate line for a transfer job sheet. Single-stream jobs
+ * (jobStreams === 1) carry hub-parsed progress (IR-131) — the summary reads
+ * `job.progress` and falls back to the last parseable progress2 output line
+ * for rows that predate it. Multi-stream jobs (push, 4 streams) return null:
+ * the hub deliberately emits no parsed progress there, and one stream's stats
+ * must never read as an aggregate. Model bytes (from the placement response)
+ * turn bytes into an "x of y" denominator when known.
+ */
+export function transferSummaryLine(
+  kind: string,
+  params: Record<string, unknown> | undefined,
+  progress: TransferProgress | null | undefined,
+  output: JobOutputLine[],
+  modelBytes: number | null,
+): string | null {
+  if (jobStreams(kind, params) !== 1) return null;
+  let best: TransferProgress | null = null;
+  if (progress !== null && progress !== undefined && (progress.bytes !== null || progress.percent !== null)) best = progress;
+  if (best === null) {
+    for (let i = output.length - 1; i >= 0; i--) {
+      const parsed = parseTransferProgress(output[i]!.line);
+      if (parsed !== null && (parsed.bytes !== null || parsed.percent !== null)) {
+        best = parsed;
+        break;
+      }
+    }
+  }
+  if (best === null || (best.bytes === null && best.percent === null)) return null;
+  const segs: string[] = [];
+  if (best.bytes !== null && modelBytes !== null && modelBytes > 0) segs.push(`${formatGiB(best.bytes)} of ${formatGiB(modelBytes)}`);
+  else if (best.bytes !== null) segs.push(formatGiB(best.bytes));
+  const pct = best.percent ?? (best.bytes !== null && modelBytes !== null && modelBytes > 0 ? (best.bytes / modelBytes) * 100 : null);
+  if (pct !== null) segs.push(`${Math.max(0, Math.min(100, Math.round(pct)))}%`);
+  if (best.rateBytesPerSec !== null && best.rateBytesPerSec > 0) segs.push(downloadSpeedLabel(best.rateBytesPerSec).label);
+  if (best.etaSeconds !== null && best.etaSeconds > 0) segs.push(`eta ${formatEta(best.etaSeconds)}`);
+  return segs.length > 0 ? segs.join(" · ") : null;
+}
+
+/** Pure: placement action → chip label + class per the DS thread budget.
+ *  IRI-051: state-shaped copy ("needs sync", not the action "sync from NAS")
+ *  so the State column never reads as a second action next to the buttons. */
 export function placementChip(action: "present" | "sync" | "push" | "unavailable"): { label: string; cls: string } {
   switch (action) {
     case "present":
       return { label: "present", cls: "chip--ok" };
     case "sync":
-      return { label: "sync from NAS", cls: "chip--accent" };
+      return { label: "needs sync", cls: "chip--accent" };
     case "push":
-      return { label: "push", cls: "chip--accent" };
+      return { label: "needs push", cls: "chip--accent" };
     default:
       return { label: "unavailable", cls: "chip--warn" };
   }
