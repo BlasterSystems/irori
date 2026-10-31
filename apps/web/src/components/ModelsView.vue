@@ -32,6 +32,7 @@ import {
   retryDownload,
   setupServingModel,
   staleSucceededIds,
+  transferSummaryLine,
   type DownloadQueueEntry,
   type HfQuantsResult,
   type JobDetail,
@@ -618,6 +619,44 @@ const jobApplyName = computed(() => {
   return typeof name === "string" && name.length > 0 ? name : null;
 });
 
+/** IRI-051: what the open job sheet is FOR — target node plus model, so the
+ *  sheet stops reading as an anonymous "sync-local RUNNING" modal. */
+const jobContext = computed(() => {
+  const j = job.value?.job;
+  if (j === undefined) return null;
+  const parts: string[] = [];
+  const node = nodes.value.find((n) => n.id === j.nodeId)?.name ?? null;
+  if (node !== null) parts.push(`on ${node}`);
+  const name = j.params["name"];
+  if (typeof name === "string" && name.length > 0) parts.push(name);
+  return parts.length > 0 ? parts.join(" · ") : null;
+});
+
+/** IRI-051: aggregate line for the sheet — download-queue keeps its batch
+ *  summary; transfer kinds get the hub-parsed progress (IR-131) via
+ *  transferSummaryLine (single-stream only; push stays raw). */
+const sheetSummary = computed(() => {
+  const j = job.value;
+  if (j === null) return null;
+  if (j.job.kind === "download-queue") return jobSummaryText.value === "" ? null : jobSummaryText.value;
+  const modelBytes = placement.value?.model.bytes ?? null;
+  return transferSummaryLine(j.job.kind, j.job.params, j.job.progress, j.output, modelBytes);
+});
+
+/** IRI-051: running sync-local jobs keyed by target node, for the live
+ *  "syncing" chip in the placement table. Fed by broadcast SSE (job and
+ *  job-progress frames) — independent of the open sheet and its poll.
+ *  Value = parsed percent, null while nothing parseable has arrived. */
+const syncingPct = computed(() => {
+  const out = new Map<string, number | null>();
+  for (const j of live.jobs.values()) {
+    if (j.kind !== "sync-local" || j.status !== "running") continue;
+    if (j.params["name"] !== selected.value) continue;
+    out.set(j.nodeId, j.progress !== null && j.progress !== undefined && typeof j.progress.percent === "number" ? Math.round(j.progress.percent) : null);
+  }
+  return out;
+});
+
 let debounce: ReturnType<typeof setTimeout> | undefined;
 function onSearchInput(): void {
   clearTimeout(debounce);
@@ -940,14 +979,14 @@ onBeforeUnmount(() => {
           </p>
           <table class="table">
             <thead>
-              <tr><th>Node</th><th>Role</th><th>Action</th><th></th></tr>
+              <tr><th>Node</th><th>State</th><th></th></tr>
             </thead>
             <tbody>
               <tr v-for="row in placement.placements" :key="row.node.id">
-                <td class="mono">{{ row.node.name }}</td>
-                <td><span class="chip">{{ row.node.role }}</span></td>
+                <td class="mono">{{ row.node.name }}<div class="stat__sub">{{ row.node.role }}</div></td>
                 <td>
-                  <span class="chip" :class="placementChip(row.action).cls">{{ placementChip(row.action).label }}</span>
+                  <span v-if="syncingPct.has(row.node.id)" class="chip chip--accent">syncing {{ syncingPct.get(row.node.id) !== null ? `${syncingPct.get(row.node.id)}%` : "…" }}</span>
+                  <span v-else class="chip" :class="placementChip(row.action).cls">{{ placementChip(row.action).label }}</span>
                   <span v-if="row.action === 'push' && pushViaName(row.viaNodeIds)" class="mono faint"> via {{ pushViaName(row.viaNodeIds) }}</span>
                   <span v-if="row.action === 'unavailable' && row.reason" class="mono faint"> {{ row.reason }}</span>
                 </td>
@@ -1013,17 +1052,19 @@ onBeforeUnmount(() => {
           </h3>
           <button class="btn btn--secondary btn--sm" @click="closeJob">Close</button>
         </div>
+        <p v-if="jobContext !== null" class="stat__sub mono" style="margin: -8px 0 0;">{{ jobContext }}</p>
         <p v-if="jobError" class="banner banner--warn">{{ jobError }}</p>
         <p v-if="jobApplyName !== null && deleteSetupWarn?.name === jobApplyName" class="banner banner--warn">
           Setup "{{ deleteSetupWarn!.setup }}" serves this model — deleting breaks its next start (advisory, never blocks).
         </p>
-        <template v-if="job.job.kind === 'download-queue' && jobSummaryText !== ''">
-          <pre class="joblog mono">{{ jobSummaryText }}</pre>
+        <template v-if="sheetSummary !== null">
+          <pre class="joblog mono">{{ sheetSummary }}</pre>
           <details class="rawlog">
-            <summary class="stat__sub">raw modelctl output — collapsed (one line per entry, refreshed in place)</summary>
+            <summary class="stat__sub">raw output — collapsed</summary>
             <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
           </details>
-          <p class="stat__sub faint">summary from the download queue (IR 71 progress fields) · raw output stays in the job record</p>
+          <p v-if="job.job.kind === 'download-queue'" class="stat__sub faint">summary from the download queue (IR 71 progress fields) · raw output stays in the job record</p>
+          <p v-else class="stat__sub faint">hub-parsed transfer progress (IR-131) · raw output stays in the job record</p>
         </template>
         <pre v-else class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
         <div v-if="confirmState !== null && confirmState.host === 'job'" class="inline-confirm" role="alertdialog" :aria-label="confirmState.title">
