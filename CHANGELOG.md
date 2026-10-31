@@ -4,257 +4,146 @@ All notable changes to Irori are recorded here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow
 [SemVer](https://semver.org/) (see `docs/RELEASING.md`).
 
-## [Unreleased] — Store-scoped hygiene staging (IRI-047)
+## [Unreleased]
 
-### Fixed
+## [0.4.0] — 2026-10-31
 
-- **NAS store staging no longer counts as a compute node's reclaimable disk**
-  (IRI-047): the hygiene agent audits whatever store root the node has
-  configured, so every node with the NAS mounted listed the store's orphaned
-  staging (236 GB on DGX-1) in its own Disk hygiene drawer and "reclaimable"
-  total — beside a Disk-% chip that measures only the root device (`df -kB /`).
-  The server now scopes the `modelctl-staging` audit category to the store
-  node (`pickStoreNode`, by identity — no online filter): staging renders once,
-  in the store node's drawer, chipped "NAS store" with a hint that a clean
-  frees store-volume space. Non-store `latestAudit`/history reads strip the
-  category; the clean flow, protected set, and typed node-name confirm are
-  unchanged, and clean rows keep their requested categories as factual history.
+Ten days of capability work since 0.3.0: usage phase 2 (retention, chats,
+tools, client identity), OpenTelemetry export, cache-user execution
+everywhere, push self-healing, job persistence across agent restarts, auto
+node-role adjustment, and a serve-wizard/placement UX round. **Two
+intentional behavior changes to call out:**
 
-## [Unreleased] — Cache-user serve execution (IRI-045)
-
-### Fixed
-
-- **Serve start/stop scripts now run as the node's cache user** (IRI-045,
-  ADR-0015): the setup driver spawned scripts as the agent user (root) — on
-  nodes with a `cacheUser` set the engine ran as root even though MODEL_PATH
-  resolved from that user's HF cache. Start **and** stop scripts now run
-  through the ADR-0011 `runuser` shape (scrubbed `XDG_STATE_HOME`/`HF_HOME`/
-  `HF_HUB_CACHE`, the owner's `HOME`, `USER`/`LOGNAME`, ambient `PATH`);
-  the resolved run context persists on the driver record, so a stop after an
-  agent restart — or a mid-run setting change — still stops the engine in the
-  user that started it. A cache user without a passwd entry refuses the start
-  with an actionable error instead of silently running root. Prerequisite:
-  the cache user needs GPU device access and owns the model paths.
-- **`set -u` start scripts no longer die on `$HOME`** (IRI-045): the agent's
-  systemd unit is HOME-less (`./scripts/config.sh: line 340: HOME: unbound
-  variable` → start exit 1 on DGX-1); the driver now injects the agent user's
-  passwd home as `HOME` when neither the ambient env nor the setup env has
-  one, for wrapped and unwrapped starts and stops alike.
-
-### Changed
-
-- **One shared runuser wrap** (IRI-045): the ADR-0011 argv shape moved from
-  four inline copies (`modelctl.ts` ×3, `inventory.ts`) into
-  `apps/agent/src/cache-user.ts` (`runuserWrap`); transfer, local-op, and
-  inventory argv are byte-identical to before.
-
-## [Unreleased] — TensorFold-native probe classification (IR-125)
-
-### Fixed
-
-- **TensorFold 1.1+ engines misclassified as LM Studio** (IR-125): the probe's
-  `/api/v0/models` branch now prefers the `owned_by` classification, so
-  tensorfold-native builds (new health schema, LM-Studio-compatible model
-  list) keep their identity and metrics instead of collapsing to the no-op
-  lmstudio applier. Queue depth and KV fall back to the shared
-  `tensorfold:` prometheus series when the health payload lacks the classic
-  counter/pool block.
-- **Agent boot crash-looped on nodes with persisted setup state** (IR-125):
-  the setup-driver re-attach ran before the transport existed while its
-  re-announce callbacks close over it, so any node with a `setups.json`
-  record fataled with "Cannot access 'transport' before initialization"
-  on every restart. Driver init now runs after the transport is built.
-
-## [Unreleased] — NodeDetail overlay idiom (IR-122)
-
-### Changed
-
-- **Node model operations join the IRI-043 overlay idiom** (IR-122): the two
-  hand-rolled confirm dialogs collapse into the shared confirm state machine,
-  and the page-flow "Model operation" card becomes a job sheet on one scrim —
-  job kind, status chip, full output, backdrop closes top-layer-first.
-  Closing the sheet leaves a compact bar (status chip, last output line,
-  Show output / Dismiss) so a running job stays one click away.
-- **Cancel job is guarded on the node page** (IR-122): the confirmation
-  renders inline in the sheet — the Models-page convention — instead of
-  canceling the running job instantly.
-
-## [Unreleased] — Push job default, overlay sheets, telemetry labels (IR-121)
+- **Serve start/stop scripts — and MODEL_PATH resolution — now run as the
+  node's `cacheUser`** instead of the agent user (root). A cache user needs
+  GPU device access and must own the model paths (IRI-045 / IR-120,
+  ADR-0015).
+- **Node roles auto-derive from serving-setup membership** (head over worker
+  over standalone) on every setup create/edit/remove; a manual role still
+  works but is overwritten the next time that node's membership changes
+  (IRI-050).
 
 ### Added
 
-- **Always-available telemetry drawer** (IR-121): a footer Telemetry CTA opens
-  a right-hand dock on every page rendering the same event feed as the
-  Overview card, including the new model labels. The left edge drags to
-  resize (320–720 px, persisted per browser; full-width on mobile) and the
-  panel layers above the page but below every dialog per the chrome z-order.
-- **Job params on the SSE job frame** (IR-121): `job` events now carry the
-  job `params` (older hubs omit the field; clients keep the seed value),
-  so transfers started mid-session are labeled without a page reload — the
-  settle and started events thread them through server-side.
-
-### Changed
-
-- **Overlay layers never stack** (IR-121, IRI-043 option C): job output opens
-  as a side sheet docked beside the placement/download drawer on one shared
-  scrim instead of a second centered modal; with no drawer open the job
-  panel behaves exactly as before. Backdrop presses close the top layer
-  first.
-- **Destructive confirms are drawer-native** (IR-121): Delete-from-NAS
-  (placement drawer) and Cancel-job (job panel) confirm inline in the
-  hosting surface, mirroring the hygiene-drawer typed confirm; the shared
-  confirm dialog remains for page-level queue and catalog rows.
-- **Telemetry feed lines name the model** (IR-121): job progress and
-  lifecycle lines read `DGX-3 · sync-local <model>: …`; download batches
-  report `N models` instead of the first entry's name.
-- **Pushes default to four parallel streams** (IR-121): the agent now
-  defaults `push --jobs 4` when the hub omits the param — every hub path
-  already sent 4 explicitly; API-created pushes no longer fall back to
-  modelctl's single-stream default.
-
-## [Unreleased] — Cache-user MODEL_PATH resolution + serve UX (IR-120)
-
-### Fixed
-
-- **MODEL_PATH resolution now runs as the node's cache user** (IR-120,
-  IRI-042): the setup driver's `modelctl path --local` ran as the agent user
-  (root) while every transfer dials the cache user's per-user modelctl — on
-  nodes with `cacheUser` set the staged model lives in that user's HF cache,
-  so `MODEL_PATH` setups failed to start with
-  `MODEL_PATH resolution failed …` even though the model was staged (verified
-  on DGX-1: root's resolution exited nonzero while the cache user's resolved
-  the snapshot). Resolution now reuses the ADR-0011 runuser wrap (scrubbed
-  env, per-user binary); a missing per-user modelctl refuses the start with
-  that actionable reason instead of a bare banner, and resolution failures
-  carry modelctl's stderr detail. The cache user reaches the driver via a
-  getter, so runtime edits apply without an agent restart.
-
-### Changed
-
-- **Setup wizard scroll and model list** (IR-120, IRI-042): the wizard header
-  and footer are sticky and the step body scrolls instead of the whole panel;
-  the model list is scrollable (one 25-entry server page instead of a hard
-  8-item truncation), shows each entry's repository under the name, and
-  reports the total match count when the search yields more than one page.
-- **Disk-hygiene clean CTA is always visible** (IR-120, IRI-042): the typed
-  node-name confirm and `Clean N categories` button pin to the drawer bottom
-  (with the `N selected · bytes` summary) instead of sitting below the fold
-  behind the category rows; item counts pluralize.
-
-## [Unreleased] — Setup edit repair (IR-119)
-
-### Fixed
-
-- **Setup edit deadlock on legacy worker rows** (IR-119, IRI-041): editing a
-  setup created before the IR-78 worker validation (e.g. the fleet's
-  `glm-5.3-flash-exl3-q4` row with DGX-2 ×1 / DGX-3 ×3 / NAS ×2) failed with
-  `NAS is a NAS node and cannot be a worker` on every save path — the wizard
-  loaded the stored rows verbatim while the TYPE step hid NAS, making the
-  invalid rows invisible and unremovable. The wizard now sanitizes the worker
-  list against the node inventory (dedupe keep-first, drop head-self,
-  NAS-kind and unknown ids) on edit/duplicate load and on every persistence
-  payload, so the first successful Save repairs the stored row; an empty
-  inventory passes through untouched and lets the server validate.
-
-## [Unreleased] — Token macro views in Analytics (IR-118)
-
-### Added
-
-- **Token macro views in the Analytics tokens lens** (`#/analytics` → tokens):
-  five fleet stat tiles (total = generated + input, generated, input, cache,
-  cache hit %), a By cluster / By node totals table folded from the lens
-  series, and a per-model table upgraded with `total` / `cacheHitPct` columns
-  backed by whole-ledger sums (never a top-N subset, capped at 100 rows).
-  The `GET /api/v1/analytics/tokens` response is additively extended with
-  `fleet` and the macro `models[]` columns. Sourced purely from engine
-  lifetime counters via the agent probes — no capture proxy required, no new
-  tables, no pricing.
-
-## [Unreleased] — OpenTelemetry export (IR-116, IR-117)
-
-### Added
-
-- **Env-gated OTLP traces** (IR-116, IRI-039): with `OTEL_EXPORTER_OTLP_ENDPOINT`
-  set, the capture proxy's agent exports one GenAI span per captured request —
-  mapped from the already-parsed usage record (`gen_ai.usage.input_tokens` /
-  `output_tokens` / `cache_read.input_tokens` / `reasoning.output_tokens`,
-  `gen_ai.response.time_to_first_chunk`, finish reasons, HTTP status) and
-  **parented by the client's `traceparent`**, which the proxy now attaches to
-  the usage event and forwards verbatim; with vLLM's native
-  `--otlp-traces-endpoint` the client → proxy → engine chain renders as one
-  trace in any OTLP backend. The hub emits low-cardinality SERVER spans per
-  request (`/healthz` skipped, UUID/numeric segments → `:id`). Export is
-  fail-open (capture and traffic are never affected) and providers flush on
-  SIGTERM; unset env leaves behavior byte-identical.
-- **Pino + OTLP logs** (IR-117): both server and agent log structured JSON via
-  pino (`IRORI_LOG_LEVEL`, default `info`); when the OTLP endpoint is set, log
-  records also export via the OTLP logs pipeline. No prompt/response content
-  is ever emitted on spans or log records.
-
-## [Unreleased] — Usage phase 2: retention, chats, tools, client identity
-
-### Added
-
-- **Register-from-cache** (IR-104, ADR-0012): the models inventory reports
-  unregistered `models--*` cache dirs per user, and the node page offers a
-  Register action that runs the modelctl 0.23 `register-local` job — the
-  entry is verified against the NAS object by hash (blob identity plus
-  small-file content hashes) and registered with **no transfer**; any
-  mismatch refuses the registration.
+- **Usage phase 2** (IR-52/53/54/55, ADR-0010): opt-in per-setup body
+  retention (sha256-addressed gzip parts deduped across turns, global caps,
+  migration 0012), read-time chat chaining with byte-exact reconstruction
+  (`#/chats`), tool-call attribution with exact largest-remainder token
+  shares (migration 0014), and per-client issued keys with
+  `X-Irori-Project` / `X-Irori-Agent-Type` / `X-Irori-Client` headers,
+  `X-Irori-Retry` lineage and an Agents tab (migration 0013).
+- **Register-from-cache** (IR-104, ADR-0012): the models inventory lists
+  unregistered `models--*` cache dirs per user and registers them via
+  modelctl 0.23 `register-local` — hash-verified against the NAS object
+  with no transfer.
 - **Modelctl convergence** (IR-106, ADR-0013): the modelctl pin is a hub
-  setting (`modelctl_pin`, `GET/PUT /api/v1/settings/modelctl-pin`, pushed to
-  agents via config-update — the node env stays as fallback);
-  `modelctl-install` provisions a cache user's own modelctl via runuser and
-  **skips without installing** when the current version already satisfies the
-  pin (a stale env pin can no longer downgrade a newer binary); the hub
-  auto-dispatches one install job per below-pin cache user after every
-  succeeded models-inventory read (silent skip when the pin is unset, the
-  node already has an active job, or the agent is offline).
-
-- **Opt-in body retention** (IR-52, ADR-0010): per-setup `Keep bodies` flag
-  (Serve wizard) with global caps (settings key `usage_body_retention`,
-  defaults 16 MiB body / 4 MiB part); the capture proxy decomposes bodies
-  into sha256-addressed gzip parts (deduped across turns, in-position
-  truncation markers), the agent buffer stores bytes once and batches under
-  the WS frame limit, and Postgres `llm_parts`/`llm_request_parts` refcount
-  parts so they die with their owning rows (migration 0012).
-- **Chats** (IR-53): read-time session chaining (client key + 30-min gap +
-  prefix-hash extension; broken chain + >50% input drop marks `compacted`)
-  and reconstruction of exactly what the model saw — `#/chats` renders
-  sessions per client/day with byte-exact images, collapsed tool blocks and
-  truncation/compaction markers; retention-off shows guidance instead of
-  errors.
-- **Tool attribution** (IR-54): `tool_call` deltas reassembled by index and
-  `role:"tool"` results lifted at capture time (retention-independent);
-  ingest attributes tokens largest-remainder per (request, tool) so shares
-  sum exactly to request totals; `unknown` fallback for unresolved ids;
-  Tools tab with per-tool×model table + top-8 token series (migration 0014).
-- **Client identity** (IR-55): issued per-client keys (fingerprinted sha256
-  at the proxy, shown once), `X-Irori-Project`/`X-Irori-Agent-Type`/
-  `X-Irori-Client` headers, `X-Irori-Retry` lineage contract; issued keys
-  win over self-declared headers, unidentified clients stay visible by
-  source IP; Agents tab + Client keys manager; project/agent-type filters
-  on Requests (migration 0013).
+  setting (`GET/PUT /api/v1/settings/modelctl-pin`, pushed to agents via
+  config-update) and `modelctl-install` skips when the installed version
+  already satisfies the pin — a stale env pin can no longer downgrade a
+  newer binary; the hub auto-dispatches one install per below-pin cache user
+  after every succeeded models-inventory read.
+- **OpenTelemetry export** (IR-116/117): with `OTEL_EXPORTER_OTLP_ENDPOINT`
+  set, the capture proxy emits one GenAI span per captured request (parented
+  by the client's `traceparent`), the hub emits low-cardinality SERVER
+  spans, and both server and agent export pino logs — fail-open, byte
+  identical when unset, and no prompt/response content on any span or record.
+- **Token macro views** (IR-118): five fleet stat tiles, by-cluster/by-node
+  totals and per-model `total`/`cacheHitPct` columns in the Analytics tokens
+  lens, sourced from whole-ledger engine counters (no capture proxy, no new
+  tables, no pricing).
+- **Push self-healing** (IR-112, ADR-0014): push jobs preflight the
+  destination and self-provision its dependencies (rsync, per-user modelctl,
+  authorized key exchange orchestrated by the hub) — a first-time dgx-to-dgx
+  push no longer dies on an ambiguous "modelctl is not installed" error;
+  private keys never leave the node and the hub stores no credentials.
+- **Job persistence across agent restarts** (IR-131, migration 0019): agents
+  persist active jobs, kill persisted process groups on boot and report them
+  in `hello`; the hub settles any running/canceling row the fresh agent no
+  longer reports instead of stranding it, and `jobs` gained cancel-requested
+  and parsed-progress columns.
+- **Transfer tracking and cancel** (IRI-048): a running sync-local/push
+  stays reachable after its sheet closes — persistent op bar plus the global
+  transfers dock, aggregate modelctl progress (bytes, percent, rate, eta),
+  and a guarded cancel with honest offline/crash reconcile.
+- **Auto node-role adjustment** (IRI-050): node roles derive from
+  serving-setup membership (head over worker over standalone, dangling ids
+  ignored) on every setup create/edit/remove, written as a write-only diff
+  per changed node with a live config-update — workers probe detection-only
+  at 10 s the moment they join a cluster; node delete strips dangling worker
+  ids from setups so no ghost worker rows render.
+- **Serve-wizard and placement UX round** (IRI-051): the wizard prefills the
+  serving port on edit/duplicate, asks for a recipe folder plus start/stop
+  names, and reviews grouped Runs / Port and health / Scripts / Environment
+  with placement node names and env values; the model picker renders the
+  whole catalog name-ordered (numeric, case-insensitive) in two columns; the
+  placement table separates state from action with role subtext, and the job
+  sheet carries target context plus a hub-parsed aggregate progress line
+  with raw output collapsed and a live `syncing N%` chip from the SSE job
+  store.
+- **Always-available telemetry drawer** (IR-121): a footer Telemetry CTA
+  docks the Overview event feed on every page (left edge resizable,
+  persisted); `job` SSE frames carry `params` so mid-session transfers are
+  labeled without a reload.
+- **Settings and quants endpoints** (IR-101/106/118, IRI-016):
+  `GET/PUT /api/v1/settings/*` for the HF token, cadence, energy/token cost
+  and modelctl pin, plus `GET /api/v1/hf-quants` backing the download
+  modal's Expand flow.
 
 ### Changed
 
-- Agent modelctl pin default raised to `0.23.0` (IR-104): `register-local`
-  requires the per-user modelctl to know the verb.
-- Agent modelctl pin default raised to `0.22.0` (IR-75): modelctl now emits
-  `progress:` JSONL on stderr during real downloads, lighting up the
-  download-queue rows, batch totals strip and job-drawer summary shipped in
-  IR-71/74.
+- **Cache-user execution everywhere** (IRI-045/120, ADR-0015): transfers,
+  local ops, inventory, MODEL_PATH resolution and serve start/stop all run
+  through one `runuser` wrap (scrubbed HF/env, per-user binary and home); a
+  missing per-user modelctl or passwd entry refuses with an actionable
+  error instead of silently running as root.
+- **Node roles are derived, not hand-maintained** (IRI-050) — see the
+  behavior callout above.
+- **Pushes default to four parallel streams** (IR-121/131): the agent
+  defaults `push --jobs 4` and the hub emits no parsed progress for
+  multi-stream transfers — the UI shows raw output rather than one stream's
+  stats presented as an aggregate.
+- **Overlay layers never stack** (IR-121/122, IRI-043): job output docks as
+  a side sheet beside an open drawer on one shared scrim (backdrop closes
+  the top layer first); destructive confirms render inline in the hosting
+  surface; telemetry feed lines name the model.
+- **Agent modelctl pin default raised to 0.23.0** (IR-104) and **0.22.0**
+  (IR-75): register-local and download progress need the newer verbs.
+- **Disk-hygiene clean CTA pins to the drawer bottom** (IR-120) instead of
+  sitting below the fold behind the category rows.
+- **CI/CD moved to the self-hosted runner** (PR #75): GitHub-hosted build
+  minutes are exhausted, so the verify/docs-check/test gate runs on
+  `iroiri-dev-vm` (LXC 110) with a throwaway per-job Postgres cluster; the
+  deploy job and rollback path are unchanged.
 
 ### Fixed
 
-- **Node page UX** (IRI-034): saving probe ports (or role / NAS root / cache
-  user) pushes a live `config-update` so the agent stops probing removed
-  ports immediately instead of ghosting them until the next reconnect; port
-  panels render configured ports plus detected hot-added ports only (idle
-  ghosts hidden); the node-page store catalog renders only on the store node
-  (`kind: nas`); the History CPU card shows the current clock like the GPU
-  card (`cpu X / Y MHz` — the max half once agents report
-  `perCoreMaxClocksKHz`).
+- **NAS store staging no longer counts as a compute node's reclaimable
+  disk** (IRI-047): the `modelctl-staging` audit category is scoped to the
+  store node by identity — 236 GB of orphaned staging used to render in
+  every NAS-mounted node's Disk hygiene drawer and reclaimable total.
+- **TensorFold 1.1+ engines misclassified as LM Studio** (IR-125): the probe
+  prefers the `owned_by` classification so tensorfold-native builds keep
+  their identity and metrics; queue depth and KV fall back to the shared
+  `tensorfold:` prometheus series when the health payload lacks the classic
+  counters.
+- **Agent boot crash-looped on nodes with persisted setup state** (IR-125):
+  the setup-driver re-attach ran before the transport existed and fataled on
+  every restart; driver init now runs after the transport is built.
+- **Setup edit deadlock on legacy worker rows** (IR-119, IRI-041): the
+  wizard sanitizes stored worker lists (dedupe keep-first, drop
+  NAS/self/unknown) on edit/duplicate so the first successful Save repairs
+  rows created before IR-78 validation instead of failing every save path.
+- **`set -u` start scripts no longer die on `$HOME`** (IRI-045): the driver
+  injects the agent user's passwd home when neither the ambient env nor the
+  setup env has one.
+- **Node page UX** (IRI-034): probe-port (and role / NAS root / cache user)
+  saves push a live `config-update` so agents stop probing removed ports
+  immediately; idle ghost ports are hidden; the store catalog renders only
+  on the store node; the History CPU card shows the current clock like the
+  GPU card.
+- **Engine output and cancel reconcile** (IR-124): setup logs stream into
+  the shared hub feed throttled and deduped, and cancel reconcile is honest
+  about what actually stopped.
 
 ## [0.3.0] — Agent onboarding, usage capture, download queue & overview
 
