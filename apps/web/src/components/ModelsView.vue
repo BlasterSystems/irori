@@ -42,7 +42,11 @@ import {
 
 const search = ref("");
 const page = ref(1);
-const sort = ref<"recent" | "name">("recent");
+// IRI-051: the toggle choice persists — the owner flips to Name A-Z once and
+// it sticks. Default stays "recently added" (new downloads belong on top).
+const sort = ref<"recent" | "name">(
+  localStorage.getItem("irori.models.sort") === "name" ? "name" : "recent",
+);
 const modelsPage = ref<ModelsPage | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -86,6 +90,7 @@ async function load(): Promise<void> {
 
 function onSortToggle(): void {
   sort.value = sort.value === "recent" ? "name" : "recent";
+  localStorage.setItem("irori.models.sort", sort.value);
   page.value = 1;
   void load();
 }

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
 import { vScrimClose } from "../scrim";
-import { fetchModelsPage, fetchPlacement } from "../models";
+import { fetchAllModelsNamed, fetchPlacement } from "../models";
 import { setupChip, type NodeInfo, type SetupTransfer, type TransferStage } from "@irori/core";
 import {
   cancelTransfer,
@@ -383,17 +383,14 @@ function prevStep(): void {
 
 const modelChoices = ref<Array<{ name: string; runtime: string; repository: string; bytes: number }>>([]);
 const modelSearch = ref("");
-/** Total catalog matches for the current search — the list renders one server page. */
-const modelChoicesTotal = ref(0);
 
 async function loadModelChoices(q: string): Promise<void> {
   try {
-    const page = await fetchModelsPage(1, q, "name");
-    // The server page (25) is the cap; the list scrolls instead of truncating (IRI-042).
-    modelChoicesTotal.value = page.total;
-    modelChoices.value = page.models.map((m) => ({ name: m.name, runtime: m.runtime, repository: m.repository, bytes: m.bytes }));
+    // IRI-051: the whole catalog, name-ordered client-side — a single server
+    // page (25) is collation-selected and truncates families.
+    const all = await fetchAllModelsNamed(q);
+    modelChoices.value = all.map((m) => ({ name: m.name, runtime: m.runtime, repository: m.repository, bytes: m.bytes }));
   } catch {
-    modelChoicesTotal.value = 0;
     modelChoices.value = [];
   }
 }
@@ -771,7 +768,7 @@ function fmtGiB(bytes: number | null): string {
         <section v-show="step === 2" class="step card__body">
           <div class="stack">
             <input v-model="modelSearch" class="input mono" type="search" placeholder="Search the NAS catalog…" @input="onModelSearch" />
-            <div class="stack" style="gap: 8px; max-height: 320px; overflow-y: auto">
+            <div class="pick-grid" style="max-height: 340px; overflow-y: auto">
               <label v-for="m in modelChoices" :key="m.name" class="pick" :class="{ 'is-on': wizard.model === m.name }">
                 <input type="radio" name="wmodel" :checked="wizard.model === m.name" @change="onPickModel(m.name)" />
                 <span style="flex: 1; min-width: 0;">
@@ -781,7 +778,6 @@ function fmtGiB(bytes: number | null): string {
               </label>
               <p v-if="modelChoices.length === 0" class="faint">no catalog matches — the exact HF repo id can be typed in Review for a chained download</p>
             </div>
-            <p v-if="modelChoicesTotal > modelChoices.length" class="faint">{{ modelChoices.length }} of {{ modelChoicesTotal }} matches shown — refine the search to narrow</p>
             <div class="field"><label>Model (catalog name or HF repo id)</label><input v-model="wizard.model" class="input mono" /></div>
             <div class="field"><label>Serving port (script-defined; probed for health)</label><input v-model.number="wizardPort" class="input" type="number" min="1" max="65535" /></div>
           </div>
@@ -985,6 +981,22 @@ function fmtGiB(bytes: number | null): string {
 .pick input {
   width: 16px;
   height: 16px;
+}
+/* IRI-051: the model picker scans two columns at a glance instead of one
+ * tall radio card per model; rows keep the .pick chrome. */
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.pick-grid .pick {
+  align-items: flex-start;
+}
+@media (max-width: 720px) {
+  .pick-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .val {
   font-family: var(--font-mono);
