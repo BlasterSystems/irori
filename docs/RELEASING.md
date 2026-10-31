@@ -25,10 +25,16 @@ Use the `semantic-versioning` skill for version bumps, releases, and Git tags.
    PR. No protected-branch rules are configured (homelab, single operator) —
    green CI is the gate by convention.
 5. **Registry/deploy in a release:** a `v*` tag triggers
-   `.github/workflows/release.yml` — multi-arch GHCR images for the server and
-   agent roles plus the agent bundle/install-script/systemd-unit release
-   artifacts. The DEV VM deploy is a separate, tag-gated `dev-*` pipeline
-   (see `DEPLOYMENT.md`); production does not exist yet (IR-10 epic scope).
+   `.github/workflows/release.yml` — **amd64-only** GHCR images for the
+   server and agent roles plus the agent bundle/install-script/systemd-unit
+   release artifacts, built on the self-hosted runner (LXC 110, docker +
+   buildx installed 2026-10-31; GitHub-hosted minutes are exhausted). Arm64
+   was dropped 2026-10-31 — the hub runs on x86, agents consume the
+   arch-independent bundle via the hub, and no arm64 consumer exists; re-add
+   `docker/setup-qemu-action` + `platforms: linux/amd64,linux/arm64` if an
+   arm64 deployment target appears. The DEV VM deploy is a separate,
+   tag-gated `dev-*` pipeline (see `DEPLOYMENT.md`); production does not
+   exist yet (IR-10 epic scope).
 
 Do not create a tag until these facts are known. Keep this file focused and link to detailed deployment documentation rather than duplicating it.
 

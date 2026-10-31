@@ -14,13 +14,14 @@ permissions:
 
 jobs:
   images:
-    runs-on: ubuntu-latest
+    # IRI-051-era: GitHub-hosted minutes are exhausted — the release builds on
+    # the self-hosted runner (LXC 110, docker + buildx installed 2026-10-31).
+    # amd64 only: the hub runs on x86, agents consume the arch-independent
+    # bundle via the hub, and no arm64 consumer exists (re-add platforms +
+    # setup-qemu if an arm64 deployment target appears).
+    runs-on: iroiri-dev-vm
     steps:
       - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
 
       - uses: docker/setup-buildx-action@v3
 
@@ -30,13 +31,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Server image (amd64 + arm64)
+      - name: Server image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           target: server
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           build-args: |
             GIT_TAG=${{ github.ref_name }}
@@ -44,20 +45,21 @@ jobs:
             ghcr.io/blastersystems/irori:${{ github.ref_name }}
             ghcr.io/blastersystems/irori:latest
 
-      - name: Agent image (amd64 + arm64)
+      - name: Agent image (amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           target: agent
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ghcr.io/blastersystems/irori-agent:${{ github.ref_name }}
             ghcr.io/blastersystems/irori-agent:latest
 
   agent-artifacts:
-    runs-on: ubuntu-latest
+    # Self-hosted runner (LXC 110) — same toolchain as the CI verify job.
+    runs-on: iroiri-dev-vm
     steps:
       - uses: actions/checkout@v4
 
