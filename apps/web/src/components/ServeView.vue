@@ -307,6 +307,10 @@ function openWizard(from?: SetupInfo): void {
   w.headNodeId = from?.headNodeId ?? firstHeadId();
   w.workerIds = from ? cleanWorkerIds(from.nodes.map((n) => n.nodeId), w.headNodeId) : [];
   w.model = from?.model ?? "";
+  // IRI-051: the port must follow the source setup on edit/duplicate — this
+  // ref was never assigned in openWizard, so edits submitted 8080 (or a value
+  // stale from a previous wizard session).
+  wizardPort.value = from?.port ?? 8080;
   w.scriptStart = from?.scriptStart ?? "";
   w.scriptStop = from?.scriptStop ?? "";
   if (from) {
@@ -326,7 +330,6 @@ function openWizard(from?: SetupInfo): void {
     w.capture = false;
     w.retain = false;
   }
-  w.model = from?.model ?? "";
   loadModelChoices("");
 }
 
