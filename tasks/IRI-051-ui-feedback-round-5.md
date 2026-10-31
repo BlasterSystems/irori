@@ -34,15 +34,20 @@ Per story — see the Jira tickets; summary:
 
 ## Validation evidence
 
-- Tests: pending
-- Build: pending
-- Configuration validation: pending
-- Documentation check: pending
-- Fixture UI verification: pending
+- Tests: `pnpm -r test` fully green (core 99, server 224, web 291 incl. 12 new, db 5, agent 196, proxy 23) against disposable Postgres.
+- Build: `pnpm build` green (all packages).
+- Configuration validation: `.agentic/bin/validate` — "Configuration validation passed".
+- Documentation check: `.agentic/bin/docs-check` — no gaps.
+- Fixture UI verification (built surfaces via vite + fetch-router/EventSource mocks):
+  - Edit prefill: the wizard opened with port **8081** (was 8080 before S1); duplicate path shares the prefill.
+  - Picker: **2-column grid**, all 10 fixture models fetched across 3 pages and client-sorted (alpha-3b first, family-adjacent).
+  - Scripts: edit prefilled folder `~/developer/recipes/GLM-X` + basenames; after editing to GLM-Y/start-v2.sh the validate POST carried the composed paths.
+  - Review: Runs / Port and health / Scripts / Environment sections; head `dgx1` + worker `dgx2` chips; `EXTRA_ARGS=--host 127.0.0.1` value chip; no log row.
+  - Models: thead `Node | State | ""` with role subtext; state copy `needs push` / `needs sync` / `present`; live `syncing 0%` chip from the SSE-seeded store (independent of the sheet); job sheet docked beside the drawer with context `on dgx2 · GLM-5.3-Flash-EXL3-4bpw`, hub-parsed summary `0.5 GiB of 163.6 GiB · 0% · 361 Mb/s · eta 1h 03m`, raw output collapsed. Screenshot captured.
 
 ## Review
 
-- Correctness: pending
-- Security: web-only; no new routes
-- Compatibility: no contract changes
-- Residual risks: pending
+- Correctness: compose/split round-trip is unit-tested; the step-3 gate checks composed values; aggregate progress comes from the hub-parsed `job.progress` (never one stream labeled aggregate — push stays raw); the syncing chip is guarded on kind/status/model/node.
+- Security: web-only; no new routes; no secrets in play.
+- Compatibility: no API or contract change; `joblog`/`rawlog`/`sheet__foot` chrome pins kept green.
+- Residual risks: the models page default sort stays "Recently added" (choice persists); two Close buttons on the docked pair remain (visually distinct surfaces now); native-tooltip idiom avoided (DS subtext used).
