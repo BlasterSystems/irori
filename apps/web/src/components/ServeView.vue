@@ -292,6 +292,27 @@ const wizard = ref<WizardState>({
 const composedStart = computed(() => composeScriptPath(wizard.value.recipeFolder, wizard.value.startName));
 const composedStop = computed(() => composeScriptPath(wizard.value.recipeFolder, wizard.value.stopName));
 
+/** IRI-051: id → name for the review step; a short-id fallback keeps the row
+ *  readable when the registry is unavailable or an id is stale. */
+function nodeName(id: string): string {
+  if (id === "") return "—";
+  return nodes.value.find((n) => n.id === id)?.name ?? `${id.slice(0, 8)}…`;
+}
+
+/** IRI-051: the env story as value-bearing chips — the exported vars WITH
+ *  their values, plus the capture/bodies toggles, instead of one flag-name wall. */
+const envChips = computed(() => {
+  const w = wizard.value;
+  const chips: string[] = [];
+  if (w.envModelName) chips.push("MODEL_NAME");
+  if (w.envPort || w.capture) chips.push("PORT");
+  if (w.envModelPath) chips.push("MODEL_PATH");
+  if (w.envExtraArgs && w.extraArgs.trim() !== "") chips.push(`EXTRA_ARGS=${w.extraArgs.trim()}`);
+  if (w.capture) chips.push("capture on");
+  if (w.capture && w.retain) chips.push("bodies kept");
+  return chips;
+});
+
 /**
  * Sanitize worker ids against the loaded node inventory (IRI-041). An empty
  * inventory (registry unavailable) must not wipe workers — pass through and
@@ -866,15 +887,43 @@ function fmtGiB(bytes: number | null): string {
         </section>
 
         <section v-show="step === 5" class="step card__body">
-          <dl class="kv">
-            <dt>name</dt><dd>{{ wizard.name.trim() || wizard.model }}</dd>
-            <dt>type</dt><dd>{{ wizard.kind === "cluster" ? `cluster — head + ${wizard.workerIds.length} worker(s)` : "single node" }}</dd>
-            <dt>model</dt><dd class="mono">{{ wizard.model }}</dd>
-            <dt>port</dt><dd>{{ wizardPort }} · probed for health (/v1/models with the model id) · timeout 15 m</dd>
-            <dt>scripts</dt><dd class="mono">{{ composedStart }} · {{ composedStop }} <span class="faint">(re-validated at every start)</span></dd>
-            <dt>env</dt><dd>{{ [wizard.envModelName ? "MODEL_NAME" : null, wizard.envPort || wizard.capture ? "PORT" : null, wizard.envExtraArgs && wizard.extraArgs !== "" ? "EXTRA_ARGS" : null, wizard.envModelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}<template v-if="wizard.capture"> · capture on ($PORT is the loopback engine port)</template><template v-if="wizard.retain"> · bodies kept</template></dd>
-            <dt>log</dt><dd>streamed into telemetry (ring + persisted run log)</dd>
-          </dl>
+          <div class="stack" style="gap: 14px">
+            <div>
+              <p class="stat__sub" style="margin: 0 0 4px"><strong>Runs</strong></p>
+              <dl class="kv">
+                <dt>name</dt><dd>{{ wizard.name.trim() || wizard.model }}</dd>
+                <dt>model</dt><dd class="mono">{{ wizard.model }}</dd>
+                <dt>type</dt><dd>{{ wizard.kind === "cluster" ? "cluster" : "single node" }}</dd>
+                <template v-if="wizard.kind === 'cluster'">
+                  <dt>head</dt><dd><span class="chip">{{ nodeName(wizard.headNodeId) }}</span></dd>
+                  <dt>workers</dt><dd><span v-for="id in wizard.workerIds" :key="id" class="chip" style="margin-right: 4px">{{ nodeName(id) }}</span><span v-if="wizard.workerIds.length === 0" class="faint">none</span></dd>
+                </template>
+                <template v-else>
+                  <dt>node</dt><dd><span class="chip">{{ nodeName(wizard.headNodeId) }}</span></dd>
+                </template>
+              </dl>
+            </div>
+            <div>
+              <p class="stat__sub" style="margin: 0 0 4px"><strong>Port and health</strong></p>
+              <dl class="kv">
+                <dt>port</dt><dd>{{ wizardPort }} <span class="faint">· probed for health (/v1/models with the model id) · timeout 15 m</span></dd>
+              </dl>
+            </div>
+            <div>
+              <p class="stat__sub" style="margin: 0 0 4px"><strong>Scripts</strong></p>
+              <dl class="kv">
+                <dt>start</dt><dd class="mono" style="overflow-wrap: anywhere;">{{ composedStart }}</dd>
+                <dt>stop</dt><dd class="mono" style="overflow-wrap: anywhere;">{{ composedStop }} <span class="faint">(re-validated at every start)</span></dd>
+              </dl>
+            </div>
+            <div>
+              <p class="stat__sub" style="margin: 0 0 4px"><strong>Environment</strong></p>
+              <p style="margin: 0">
+                <template v-if="envChips.length === 0"><span class="faint">no env exports, no capture</span></template>
+                <span v-for="c in envChips" :key="c" class="chip mono" style="margin: 0 4px 4px 0">{{ c }}</span>
+              </p>
+            </div>
+          </div>
         </section>
 
         <div class="card__head row--between wizard__foot" style="display: flex; border-top: 1px solid var(--border); border-bottom: 0">
