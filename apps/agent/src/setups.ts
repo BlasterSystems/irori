@@ -1,7 +1,6 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from "node:fs";
-import { createWriteStream, type WriteStream } from "node:fs";
+import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, openSync, closeSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BodyRetention } from "@irori/core";
@@ -91,6 +90,9 @@ interface DriverRecord {
    *  the run's execution context, even if the node setting changes mid-run. */
   runUser: string | null;
   runHome: string | null;
+  /** IR-149: next ring seq, persisted at every state write so seqs stay
+   *  monotonic across agent restarts (the ServeView panel keys by seq). */
+  nextSeq: number;
 }
 
 interface RingEntry {
@@ -160,9 +162,9 @@ async function pickFreeLoopbackPort(): Promise<number> {
 export class SetupDriver {
   private readonly records = new Map<string, DriverRecord>();
   private readonly children = new Map<string, ChildProcess>();
-  private readonly streams = new Map<string, WriteStream>();
   private readonly rings = new Map<string, RingEntry[]>();
   private readonly seqs = new Map<string, number>();
+  private readonly tailers = new Map<string, { timer: NodeJS.Timeout; offset: number; carry: string }>();
   private readonly stopping = new Set<string>();
 
   constructor(private readonly deps: SetupDriverDeps) {}
@@ -183,10 +185,13 @@ export class SetupDriver {
     const kept: DriverRecord[] = [];
     for (const record of records) {
       if (record.pgid !== null && groupAlive(record.pgid)) {
-        // Re-attached: the engine survived the agent restart, but the old
-        // stdout pipes died with the previous agent process — log capture
-        // resumes on the next start.
+        // Re-attached: the engine survived the agent restart. Its stdout/stderr
+        // ride an inherited fd straight into record.logPath (IR-149), so the
+        // file kept growing while the agent was gone — resume capture by
+        // tailing it from EOF and seed the seq counter monotonically.
         this.records.set(record.setupId, record);
+        this.seqs.set(record.setupId, this.seedSeq(record));
+        this.startTailer(record.setupId, record.logPath, "eof");
         kept.push(record);
         if (record.proxyPort !== null && record.enginePort !== null && this.deps.capture !== undefined) {
           void this.deps.capture
@@ -348,11 +353,22 @@ export class SetupDriver {
 
     const logPath = join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`);
     const argv = serveSpawnArgv(scriptStart, wrap, process.env.PATH);
+    // IR-149: the engine writes stdout/stderr straight into the run log
+    // through an inherited fd, so output keeps flowing while the agent is
+    // down and init() resumes tailing the file after a restart. If the fd
+    // cannot be opened (broken state dir), fall back to pipe capture.
+    let logFd: number | null = null;
+    try {
+      logFd = openSync(logPath, "a");
+    } catch (err) {
+      this.deps.log?.(`setup log open failed (${err instanceof Error ? err.message : String(err)})`);
+    }
     const child = spawn(argv[0]!, argv.slice(1), {
       detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: logFd !== null ? ["ignore", logFd, logFd] : ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...finalEnv },
     });
+    if (logFd !== null) closeSync(logFd); // the child holds its own copy
     const record: DriverRecord = {
       setupId,
       runId,
@@ -368,10 +384,17 @@ export class SetupDriver {
       retention: capture !== null ? capture.retention ?? null : null,
       runUser: wrap?.user ?? null,
       runHome: wrap?.home ?? null,
+      nextSeq: 0,
     };
     this.records.set(setupId, record);
     this.children.set(setupId, child);
+    this.seqs.set(setupId, 0);
     this.persist([...this.records.values()]);
+    if (logFd !== null) {
+      // Engine output reaches the file through its own fd — tail it into the
+      // ring + setup-log frames (IR-149).
+      this.startTailer(setupId, logPath, 0);
+    }
     if (wrap !== null) {
       this.pushLog(setupId, `driver: serving as cache user ${wrap.user} (HOME=${wrap.home})`);
     }
@@ -379,8 +402,6 @@ export class SetupDriver {
       this.pushLog(setupId, `driver: capture proxy :${capture.proxyPort} → 127.0.0.1:${enginePort} (requests captured, engine on loopback)`);
     }
 
-    const stream = createWriteStream(logPath, { flags: "a" });
-    this.streams.set(setupId, stream);
     const onChunk = (buf: Buffer): void => {
       for (const line of buf.toString("utf8").split(/\r\n|\r|\n/)) {
         if (line.length > 0) this.pushLog(setupId, line);
@@ -686,15 +707,14 @@ export class SetupDriver {
     ring.push(entry);
     if (ring.length > LOG_RING_LINES) ring.splice(0, ring.length - LOG_RING_LINES);
     this.rings.set(setupId, ring);
-    this.streams.get(setupId)?.write(`${line}\n`);
     this.deps.events.onLog(setupId, entry.seq, entry.line, entry.ts);
   }
 
   private finish(setupId: string, exitCode: number | null, error: string | null): void {
     const record = this.records.get(setupId);
     this.children.delete(setupId);
-    this.streams.get(setupId)?.end();
-    this.streams.delete(setupId);
+    this.drainTailer(setupId);
+    this.stopTailer(setupId);
     if (record) {
       this.records.delete(setupId);
       this.persist([...this.records.values()]);
@@ -704,10 +724,87 @@ export class SetupDriver {
   }
 
   private persist(records: DriverRecord[]): void {
+    // Stamp the live seq counter onto each surviving record (IR-149) so a
+    // re-attach resumes numbering where this process left off.
+    for (const record of records) {
+      const live = this.seqs.get(record.setupId);
+      if (live !== undefined) record.nextSeq = live;
+    }
     try {
       writeFileSync(join(this.deps.stateDir, STATE_FILE), JSON.stringify(records, null, 2));
     } catch (err) {
       this.deps.log?.(`failed to persist setup state (${err instanceof Error ? err.message : String(err)})`);
     }
+  }
+
+  /** IR-149: seed the seq counter for a re-attached run. Pre-IR-149 records
+   *  lack nextSeq — fall back to 0 (their lines are gone from the ring too). */
+  private seedSeq(record: DriverRecord): number {
+    return typeof record.nextSeq === "number" && Number.isFinite(record.nextSeq) ? record.nextSeq : 0;
+  }
+
+  /**
+   * Starts tailing the run log into the ring + setup-log frames. `from` = 0
+   * for a fresh run (the file was just opened), "eof" for a re-attach (the
+   * backlog written while the agent was down stays in the durable file; the
+   * live view joins from now, per IR-149).
+   */
+  private startTailer(setupId: string, logPath: string, from: number | "eof"): void {
+    this.stopTailer(setupId);
+    let offset = 0;
+    if (from === "eof") {
+      try {
+        offset = statSync(logPath).size;
+      } catch {
+        offset = 0; // no file yet — the engine has written nothing
+      }
+    }
+    const tailer = { timer: setInterval(() => this.drainTailer(setupId), 250), offset, carry: "" };
+    tailer.timer.unref();
+    this.tailers.set(setupId, tailer);
+  }
+
+  /** Reads whatever the engine appended since the last drain; emits lines. */
+  private drainTailer(setupId: string): void {
+    const tailer = this.tailers.get(setupId);
+    const record = this.records.get(setupId);
+    if (tailer === undefined || record === undefined) return;
+    let fd: number | null = null;
+    try {
+      fd = openSync(record.logPath, "r");
+      const size = statSync(record.logPath).size;
+      if (size < tailer.offset) tailer.offset = 0; // truncated/rotated
+      if (size === tailer.offset) return;
+      const chunk = Buffer.alloc(Math.min(size - tailer.offset, 256 * 1024));
+      let emitted = false;
+      for (;;) {
+        const read = readSync(fd, chunk, 0, chunk.length, tailer.offset);
+        if (read === 0) break;
+        tailer.offset += read;
+        const text = tailer.carry + chunk.toString("utf8", 0, read);
+        const parts = text.split(/\r\n|\r|\n/);
+        tailer.carry = parts.pop() ?? "";
+        for (const line of parts) {
+          if (line.length > 0) {
+            this.pushLog(setupId, line);
+            emitted = true;
+          }
+        }
+        if (read < chunk.length) break;
+      }
+      if (emitted) this.persist([...this.records.values()]); // keep nextSeq fresh
+    } catch {
+      // File missing or unreadable — keep the timer; a slow filesystem or a
+      // pruned file must not kill the tail (finish() clears it at run end).
+    } finally {
+      if (fd !== null) closeSync(fd);
+    }
+  }
+
+  private stopTailer(setupId: string): void {
+    const tailer = this.tailers.get(setupId);
+    if (tailer === undefined) return;
+    clearInterval(tailer.timer);
+    this.tailers.delete(setupId);
   }
 }
