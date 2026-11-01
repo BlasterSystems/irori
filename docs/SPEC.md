@@ -291,9 +291,15 @@ flowchart LR
   **staged progress** (HF→NAS download → NAS→head `sync-local` → head→worker
   `push` over CX7), each stage showing %, rate, ETA, cancel; busy-node
   warning; "pull from HF anyway" stays a ghost option; warnings never block.
-- **UI scale**: setups render as **cards** (never an enterprise table),
-  with a detail drawer: streamed engine log, per-node placement history,
-  endpoints (direct), edit/duplicate/remove.
+- **UI scale**: setups render as **cards** (never an enterprise table), sorted
+  running → failed → idle with a pagehead summary line, with a detail drawer:
+  streamed engine log, per-node placement history, endpoints (direct),
+  edit/duplicate/remove. A probe-derived **Running now** section lists every
+  detected engine (node · port · model · backend · tok/s), managed-by link or
+  "unmanaged" + **Adopt** (opens the wizard prefilled) — it reports probe
+  truth only, so Serve and Overview never contradict each other. Chips split
+  stopped into never-started / stopped / (probe-detected) serving, and failed
+  renders warn with the reason visible (IR-152).
 
 ## 8. Benchmarks
 

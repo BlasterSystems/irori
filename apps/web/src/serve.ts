@@ -1,4 +1,5 @@
 import {
+  MAX_SETUP_NODES,
   modelIdMatches,
   setupInfoSchema,
   setupTransferSchema,
@@ -216,19 +217,177 @@ export function probeSeesEngine(
   return port !== undefined && port.detected && modelIdMatches(port.model, setup.model);
 }
 
-/** Pure: chip state → DS dot/chip class per the thread budget. */
-export function setupChipCls(chip: string): string {
-  switch (chip) {
-    case "healthy":
-      return "chip--ok";
+/**
+ * IR-152: the card/drawer chip as one honest presentation unit. The old
+ * mapping rendered `failed` identical to `stopped` (both bare halt chips) and
+ * one word ("stopped") covered three realities — never started, stopped on
+ * purpose, and an engine still answering the port. `foreign` now reads
+ * "wrong engine". failed/wrong-engine/serving-while-stopped are warn; idle
+ * states are muted; only live states carry the run dot.
+ */
+export interface SetupChipView {
+  label: string;
+  cls: string;
+  dot: string;
+}
+
+export function setupChipView(
+  setup: Pick<SetupInfo, "status" | "health" | "lastStartedAt" | "port">,
+  opts: { probeSees: boolean },
+): SetupChipView {
+  switch (setup.status) {
+    case "running":
+      if (setup.health === "foreign") return { label: "wrong engine", cls: "chip--warn", dot: "dot--warn" };
+      if (setup.health === "healthy") return { label: "healthy", cls: "chip--ok", dot: "dot--ok" };
+      if (setup.health === "timeout") return { label: "failed", cls: "chip--warn", dot: "dot--warn" };
+      return { label: "starting", cls: "chip--run", dot: "dot--run" };
+    case "starting":
+    case "stopping":
+      return { label: setup.status, cls: "chip--run", dot: "dot--run" };
     case "failed":
+      return { label: "failed", cls: "chip--warn", dot: "dot--warn" };
     case "stopped":
-      return "chip--halt";
-    case "foreign":
-      return "chip--warn";
-    default:
-      return "chip--run";
+      if (opts.probeSees) return { label: `serving :${setup.port}`, cls: "chip--warn", dot: "dot--warn" };
+      return setup.lastStartedAt === null
+        ? { label: "never started", cls: "chip--muted", dot: "dot--halt" }
+        : { label: "stopped", cls: "chip--muted", dot: "dot--halt" };
   }
+}
+
+/** IR-152: board order — live work first, then failures, idle last; name
+ *  keeps it stable so a running setup cannot sit below three stopped ones. */
+const STATUS_RANK: Record<string, number> = { running: 0, starting: 0, stopping: 0, failed: 1, stopped: 2 };
+
+export function sortSetupsForBoard<T extends { status: string; name: string }>(setups: T[]): T[] {
+  return [...setups].sort(
+    (a, b) => (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3) || a.name.localeCompare(b.name),
+  );
+}
+
+/** IR-152: pagehead summary ("1 running · 3 stopped · 1 failed"). */
+export function setupSummaryLine<T extends { status: string }>(setups: T[]): string {
+  const live = setups.filter((s) => s.status === "running" || s.status === "starting" || s.status === "stopping").length;
+  const failed = setups.filter((s) => s.status === "failed").length;
+  return `${live} running · ${setups.length - live - failed} stopped · ${failed} failed`;
+}
+
+/**
+ * IR-152: the engine-log empty state explains itself. "no output yet" said
+ * nothing about why; each state now states what is expected. (The label is
+ * honest since IR-147 wired setup-log frames into telemetry.)
+ */
+export function engineLogEmptyText(setup: Pick<SetupInfo, "status" | "lastError" | "lastStartedAt">): string {
+  switch (setup.status) {
+    case "running":
+      return "waiting for engine output — the first line lands here";
+    case "starting":
+      return "starting — driver markers and engine output land here as they arrive";
+    case "stopping":
+      return "stopping — the final lines land here";
+    case "failed":
+      return setup.lastError ?? "the start failed before any output was captured";
+    default:
+      return setup.lastStartedAt === null
+        ? "never started — Start streams its output here"
+        : "not running — start it again to stream engine output here";
+  }
+}
+
+/**
+ * IR-152: pre-save script path rules (the wizard used to accept anything the
+ * head's `test -x` would later reject — an owner burned three starts on
+ * "~/developer/..." paths the agent resolves literally, never by the shell).
+ * Null = usable; otherwise the actionable message.
+ */
+export function scriptPathError(path: string): string | null {
+  if (path.startsWith("~")) return "the head resolves paths literally — expand ~ to the absolute path (e.g. /home/you/…)";
+  if (!path.startsWith("/")) return "the head needs an absolute path (it must start with /)";
+  if (path.length > 1024) return "script path too long — the head caps script paths at 1024 characters";
+  return null;
+}
+
+/** IR-152: cluster cap hint under the worker picker (server caps at
+ *  MAX_SETUP_NODES total, head included — the 8th click used to be silent). */
+export function workerCapHint(workerCount: number, kind: "single" | "cluster"): string | null {
+  if (kind !== "cluster" || workerCount < MAX_SETUP_NODES - 1) return null;
+  return `cluster cap reached — ${MAX_SETUP_NODES} nodes total (head + ${MAX_SETUP_NODES - 1} workers)`;
+}
+
+export interface RunningEngineRow {
+  key: string;
+  nodeId: string;
+  nodeName: string;
+  port: number;
+  backend: string;
+  model: string | null;
+  decodeTps: number | null;
+  managedSetupId: string | null;
+  managedName: string | null;
+}
+
+/**
+ * IR-152: the "Running now" section — every probe-detected engine on every
+ * node, managed or not. Probe truth only (detected ports), so the section can
+ * never lie; Serve's old stopped-cards-only view contradicted the Overview
+ * hero for exactly the engines this lists.
+ */
+export function runningEnginesFromProbes(
+  probes: Array<{ nodeId: string; ports: Array<{ port: number; detected: boolean; backend: string; model: string | null; decodeTps: number | null }> }>,
+  nodes: Array<{ id: string; name: string }>,
+  setups: Array<{ id: string; name: string; headNodeId: string; port: number }>,
+): RunningEngineRow[] {
+  const rows: RunningEngineRow[] = [];
+  const seen = new Set<string>();
+  for (const probe of probes) {
+    for (const p of probe.ports) {
+      if (!p.detected) continue;
+      const key = `${probe.nodeId}:${p.port}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const node = nodes.find((n) => n.id === probe.nodeId);
+      const managed = setups.find((s) => s.headNodeId === probe.nodeId && s.port === p.port) ?? null;
+      rows.push({
+        key,
+        nodeId: probe.nodeId,
+        nodeName: node?.name ?? probe.nodeId.slice(0, 8),
+        port: p.port,
+        backend: p.backend,
+        model: p.model,
+        decodeTps: p.decodeTps,
+        managedSetupId: managed?.id ?? null,
+        managedName: managed?.name ?? null,
+      });
+    }
+  }
+  return rows.sort(
+    (a, b) =>
+      (a.managedSetupId === null ? 1 : 0) - (b.managedSetupId === null ? 1 : 0) ||
+      a.nodeName.localeCompare(b.nodeName) ||
+      a.port - b.port,
+  );
+}
+
+/**
+ * IR-152: instant chips between polls — overlay the newest setup-state SSE
+ * frame per setup on the REST rows (the 2.5 s poll stays the convergent
+ * source of truth; events are newest-last in the feed ring). A frame older
+ * than the row's own write never reverts it: the ring survives page mounts,
+ * an empty ring (server restart) is a no-op.
+ */
+export function applySetupStates<
+  T extends { id: string; status: SetupInfo["status"]; health: SetupInfo["health"]; lastError: string | null; updatedAt: string },
+>(
+  setups: T[],
+  states: Array<{ setupId: string; status: SetupInfo["status"]; health: SetupInfo["health"]; lastError: string | null; serverTimeMs: number }>,
+): T[] {
+  if (states.length === 0) return setups;
+  const last = new Map<string, (typeof states)[number]>();
+  for (const e of states) last.set(e.setupId, e);
+  return setups.map((s) => {
+    const e = last.get(s.id);
+    if (e === undefined || e.serverTimeMs <= Date.parse(s.updatedAt)) return s;
+    return { ...s, status: e.status, health: e.health, lastError: e.lastError };
+  });
 }
 
 /** Pure: one stage's progress line (mockup: "64% · 168 MB/s · ~4m left"). */
@@ -294,36 +453,56 @@ export interface SetupNodeLine {
 /**
  * Pure: per-node chip lines for a card (mockup: "spark1 · head · :8000 · ●
  * 142.3 tok/s"). The head shows probe state (decode rate when present);
- * workers show model presence/transfer state — worker engines are script-orchestrated
+ * workers show join state — worker engines are script-orchestrated
  * and only visible to Irori through the probe ports declared on them.
+ *
+ * IR-152 (P1): a stopped/failed setup renders IDLE chips. The old lines
+ * derived purely from node online + probe and ignored setup.status, so a
+ * stopped cluster showed green "JOINED" workers and a "no probe" head — live
+ * vocabulary on a dead setup. `probeSees` (the IR-151 escape hatch) keeps the
+ * head line honest on a falsely-stopped row that really is answering.
  */
 export function setupNodeLines(
   setup: SetupInfo,
   nodes: NodeInfo[],
-  latest?: { decodeTps: number | null } | null,
+  latest?: { decodeTps?: number | null; probeSees?: boolean } | null,
 ): SetupNodeLine[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const lines: SetupNodeLine[] = [];
   const head = byId.get(setup.headNodeId);
   const headOnline = head?.online === true;
+  const idle = setup.status === "stopped" || setup.status === "failed";
   const healthy = setup.status === "running" && setup.health === "healthy";
-  const headDetail =
-    healthy && latest?.decodeTps != null
+  const headLive = healthy || latest?.probeSees === true;
+  const headDetail = headLive
+    ? latest?.decodeTps != null
       ? `${latest.decodeTps.toFixed(1)} tok/s`
-      : healthy
-        ? "serving"
-        : headOnline
-          ? "no probe"
-          : "offline";
+      : "serving"
+    : idle
+      ? headOnline
+        ? "idle"
+        : "offline"
+      : headOnline
+        ? "no probe"
+        : "offline";
   lines.push({
     nodeId: setup.headNodeId,
     label: `${head?.name ?? setup.headNodeId.slice(0, 8)} · head · :${setup.port}`,
-    cls: healthy ? "chip--ok" : setup.status === "failed" ? "chip--halt" : headOnline ? "chip--run" : "chip--halt",
+    cls: headLive ? "chip--ok" : idle ? "chip--muted" : setup.status === "failed" ? "chip--halt" : headOnline ? "chip--run" : "chip--halt",
     detail: headDetail,
   });
   for (const worker of setup.nodes) {
     const node = byId.get(worker.nodeId);
     const online = node?.online === true;
+    if (idle) {
+      lines.push({
+        nodeId: worker.nodeId,
+        label: `${node?.name ?? worker.nodeId.slice(0, 8)} · worker`,
+        cls: "chip--muted",
+        detail: online ? "idle" : "offline",
+      });
+      continue;
+    }
     lines.push({
       nodeId: worker.nodeId,
       label: `${node?.name ?? worker.nodeId.slice(0, 8)} · worker`,
