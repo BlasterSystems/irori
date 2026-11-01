@@ -27,6 +27,10 @@ import {
   refreshNodeInventory,
   registerCopy,
   registerRequestFor,
+  orphanHint,
+  orphanRowsFor,
+  resumeCopy,
+  resumeRequestFor,
   storeMountLabel,
   type DeleteTarget,
 } from "../inventory";
@@ -447,6 +451,21 @@ function askRegister(repo: string, user: string): void {
   });
 }
 
+// IR-133: a resumable orphan is a canceled/failed sync-local — the recovery is
+// re-dispatching sync-local for the same name + cache user. modelctl's
+// deterministic staging dir plus rsync --partial continue the transfer.
+function askResume(repo: string, user: string): void {
+  const copy = resumeCopy(repo);
+  confirmAction({
+    title: copy.title,
+    body: copy.body,
+    danger: copy.danger,
+    hint: "staged files are reused — only the missing bytes transfer",
+    secondary: true,
+    run: () => runModelJob(resumeRequestFor(repo, user)),
+  });
+}
+
 /** IRI-043 parity: Cancel job was instant here while every other surface
  *  guards it — the confirm now renders INSIDE the sheet (host "job"). */
 function confirmSheetCancel(): void {
@@ -812,14 +831,31 @@ onUnmounted(() => {
             </tbody>
           </table>
           <template v-if="cache.error === null && cache.orphans.length > 0">
-            <p class="stat__sub" style="margin: 12px 0 6px;">unregistered cache entries — verified against the NAS by hash, nothing transferred</p>
+            <p class="stat__sub" style="margin: 12px 0 6px;">unregistered cache entries</p>
             <table class="table">
-              <thead><tr><th>Unregistered</th><th style="text-align: right;">Register</th></tr></thead>
+              <thead><tr><th>Unregistered</th><th style="text-align: right;">Remediation</th></tr></thead>
               <tbody>
-                <tr v-for="repo in cache.orphans" :key="repo">
-                  <td class="model-repo" :title="repo">{{ repo }}</td>
-                  <td style="text-align: right;">
-                    <button class="btn btn--ghost btn--sm" :disabled="opBusy" @click="askRegister(repo, cache.user)">Register</button>
+                <!-- IR-133: the adoption state decides the CTA. A partial
+                     (resumable) transfer's only working recovery is re-running
+                     sync-local; register-local structurally refuses it. -->
+                <tr v-for="row in orphanRowsFor(cache)" :key="row.repo">
+                  <td class="model-repo" :title="row.repo">
+                    {{ row.repo }}
+                    <span v-if="orphanHint(row.state)" class="stat__sub faint" style="display: block;">{{ orphanHint(row.state) }}</span>
+                  </td>
+                  <td style="text-align: right; white-space: nowrap;">
+                    <button
+                      v-if="row.state === 'resumable'"
+                      class="btn btn--ghost btn--sm"
+                      :disabled="opBusy"
+                      @click="askResume(row.repo, cache.user)"
+                    >Resume transfer</button>
+                    <button
+                      v-else
+                      class="btn btn--ghost btn--sm"
+                      :disabled="opBusy"
+                      @click="askRegister(row.repo, cache.user)"
+                    >Register</button>
                   </td>
                 </tr>
               </tbody>
