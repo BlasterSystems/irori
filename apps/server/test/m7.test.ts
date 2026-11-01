@@ -97,6 +97,38 @@ d("M7 ledger + analytics + cleanup (db integration)", () => {
     expect(minuteRows.reduce((s, r) => s + r.promptTokens, 0)).toBe(1100);
   });
 
+  it("diffs tensorfold and exl3 probe counters into ledger rows (IR-153)", async () => {
+    // Same payload shape the agent probe now emits for these backends:
+    // tensorfold publishes cached, exl3 publishes null there.
+    const snap = (port: number, tokens: { generated: number | null; prompt: number | null; cached: number | null }, model: string, minutesAgo: number) => ({
+      nodeId,
+      serverTime: new Date(Date.now() - minutesAgo * 60_000),
+      payload: {
+        ports: [{ port, host: "127.0.0.1", backend: port === 8123 ? "tensorfold" : "exl3", detected: true, model, tokens, probedAtMs: 0 }],
+      },
+    });
+    await db.insert(llmSnapshots).values([
+      snap(8123, { generated: 500, prompt: 12000, cached: 7000 }, "tf-model", 12),
+      snap(8123, { generated: 540, prompt: 12500, cached: 7100 }, "tf-model", 10),
+      snap(8124, { generated: 90, prompt: 180, cached: null }, "exl3-model", 12),
+      snap(8124, { generated: 99, prompt: 230, cached: null }, "exl3-model", 10),
+    ]);
+    const engine = createTokenLedgerEngine(db);
+    await engine.runOnce();
+
+    const rows = (await db.select().from(tokenLedger).where(eq(tokenLedger.nodeId, nodeId))).filter((r) => r.port === 8123 || r.port === 8124);
+    const tf = rows.filter((r) => r.port === 8123 && r.granularity === "hour");
+    const ex = rows.filter((r) => r.port === 8124 && r.granularity === "hour");
+    expect(tf.reduce((s, r) => s + r.generatedTokens, 0)).toBe(40);
+    expect(tf.reduce((s, r) => s + r.promptTokens, 0)).toBe(500);
+    expect(tf.reduce((s, r) => s + r.cachedTokens, 0)).toBe(100);
+    expect(tf[0]!.model).toBe("tf-model");
+    expect(ex.reduce((s, r) => s + r.generatedTokens, 0)).toBe(9);
+    expect(ex.reduce((s, r) => s + r.promptTokens, 0)).toBe(50);
+    expect(ex.reduce((s, r) => s + r.cachedTokens, 0)).toBe(0);
+    expect(ex.every((r) => !r.cachedSeen)).toBe(true); // null counter → coverage, never a zero guess
+  });
+
   it("prunes ledger rows past retention", async () => {
     await db.insert(tokenLedger).values({
       nodeId,

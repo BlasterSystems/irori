@@ -790,10 +790,17 @@ export class LlmPortProbe {
     const body = res.body;
     const out: LlmMetrics = {};
     const busy = body.busy === true;
-    const promptS = this.sample("exl3:prompt", num(body.prompt_tokens_total));
+    const promptCounter = num(body.prompt_tokens_total);
+    const completionCounter = num(body.completion_tokens_total);
+    const promptS = this.sample("exl3:prompt", promptCounter);
     if (promptS !== null) out.prefillTps = busy ? promptS.rate : 0;
-    const completionS = this.sample("exl3:gen", num(body.completion_tokens_total));
+    const completionS = this.sample("exl3:gen", completionCounter);
     if (completionS !== null) out.decodeTps = busy ? completionS.rate : 0;
+    // Cumulative counters feed the M7 ledger (IRI-054); exl3 /health has no
+    // cached counter, so cached stays null — the ledger never guesses a zero.
+    if (promptCounter !== null || completionCounter !== null) {
+      out.tokens = { generated: completionCounter, prompt: promptCounter, cached: null };
+    }
     out.queueRunning = busy ? 1 : 0;
     const engineMeta: Record<string, unknown> = { busy };
     const ctx = num(body.context_length);
@@ -856,6 +863,15 @@ export class LlmPortProbe {
 
     const hasCounters =
       num(body.prompt_tokens_total) !== null || num(body.completion_tokens_total) !== null;
+    // Cumulative counters feed the M7 ledger (IRI-054); nulls pass through and
+    // the ledger records coverage instead of guessing a zero.
+    if (hasCounters) {
+      out.tokens = {
+        generated: num(body.completion_tokens_total),
+        prompt: num(body.prompt_tokens_total),
+        cached: num(body.cached_tokens_total),
+      };
+    }
     if (!hasCounters && live === null) {
       // /metrics fallback for builds without health counters/live block.
       const m = await this.getText("/metrics");
@@ -868,6 +884,13 @@ export class LlmPortProbe {
         if (out.prefillTps === undefined) {
           const promptS = this.sample("tf:prompt", promSum(series, "tensorfold:prompt_tokens_total"));
           if (promptS !== null) out.prefillTps = promptS.rate;
+        }
+        // Native builds publish the same counters in the tensorfold: family;
+        // no cached counter exists there.
+        const genCounter = promSum(series, "tensorfold:generation_tokens_total");
+        const promptCounter = promSum(series, "tensorfold:prompt_tokens_total");
+        if (genCounter !== null || promptCounter !== null) {
+          out.tokens = { generated: genCounter, prompt: promptCounter, cached: null };
         }
       }
     }
@@ -886,7 +909,7 @@ export class LlmPortProbe {
     // Native builds (1.1+) dropped the health counter/pool block: queue depth
     // and KV live only in /metrics (same tensorfold: family as the classic
     // health fields the branches above consume).
-    if (running === null || out.kvCachePct === undefined) {
+    if (running === null || out.kvCachePct === undefined || out.tokens === undefined) {
       const m = await this.getText("/metrics");
       if (m !== null) {
         const series = parsePromText(m.text);
@@ -897,6 +920,16 @@ export class LlmPortProbe {
         if (out.kvCachePct === undefined) {
           const kv = promSum(series, "tensorfold:kv_cache_usage_ratio");
           if (kv !== null) out.kvCachePct = round2(Math.min(100, Math.max(0, kv * 100)));
+        }
+        // A live{} block without health counters still skips the counter
+        // fallback above; the tensorfold: family is the only token source
+        // for these builds (no cached counter exists there).
+        if (out.tokens === undefined) {
+          const genCounter = promSum(series, "tensorfold:generation_tokens_total");
+          const promptCounter = promSum(series, "tensorfold:prompt_tokens_total");
+          if (genCounter !== null || promptCounter !== null) {
+            out.tokens = { generated: genCounter, prompt: promptCounter, cached: null };
+          }
         }
       }
     }
