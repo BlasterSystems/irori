@@ -322,12 +322,14 @@ it("detects EXL3 via the /health fall-through and gates rates on busy", async ()
   expect(seed.prefillTps).toBe(0);
   expect(seed.queueRunning).toBe(1);
   expect(seed.engineMeta).toEqual({ busy: true, contextLength: 65536 });
+  expect(seed.tokens).toEqual({ generated: 50, prompt: 100, cached: null }); // IR-153
 
   clock.advance(2000);
   state.health = { ...state.health, prompt_tokens_total: 180, completion_tokens_total: 90 };
   const live = parseSnapshot(await probe.probe(false));
   expect(live.decodeTps).toBe(20);
   expect(live.prefillTps).toBe(40);
+  expect(live.tokens).toEqual({ generated: 90, prompt: 180, cached: null });
 
   clock.advance(2000);
   state.health = { ...state.health, busy: false };
@@ -371,6 +373,7 @@ it("detects TensorFold; live{} is used as-is; counters diff when absent", async 
   expect(seed.prefillTps).toBe(0);
   expect(seed.kvCachePct).toBe(10); // 1 − 90000/100000
   expect(seed.queueRunning).toBe(2);
+  expect(seed.tokens).toEqual({ generated: 200, prompt: 1000, cached: 640 }); // IR-153
   expect(seed.engineMeta).toEqual({
     streams,
     poolTokens: 100000,
@@ -418,7 +421,8 @@ it("detects TensorFold-native via /api/v0 owned_by; queue/KV fall back to /metri
   const live = { connections: 1, waiting: 2, decode_tokens_per_second: 0, prefill_tokens_per_second: 0 };
   const state = {
     health: { status: "ok", model: "Qwen3.8-Flash-Next", live, version: "1.1.4", backend: "cuda" } as Record<string, unknown>,
-    metrics: "tensorfold:requests_running 0\ntensorfold:kv_cache_usage_ratio{pool=\"0\"} 0.42\n",
+    metrics: "tensorfold:requests_running 0\ntensorfold:kv_cache_usage_ratio{pool=\"0\"} 0.42\n" +
+      "tensorfold:generation_tokens_total 500\ntensorfold:prompt_tokens_total 12000\n",
   };
   const srv = await startTracked({
     // 1.1+ answers the LM Studio probe with owned_by: tensorfold.
@@ -435,6 +439,7 @@ it("detects TensorFold-native via /api/v0 owned_by; queue/KV fall back to /metri
   expect(seed.queueRunning).toBe(0); // from /metrics, health has no counters
   expect(seed.queueWaiting).toBe(2); // live.waiting
   expect(seed.kvCachePct).toBe(42); // ratio 0.42 → pct
+  expect(seed.tokens).toEqual({ generated: 500, prompt: 12000, cached: null }); // IR-153
 
   clock.advance(2000);
   state.health = { ...state.health, live: { ...live, decode_tokens_per_second: 33.3, prefill_tokens_per_second: 120.5 } };
