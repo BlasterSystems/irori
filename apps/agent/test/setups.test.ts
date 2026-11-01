@@ -237,6 +237,30 @@ describe("SetupDriver", () => {
     await driver2.stop(ID, 1000).catch(() => {});
   });
 
+  it("logs the start attempt and failure reason into the ring (IR-150)", async () => {
+    const dir = makeDir();
+    // A plain start (no cache user, no capture) emits the marker line before
+    // the engine prints anything.
+    const start = script(dir, "start.sh", "sleep 60");
+    const stop = script(dir, "stop.sh", "true");
+    await h.driver.start(ID, RUN, start, stop, {}, null);
+    expect(h.logs.some((l) => l.line === `driver: starting ${start}`)).toBe(true);
+    await h.driver.stop(ID, 1000);
+
+    // A pre-spawn MODEL_PATH failure emits the failure line with the reason,
+    // returns the error, and never reports the run as running (the hub's
+    // failed setup-state fires exactly once off the nack ack — covered in
+    // the server suite).
+    const failing = script(dir, "modelctl-fail", "exit 1");
+    const h2 = makeHarness(failing);
+    const refusal = await h2.driver.start(ID, RUN, start, stop, {}, "GLM-5.3-Flash-EXL3");
+    expect(refusal.ok).toBe(false);
+    expect(refusal.error).toContain("MODEL_PATH resolution failed");
+    expect(h2.logs.some((l) => l.line === `driver: starting ${start}`)).toBe(true);
+    expect(h2.logs.some((l) => l.line.startsWith("driver: start failed: MODEL_PATH resolution failed"))).toBe(true);
+    expect(h2.events.some((e) => e.state === "running")).toBe(false);
+  });
+
   it("resolves MODEL_PATH via modelctl path --local and fails the start when it errors", async () => {
     const dir = makeDir();
     const modelctl = script(dir, "modelctl", 'echo "/hf/models--GLM-5.3-Flash-EXL3/snapshots/abc"; # args: ');

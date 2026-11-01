@@ -293,14 +293,23 @@ export class SetupDriver {
     if (existing && (this.children.has(setupId) || (existing.pgid !== null && groupAlive(existing.pgid)))) {
       return { ok: false, error: "setup is already running" };
     }
+    // IR-150: every launch attempt and its outcome enter the log ring (and
+    // from there the shared feed) — a plain start used to be silent until the
+    // engine printed, and pre-spawn failures left only a bare failed
+    // setup-state transition with no reason.
+    this.pushLog(setupId, `driver: starting ${scriptStart}`);
+    const startFailed = (error: string): { ok: false; error: string } => {
+      this.pushLog(setupId, `driver: start failed: ${error}`);
+      return { ok: false, error };
+    };
     if (!isExecutable(scriptStart)) {
-      return { ok: false, error: `start script is not executable: ${scriptStart} (test -x failed)` };
+      return startFailed(`start script is not executable: ${scriptStart} (test -x failed)`);
     }
     if (scriptStop.length === 0) {
-      return { ok: false, error: "a stop script is required — launch refused" };
+      return startFailed("a stop script is required — launch refused");
     }
     if (!isExecutable(scriptStop)) {
-      return { ok: false, error: `stop script is not executable: ${scriptStop} (test -x failed)` };
+      return startFailed(`stop script is not executable: ${scriptStop} (test -x failed)`);
     }
 
     // IRI-045: resolve the serve execution context before anything binds —
@@ -310,17 +319,16 @@ export class SetupDriver {
     try {
       wrap = this.resolveServeWrap();
     } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      return startFailed(err instanceof Error ? err.message : String(err));
     }
 
     const finalEnv = { ...env };
     if (modelPathName !== null) {
       const resolved = await this.resolveModelPath(modelPathName);
       if (resolved.path === null) {
-        return {
-          ok: false,
-          error: `MODEL_PATH resolution failed for ${modelPathName} (modelctl path --local)${resolved.error === null ? "" : `: ${resolved.error}`}`,
-        };
+        return startFailed(
+          `MODEL_PATH resolution failed for ${modelPathName} (modelctl path --local)${resolved.error === null ? "" : `: ${resolved.error}`}`,
+        );
       }
       finalEnv.MODEL_PATH = resolved.path;
     }
@@ -330,14 +338,14 @@ export class SetupDriver {
     let enginePort: number | null = null;
     if (capture !== null) {
       if (this.deps.capture === undefined) {
-        return { ok: false, error: "capture requested but this agent has no capture proxy support" };
+        return startFailed("capture requested but this agent has no capture proxy support");
       }
       enginePort = await pickFreeLoopbackPort();
       try {
         await this.deps.capture.start(setupId, capture.proxyPort, enginePort, capture.retention ?? null);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `capture proxy bind failed on :${capture.proxyPort} — ${message}` };
+        return startFailed(`capture proxy bind failed on :${capture.proxyPort} — ${message}`);
       }
       finalEnv.PORT = String(enginePort);
     }
