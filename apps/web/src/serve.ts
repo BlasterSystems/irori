@@ -1,4 +1,5 @@
 import {
+  modelIdMatches,
   setupInfoSchema,
   setupTransferSchema,
   type SetupInfo,
@@ -196,6 +197,23 @@ export function sanitizeWorkerIds(workerIds: string[], headNodeId: string, nodes
     out.push(nodeId);
   }
   return out;
+}
+
+/**
+ * IR-151: true when the head node's LLM probe currently reports the setup's
+ * declared engine answering the declared port — the escape hatch for a falsely
+ * stopped row (a daemonizing recipe keeps the engine outside the recorded
+ * group; hub demotion was pgid-only). Drives the card Stop button: the row's
+ * status must never hide the only control that kills a live engine.
+ */
+export function probeSeesEngine(
+  setup: Pick<SetupInfo, "headNodeId" | "port" | "model">,
+  headLlm: Map<string, { ports: Array<{ port: number; detected: boolean; model: string | null }> } | null>,
+): boolean {
+  const snap = headLlm.get(setup.headNodeId);
+  if (snap === undefined || snap === null) return false;
+  const port = snap.ports.find((p) => p.port === setup.port);
+  return port !== undefined && port.detected && modelIdMatches(port.model, setup.model);
 }
 
 /** Pure: chip state → DS dot/chip class per the thread budget. */

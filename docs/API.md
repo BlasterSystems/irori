@@ -333,6 +333,22 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 - Identical driver-state replies are not re-announced: an unchanged
   `(status, health, lastError)` produces no `setup-state` SSE event and no row
   write, so the driver-truth poll cannot flood the event feed.
+- **Poll truth defers to the probe** (IR-151): a driver-truth poll reporting
+  `stopped` (`exitCode` null) does NOT demote a row whose head node's probe
+  still sees the declared engine answering the declared port — the row stays
+  (or returns to) `running`/`healthy`, or `foreign` when a different engine
+  answers. A daemonizing recipe (`docker run -d`, script exits 0) leaves the
+  engine outside the recorded process group, so pgid-only truth would demote a
+  serving engine forever. Only when nothing answers does the poll demote. A
+  stop that settled within the last 30 s always demotes (the node's probe may
+  still hold the pre-kill snapshot).
+- `POST /api/v1/setups/:id/stop` forwards the stop frame **regardless of row
+  status** (IR-151) — no silent no-op for a `stopped` row. The agent answers
+  harmlessly when its driver holds no record (that nack settles clean,
+  `lastError` untouched); with a retained record it runs the stop script and
+  kills the real engine. `SetupOfflineError` still applies. The Serve card
+  renders Stop for a stopped row whenever the head's probe sees the declared
+  engine on the declared port.
 - Setup frames (`setup-ack`, `setup-event`, `setup-log`) are accepted only
   from the setup's head node; `setup-validate-result` only from the node the
   validation was sent to. Frames from any other authenticated agent are
