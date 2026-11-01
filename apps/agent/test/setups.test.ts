@@ -195,6 +195,48 @@ describe("SetupDriver", () => {
     expect(events3.some((e) => e.setupId === ID && e.state === "stopped")).toBe(true);
   });
 
+  it("resumes engine log capture after an agent restart with monotonic seq (IR-149)", async () => {
+    const dir = makeDir();
+    // The engine writes beats for ~6 s — long enough to outlive the simulated
+    // restart and keep producing output the re-attached driver can tail.
+    const start = script(dir, "start.sh", "for i in $(seq 1 20); do echo beat-$i; sleep 0.3; done; sleep 60");
+    const stop = script(dir, "stop.sh", "true");
+    const events1: RecordedEvent[] = [];
+    const logs1: RecordedLog[] = [];
+    const driver1 = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent",
+      events: { onEvent: (setupId, event) => events1.push({ setupId, ...event }), onLog: (s, seq, line, ts) => logs1.push({ setupId: s, seq, line, ts }) },
+      log: () => {},
+    });
+    driver1.init();
+    const result = await driver1.start(ID, RUN, start, stop, {}, null);
+    expect(result.ok).toBe(true);
+    // Output flows through the inherited-fd file + tailer, not the old pipe.
+    await waitFor(() => logs1.some((l) => l.line.includes("beat-1")));
+    const firstSeq = logs1.find((l) => l.line.includes("beat-1"))!.seq;
+
+    // Simulated agent restart: a fresh driver over the same state dir re-attaches.
+    const logs2: RecordedLog[] = [];
+    const driver2 = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent",
+      events: { onEvent: () => {}, onLog: (s, seq, line, ts) => logs2.push({ setupId: s, seq, line, ts }) },
+      log: () => {},
+    });
+    driver2.init();
+    // New engine output (written while/after the re-attach) reaches the ring.
+    await waitFor(() => logs2.some((l) => l.line.startsWith("beat-")));
+    await waitFor(() => logs2.filter((l) => l.line.startsWith("beat-")).length >= 2);
+    const beats = logs2.filter((l) => l.line.startsWith("beat-"));
+    // Seq keeps counting where the old process left off — never rewinds.
+    expect(beats[0]!.seq).toBeGreaterThan(firstSeq);
+    expect(beats[1]!.seq).toBeGreaterThan(beats[0]!.seq);
+
+    await driver1.stop(ID, 1000).catch(() => {});
+    await driver2.stop(ID, 1000).catch(() => {});
+  });
+
   it("resolves MODEL_PATH via modelctl path --local and fails the start when it errors", async () => {
     const dir = makeDir();
     const modelctl = script(dir, "modelctl", 'echo "/hf/models--GLM-5.3-Flash-EXL3/snapshots/abc"; # args: ');
