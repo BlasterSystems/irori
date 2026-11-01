@@ -17,6 +17,7 @@ import { computeDetailData, formatRate } from "../detail-data";
 import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import { cancelJob, createJob, fetchJob, jobStatusChip, startAgentUpdate, type JobDetail } from "../models";
+import { activeJobFor, blockingJobLabel } from "../jobs";
 import {
   deleteConfirmCopy,
   deleteRequestFor,
@@ -402,6 +403,14 @@ async function openJob(id: string, epoch: number): Promise<void> {
   }, 2000);
 }
 
+/** IR-134: the job holding this node's one-active-job slot right now —
+ *  Register / Resume / delete / inventory Read all 409 while it runs, so the
+ *  buttons show the blocker instead of firing a click that will be refused. */
+const nodeBusyJob = computed(() => activeJobFor(live.jobs.values(), props.nodeId));
+const nodeBusyLabel = computed(() =>
+  nodeBusyJob.value === null ? "" : `node busy — ${blockingJobLabel(nodeBusyJob.value)}`,
+);
+
 /** Shared dispatch for delete/register: confirms never stack, the sheet
  *  opens on dispatch, and a dispatch failure surfaces in the page banner
  *  (the sheet would otherwise never have opened). */
@@ -727,8 +736,8 @@ onUnmounted(() => {
           {{ inventoryBusy ? "reading the node's caches…" : inventory.store ? "store catalog renders on the store node" : "local caches" }}
           <span v-if="inventoryReadLabel && !inventoryBusy" class="stat__sub faint">— read {{ inventoryReadLabel }}</span>
         </span>
-        <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy || node?.online !== true" @click="refreshInventory">
-          {{ inventoryBusy ? "reading…" : "Refresh" }}
+        <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy || node?.online !== true || nodeBusyJob !== null" :title="nodeBusyLabel || undefined" @click="refreshInventory">
+          {{ inventoryBusy ? "reading…" : nodeBusyJob !== null ? "Busy" : "Refresh" }}
         </button>
       </div>
 
@@ -739,8 +748,8 @@ onUnmounted(() => {
           <span class="mono faint model-root">{{ storeMount }}</span>
           <span class="stat__sub">{{ inventorySummary(inventory.store.models) }}</span>
           <span v-if="inventoryReadLabel" class="stat__sub faint">read {{ inventoryReadLabel }}</span>
-          <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy" @click="refreshInventory">
-            {{ inventoryBusy ? "reading…" : "Refresh" }}
+          <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy || nodeBusyJob !== null" :title="nodeBusyLabel || undefined" @click="refreshInventory">
+            {{ inventoryBusy ? "reading…" : nodeBusyJob !== null ? "Busy" : "Refresh" }}
           </button>
         </div>
         <div class="card__body" style="padding-top: 12px;">
@@ -847,13 +856,15 @@ onUnmounted(() => {
                     <button
                       v-if="row.state === 'resumable'"
                       class="btn btn--ghost btn--sm"
-                      :disabled="opBusy"
+                      :disabled="opBusy || nodeBusyJob !== null"
+                      :title="nodeBusyLabel || undefined"
                       @click="askResume(row.repo, cache.user)"
                     >Resume transfer</button>
                     <button
                       v-else
                       class="btn btn--ghost btn--sm"
-                      :disabled="opBusy"
+                      :disabled="opBusy || nodeBusyJob !== null"
+                      :title="nodeBusyLabel || undefined"
                       @click="askRegister(row.repo, cache.user)"
                     >Register</button>
                   </td>
