@@ -116,6 +116,23 @@ describe("createLiveStore", () => {
     store.stop();
   });
 
+  it("bounds setup-log frames so they cannot evict setup-state from the shared ring (review fix)", async () => {
+    const { store, es } = await startedStore([nodeFixture()]);
+    const setupId = "00000000-0000-4000-8000-000000000010";
+    es.emit(JSON.stringify({ type: "setup-state", serverTimeMs: 5, setupId, status: "starting", health: null, lastError: null }));
+    // IR-148 lets the hub send ~10 lines/s while a setup is starting; the ring
+    // is shared, so unbounded log frames must not push setup-state (which the
+    // Serve instant-chip overlay reads), thermal or job frames out of it.
+    for (let i = 0; i < 80; i++) {
+      es.emit(JSON.stringify({ type: "setup-log", serverTimeMs: 100 + i, setupId, nodeId: nodeFixture().id, name: "glm-main", line: "line " + i }));
+    }
+    const ring = store.events.value;
+    expect(ring.filter((e) => e.type === "setup-log").length).toBeLessThanOrEqual(50);
+    expect(ring.some((e) => e.type === "setup-state")).toBe(true);
+    expect(ring.filter((e) => e.type === "setup-log").at(-1)).toMatchObject({ line: "line 79" });
+    store.stop();
+  });
+
   it("seeds the registry from REST and opens /api/v1/events", async () => {
     const { store, fetchNodesFn, es } = await startedStore([nodeFixture()]);
     expect(fetchNodesFn).toHaveBeenCalled();
