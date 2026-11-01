@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
 import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type TransferProgress } from "@irori/core";
@@ -68,6 +68,33 @@ async function settleInventory(db: Db, nodeId: string, jobId: string): Promise<N
     .values({ nodeId, report: parsed.data, updatedAt })
     .onConflictDoUpdate({ target: nodeInventory.nodeId, set: { report: parsed.data, updatedAt } });
   return parsed.data;
+}
+
+/**
+ * IR-140: reconcile the node_models presence table from a succeeded
+ * models-inventory report. Presence was previously written only by settling
+ * transfer jobs, so a model that reached a node outside a successful hub job
+ * (registered locally, transferred before the table existed, manual modelctl
+ * use, pruned job rows) never became present — placement demanded re-pushes of
+ * resident models and setup start refused with "not staged". The agent's
+ * `modelctl list --local` listing is the ground truth; upsert every listed
+ * model. Prune stale rows ONLY when the report is known complete — at least
+ * one cache read and every cache read succeeded (a failed read reports empty
+ * models, and pruning on that would delete true presence).
+ */
+export async function reconcilePresenceFromInventory(db: Db, nodeId: string, report: NodeInventory): Promise<void> {
+  const names = [...new Set(report.local.flatMap((cache) => cache.models.map((m) => m.name)))];
+  if (names.length > 0) {
+    await db
+      .insert(nodeModels)
+      .values(names.map((model) => ({ nodeId, model })))
+      .onConflictDoNothing();
+  }
+  const complete = report.local.length > 0 && report.local.every((cache) => cache.error === null);
+  if (!complete) return;
+  await db
+    .delete(nodeModels)
+    .where(names.length === 0 ? eq(nodeModels.nodeId, nodeId) : and(eq(nodeModels.nodeId, nodeId), notInArray(nodeModels.model, names)));
 }
 
 /**
@@ -499,8 +526,14 @@ export function createJobsService(
       } else if (row.kind === "models-inventory") {
         if (status === "succeeded") {
           const report = await settleInventory(db, nodeId, jobId);
-          if (report !== null && getModelctlPin !== undefined) {
-            await autoProvisionModelctl((n, k, p) => service.create(n, k, p), getModelctlPin, nodeId, report);
+          if (report !== null) {
+            // IR-140: the listing is ground truth for presence — placement and
+            // start staging read node_models, which transfer settles alone
+            // never fed for out-of-band models.
+            await reconcilePresenceFromInventory(db, nodeId, report);
+            if (getModelctlPin !== undefined) {
+              await autoProvisionModelctl((n, k, p) => service.create(n, k, p), getModelctlPin, nodeId, report);
+            }
           }
         }
       } else if (row.kind === "push" && status === "failed" && onPushBlocked !== undefined) {
@@ -594,10 +627,25 @@ export function createJobsService(
       return row ?? null;
     },
 
-    /** Node ids whose local HF cache holds the model (node_models inventory). */
+    /**
+     * Node ids whose local HF cache holds the model. The node_models table is
+     * authoritative (reconciled on every inventory settle, IR-140); the cached
+     * inventory report is unioned as a defense so presence is correct even
+     * between a settle that wrote a report and the reconcile. A cached row is
+     * deleted whenever a model-mutating job settles on its node, so a stale
+     * row can never claim a deleted model is still resident.
+     */
     async presentNodesFor(name: string): Promise<string[]> {
       const rows = await db.select({ nodeId: nodeModels.nodeId }).from(nodeModels).where(eq(nodeModels.model, name));
-      return rows.map((r) => r.nodeId);
+      const ids = new Set(rows.map((r) => r.nodeId));
+      const cached = await db.select({ nodeId: nodeInventory.nodeId, report: nodeInventory.report }).from(nodeInventory);
+      for (const row of cached) {
+        if (ids.has(row.nodeId)) continue;
+        const parsed = nodeInventorySchema.safeParse(row.report);
+        if (!parsed.success) continue;
+        if (parsed.data.local.some((cache) => cache.models.some((m) => m.name === name))) ids.add(row.nodeId);
+      }
+      return [...ids];
     },
 
     async reapOffline(onlineNodes) {
