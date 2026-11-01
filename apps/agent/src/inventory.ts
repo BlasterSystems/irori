@@ -4,7 +4,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import type { InventoryLeftover, InventoryLocalCache, InventoryModel, NodeInventory } from "@irori/core";
+import type { InventoryLeftover, InventoryLocalCache, InventoryModel, InventoryOrphanState, NodeInventory, OrphanState } from "@irori/core";
 import { dirBytes, readStore } from "./catalog-read.js";
 import { runuserWrap } from "./cache-user.js";
 
@@ -283,6 +283,27 @@ function repoIdFromCacheDir(entry: string): string | null {
   return `${rest.slice(0, idx)}/${rest.slice(idx + 2)}`;
 }
 
+/**
+ * IR-133: classify an unregistered `models--*` dir from its on-disk layout
+ * (no NAS round-trip). `snapshots/<40-hex>/` = register-local's structural
+ * precondition, so it is `adoptable`; only modelctl's deterministic
+ * `.modelctl-staging/<commit>-…` dir = a canceled/failed sync-local whose
+ * re-run resumes from staging (`resumable`); anything else is `unknown` and
+ * keeps the Register-only behavior (register-local still verifies fail-closed).
+ */
+async function classifyOrphan(cacheDir: string, entry: string): Promise<OrphanState> {
+  const root = join(cacheDir, entry);
+  const snapshots = await readdir(join(root, "snapshots")).catch(() => [] as string[]);
+  for (const name of snapshots) {
+    if (!/^[0-9a-f]{40}$/.test(name)) continue;
+    const info = await stat(join(root, "snapshots", name)).catch(() => null);
+    if (info?.isDirectory()) return "adoptable";
+  }
+  const staging = await readdir(join(root, ".modelctl-staging")).catch(() => [] as string[]);
+  if (staging.some((name) => /^[0-9a-f]{40}-/.test(name))) return "resumable";
+  return "unknown";
+}
+
 /** One local cache per user that has a modelctl binary and an HF cache. */
 export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryLocalCache[]> {
   const users = ctx.users ?? discoverUsers(readPasswd(ctx.passwdPath ?? "/etc/passwd"), ctx.agentUser);
@@ -292,7 +313,7 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
     const cacheDir = join(home, ".cache", "huggingface", "hub");
     const binary = user === ctx.agentUser ? ctx.modelctlPath : localBinary(home);
     if (binary === null) {
-      caches.push({ user, home, cacheDir, modelctlVersion: null, error: "modelctl is not installed for this user", models: [], orphans: [] });
+      caches.push({ user, home, cacheDir, modelctlVersion: null, error: "modelctl is not installed for this user", models: [], orphans: [], orphanStates: [] });
       continue;
     }
     try {
@@ -302,13 +323,21 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
       // action maps them to a transfer-free `modelctl register-local`.
       const registered = new Set(listed.map((m) => m.repository.toLowerCase()));
       const orphans: string[] = [];
+      // IR-133: each orphan carries an adoption state so the UI offers the
+      // right remediation (Register for adoptable, Resume transfer for a
+      // partial sync, Register for unknown).
+      const orphanStates: InventoryOrphanState[] = [];
       for (const entry of await readdir(cacheDir).catch(() => [])) {
         const repo = repoIdFromCacheDir(entry);
         if (repo === null || registered.has(repo.toLowerCase())) continue;
         const info = await stat(join(cacheDir, entry)).catch(() => null);
-        if (info?.isDirectory()) orphans.push(repo);
+        if (info?.isDirectory()) {
+          orphans.push(repo);
+          orphanStates.push({ repo, state: await classifyOrphan(cacheDir, entry) });
+        }
       }
       orphans.sort();
+      orphanStates.sort((a, b) => a.repo.localeCompare(b.repo));
       const models: InventoryModel[] = [];
       for (const [index, model] of listed.entries()) {
         if (index >= MAX_SIZED_MODELS) {
@@ -329,7 +358,7 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
         }
         models.push({ ...model, bytes });
       }
-      caches.push({ user, home, cacheDir, modelctlVersion: version, error: null, models, orphans });
+      caches.push({ user, home, cacheDir, modelctlVersion: version, error: null, models, orphans, orphanStates });
     } catch (err) {
       caches.push({
         user,
@@ -339,6 +368,7 @@ export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryL
         error: err instanceof Error ? err.message : String(err),
         models: [],
         orphans: [],
+        orphanStates: [],
       });
     }
   }

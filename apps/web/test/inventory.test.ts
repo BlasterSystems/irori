@@ -5,8 +5,12 @@ import {
   filterModels,
   inventorySummary,
   leftoverLabel,
+  orphanHint,
+  orphanRowsFor,
   registerCopy,
   registerRequestFor,
+  resumeCopy,
+  resumeRequestFor,
   storeMountLabel,
   type DeleteTarget,
 } from "../src/inventory";
@@ -45,6 +49,45 @@ describe("deleteConfirmCopy", () => {
       danger: "Delete from store",
     });
     expect(deleteConfirmCopy({ scope: "leftover", name: null, object: "/x", target: "o/r/a--b", bytes: null, error: null }).danger).toBe("Remove leftover");
+  });
+});
+
+describe("orphanRowsFor (IR-133)", () => {
+  it("joins states onto orphans and defaults missing ones to unknown", () => {
+    expect(
+      orphanRowsFor({
+        orphans: ["a/one", "b/two", "c/three"],
+        orphanStates: [
+          { repo: "b/two", state: "resumable" },
+          { repo: "a/one", state: "adoptable" },
+        ],
+      }),
+    ).toEqual([
+      { repo: "a/one", state: "adoptable" },
+      { repo: "b/two", state: "resumable" },
+      { repo: "c/three", state: "unknown" },
+    ]);
+  });
+
+  it("keeps pre-classification reports rendering as unknown (Register-only)", () => {
+    expect(orphanRowsFor({ orphans: ["x/y"], orphanStates: [] })).toEqual([{ repo: "x/y", state: "unknown" }]);
+    expect(orphanHint("unknown")).toBeNull();
+    expect(orphanHint("resumable")).toContain("completed files are not re-copied");
+  });
+});
+
+describe("resumeRequestFor (IR-133)", () => {
+  it("maps a resumable orphan to a per-user sync-local job", () => {
+    expect(resumeRequestFor("Mia-AiLab/GLM-5.3-EXL3-2.75bpw-TensorFold", "operator")).toEqual({
+      kind: "sync-local",
+      params: { name: "Mia-AiLab/GLM-5.3-EXL3-2.75bpw-TensorFold", user: "operator" },
+    });
+  });
+
+  it("states the transfer continues from staging", () => {
+    const copy = resumeCopy("o/r");
+    expect(copy.danger).toBe("Resume transfer");
+    expect(copy.body).toContain("not re-transferred");
   });
 });
 

@@ -117,6 +117,25 @@ describe("buildCommand", () => {
     expect(argv).toEqual(["modelctl", "sync-local", "glm", "--source-root", "/mnt/nas"]);
   });
 
+  it("wraps sync-local in runuser for an explicit params.user (IR-133 Resume)", () => {
+    // The orphan Resume dispatch targets the cache owner the listing came
+    // from, which may differ from the node's configured cache user.
+    const userCtx = {
+      ...ctx,
+      agentUser: "root",
+      cacheUser: null,
+      resolveLocalUser: () => ({ home: "/home/operator", binary: "/home/operator/.local/bin/modelctl" }),
+    };
+    const { argv, shell } = buildCommand("sync-local", { name: "glm", user: "operator" }, userCtx);
+    expect(shell).toBeUndefined();
+    expect(argv[0]).toBe("runuser");
+    expect(argv).toContain("runuser");
+    expect(argv.slice(-5)).toEqual(["/home/operator/.local/bin/modelctl", "sync-local", "glm", "--source-root", "/mnt/nas"]);
+    // The agent's own user stays unwrapped; an unknown user is actionable.
+    expect(buildCommand("sync-local", { name: "glm", user: "root" }, userCtx).argv).toEqual(["modelctl", "sync-local", "glm", "--source-root", "/mnt/nas"]);
+    expect(() => buildCommand("sync-local", { name: "glm", user: "ghost" }, { ...ctx, resolveLocalUser: () => null })).toThrow(/unknown local cache user "ghost"/);
+  });
+
   it("fails sync-local with an actionable error when the cache user has no modelctl (IR-101)", () => {
     const brokenCtx = { ...ctx, agentUser: "root", cacheUser: "operator", resolveLocalUser: () => null };
     expect(() => buildCommand("sync-local", { name: "glm" }, brokenCtx)).toThrow(/no modelctl for cache user "operator"/);

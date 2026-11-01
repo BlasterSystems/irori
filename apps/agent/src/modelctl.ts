@@ -304,7 +304,21 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       if (jobs) argv.push("--jobs", String(Math.floor(jobs)));
       const cache = str("cacheDir");
       if (cache) argv.push("--cache-dir", cache);
-      return asCacheUser(argv, ctx, "sync-local");
+      // IR-133: an explicit params.user (the orphan Resume dispatch) runs as
+      // that cache owner — same per-user rule as register-local, since the
+      // registration state lives in the invoking user's home. Without it, the
+      // node's configured cache user applies (IR-101).
+      const user = str("user");
+      if (user === undefined) return asCacheUser(argv, ctx, "sync-local");
+      if (user === (ctx.agentUser ?? "root")) return { argv };
+      const resolved = ctx.resolveLocalUser?.(user) ?? null;
+      if (resolved === null) {
+        throw new CommandBuildError(`sync-local: unknown local cache user "${user}"`);
+      }
+      return {
+        raw: true,
+        argv: runuserWrap(user, resolved.home, { PATH: userBinaryPath(resolved.binary) }, [resolved.binary, ...argv]),
+      };
     }
     case "download":
     case "install": {

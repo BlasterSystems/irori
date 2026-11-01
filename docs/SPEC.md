@@ -216,11 +216,20 @@ flowchart LR
   leftovers) on the store node (`kind: nas`; nodes that merely mount the
   store show only their local caches, IRI-034), and every local HF-cache registration per
   user (modelctl local state is per user; a root agent lists each cache owner
-  through `runuser`). Unregistered `models--*` dirs are listed as orphans with
-  a Register action that runs the modelctl 0.23 `register-local` job (IR-104,
+  through `runuser`). Unregistered `models--*` dirs are listed as orphans,
+  each classified agent-side from its on-disk layout (IR-133): `adoptable`
+  (a snapshot farm exists) and `unknown` get a Register action that runs the
+  modelctl 0.23 `register-local` job (IR-104,
   ADR-0012): the entry is verified against the active store object by hash —
   blob identity plus small-file content hashes — and registered with no
-  transfer; any mismatch refuses and writes nothing. Rows carry size/repo/runtime and delete in place:
+  transfer; any mismatch refuses and writes nothing. `resumable` (only modelctl's
+  deterministic staging dir — a canceled/failed sync-local) gets a **Resume
+  transfer** action re-dispatching `sync-local` for the same name + cache
+  user: register-local structurally refuses a partial, while the deterministic
+  staging dir plus `rsync --partial` continues the transfer without
+  re-copying completed files. Reports from pre-classification agents carry no
+  states and render Register-only.
+  Rows carry size/repo/runtime and delete in place:
   `nas-delete-apply` for store models, `delete-local` for a local registration,
   `gc-objects` for a leftover. `nas-delete-apply` preflights every object and
   staging directory with a create+unlink probe after the read-only `--json`
