@@ -128,6 +128,30 @@ describe("SetupDriver", () => {
     expect(h.logs.filter((l) => l.line.includes("stop: graceful")).length).toBe(1);
   });
 
+  it("keeps durable markers on their own line and never skips pending engine bytes (review fix)", async () => {
+    const dir = makeDir();
+    // A partial line (no newline yet), a pause long enough for several tailer
+    // drains, then the rest of the line.
+    const start = script(dir, "start.sh", "printf 'partial'; sleep 3; echo ' done'; sleep 60");
+    const stop = script(dir, "stop.sh", "true");
+    const result = await h.driver.start(ID, RUN, start, stop, {}, null);
+    expect(result.ok).toBe(true);
+    const logFile = join(h.dir, "setup-logs", `${ID}-${RUN}.log`);
+    await waitFor(() => readFileSync(logFile, "utf8").includes("partial"));
+    await new Promise((r) => setTimeout(r, 600)); // let the tailer drain the partial bytes
+
+    // A durable marker lands while the engine line is still open.
+    h.driver.pushSetupLog(ID, "driver: test marker");
+    const text = readFileSync(logFile, "utf8");
+    // …it never glues onto the partial engine bytes.
+    expect(text).toContain("partial\ndriver: test marker\n");
+    expect(h.logs.filter((l) => l.line === "driver: test marker").length).toBe(1);
+
+    // The engine's bytes were not skipped: the rest of the line still lands.
+    await waitFor(() => h.logs.some((l) => l.line.includes("partial done")));
+    await h.driver.stop(ID, 1000).catch(() => {});
+  });
+
   it("falls back to killing the process group when the stop script fails", async () => {
     const dir = makeDir();
     const start = script(dir, "start.sh", "sleep 60");

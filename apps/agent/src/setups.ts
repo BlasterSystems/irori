@@ -175,9 +175,6 @@ export class SetupDriver {
   private readonly rings = new Map<string, RingEntry[]>();
   private readonly seqs = new Map<string, number>();
   private readonly tailers = new Map<string, { timer: NodeJS.Timeout; offset: number; carry: string }>();
-  /** IR-149/150 fix: setup ids with a tailer drain in flight (guards the
-   *  self-append offset bump against a concurrent read). */
-  private readonly draining = new Set<string>();
   /** IR-149/150 fix: run-log path per setup, registered in start() BEFORE the
    *  record exists so early driver markers are written durably. */
   private readonly logPaths = new Map<string, string>();
@@ -759,11 +756,30 @@ export class SetupDriver {
     if (opts?.durable !== false) {
       const path = this.records.get(setupId)?.logPath ?? this.logPaths.get(setupId);
       if (path !== undefined) {
-        const buf = Buffer.from(`${line}\n`);
         try {
+          // The engine writes raw bytes: the file may end MID-LINE (block-
+          // buffered flushes, \r progress repaints). Without a separator the
+          // marker would glue onto that line and both become unreadable.
+          const size = fileSizeOrZero(path);
+          let prefix = "";
+          if (size > 0) {
+            const fd = openSync(path, "r");
+            try {
+              const last = Buffer.alloc(1);
+              readSync(fd, last, 0, 1, size - 1);
+              if (last[0] !== 0x0a) prefix = "\n";
+            } finally {
+              closeSync(fd);
+            }
+          }
+          const buf = Buffer.from(`${prefix}${line}\n`);
           appendFileSync(path, buf);
+          // Move the tailer past our own bytes ONLY when it had fully drained
+          // first (offset === size, since drains are synchronous). Otherwise
+          // the bump would skip engine bytes that were never read — a
+          // duplicate marker frame is the lesser evil.
           const tailer = this.tailers.get(setupId);
-          if (tailer !== undefined && !this.draining.has(setupId)) tailer.offset += buf.length;
+          if (tailer !== undefined && tailer.offset === size) tailer.offset += buf.length;
         } catch {
           /* state dir unwritable — the ring/feed still carries the line */
         }
@@ -832,7 +848,6 @@ export class SetupDriver {
     const record = this.records.get(setupId);
     if (tailer === undefined || record === undefined) return;
     let fd: number | null = null;
-    this.draining.add(setupId); // a pushLog append must not bump the offset mid-read
     try {
       fd = openSync(record.logPath, "r");
       const size = statSync(record.logPath).size;
@@ -861,7 +876,6 @@ export class SetupDriver {
       // File missing or unreadable — keep the timer; a slow filesystem or a
       // pruned file must not kill the tail (finish() clears it at run end).
     } finally {
-      this.draining.delete(setupId);
       if (fd !== null) closeSync(fd);
     }
   }
