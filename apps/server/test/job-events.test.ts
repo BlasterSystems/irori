@@ -43,6 +43,26 @@ d("job settle events (db integration)", () => {
     await handle.close();
   });
 
+  it("names the blocking job when the node slot is taken (IR-134)", async () => {
+    // Own service instance: this test's settle events must not pollute the
+    // shared collector the event-shape tests assert on.
+    const svc = createJobsService(db, () => true);
+    const blocker = await svc.create(nodeId, "sync-local", { name: "GLM-5.3-EXL3-2.75bpw-TensorFold" });
+    // A queued/running job on the node is the one-active-slot constraint.
+    await expect(svc.create(nodeId, "push", { name: "other", hosts: ["a@b"] })).rejects.toThrow(
+      /node already has an active job: sync-local GLM-5.3-EXL3-2\.75bpw-TensorFold/,
+    );
+    // A job whose params carry no name falls back to kind + id.
+    await svc.onDone(nodeId, blocker.id, "succeeded", 0);
+    const anonymous = await svc.create(nodeId, "models-inventory", {});
+    let message = "";
+    await svc.create(nodeId, "hygiene-audit", {}).catch((err: unknown) => {
+      message = err instanceof Error ? err.message : String(err);
+    });
+    expect(message).toMatch(new RegExp(`node already has an active job: models-inventory \\(${anonymous.id}\\)`));
+    await svc.onDone(nodeId, anonymous.id, "succeeded", 0);
+  });
+
   it("emits exactly one event on done, none on a repeated done", async () => {
     const row = await service.create(nodeId, "sync-local", {});
     await service.onDone(nodeId, row.id, "succeeded", 0);
