@@ -52,6 +52,15 @@ its refresh with a visible failure until they are updated.
 
 No runtime configuration; built static assets are served by the server.
 
+### Usage capture matching (IRI-055)
+
+The capture proxy records `POST` requests whose path is one of
+`chat/completions`, `completions`, `embeddings`, `responses` — with or
+without the `/v1/` prefix. Engines that serve both spellings (TensorFold
+does) are therefore captured regardless of whether the client's provider
+baseUrl includes `/v1`; the stored `endpoint` is always canonicalized to the
+`/v1/` spelling. No configuration is involved — nothing to set.
+
 ### Hub settings (runtime, IRI-019)
 
 The global HF token is defined in the UI (footer gear → Hub settings) or via

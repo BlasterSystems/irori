@@ -110,6 +110,40 @@ d("usage store (postgres)", () => {
     expect(page.rows.filter((r) => batch.some((b) => b.id === r.id))).toHaveLength(2);
   });
 
+  it("warns (rate-limited) instead of silently dropping malformed events (IR-154)", async () => {
+    const warns: string[] = [];
+    let clock = 1_000;
+    const store = createUsageStore(handle!.db, { warn: (m) => warns.push(m), now: () => clock });
+    const bad = (n: number): UsageRequest =>
+      ({ id: randomUUID(), port: 8090 + n, endpoint: "/chat/completions", model: "m" }) as unknown as UsageRequest;
+    const good = usageRequest({ endpoint: "/v1/chat/completions" });
+
+    // Two malformed + one valid: the valid one lands; the FIRST drop warns
+    // immediately (names that event's identity); the second drop within the
+    // rate-limit window is counted, not logged.
+    const inserted = await store.insertBatch(nodeId, [bad(1), good, bad(2)]);
+    expect(inserted).toBe(1);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("port=8091");
+    expect(warns[0]).toContain("endpoint=/chat/completions");
+    expect(warns[0]).toContain("malformed event(s)");
+    const page = await store.requests({ range: "24h", nodeId, page: 1, limit: 100 });
+    expect(page.rows.some((r) => r.id === good.id)).toBe(true);
+
+    // Still inside the rate-limit window → counted, not logged.
+    clock += 1_000;
+    await store.insertBatch(nodeId, [bad(3)]);
+    expect(warns).toHaveLength(1);
+
+    // Past the window → the next drop logs and the count carries the backlog
+    // (bad(2) + bad(3) suppressed earlier + this one = 3).
+    clock += 60_000;
+    await store.insertBatch(nodeId, [bad(4)]);
+    expect(warns).toHaveLength(2);
+    expect(warns[1]).toContain("dropped 3 malformed event(s)");
+    expect(warns[1]).toContain("port=8094");
+  });
+
   it("rolls up hourly/daily buckets on ingest time and advances the watermark", async () => {
     const store = createUsageStore(handle!.db);
     const events = [usageRequest(), usageRequest({ error: "boom", errorSig: "boom", status: 500 })];

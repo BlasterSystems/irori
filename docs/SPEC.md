@@ -419,7 +419,10 @@ reported in every snapshot; upgrade = re-run install.
    The proxy is a raw byte pipe with a passive capped tee: streaming is
    byte-identical, capture failures degrade to pass-through, and only
    OpenAI-compat inference requests are recorded (probes/`/metrics` are
-   forwarded uncaptured). Per request: model, endpoint, status, finish
+   forwarded uncaptured). Matching accepts the endpoint with or without the
+   `/v1/` prefix — clients whose baseUrl omits `/v1` are captured too; stored
+   endpoints are canonicalized to the `/v1/` spelling (IRI-055). Per
+   request: model, endpoint, status, finish
    reason, errors (+ normalized signature), duration/TTFT/decode tok/s,
    prompt/completion/cached/reasoning/total tokens, the TensorFold block
    verbatim, payload sizes, source address — no bodies (IR-51). Captured
