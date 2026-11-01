@@ -53,8 +53,10 @@ export const vDialog: Directive<HTMLElement, () => void> = {
         binding.value();
         return;
       }
-      // Tab handling only while focus lives inside this panel.
-      if (e.key === "Tab" && el.contains(document.activeElement)) trapTab(el, e);
+      // Always trap: a click on non-focusable panel content (selecting a log
+      // line) parks focus on body, and trapTab's outside branch is the only
+      // way back in — gating on contains() made that branch unreachable.
+      if (e.key === "Tab") trapTab(el, e);
     };
     // Document-level: a click on non-focusable panel content parks focus on
     // body; a panel-level listener would never see Escape then.

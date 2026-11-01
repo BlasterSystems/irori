@@ -215,13 +215,20 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       case "thermal":
       case "setup-state":
       case "setup-transfer":
-      // IR-147: the hub emits throttled setup-log frames (≤1/s per setup,
-      // unchanged lines skipped server-side) but the ingest switch never had
-      // an arm, so they were dropped and the feedLines renderer was dead code.
-      // Live-only by design (IR-124 non-goal: no backfill) — a drawer opened
-      // mid-load shows the next throttled line.
-      case "setup-log":
         pushEvent(event);
+        break;
+      // IR-147: the hub emits throttled setup-log frames (unchanged lines
+      // skipped server-side) but the ingest switch never had an arm, so they
+      // were dropped and the feedLines renderer was dead code. Live-only by
+      // design (IR-124 non-goal: no backfill) — a drawer opened mid-load shows
+      // the next throttled line.
+      // Review fix: IR-148 relaxes that throttle to ~10 fps while a setup is
+      // STARTING, and the 300-slot ring is shared with every event type — an
+      // unbounded flood evicted the setup-state frames the Serve instant-chip
+      // overlay reads (and node/thermal/job frames the feed cannot rebuild).
+      // Engine output is capped inside the ring; other event types never are.
+      case "setup-log":
+        pushSetupLogBounded(event);
         break;
       case "usage": {
         // Newest-first ring; also rides the feed (bounded by pushEvent).
@@ -237,9 +244,25 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
 
   /** Feed ring cap: generous for a session, small enough to stay cheap. */
   const EVENT_RING_CAP = 300;
+  /** Engine-output share of the ring (IR-148 raised the hub rate to ~10 fps
+   *  while starting; unbounded log frames would evict setup-state/thermal/job
+   *  frames the UI cannot rebuild — drop-oldest log first). */
+  const LOG_RING_CAP = 50;
   function pushEvent(event: SseEvent): void {
     events.value.push(event);
     if (events.value.length > EVENT_RING_CAP) events.value.splice(0, events.value.length - EVENT_RING_CAP);
+  }
+
+  function pushSetupLogBounded(event: SseEvent): void {
+    let logs = 0;
+    let oldest = -1;
+    for (let i = 0; i < events.value.length; i++) {
+      if (events.value[i]!.type !== "setup-log") continue;
+      logs += 1;
+      if (oldest < 0) oldest = i;
+    }
+    if (logs >= LOG_RING_CAP && oldest >= 0) events.value.splice(oldest, 1);
+    pushEvent(event);
   }
 
   async function refreshNodes(): Promise<void> {

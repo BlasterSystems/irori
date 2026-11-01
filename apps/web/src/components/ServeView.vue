@@ -218,9 +218,11 @@ function onAdopt(row: RunningEngineRow): void {
   wizard.value.headNodeId = row.nodeId;
   wizard.value.workerIds = [];
   wizardPort.value = row.port;
-  // Type and Model are already answered — land on Scripts, the missing part.
-  step.value = 3;
-  maxVisited.value = 3;
+  // Type is answered; Model is only answered when the probe REPORTED one —
+  // an engine that answers without a model id would otherwise reach Review
+  // with an empty model and fail the server contract on Create.
+  step.value = row.model === null ? 2 : 3;
+  maxVisited.value = step.value;
   actionError.value = null;
 }
 
@@ -416,6 +418,7 @@ function openWizard(from?: SetupInfo): void {
   maxVisited.value = 1;
   wizardError.value = null;
   validation.value = null;
+  validatedKey = null;
   placementRows.value = null;
   created.value = null;
   createdInput.value = null;
@@ -519,12 +522,18 @@ async function nextStep(): Promise<void> {
       wizardError.value = startPathError.value ?? stopPathError.value;
       return;
     }
-    if (validation.value === null && !validating.value) {
+    // Re-validate whenever the head or either path changed since the last
+    // check — a cached ok for a different script set is exactly the
+    // dead-on-arrival trap this gate exists for.
+    if ((validation.value === null || validatedKey !== scriptsKey()) && !validating.value) {
       validating.value = true;
       try {
+        const key = scriptsKey();
         validation.value = await validateScripts(wizard.value.headNodeId, [composedStart.value, composedStop.value]);
+        validatedKey = key;
       } catch {
         validation.value = null; // head unreachable — don't block, save/start re-check
+        validatedKey = null;
       } finally {
         validating.value = false;
       }
@@ -579,13 +588,25 @@ function onPickModel(name: string): void {
 
 const validation = ref<Array<{ script: string; ok: boolean; error: string | null }> | null>(null);
 const validating = ref(false);
+/** IR-152 fix (review): the cache is keyed by the exact (head, start, stop)
+ *  triple it validated. Without the key, validate → Back → edit to a
+ *  nonexistent absolute path → Next skipped the re-check and saved the DOA
+ *  row the ticket exists to prevent. */
+let validatedKey: string | null = null;
+
+function scriptsKey(): string {
+  return JSON.stringify([wizard.value.headNodeId, composedStart.value, composedStop.value]);
+}
 
 async function onValidate(): Promise<void> {
   validating.value = true;
   validation.value = null;
+  validatedKey = null;
   wizardError.value = null;
   try {
+    const key = scriptsKey();
     validation.value = await validateScripts(wizard.value.headNodeId, [composedStart.value, composedStop.value]);
+    validatedKey = key;
   } catch (err) {
     wizardError.value = err instanceof Error ? err.message : String(err);
   } finally {

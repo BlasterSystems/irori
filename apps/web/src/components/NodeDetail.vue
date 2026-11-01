@@ -770,7 +770,8 @@ onUnmounted(() => {
             <div class="row" style="gap: 8px; margin-top: 6px;">
               <button
                 class="btn btn--danger btn--sm"
-                :disabled="opBusy || leftover.target === null"
+                :disabled="opBusy || leftover.target === null || nodeBusyJob !== null"
+                :title="nodeBusyLabel || undefined"
                 @click="askDelete({ scope: 'leftover', name: leftover.name, object: leftover.object, target: leftover.target ?? '', bytes: leftover.bytes, error: leftover.error })"
               >Remove leftover</button>
               <span v-if="leftover.target === null" class="stat__sub faint">no gc-objects target derivable</span>
@@ -794,7 +795,8 @@ onUnmounted(() => {
                   <td style="text-align: right;">
                     <button
                       class="btn btn--ghost btn--sm"
-                      :disabled="opBusy"
+                      :disabled="opBusy || nodeBusyJob !== null"
+                      :title="nodeBusyLabel || undefined"
                       @click="askDelete({ scope: 'store', name: m.name, repository: m.repository, bytes: m.bytes })"
                     >Delete</button>
                   </td>
@@ -832,7 +834,8 @@ onUnmounted(() => {
                 <td style="text-align: right;">
                   <button
                     class="btn btn--ghost btn--sm"
-                    :disabled="opBusy"
+                    :disabled="opBusy || nodeBusyJob !== null"
+                    :title="nodeBusyLabel || undefined"
                     @click="askDelete({ scope: 'local', name: m.name, repository: m.repository, bytes: m.bytes, user: cache.user, cacheDir: cache.cacheDir })"
                   >Delete</button>
                 </td>
