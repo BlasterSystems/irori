@@ -15,6 +15,7 @@ import {
   openSetupLog,
   patchSetup,
   sanitizeWorkerIds,
+  probeSeesEngine,
   setupChipCls,
   setupNodeLines,
   setupSubline,
@@ -696,7 +697,7 @@ function fmtGiB(bytes: number | null): string {
           <span class="grow"></span>
           <div class="row" @click.stop>
             <button v-if="setup.status === 'stopped' || setup.status === 'failed'" class="btn btn--secondary btn--sm" @click="onStart(setup)">Start</button>
-            <button v-if="setup.status === 'starting' || setup.status === 'running'" class="btn btn--ghost btn--sm" :class="{ 'btn--danger': armedStop === setup.id }" @click="onArmStop(setup)">
+            <button v-if="setup.status === 'starting' || setup.status === 'running' || probeSeesEngine(setup, headLlm)" class="btn btn--ghost btn--sm" :class="{ 'btn--danger': armedStop === setup.id }" @click="onArmStop(setup)">
               {{ armedStop === setup.id ? "Confirm stop" : "Stop…" }}
             </button>
             <button class="btn btn--ghost btn--sm" @click="openDetail(setup)">Logs</button>

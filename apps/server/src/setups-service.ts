@@ -178,7 +178,13 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
   };
 
   const updateRow = async (id: string, patch: Partial<typeof setups.$inferInsert>): Promise<void> => {
-    if (patch.status !== undefined) statusBySetup.set(id, patch.status);
+    if (patch.status !== undefined) {
+      statusBySetup.set(id, patch.status);
+      // IR-151: a settled stop arms the probe-truth grace (a pre-kill snapshot
+      // must not promote the row back); a fresh start disarms it.
+      if (patch.status === "stopped") stopSettledMs.set(id, Date.now());
+      else if (patch.status === "starting") stopSettledMs.delete(id);
+    }
     await deps.db.update(setups).set({ ...patch, updatedAt: new Date() }).where(eq(setups.id, id));
   };
 
@@ -357,6 +363,16 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     const snap = entry?.ports.find((p) => p.port === port);
     return snap ? { model: snap.model, detected: snap.detected } : null;
   };
+
+  /**
+   * IR-151: the hub-side clock of the last settled stop per setup. A kill is
+   * not visible to the node's probe until its next pass (default cadence 2 s),
+   * so a driver-truth poll landing right after a stop would otherwise promote
+   * the row back off a pre-kill snapshot — the "engine won't stop" flicker.
+   * Poll truth defers to a just-settled stop for this window.
+   */
+  const stopSettledMs = new Map<string, number>();
+  const STOP_TRUTH_GRACE_MS = 30_000;
 
   /**
    * Worker rows must reference real spark nodes — not the head itself, not a
@@ -602,8 +618,13 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     async stop(id) {
       const [row] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
       if (!row) throw new SetupNotFoundError("setup not found");
-      if (row.status === "stopped") return toInfo(row);
+      // IR-151: no early return on status === "stopped". A daemonizing recipe
+      // can leave a serving engine outside the recorded group with a false
+      // stopped row (pre-probe-truth); forwarding anyway reaches the agent's
+      // retained record, which runs stop.sh and kills the real engine. The
+      // agent answers harmlessly when its driver holds no record.
       if (!deps.online().has(row.headNodeId)) throw new SetupOfflineError("head node agent is offline");
+      const wasStopped = row.status === "stopped";
 
       // 20 s: the agent's fallback deadline for the recorded group; the stop
       // script itself gets +30 s on top (see SetupDriver.stop). The pending
@@ -624,8 +645,12 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
 
       await updateRow(id, { status: "stopping" });
       const ack = await promise;
+      // "setup is not running" from an already-stopped row is the harmless
+      // no-record answer (IR-151) — settle clean, not with a bogus lastError.
+      const harmless = wasStopped && !ack.ok && ack.error === "setup is not running";
+      const stopError = ack.ok || harmless ? null : (ack.error ?? "stop failed");
 
-      await updateRow(id, { status: "stopped", health: null, lastError: ack.ok ? null : (ack.error ?? "stop failed") });
+      await updateRow(id, { status: "stopped", health: null, lastError: stopError });
       const [latest] = await deps.db
         .select({ id: setupRuns.id })
         .from(setupRuns)
@@ -635,7 +660,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       if (latest) {
         await deps.db.update(setupRuns).set({ status: "stopped", endedAt: new Date() }).where(eq(setupRuns.id, latest.id));
       }
-      announce(row.id, "stopped", null, ack.ok ? null : (ack.error ?? "stop failed"));
+      announce(row.id, "stopped", null, stopError);
       const [updated] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
       return toInfo(updated!);
     },
@@ -695,6 +720,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
 
       let status: SetupStatus = row.status;
       let health = row.health;
+      let probePromoted = false;
       switch (msg.state) {
         case "starting":
           status = "starting";
@@ -715,10 +741,28 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
               health = null;
             }
           } else {
-            // Poll truth or stop completion: the driver is gone and nothing
-            // may resurrect the setup — polls never promote via the probe.
-            status = "stopped";
-            health = null;
+            // Poll truth or stop completion. IR-151: a daemonizing recipe
+            // (docker run -d + readiness wait, script exits 0) leaves the
+            // engine OUTSIDE the recorded group — pgid-only poll truth would
+            // demote a serving engine forever (tick only re-probes
+            // starting|running rows). The probe is the source of truth for
+            // the engine: if it still answers with the declared model, keep
+            // (or restore) running; a different engine answers as foreign.
+            // Only when nothing answers does the poll demote. A stop that
+            // settled inside the grace window always demotes — the node's
+            // probe may still hold the pre-kill snapshot.
+            const inStopGrace = Date.now() - (stopSettledMs.get(row.id) ?? 0) < STOP_TRUTH_GRACE_MS;
+            const snap = latestPortSnap(row.headNodeId, row.port);
+            if (!inStopGrace && snap !== null && snap.detected) {
+              status = "running";
+              health = modelIdMatches(snap.model, row.model) ? "healthy" : "foreign";
+              // Mirror evaluateHealth: the engine answering clears the stale
+              // "stopped answering" note.
+              if (health === "healthy") probePromoted = true;
+            } else {
+              status = "stopped";
+              health = null;
+            }
           }
           break;
         }
@@ -726,7 +770,8 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
           status = "failed";
           break;
       }
-      const lastError = msg.error ?? (status === "failed" ? "driver reported failure" : row.lastError);
+      const lastError =
+        msg.error ?? (status === "failed" ? "driver reported failure" : probePromoted ? null : row.lastError);
       // Driver-truth polls repeat every 15 s; re-announcing an unchanged state
       // floods the feed with identical lines (and rewrites the row for nothing).
       if (status === row.status && health === row.health && lastError === row.lastError) return;

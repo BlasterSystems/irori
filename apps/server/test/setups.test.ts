@@ -355,8 +355,10 @@ d("setups service", () => {
     await ctx.service.tick();
     expect((await ctx.service.get(setup.id))!.health).toBe("timeout");
 
-    // The driver-truth poll (exitCode null) may NOT resurrect a stopped setup
-    // even when the probe still sees the model on the port.
+    // A poll-reported stop (exitCode null) demotes when the probe sees
+    // nothing on the port (the ring's latest pass here is detected:false).
+    // The opposite case — a daemonized engine still answering — is covered
+    // by the IR-151 probe-truth tests below.
     const stopping = ctx.service.stop(setup.id);
     await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === setup.id));
     ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
@@ -365,6 +367,126 @@ d("setups service", () => {
     const afterPoll = await ctx.service.get(setup.id);
     expect(afterPoll!.status).toBe("stopped");
     expect(afterPoll!.health).toBeNull();
+  });
+
+  it("keeps a daemonized engine running on poll truth when the probe answers (IR-151)", async () => {
+    const setup = await ctx.service.create({
+      name: "daemonized",
+      kind: "single",
+      model: "Daemonized-Model",
+      port: 9151,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    // Start, ack, driver running → starting.
+    const starting = ctx.service.start(setup.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === setup.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
+    await starting;
+    // The recipe daemonizes: the start script's own exit 0 with the engine
+    // answering the declared model promotes via the probe (pre-existing rule).
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9151, host: "127.0.0.1", detected: true, model: "daemonized-model" })],
+    });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: 0, pid: 10, pgid: 10, error: null }, ids.head);
+    expect((await ctx.service.get(setup.id))!.status).toBe("running");
+
+    // The 15 s driver-truth poll reports stopped (exitCode null, engine lives
+    // outside the recorded group). Pre-IR-151 this demoted to stopped/null;
+    // probe truth now keeps the row running/healthy.
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null }, ids.head);
+    const held = await ctx.service.get(setup.id);
+    expect(held!.status).toBe("running");
+    expect(held!.health).toBe("healthy");
+
+    // A DIFFERENT engine answering the port → foreign, not a false healthy.
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9151, host: "127.0.0.1", detected: true, model: "someone-else-7b" })],
+    });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null }, ids.head);
+    expect((await ctx.service.get(setup.id))!.health).toBe("foreign");
+
+    // Nothing answering → the poll demotes (engine really gone).
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9151, host: "127.0.0.1", detected: false, model: null })],
+    });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null }, ids.head);
+    const down = await ctx.service.get(setup.id);
+    expect(down!.status).toBe("stopped");
+    expect(down!.health).toBeNull();
+    const cleanup = ctx.service.stop(setup.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === setup.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
+    await cleanup;
+  });
+
+  it("a settled stop is not undone by a pre-kill probe snapshot (IR-151 grace)", async () => {
+    const setup = await ctx.service.create({
+      name: "stop-grace",
+      kind: "single",
+      model: "Grace-Model",
+      port: 9152,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    const starting = ctx.service.start(setup.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === setup.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
+    await starting;
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9152, host: "127.0.0.1", detected: true, model: "grace-model" })],
+    });
+    await ctx.service.tick();
+    expect((await ctx.service.get(setup.id))!.health).toBe("healthy");
+
+    // Stop settles while the node's probe still holds the pre-kill snapshot.
+    const stopping = ctx.service.stop(setup.id);
+    await waitFor(() => ctx.sent.filter((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === setup.id).length > 0);
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
+    expect((await stopping)!.status).toBe("stopped");
+    // A driver-truth poll arriving now must NOT promote off the stale snapshot.
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: setup.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null }, ids.head);
+    const after = await ctx.service.get(setup.id);
+    expect(after!.status).toBe("stopped");
+    expect(after!.health).toBeNull();
+  });
+
+  it("forwards stop for a falsely-stopped row — no silent no-op (IR-151)", async () => {
+    const setup = await ctx.service.create({
+      name: "escape",
+      kind: "single",
+      model: "Escape-Model",
+      port: 9153,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    // Row never started (status stopped) — stop() used to early-return.
+    const before = ctx.sent.length;
+    const stopping = ctx.service.stop(setup.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === setup.id));
+    expect(ctx.sent.length).toBeGreaterThan(before); // the frame really went out
+    // Agent has no driver record → the harmless nack settles clean.
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: false, error: "setup is not running" }, ids.head);
+    const done = await stopping;
+    expect(done!.status).toBe("stopped");
+    expect(done!.lastError).toBeNull();
+    // Offline → SetupOfflineError even for a stopped row.
+    ctx.online.delete(ids.head);
+    await expect(ctx.service.stop(setup.id)).rejects.toBeInstanceOf(SetupOfflineError);
+    ctx.online.add(ids.head);
   });
 
   it("builds staged transfers per target and chains them on job completion", async () => {

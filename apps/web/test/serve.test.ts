@@ -3,6 +3,7 @@ import {
   composeScriptPath,
   fmtEta,
   fmtRate,
+  probeSeesEngine,
   sanitizeWorkerIds,
   setupChipCls,
   setupNodeLines,
@@ -180,5 +181,21 @@ describe("setup cards", () => {
     expect(setupSubline(setup({ status: "running", health: "foreign", port: 8100 }))).toContain("another process took the port");
     expect(setupSubline(setup({ status: "stopped", lastStartedAt: "2026-10-16T00:00:00.000Z" }))).toContain("last start");
     expect(setupSubline(setup({ status: "failed", lastError: "start script exited with code 3" }))).toContain("code 3");
+  });
+});
+
+describe("probeSeesEngine (IR-151)", () => {
+  const headId = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+  const port = (detected: boolean, model: string | null) => ({ port: 8081, detected, model });
+
+  it("only true when the declared engine answers the declared port", () => {
+    const s = setup({});
+    expect(probeSeesEngine(s, new Map([[headId, { ports: [port(true, "glm-5.3-flash-exl3")] }]]))).toBe(true);
+    // Unknown port, a different engine, no snapshot, null snapshot, absent node.
+    expect(probeSeesEngine(s, new Map([[headId, { ports: [{ ...port(true, "glm-5.3-flash-exl3"), port: 9999 }] }]]))).toBe(false);
+    expect(probeSeesEngine(s, new Map([[headId, { ports: [port(true, "qwen3-8b")] }]]))).toBe(false);
+    expect(probeSeesEngine(s, new Map([[headId, { ports: [port(false, null)] }]]))).toBe(false);
+    expect(probeSeesEngine(s, new Map([[headId, null]]))).toBe(false);
+    expect(probeSeesEngine(s, new Map())).toBe(false);
   });
 });
