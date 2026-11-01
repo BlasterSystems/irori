@@ -6,6 +6,7 @@ import { createRings, type Rings } from "../src/rings.js";
 import { createSseHub, type SseHub } from "../src/sse.js";
 import {
   createSetupsService,
+  SetupBusyError,
   SetupInvalidError,
   SetupOfflineError,
   SetupStartError,
@@ -483,10 +484,37 @@ d("setups service", () => {
     const done = await stopping;
     expect(done!.status).toBe("stopped");
     expect(done!.lastError).toBeNull();
-    // Offline → SetupOfflineError even for a stopped row.
+    // Review fix: a stopped row on an offline head has nothing to forward (the
+    // probe that would flag a ghost engine comes from that same agent) — it
+    // returns unchanged instead of a 409.
     ctx.online.delete(ids.head);
-    await expect(ctx.service.stop(setup.id)).rejects.toBeInstanceOf(SetupOfflineError);
+    const offline = await ctx.service.stop(setup.id);
+    expect(offline!.status).toBe("stopped");
     ctx.online.add(ids.head);
+  });
+
+  it("refuses a second concurrent stop instead of overwriting its ack slot (review fix)", async () => {
+    const setup = await ctx.service.create({
+      name: "double-stop",
+      kind: "single",
+      model: "Double-Stop",
+      port: 9154,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    const first = ctx.service.stop(setup.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === setup.id));
+    // Second request while the first awaits its ack: previously it silently
+    // replaced the pending resolver, hung for the full timeout and persisted a
+    // bogus "did not acknowledge" error on a row whose stop had succeeded.
+    await expect(ctx.service.stop(setup.id)).rejects.toBeInstanceOf(SetupBusyError);
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: setup.id, ok: true, error: null }, ids.head);
+    const done = await first;
+    expect(done!.status).toBe("stopped");
+    expect(done!.lastError).toBeNull();
   });
 
   it("builds staged transfers per target and chains them on job completion", async () => {

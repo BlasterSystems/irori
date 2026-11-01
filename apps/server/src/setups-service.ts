@@ -623,8 +623,20 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       // stopped row (pre-probe-truth); forwarding anyway reaches the agent's
       // retained record, which runs stop.sh and kills the real engine. The
       // agent answers harmlessly when its driver holds no record.
-      if (!deps.online().has(row.headNodeId)) throw new SetupOfflineError("head node agent is offline");
       const wasStopped = row.status === "stopped";
+      if (!deps.online().has(row.headNodeId)) {
+        // A stopped row on an unreachable head has nothing to forward (the
+        // probe that would flag a ghost engine comes from that same agent) —
+        // keep the pre-IR-151 no-op instead of a 409. A running row still
+        // reports the offline head.
+        if (wasStopped) return toInfo(row);
+        throw new SetupOfflineError("head node agent is offline");
+      }
+      // Two concurrent stops (double click, two tabs, a retry) must not
+      // overwrite each other's ack slot: the loser would hang for the full
+      // timeout and then persist a bogus "did not acknowledge" lastError on a
+      // row whose stop succeeded.
+      if (pending.has(row.id)) throw new SetupBusyError("a stop is already in progress");
 
       // 20 s: the agent's fallback deadline for the recorded group; the stop
       // script itself gets +30 s on top (see SetupDriver.stop). The pending
@@ -632,7 +644,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       // answer within the updateRow await below.
       const { promise, resolve } = Promise.withResolvers<{ ok: boolean; error: string | null }>();
       const timer = setTimeout(() => {
-        pending.delete(row.id);
+        // Only this request's slot: a later stop (after this one settled or
+        // timed out) owns the map entry now.
+        if (pending.get(row.id)?.timer === timer) pending.delete(row.id);
         resolve({ ok: false, error: "head agent did not acknowledge the stop" });
       }, STOP_ACK_TIMEOUT_MS);
       pending.set(row.id, { resolve, timer });

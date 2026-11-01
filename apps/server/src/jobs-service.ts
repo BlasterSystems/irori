@@ -309,6 +309,16 @@ export function parsePushBlocked(output: Array<{ seq: number; line: string }>): 
   return { needsKeys, needsRsync, needsModelctl };
 }
 
+/**
+ * IR-134: the blocker suffix of a busy 409 — `: sync-local GLM-5.3-…` (kind +
+ * model when params carry one, else kind + job id). Shared by the fast path
+ * and the unique-violation race path so both name the same winner.
+ */
+function activeJobLabel(active: { id: string; kind: string; params: unknown }): string {
+  const name = (active.params as { name?: unknown } | null)?.name;
+  return typeof name === "string" && name.length > 0 ? `: ${active.kind} ${name}` : `: ${active.kind} (${active.id})`;
+}
+
 export function createJobsService(
   db: Db,
   sendToAgent: JobAgentSend,
@@ -327,13 +337,7 @@ export function createJobsService(
         .from(jobs)
         .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])))
         .limit(1);
-      if (active) {
-        // IR-134: name the blocker (kind + model) so the drawer banner is
-        // self-explanatory without a client-side lookup of the job id.
-        const name = (active.params as { name?: unknown } | null)?.name;
-        const label = typeof name === "string" && name.length > 0 ? `: ${active.kind} ${name}` : `: ${active.kind} (${active.id})`;
-        throw new JobBusyError(`node already has an active job${label}`);
-      }
+      if (active) throw new JobBusyError(`node already has an active job${activeJobLabel(active)}`);
       let inserted: Array<typeof jobs.$inferSelect>;
       try {
         inserted = await db
@@ -342,8 +346,16 @@ export function createJobsService(
           .returning();
       } catch (err) {
         // The partial unique index makes one-active-per-node hold under
-        // concurrency; the check above is the fast path.
-        if (isUniqueViolation(err)) throw new JobBusyError("node already has an active job");
+        // concurrency; the check above is the fast path. The loser of the race
+        // still names the winner (IR-134) instead of a bare message.
+        if (isUniqueViolation(err)) {
+          const [winner] = await db
+            .select({ id: jobs.id, kind: jobs.kind, params: jobs.params })
+            .from(jobs)
+            .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])))
+            .limit(1);
+          throw new JobBusyError(`node already has an active job${winner === undefined ? "" : activeJobLabel(winner)}`);
+        }
         throw err;
       }
       const [row] = inserted;
