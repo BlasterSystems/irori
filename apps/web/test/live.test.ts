@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NodeInfo } from "@irori/core";
 import { createLiveStore } from "../src/live";
+import { feedLines } from "../src/overview";
 
 function nodeFixture(overrides: Partial<NodeInfo> = {}): NodeInfo {
   return {
@@ -100,6 +101,21 @@ afterEach(() => {
 });
 
 describe("createLiveStore", () => {
+  it("streams throttled setup-log frames into the feed ring (IR-147)", async () => {
+    const { store, es } = await startedStore([nodeFixture()]);
+    const before = store.events.value.length;
+    es.emit(JSON.stringify({ type: "setup-log", serverTimeMs: 11, setupId: "00000000-0000-4000-8000-000000000010", nodeId: nodeFixture().id, name: "glm-main", line: "loading weights shard 3/4" }));
+    expect(store.events.value.length).toBe(before + 1);
+    const last = store.events.value.at(-1);
+    expect(last).toMatchObject({ type: "setup-log", name: "glm-main", line: "loading weights shard 3/4" });
+    // The renderer path the ticket proved unreachable (overview.feedLines)
+    // now has a line to render.
+    expect(feedLines(store.events.value, (id) => (id === nodeFixture().id ? "spark2" : id))).toEqual(
+      expect.arrayContaining([{ t: 11, text: "spark2 · glm-main: loading weights shard 3/4" }]),
+    );
+    store.stop();
+  });
+
   it("seeds the registry from REST and opens /api/v1/events", async () => {
     const { store, fetchNodesFn, es } = await startedStore([nodeFixture()]);
     expect(fetchNodesFn).toHaveBeenCalled();

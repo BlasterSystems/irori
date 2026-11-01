@@ -215,6 +215,12 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       case "thermal":
       case "setup-state":
       case "setup-transfer":
+      // IR-147: the hub emits throttled setup-log frames (≤1/s per setup,
+      // unchanged lines skipped server-side) but the ingest switch never had
+      // an arm, so they were dropped and the feedLines renderer was dead code.
+      // Live-only by design (IR-124 non-goal: no backfill) — a drawer opened
+      // mid-load shows the next throttled line.
+      case "setup-log":
         pushEvent(event);
         break;
       case "usage": {
