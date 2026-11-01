@@ -143,6 +143,75 @@ d("job settle events (db integration)", () => {
     await db.delete(nodeModels).where(eq(nodeModels.model, name));
   });
 
+  it("reconciles node presence from an inventory settle and prunes only on a complete report (IR-140)", async () => {
+    const names = { resident: "iri140-resident", ghost: "iri140-ghost", late: "iri140-late" };
+    await db.delete(nodeModels).where(inArray(nodeModels.model, Object.values(names)));
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+    // Pre-existing presence: the resident model plus a ghost a delete removed
+    // outside a hub job (the false-negative the ticket reports).
+    await db.insert(nodeModels).values([{ nodeId, model: names.resident }, { nodeId, model: names.ghost }]);
+
+    const cache = (user: string, modelNames: string[], error: string | null = null) => ({
+      user,
+      home: `/home/${user}`,
+      cacheDir: `/home/${user}/.cache/huggingface/hub`,
+      modelctlVersion: "0.23.0",
+      error,
+      models: modelNames.map((name) => ({ name, repository: "org/" + name, runtime: "vllm", bytes: null })),
+      orphans: [] as string[],
+    });
+
+    // Complete report (every cache read succeeded): upsert the late model,
+    // keep the resident one, prune the ghost.
+    const inv1 = await service.create(nodeId, "models-inventory", {});
+    await db.insert(jobOutput).values({ jobId: inv1.id, seq: 1, line: JSON.stringify({ generatedAtMs: Date.now(), store: null, local: [cache("root", [names.resident, names.late]), cache("piresbruno", [names.late])] }) });
+    await service.onDone(nodeId, inv1.id, "succeeded", 0);
+    const after1 = (await db.select({ model: nodeModels.model }).from(nodeModels).where(eq(nodeModels.nodeId, nodeId))).map((r) => r.model).sort();
+    expect(after1).toEqual([names.late, names.resident]);
+
+    // Partial report (one cache read failed → its models list is empty but
+    // NOT authoritative): no prune — the surviving rows stay.
+    const inv2 = await service.create(nodeId, "models-inventory", {});
+    await db.insert(jobOutput).values({ jobId: inv2.id, seq: 1, line: JSON.stringify({ generatedAtMs: Date.now(), store: null, local: [cache("root", [names.resident, names.late]), cache("piresbruno", [], "modelctl timed out")] }) });
+    await service.onDone(nodeId, inv2.id, "succeeded", 0);
+    const after2 = (await db.select({ model: nodeModels.model }).from(nodeModels).where(eq(nodeModels.nodeId, nodeId))).map((r) => r.model).sort();
+    expect(after2).toEqual([names.late, names.resident]);
+
+    // Complete report where every cache lists nothing: prune everything.
+    const inv3 = await service.create(nodeId, "models-inventory", {});
+    await db.insert(jobOutput).values({ jobId: inv3.id, seq: 1, line: JSON.stringify({ generatedAtMs: Date.now(), store: null, local: [cache("root", [])] }) });
+    await service.onDone(nodeId, inv3.id, "succeeded", 0);
+    expect(await db.select().from(nodeModels).where(eq(nodeModels.nodeId, nodeId))).toHaveLength(0);
+
+    await db.delete(nodeModels).where(inArray(nodeModels.model, Object.values(names)));
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+  });
+
+  it("presentNodesFor unions the cached inventory report (IR-140 defense)", async () => {
+    const name = "iri140-cached-only";
+    await db.delete(nodeModels).where(eq(nodeModels.model, name));
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+    expect(await service.presentNodesFor(name)).toEqual([]);
+
+    // A report row without a node_models write still reports presence.
+    await db.insert(nodeInventory).values({
+      nodeId,
+      report: {
+        generatedAtMs: Date.now(),
+        store: null,
+        local: [{ user: "root", home: "/root", cacheDir: "/root/.cache/huggingface/hub", modelctlVersion: "0.23.0", error: null, models: [{ name, repository: "org/x", runtime: "vllm", bytes: null }], orphans: [] }],
+      },
+    });
+    expect(await service.presentNodesFor(name)).toEqual([nodeId]);
+
+    // Model-ops settle deletes the cached row — the union can no longer lie.
+    const del = await service.create(nodeId, "delete-local", { name });
+    await service.onDone(nodeId, del.id, "succeeded", 0);
+    expect(await service.presentNodesFor(name)).toEqual([]);
+
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+  });
+
   it("auto-provisions below-pin cache users after an inventory settle (IR-105)", async () => {
     const withPin = createJobsService(db, () => true, (e) => settled.push(e), undefined, async () => "0.23.0");
     const report = {
