@@ -1,16 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySetupStates,
   composeScriptPath,
+  engineLogEmptyText,
   fmtEta,
   fmtRate,
   probeSeesEngine,
+  runningEnginesFromProbes,
   sanitizeWorkerIds,
-  setupChipCls,
+  scriptPathError,
+  setupChipView,
   setupNodeLines,
   setupSubline,
+  setupSummaryLine,
+  sortSetupsForBoard,
   splitRecipePaths,
   stagePercent,
   stageVal,
+  workerCapHint,
   type SetupInfo,
 } from "../src/serve";
 import type { NodeInfo } from "@irori/core";
@@ -152,11 +159,24 @@ describe("stage lines", () => {
 });
 
 describe("setup cards", () => {
-  it("maps chips to DS classes", () => {
-    expect(setupChipCls("healthy")).toBe("chip--ok");
-    expect(setupChipCls("foreign")).toBe("chip--warn");
-    expect(setupChipCls("failed")).toBe("chip--halt");
-    expect(setupChipCls("starting")).toBe("chip--run");
+  it("renders honest chips: failed distinct from stopped, foreign as wrong engine (IR-152)", () => {
+    const healthy = setupChipView(setup({ status: "running", health: "healthy" }), { probeSees: false });
+    expect(healthy).toMatchObject({ label: "healthy", cls: "chip--ok", dot: "dot--ok" });
+    const foreign = setupChipView(setup({ status: "running", health: "foreign" }), { probeSees: false });
+    expect(foreign).toMatchObject({ label: "wrong engine", cls: "chip--warn" });
+    const failed = setupChipView(setup({ status: "failed", lastError: "boom" }), { probeSees: false });
+    const stopped = setupChipView(setup({ status: "stopped", lastStartedAt: "2026-10-16T00:00:00.000Z" }), { probeSees: false });
+    const never = setupChipView(setup({ status: "stopped" }), { probeSees: false });
+    expect(failed.label).toBe("failed");
+    expect(failed.cls).toBe("chip--warn");
+    // P2: failed must not be visually identical to stopped.
+    expect(failed.cls).not.toBe(stopped.cls);
+    expect(stopped).toMatchObject({ label: "stopped", cls: "chip--muted" });
+    // One word covered three realities: never-started reads differently.
+    expect(never.label).toBe("never started");
+    // The IR-151 escape hatch: a falsely-stopped row says what is true.
+    const servingWhileStopped = setupChipView(setup({ status: "stopped" }), { probeSees: true });
+    expect(servingWhileStopped).toMatchObject({ label: "serving :8081", cls: "chip--warn" });
   });
 
   it("renders per-node lines: head probe state, worker join state", () => {
@@ -177,10 +197,129 @@ describe("setup cards", () => {
     expect(lines[1]!.detail).toBe("joined");
   });
 
+  it("renders IDLE node chips for stopped/failed setups — no green JOINED on a dead cluster (IR-152 P1)", () => {
+    const s = setup({
+      kind: "cluster",
+      nodes: [{ nodeId: "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e03", role: "worker" }],
+      status: "stopped",
+      lastStartedAt: "2026-10-16T00:00:00.000Z",
+    });
+    const nodesArr = [node(s.headNodeId, "dgx1", true), node("0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e03", "spark2", true)];
+    const lines = setupNodeLines(s, nodesArr, { decodeTps: null, probeSees: false });
+    expect(lines[0]!.cls).toBe("chip--muted");
+    expect(lines[0]!.detail).toBe("idle");
+    expect(lines[1]!.cls).toBe("chip--muted");
+    expect(lines[1]!.detail).toBe("idle");
+    // An offline worker under a stopped setup still says offline.
+    expect(setupNodeLines(s, [nodesArr[0]!, node("0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e03", "spark2", false)], null)[1]!.detail).toBe("offline");
+    // The escape hatch keeps a falsely-stopped head line honest.
+    const hatch = setupNodeLines(s, nodesArr, { decodeTps: 87.4, probeSees: true });
+    expect(hatch[0]!.cls).toBe("chip--ok");
+    expect(hatch[0]!.detail).toBe("87.4 tok/s");
+  });
+
   it("explains foreign ports and stopped setups", () => {
     expect(setupSubline(setup({ status: "running", health: "foreign", port: 8100 }))).toContain("another process took the port");
     expect(setupSubline(setup({ status: "stopped", lastStartedAt: "2026-10-16T00:00:00.000Z" }))).toContain("last start");
     expect(setupSubline(setup({ status: "failed", lastError: "start script exited with code 3" }))).toContain("code 3");
+  });
+});
+
+describe("board ordering and summary (IR-152)", () => {
+  const row = (name: string, status: SetupInfo["status"]) => ({ id: name, name, status, health: null, lastError: null, updatedAt: "2026-10-18T00:00:00.000Z" });
+
+  it("sorts running first, then failed, then idle; name-stable", () => {
+    const board = sortSetupsForBoard([
+      row("alpha-stopped", "stopped"),
+      row("bravo-running", "running"),
+      row("charlie-failed", "failed"),
+      row("delta-stopped", "stopped"),
+      row("echo-starting", "starting"),
+    ]);
+    expect(board.map((s) => s.name)).toEqual(["bravo-running", "echo-starting", "charlie-failed", "alpha-stopped", "delta-stopped"]);
+  });
+
+  it("counts the summary line", () => {
+    expect(setupSummaryLine([
+      row("a", "running"),
+      row("b", "stopped"),
+      row("c", "stopped"),
+      row("d", "failed"),
+      row("e", "starting"),
+    ])).toBe("2 running · 2 stopped · 1 failed");
+  });
+
+  it("overlays only fresh setup-state SSE frames (IR-152 instant chips)", () => {
+    const rows = [row("a", "stopped")];
+    // The ring survives mounts; a frame older than the row's own write never
+    // reverts it (the poll is the convergent source).
+    const stale = [{ setupId: "a", status: "running" as const, health: "healthy" as const, lastError: null, serverTimeMs: Date.parse("2026-10-17T00:00:00.000Z") }];
+    expect(applySetupStates(rows, stale)).toEqual(rows);
+    const fresh = [{ setupId: "a", status: "running" as const, health: "healthy" as const, lastError: null, serverTimeMs: Date.parse("2026-10-19T00:00:00.000Z") }];
+    expect(applySetupStates(rows, fresh)[0]).toMatchObject({ status: "running", health: "healthy" });
+    // Newest frame wins per setup.
+    const older = fresh[0]!;
+    const newer = { ...older, status: "failed" as const, health: null, serverTimeMs: older.serverTimeMs + 1000 };
+    expect(applySetupStates(rows, [older, newer])[0]).toMatchObject({ status: "failed" });
+  });
+});
+
+describe("script path rules and cluster cap (IR-152)", () => {
+  it("rejects tilde and relative paths with actionable messages", () => {
+    expect(scriptPathError("~/developer/recipes/start.sh")).toContain("expand ~");
+    expect(scriptPathError("recipes/start.sh")).toContain("absolute");
+    expect(scriptPathError("/home/you/start.sh")).toBeNull();
+    expect(scriptPathError("/" + "a".repeat(1024))).toContain("too long");
+  });
+
+  it("only hints at the cap for a full cluster", () => {
+    expect(workerCapHint(0, "single")).toBeNull();
+    expect(workerCapHint(6, "cluster")).toBeNull();
+    expect(workerCapHint(7, "cluster")).toContain("cluster cap");
+  });
+});
+
+describe("engine log empty states (IR-152)", () => {
+  it("explains each state instead of bare 'no output yet'", () => {
+    expect(engineLogEmptyText({ status: "running", lastError: null, lastStartedAt: null })).toContain("waiting for engine output");
+    expect(engineLogEmptyText({ status: "starting", lastError: null, lastStartedAt: null })).toContain("starting");
+    expect(engineLogEmptyText({ status: "failed", lastError: "script exited 3", lastStartedAt: null })).toBe("script exited 3");
+    expect(engineLogEmptyText({ status: "stopped", lastError: null, lastStartedAt: null })).toContain("never started");
+    expect(engineLogEmptyText({ status: "stopped", lastError: null, lastStartedAt: "2026-10-16T00:00:00.000Z" })).toContain("start it again");
+  });
+});
+
+describe("runningEnginesFromProbes (IR-152 Running now)", () => {
+  const headId = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+  const otherId = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e03";
+  const p = (port: number, detected: boolean, model: string | null = "glm", decodeTps: number | null = 40) =>
+    ({ port, detected, backend: "tensorfold", model, decodeTps });
+
+  it("lists detected engines only, managed first, unmanaged last", () => {
+    const rows = runningEnginesFromProbes(
+      [
+        { nodeId: headId, ports: [p(8081, true), p(8090, false)] },
+        { nodeId: otherId, ports: [p(8123, true, "qwen3-8b")] },
+      ],
+      [node(headId, "dgx1", true), node(otherId, "spark2", true)],
+      [{ id: "s1", name: "GLM prod", headNodeId: headId, port: 8081 }],
+    );
+    expect(rows.map((r) => r.key)).toEqual([`${headId}:8081`, `${otherId}:8123`]);
+    expect(rows[0]).toMatchObject({ managedSetupId: "s1", managedName: "GLM prod", backend: "tensorfold", decodeTps: 40 });
+    expect(rows[1]).toMatchObject({ managedSetupId: null, managedName: null, model: "qwen3-8b", nodeName: "spark2" });
+  });
+
+  it("dedupes node+port and falls back to a short id for unknown nodes", () => {
+    const rows = runningEnginesFromProbes(
+      [
+        { nodeId: otherId, ports: [p(8123, true)] },
+        { nodeId: otherId, ports: [p(8123, true)] },
+      ],
+      [],
+      [],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.nodeName).toBe(otherId.slice(0, 8));
   });
 });
 

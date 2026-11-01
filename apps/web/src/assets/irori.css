@@ -256,7 +256,10 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .input, .select { width: 100%; min-height: 32px; padding: 5px 10px; font: inherit; font-size: 13.5px; color: var(--fg);
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
 .input.mono { font-family: var(--font-mono); font-size: 12.5px; }
-.input:focus, .select:focus { outline: none; border-color: var(--thread); box-shadow: 0 0 0 3px var(--thread-wash); }
+/* IR-152: the focus ring is attention, not error. --thread is the danger
+ * token; a focused-valid input must not read as errored, so the ring rides
+ * --ink/--border-strong (App-wide DS change). */
+.input:focus, .select:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 16%, transparent); }
 
 /* ── Segmented / tabs ──────────────────────────────────────────────── */
 .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
