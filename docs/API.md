@@ -187,8 +187,10 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 ## Job activity (IRI-028)
 
 - SSE `setup-log` `{setupId, nodeId, name, line}` (IR-124): throttled engine
-  output for the shared telemetry feed — ≤1 frame/s per setup, identical
-  consecutive lines skipped, live-only (excluded from
+  output for the shared telemetry feed — ≤1 frame/s per setup while the setup
+  is running, relaxed to ~10 frame/s while its driver state is `starting`
+  (weight loading, IR-148); identical consecutive lines always skipped,
+  live-only (excluded from
   `/api/v1/events/recent`; `GET /api/v1/setups/:id/log` stays the backfill
   source). Older web bundles ignore it.
 - `GET /api/v1/jobs?limit=` → `{jobs: [{...jobInfo, lastLine}]}` — recent jobs
