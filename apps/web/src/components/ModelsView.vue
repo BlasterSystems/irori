@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes } from "../api";
 import { live } from "../live";
-import { jobLabel } from "../jobs";
+import { activeJobsByNode, blockingJobLabel, jobLabel, type JobLive } from "../jobs";
 import { fetchSetups } from "../serve";
-import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo } from "@irori/core";
+import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
 import {
   cancelJob,
   createJob,
@@ -666,6 +666,27 @@ const syncingPct = computed(() => {
   return out;
 });
 
+/** IR-134: the job holding each node's one-active slot, so a push row whose
+ *  RELAY (viaNodeIds[0]) is busy shows the blocker instead of throwing an
+ *  invisible 409 at the user. Kept current by the same SSE frames as
+ *  syncingPct. */
+const relayBusy = computed(() => activeJobsByNode(live.jobs.values()));
+
+/** IR-134: the job blocking a row's dispatch — a push runs on the RELAY
+ *  (viaNodeIds[0]), sync/delete on the node itself. Null when idle. */
+function dispatchBlocker(row: PlacementRow): JobLive | null {
+  const targetId = row.action === "push" ? row.viaNodeIds[0] : row.node.id;
+  if (targetId === undefined) return null;
+  return relayBusy.value.get(targetId) ?? null;
+}
+
+function dispatchBlockerLabel(row: PlacementRow): string {
+  const blocker = dispatchBlocker(row);
+  if (blocker === null) return "";
+  const name = placement.value?.placements.find((p) => p.node.id === blocker.nodeId)?.node.name ?? "node";
+  return `${name} busy — ${blockingJobLabel(blocker)}`;
+}
+
 let debounce: ReturnType<typeof setTimeout> | undefined;
 function onSearchInput(): void {
   clearTimeout(debounce);
@@ -997,23 +1018,34 @@ onBeforeUnmount(() => {
                   <span v-if="syncingPct.has(row.node.id)" class="chip chip--accent">syncing {{ syncingPct.get(row.node.id) !== null ? `${syncingPct.get(row.node.id)}%` : "…" }}</span>
                   <span v-else class="chip" :class="placementChip(row.action).cls">{{ placementChip(row.action).label }}</span>
                   <span v-if="row.action === 'push' && pushViaName(row.viaNodeIds)" class="mono faint"> via {{ pushViaName(row.viaNodeIds) }}</span>
+                  <!-- IR-134: a push runs on the RELAY (viaNodeIds[0]), a
+                       sync/delete on the node itself — the one-active-slot
+                       holder for the DISPATCHING node is the real blocker,
+                       so name it instead of letting the click 409. -->
+                  <span v-if="dispatchBlocker(row)" class="mono faint" style="display: block;">{{ dispatchBlockerLabel(row) }}</span>
                   <span v-if="row.action === 'unavailable' && row.reason" class="mono faint"> {{ row.reason }}</span>
                 </td>
                 <td>
                   <button
                     v-if="row.action === 'sync'"
                     class="btn btn--secondary btn--sm"
+                    :disabled="dispatchBlocker(row) !== null"
+                    :title="dispatchBlocker(row) !== null ? dispatchBlockerLabel(row) : undefined"
                     @click="runJob(row.node.id, 'sync-local', { name: selected, root: undefined })"
-                  >Sync</button>
+                  >{{ dispatchBlocker(row) !== null ? "Busy" : "Sync" }}</button>
                   <!-- Warnings never block (SPEC): capacity/offline reasons are advisory. -->
                   <button
                     v-else-if="row.node.online && row.node.kind !== 'nas' && row.viaNodeIds.length > 0"
                     class="btn btn--secondary btn--sm"
+                    :disabled="dispatchBlocker(row) !== null"
+                    :title="dispatchBlocker(row) !== null ? dispatchBlockerLabel(row) : undefined"
                     @click="runJob(row.viaNodeIds[0]!, 'push', { name: selected, hosts: [row.node.cacheUser ? `${row.node.cacheUser}@${row.node.host}` : row.node.host], jobs: 4 })"
-                  >Push</button>
+                  >{{ dispatchBlocker(row) !== null ? "Busy" : "Push" }}</button>
                   <button
                     v-else-if="row.node.kind === 'nas'"
                     class="btn btn--secondary btn--sm"
+                    :disabled="dispatchBlocker(row) !== null"
+                    :title="dispatchBlocker(row) !== null ? dispatchBlockerLabel(row) : undefined"
                     @click="confirmDrawerDelete(row.node.id)"
                   >Delete from NAS</button>
                 </td>

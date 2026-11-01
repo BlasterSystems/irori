@@ -323,11 +323,17 @@ export function createJobsService(
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
       const [active] = await db
-        .select({ id: jobs.id })
+        .select({ id: jobs.id, kind: jobs.kind, params: jobs.params })
         .from(jobs)
         .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])))
         .limit(1);
-      if (active) throw new JobBusyError(`node already has an active job (${active.id})`);
+      if (active) {
+        // IR-134: name the blocker (kind + model) so the drawer banner is
+        // self-explanatory without a client-side lookup of the job id.
+        const name = (active.params as { name?: unknown } | null)?.name;
+        const label = typeof name === "string" && name.length > 0 ? `: ${active.kind} ${name}` : `: ${active.kind} (${active.id})`;
+        throw new JobBusyError(`node already has an active job${label}`);
+      }
       let inserted: Array<typeof jobs.$inferSelect>;
       try {
         inserted = await db

@@ -239,7 +239,11 @@ flowchart LR
   invalidated by every model-mutating job settle.
 - **Placement planning**: for model × node → `present / sync / push / unavailable`,
   offered as one-click remediations wherever a model is needed (serving
-  start, setups). Capacity math shown (`free X GB · needs Y GB` minus
+  start, setups). The dispatch target's one-active-job slot is visible before
+  the click (IR-134): a push runs on its relay (`viaNodeIds[0]`), a sync/delete
+  on the node itself — while that node holds a queued/running job the button
+  renders disabled and the row names the blocking job (kind + model + percent,
+  from the live job stream); the server's 409 names it too. Capacity math shown (`free X GB · needs Y GB` minus
   reserve); a failed check offers **"Clean up disk — est. +N GB"** from the
   agent's disk audit (§11.6).
 - **Catalog UX contract**: the Models page is one searchable table — search

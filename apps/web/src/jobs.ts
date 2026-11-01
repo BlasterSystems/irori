@@ -48,6 +48,36 @@ export function jobLiveFromSummary(summary: JobSummary): JobLive {
   };
 }
 
+/** IR-134: the job currently holding a node's one-active-job slot (queued or
+ *  running), or null when the node is idle. The live jobs map is seeded from
+ *  GET /api/v1/jobs and kept current by the SSE `job` / `job-progress`
+ *  frames, so the busy state renders before any click 409s. */
+export function activeJobFor(jobs: Iterable<JobLive>, nodeId: string): JobLive | null {
+  for (const job of jobs) {
+    if (job.nodeId === nodeId && (job.status === "queued" || job.status === "running")) return job;
+  }
+  return null;
+}
+
+/** IR-134: index of active jobs by node (first wins; the partial unique index
+ *  makes one-active-per-node hold, so order never matters in practice). */
+export function activeJobsByNode(jobs: Iterable<JobLive>): Map<string, JobLive> {
+  const out = new Map<string, JobLive>();
+  for (const job of jobs) {
+    if (job.status !== "queued" && job.status !== "running") continue;
+    if (!out.has(job.nodeId)) out.set(job.nodeId, job);
+  }
+  return out;
+}
+
+/** IR-134: the human blocker label — `sync-local GLM-5.3-…, 31%` (percent
+ *  only once the hub parsed a progress line). */
+export function blockingJobLabel(job: JobLive): string {
+  const pct = job.progress?.percent;
+  const suffix = typeof pct === "number" ? `, ${Math.round(pct)}%` : "";
+  return `${job.kind}${jobLabel(job.params)}${suffix}`;
+}
+
 /** IR-121: the human suffix for a job — the model name when params carry one,
  *  the download-queue batch size otherwise; "" when the job is unlabeled.
  *  Shared by the Overview feed, the transfer op bar and the dock. */
