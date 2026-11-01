@@ -7,6 +7,7 @@ import {
   MAX_USAGE_BATCH,
   iroriIdentityFromHeaders,
   normalizeErrorSignature,
+  normalizeUsageEndpoint,
   parseIroriRetryHeader,
   usageBatchAckMsgSchema,
   usageBatchMsgSchema,
@@ -73,15 +74,36 @@ describe("usage contracts", () => {
     expect(usageBatchAckMsgSchema.safeParse({ type: "usage-batch-ack", ids: [] }).success).toBe(false);
   });
 
-  it("matches only OpenAI inference endpoints (probes stay uncaptured)", () => {
+  it("matches OpenAI inference endpoints with or without the /v1 prefix (IR-154)", () => {
     expect(CAPTURED_ENDPOINT_RE.test("/v1/chat/completions")).toBe(true);
     expect(CAPTURED_ENDPOINT_RE.test("/v1/completions")).toBe(true);
     expect(CAPTURED_ENDPOINT_RE.test("/v1/embeddings")).toBe(true);
     expect(CAPTURED_ENDPOINT_RE.test("/v1/responses")).toBe(true);
+    expect(CAPTURED_ENDPOINT_RE.test("/chat/completions")).toBe(true);
+    expect(CAPTURED_ENDPOINT_RE.test("/completions")).toBe(true);
+    expect(CAPTURED_ENDPOINT_RE.test("/embeddings")).toBe(true);
+    expect(CAPTURED_ENDPOINT_RE.test("/responses")).toBe(true);
     expect(CAPTURED_ENDPOINT_RE.test("/v1/models")).toBe(false);
+    expect(CAPTURED_ENDPOINT_RE.test("/models")).toBe(false);
     expect(CAPTURED_ENDPOINT_RE.test("/metrics")).toBe(false);
     expect(CAPTURED_ENDPOINT_RE.test("/health")).toBe(false);
     expect(CAPTURED_ENDPOINT_RE.test("/slots")).toBe(false);
+    // Only the exact endpoint suffix matches — path traversal/nesting no.
+    expect(CAPTURED_ENDPOINT_RE.test("/api/chat/completions")).toBe(false);
+    expect(CAPTURED_ENDPOINT_RE.test("/v2/chat/completions")).toBe(false);
+    expect(CAPTURED_ENDPOINT_RE.test("/v1/chat/completions/extra")).toBe(false);
+    expect(CAPTURED_ENDPOINT_RE.test("v1/chat/completions")).toBe(false);
+  });
+
+  it("canonicalizes captured endpoints to the /v1 spelling (IR-154)", () => {
+    expect(normalizeUsageEndpoint("/chat/completions")).toBe("/v1/chat/completions");
+    expect(normalizeUsageEndpoint("/completions")).toBe("/v1/completions");
+    expect(normalizeUsageEndpoint("/embeddings")).toBe("/v1/embeddings");
+    expect(normalizeUsageEndpoint("/responses")).toBe("/v1/responses");
+    expect(normalizeUsageEndpoint("/v1/chat/completions")).toBe("/v1/chat/completions");
+    // Non-captured paths pass through untouched.
+    expect(normalizeUsageEndpoint("/health")).toBe("/health");
+    expect(normalizeUsageEndpoint("/")).toBe("/");
   });
 
   it("parses X-Irori-* identity headers with bounds (IR-55)", () => {

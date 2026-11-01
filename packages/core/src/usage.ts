@@ -259,5 +259,17 @@ export function normalizeErrorSignature(message: string): string {
     .slice(0, 240);
 }
 
-/** OpenAI-compat inference endpoints the proxy captures (ADR-0008 §2). */
-export const CAPTURED_ENDPOINT_RE = /^\/v1\/(chat\/completions|completions|embeddings|responses)$/;
+/**
+ * OpenAI-compat inference endpoints the proxy captures (ADR-0008 §2). The
+ * `/v1/` prefix is optional: TensorFold serves the bare and prefixed
+ * spellings identically, so providers whose baseUrl omits `/v1` (e.g. omp's
+ * DGX1 provider) must capture too (IRI-055). Stored endpoints are canonical
+ * via normalizeUsageEndpoint, keeping one identity per endpoint in the
+ * read models.
+ */
+export const CAPTURED_ENDPOINT_RE = /^\/(?:v1\/)?(chat\/completions|completions|embeddings|responses)$/;
+
+/** Canonical `/v1/...` spelling for captured endpoints (IRI-055). */
+export function normalizeUsageEndpoint(path: string): string {
+  return CAPTURED_ENDPOINT_RE.test(path) && !path.startsWith("/v1/") ? "/v1" + path : path;
+}
