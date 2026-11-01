@@ -107,7 +107,15 @@ describe("SetupDriver", () => {
     expect(h.events[0]).toMatchObject({ setupId: ID, state: "running" });
     // \r-split progress chunks stream as lines
     expect(h.logs.some((l) => l.line.includes("progress 45%"))).toBe(true);
-    expect(existsSync(join(h.dir, "setup-logs", `${ID}-${RUN}.log`))).toBe(true);
+    const logFile = join(h.dir, "setup-logs", `${ID}-${RUN}.log`);
+    expect(existsSync(logFile)).toBe(true);
+    // Review fix (IR-149/150): the ENGINE writes the file through its inherited
+    // fd, and the driver's own markers must be mirrored there too — the ring is
+    // live-only, the file is what an operator tails on the node.
+    expect(readFileSync(logFile, "utf8")).toContain("driver: starting");
+    expect(readFileSync(logFile, "utf8")).toContain("engine: listening on 0.0.0.0:8081");
+    // …and the tailer must not re-emit our own appends as duplicates.
+    expect(h.logs.filter((l) => l.line.startsWith("driver: starting")).length).toBe(1);
 
     const stopped = await h.driver.stop(ID, 2000);
     expect(stopped.ok).toBe(true);
@@ -115,6 +123,9 @@ describe("SetupDriver", () => {
     await waitFor(() => h.events.some((e) => e.state === "stopped"));
     // the stop script's output lands in the log ring
     expect(h.logs.some((l) => l.line.includes("stop: graceful"))).toBe(true);
+    // …and durably in the file, alongside the stop markers.
+    expect(readFileSync(logFile, "utf8")).toContain("driver: running stop script");
+    expect(h.logs.filter((l) => l.line.includes("stop: graceful")).length).toBe(1);
   });
 
   it("falls back to killing the process group when the stop script fails", async () => {

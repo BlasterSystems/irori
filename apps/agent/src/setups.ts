@@ -1,6 +1,6 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { accessSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, openSync, closeSync, readSync } from "node:fs";
+import { accessSync, appendFileSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, openSync, closeSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { BodyRetention } from "@irori/core";
@@ -68,6 +68,16 @@ export interface SetupCaptureHooks {
 const LOG_RING_LINES = 1000;
 const LOG_DIR = "setup-logs";
 const STATE_FILE = "setups.json";
+
+/** Size of the run log, 0 when it does not exist yet (append-only file). */
+function fileSizeOrZero(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
 const STOP_FALLBACK_GRACE_MS = 5_000;
 
 interface DriverRecord {
@@ -165,9 +175,24 @@ export class SetupDriver {
   private readonly rings = new Map<string, RingEntry[]>();
   private readonly seqs = new Map<string, number>();
   private readonly tailers = new Map<string, { timer: NodeJS.Timeout; offset: number; carry: string }>();
+  /** IR-149/150 fix: setup ids with a tailer drain in flight (guards the
+   *  self-append offset bump against a concurrent read). */
+  private readonly draining = new Set<string>();
+  /** IR-149/150 fix: run-log path per setup, registered in start() BEFORE the
+   *  record exists so early driver markers are written durably. */
+  private readonly logPaths = new Map<string, string>();
   private readonly stopping = new Set<string>();
 
   constructor(private readonly deps: SetupDriverDeps) {}
+
+  /** Run-log dir, created lazily so a start before init() still lands durably. */
+  private mkLogDir(): void {
+    try {
+      mkdirSync(join(this.deps.stateDir, LOG_DIR), { recursive: true });
+    } catch {
+      /* append falls back to ring-only */
+    }
+  }
 
   /** Loads persisted drivers, drops dead ones, reports live ones. */
   init(): void {
@@ -296,7 +321,11 @@ export class SetupDriver {
     // IR-150: every launch attempt and its outcome enter the log ring (and
     // from there the shared feed) — a plain start used to be silent until the
     // engine printed, and pre-spawn failures left only a bare failed
-    // setup-state transition with no reason.
+    // setup-state transition with no reason. The run-log path is registered
+    // before the first marker so those early lines also reach the durable
+    // file (review fix: the ring alone is not what an operator tails).
+    this.mkLogDir();
+    this.logPaths.set(setupId, join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`));
     this.pushLog(setupId, `driver: starting ${scriptStart}`);
     const startFailed = (error: string): { ok: false; error: string } => {
       this.pushLog(setupId, `driver: start failed: ${error}`);
@@ -359,7 +388,7 @@ export class SetupDriver {
       finalEnv.HOME = homedir();
     }
 
-    const logPath = join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`);
+    const logPath = this.logPaths.get(setupId) ?? join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`);
     const argv = serveSpawnArgv(scriptStart, wrap, process.env.PATH);
     // IR-149: the engine writes stdout/stderr straight into the run log
     // through an inherited fd, so output keeps flowing while the agent is
@@ -371,6 +400,10 @@ export class SetupDriver {
     } catch (err) {
       this.deps.log?.(`setup log open failed (${err instanceof Error ? err.message : String(err)})`);
     }
+    // Everything in the file so far is the driver's own pre-spawn markers.
+    // Tail from here (never from 0) so the tailer cannot re-emit them as
+    // engine lines; measured BEFORE spawn so no engine byte is skipped.
+    const tailFrom = logFd === null ? 0 : fileSizeOrZero(logPath);
     const child = spawn(argv[0]!, argv.slice(1), {
       detached: true,
       stdio: logFd !== null ? ["ignore", logFd, logFd] : ["ignore", "pipe", "pipe"],
@@ -400,8 +433,8 @@ export class SetupDriver {
     this.persist([...this.records.values()]);
     if (logFd !== null) {
       // Engine output reaches the file through its own fd — tail it into the
-      // ring + setup-log frames (IR-149).
-      this.startTailer(setupId, logPath, 0);
+      // ring + setup-log frames (IR-149) from the marker boundary.
+      this.startTailer(setupId, logPath, tailFrom);
     }
     if (wrap !== null) {
       this.pushLog(setupId, `driver: serving as cache user ${wrap.user} (HOME=${wrap.home})`);
@@ -707,7 +740,7 @@ export class SetupDriver {
     return promise;
   }
 
-  private pushLog(setupId: string, line: string): void {
+  private pushLog(setupId: string, line: string, opts?: { durable?: boolean }): void {
     const seq = this.seqs.get(setupId) ?? 0;
     const entry: RingEntry = { seq, line, ts: Date.now() };
     this.seqs.set(setupId, seq + 1);
@@ -715,6 +748,27 @@ export class SetupDriver {
     ring.push(entry);
     if (ring.length > LOG_RING_LINES) ring.splice(0, ring.length - LOG_RING_LINES);
     this.rings.set(setupId, ring);
+    // IR-149/150 fix: the engine writes its own stdout/stderr into the run log
+    // through the inherited fd, so pushLog no longer mirrors lines to the file
+    // — driver and stop-script markers were hub/ring-only, and the durable log
+    // an operator tails on the node lost exactly the lines explaining a start
+    // attempt. Mirror them here (tailer-sourced engine lines are already in
+    // the file: durable:false). Appending moves the tailer's read offset past
+    // our own bytes so the file is never re-emitted as a duplicate; when a
+    // drain is mid-flight the offset is left alone (a duplicate, never a skip).
+    if (opts?.durable !== false) {
+      const path = this.records.get(setupId)?.logPath ?? this.logPaths.get(setupId);
+      if (path !== undefined) {
+        const buf = Buffer.from(`${line}\n`);
+        try {
+          appendFileSync(path, buf);
+          const tailer = this.tailers.get(setupId);
+          if (tailer !== undefined && !this.draining.has(setupId)) tailer.offset += buf.length;
+        } catch {
+          /* state dir unwritable — the ring/feed still carries the line */
+        }
+      }
+    }
     this.deps.events.onLog(setupId, entry.seq, entry.line, entry.ts);
   }
 
@@ -723,6 +777,8 @@ export class SetupDriver {
     this.children.delete(setupId);
     this.drainTailer(setupId);
     this.stopTailer(setupId);
+    // logPaths keeps this run's file so late markers (stop script outcome,
+    // capture-proxy close) still land durably; start() overwrites it per run.
     if (record) {
       this.records.delete(setupId);
       this.persist([...this.records.values()]);
@@ -761,11 +817,9 @@ export class SetupDriver {
     this.stopTailer(setupId);
     let offset = 0;
     if (from === "eof") {
-      try {
-        offset = statSync(logPath).size;
-      } catch {
-        offset = 0; // no file yet — the engine has written nothing
-      }
+      offset = fileSizeOrZero(logPath); // no file yet — the engine wrote nothing
+    } else {
+      offset = from;
     }
     const tailer = { timer: setInterval(() => this.drainTailer(setupId), 250), offset, carry: "" };
     tailer.timer.unref();
@@ -778,6 +832,7 @@ export class SetupDriver {
     const record = this.records.get(setupId);
     if (tailer === undefined || record === undefined) return;
     let fd: number | null = null;
+    this.draining.add(setupId); // a pushLog append must not bump the offset mid-read
     try {
       fd = openSync(record.logPath, "r");
       const size = statSync(record.logPath).size;
@@ -794,7 +849,8 @@ export class SetupDriver {
         tailer.carry = parts.pop() ?? "";
         for (const line of parts) {
           if (line.length > 0) {
-            this.pushLog(setupId, line);
+            // Already in the durable file — don't mirror it back (durable:false).
+            this.pushLog(setupId, line, { durable: false });
             emitted = true;
           }
         }
@@ -805,6 +861,7 @@ export class SetupDriver {
       // File missing or unreadable — keep the timer; a slow filesystem or a
       // pruned file must not kill the tail (finish() clears it at run end).
     } finally {
+      this.draining.delete(setupId);
       if (fd !== null) closeSync(fd);
     }
   }
