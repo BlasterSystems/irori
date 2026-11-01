@@ -160,7 +160,25 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     { resolve: (r: Array<{ script: string; ok: boolean; error: string | null }>) => void; timer: NodeJS.Timeout; nodeId: string }
   >();
 
+  // Driver-status mirror for the feed throttle (IR-148): weight loading is
+  // the densest engine-output phase, so while the hub row says "starting" the
+  // shared feed runs at ~10 fps instead of the IR-124 1 fps cap. Mirrored at
+  // every row write (updateRow is the single write path) and hydrated from
+  // the DB on miss so a hub restart mid-start keeps the fast rate (the agent
+  // re-sends identical poll states, which dedup keeps from re-announcing).
+  const statusBySetup = new Map<string, SetupStatus>();
+  const statusOf = async (setupId: string): Promise<SetupStatus | null> => {
+    const cached = statusBySetup.get(setupId);
+    if (cached !== undefined) return cached;
+    const [row] = await deps.db.select({ status: setups.status }).from(setups).where(eq(setups.id, setupId)).limit(1);
+    if (!row) return null;
+    // Don't clobber a newer value a concurrent updateRow already mirrored.
+    if (!statusBySetup.has(setupId)) statusBySetup.set(setupId, row.status as SetupStatus);
+    return row.status as SetupStatus;
+  };
+
   const updateRow = async (id: string, patch: Partial<typeof setups.$inferInsert>): Promise<void> => {
+    if (patch.status !== undefined) statusBySetup.set(id, patch.status);
     await deps.db.update(setups).set({ ...patch, updatedAt: new Date() }).where(eq(setups.id, id));
   };
 
@@ -202,6 +220,10 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
   // per second per setup with identical consecutive lines skipped — the same
   // live-only tradeoff as job-progress (a freshly opened drawer waits for the
   // next line; GET /api/v1/setups/:id/log remains the backfill source).
+  // IR-148: while the setup is "starting" (weight loading — the interesting
+  // phase) the cap relaxes to ~10 fps; identical-line dedup always applies.
+  const FEED_LOG_MIN_MS_RUNNING = 1_000;
+  const FEED_LOG_MIN_MS_STARTING = 100;
   const feedLogState = new Map<string, { lastLine: string; lastMs: number }>();
   const nameBySetup = new Map<string, string>();
   const nameOf = async (setupId: string): Promise<string | null> => {
@@ -212,17 +234,21 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     nameBySetup.set(setupId, row.name);
     return row.name;
   };
-  const emitSharedSetupLog = (setupId: string, nodeId: string, line: string): void => {
-    void nameOf(setupId)
-      .then((name) => {
+  // Awaited by onDriverLog so frame emission ordering is deterministic (the
+  // per-setup throttle state is read-then-write; a fire-and-forget with two
+  // DB lookups could reorder under load). Never rejects.
+  const emitSharedSetupLog = (setupId: string, nodeId: string, line: string): Promise<void> => {
+    return Promise.all([nameOf(setupId), statusOf(setupId)])
+      .then(([name, status]) => {
         if (name === null) return;
         const st = feedLogState.get(setupId);
         const nowMs = Date.now();
-        if (st !== undefined && (st.lastLine === line || nowMs - st.lastMs < 1000)) return;
+        const minMs = status === "starting" ? FEED_LOG_MIN_MS_STARTING : FEED_LOG_MIN_MS_RUNNING;
+        if (st !== undefined && (st.lastLine === line || nowMs - st.lastMs < minMs)) return;
         feedLogState.set(setupId, { lastLine: line, lastMs: nowMs });
         deps.sse.send({ type: "setup-log", serverTimeMs: nowMs, setupId, nodeId, name, line } satisfies SseEvent);
       })
-      .catch(() => {}); // a DB blip on the name lookup must not crash the hub
+      .catch(() => {}); // a DB blip on the name/status lookup must not crash the hub
   };
 
   const announce = (setupId: string, status: SetupStatus, health: SetupInfo["health"], lastError: string | null): void => {
@@ -712,7 +738,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const head = await headOf(msg.setupId);
       if (head === null || head !== senderNodeId) return;
       pushLog(msg.setupId, msg.seq, msg.line, msg.ts);
-      emitSharedSetupLog(msg.setupId, head, msg.line);
+      await emitSharedSetupLog(msg.setupId, head, msg.line);
     },
 
     attachLog(res, setupId) {
