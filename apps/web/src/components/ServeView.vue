@@ -218,9 +218,11 @@ function onAdopt(row: RunningEngineRow): void {
   wizard.value.headNodeId = row.nodeId;
   wizard.value.workerIds = [];
   wizardPort.value = row.port;
-  // Type and Model are already answered — land on Scripts, the missing part.
-  step.value = 3;
-  maxVisited.value = 3;
+  // Type is answered; Model is only answered when the probe REPORTED one —
+  // an engine that answers without a model id would otherwise reach Review
+  // with an empty model and fail the server contract on Create.
+  step.value = row.model === null ? 2 : 3;
+  maxVisited.value = step.value;
   actionError.value = null;
 }
 
