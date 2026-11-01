@@ -2,30 +2,39 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
 import { vScrimClose } from "../scrim";
-import { fetchAllModelsNamed, fetchPlacement } from "../models";
-import { setupChip, type NodeInfo, type SetupTransfer, type TransferStage } from "@irori/core";
+import { vDialog } from "../dialog";
+import { live } from "../live";
+import { fetchAllModelsNamed, fetchPlacement, placementChip } from "../models";
+import { MAX_SETUP_NODES, type NodeInfo, type PlacementRow, type SetupTransfer, type TransferStage } from "@irori/core";
 import {
+  applySetupStates,
   cancelTransfer,
   createSetup,
   createTransfer,
   deleteSetup,
+  engineLogEmptyText,
   fetchSetups,
   fetchSetup,
-  fmtEta,
   openSetupLog,
   patchSetup,
+  runningEnginesFromProbes,
   sanitizeWorkerIds,
   probeSeesEngine,
-  setupChipCls,
+  scriptPathError,
+  setupChipView,
   setupNodeLines,
   setupSubline,
+  setupSummaryLine,
+  sortSetupsForBoard,
   stagePercent,
   stageVal,
   startSetup,
   stopSetup,
   validateScripts,
+  workerCapHint,
   composeScriptPath,
   splitRecipePaths,
+  type RunningEngineRow,
   type SetupCreateInput,
   type SetupInfo,
   type SetupLogLine,
@@ -37,7 +46,9 @@ const nodes = ref<NodeInfo[]>([]);
 const setups = ref<SetupInfo[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
-const headLlm = ref<Map<string, LlmSnapshot | null>>(new Map());
+/** Latest LLM probe per node id — ALL nodes, not just setup heads (IR-152:
+ *  the Running-now section must see engines no setup manages). */
+const probes = ref<Map<string, LlmSnapshot | null>>(new Map());
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let loadSeq = 0;
 
@@ -56,17 +67,29 @@ async function load(): Promise<void> {
   }
 }
 
-function chipOf(setup: SetupInfo): string {
-  return setupChip(setup);
+/** IR-152: setup-state SSE frames (via the app-wide live store) overlay the
+ *  REST rows so chips flip instantly; the 2.5 s poll stays the convergent
+ *  source of truth (applySetupStates refuses stale frames). */
+const board = computed<SetupInfo[]>(() => {
+  const states = live.events.value.filter((e) => e.type === "setup-state");
+  const merged = applySetupStates(setups.value, states);
+  return sortSetupsForBoard(merged);
+});
+
+const summaryLine = computed(() => (setups.value.length === 0 ? "" : setupSummaryLine(setups.value)));
+
+function probeSees(setup: SetupInfo): boolean {
+  return probeSeesEngine(setup, probes.value);
 }
 
-async function refreshLlm(rows: SetupInfo[]): Promise<void> {
-  const seen = new Set<string>();
-  for (const setup of rows) {
-    if (seen.has(setup.headNodeId)) continue;
-    seen.add(setup.headNodeId);
+function chipView(setup: SetupInfo) {
+  return setupChipView(setup, { probeSees: probeSees(setup) });
+}
+
+async function refreshLlm(nodeIds: string[]): Promise<void> {
+  for (const nodeId of nodeIds) {
     try {
-      headLlm.value.set(setup.headNodeId, await fetchNodeLlm(setup.headNodeId));
+      probes.value.set(nodeId, await fetchNodeLlm(nodeId));
     } catch {
       // Keep the last good snapshot; retried on the next poll. Seeding once
       // froze tok/s at page-load values and cached "no probe" forever after
@@ -75,11 +98,26 @@ async function refreshLlm(rows: SetupInfo[]): Promise<void> {
   }
 }
 
+/** IR-152: every detected engine, managed or not — probe truth only. */
+const runningNow = computed<RunningEngineRow[]>(() =>
+  runningEnginesFromProbes(
+    [...probes.value].flatMap(([nodeId, snap]) => (snap === null ? [] : [{ nodeId, ports: snap.ports }])),
+    nodes.value,
+    setups.value,
+  ),
+);
+
 function decodeTps(setup: SetupInfo): number | null {
-  const snap = headLlm.value.get(setup.headNodeId) ?? null;
+  const snap = probes.value.get(setup.headNodeId) ?? null;
   if (snap === null) return null;
   const port = snap.ports.find((p) => p.port === setup.port);
   return port?.decodeTps ?? null;
+}
+
+function probeNodeIds(): string[] {
+  const ids = new Set<string>(nodes.value.map((n) => n.id));
+  for (const s of setups.value) ids.add(s.headNodeId);
+  return [...ids];
 }
 
 onMounted(async () => {
@@ -89,7 +127,7 @@ onMounted(async () => {
     /* registry unavailable — cards still render */
   }
   await load();
-  await refreshLlm(setups.value);
+  await refreshLlm(probeNodeIds());
   pollTimer = setInterval(() => {
     void load();
     void fetchNodes()
@@ -97,7 +135,7 @@ onMounted(async () => {
         nodes.value = rows;
       })
       .catch(() => {});
-    void refreshLlm(setups.value);
+    void refreshLlm(probeNodeIds());
     if (selected.value !== null) void refreshDetail();
     if (wizardOpen.value && activeTransfer.value !== null && created.value !== null) void refreshWizardTransfer();
   }, 2500);
@@ -111,14 +149,24 @@ onBeforeUnmount(() => {
 /* ── Card actions ─────────────────────────────────────────────────────────── */
 
 const actionError = ref<string | null>(null);
+/** IR-152: per-action in-flight refs — the button disables and reads
+ *  "Starting…" until the call returns (double-submit guard + feedback that
+ *  used to wait for the next 2.5 s poll). */
+const startingId = ref<string | null>(null);
+const stoppingId = ref<string | null>(null);
+const removingId = ref<string | null>(null);
 
 async function onStart(setup: SetupInfo): Promise<void> {
+  if (startingId.value !== null) return;
+  startingId.value = setup.id;
   actionError.value = null;
   try {
     await startSetup(setup.id);
     await load();
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    startingId.value = null;
   }
 }
 
@@ -141,13 +189,45 @@ function onArmStop(setup: SetupInfo): void {
 }
 
 async function onStop(setup: SetupInfo): Promise<void> {
+  if (stoppingId.value !== null) return;
+  stoppingId.value = setup.id;
   actionError.value = null;
   try {
     await stopSetup(setup.id);
     await load();
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    stoppingId.value = null;
   }
+}
+
+/**
+ * IR-152: Adopt — an unmanaged engine the probe sees becomes manageable:
+ * the wizard opens prefilled with the detected model/port/head so the owner
+ * supplies the real script pair. No row is created here: a setup with
+ * placeholder scripts would fail `test -x` at every start (the exact
+ * dead-on-arrival trap this ticket removes), and the wizard's Create is the
+ * honest path.
+ */
+function onAdopt(row: RunningEngineRow): void {
+  openWizard();
+  wizard.value.name = row.model ?? `${row.backend}:${row.port}`;
+  wizard.value.model = row.model ?? "";
+  wizard.value.kind = "single";
+  wizard.value.headNodeId = row.nodeId;
+  wizard.value.workerIds = [];
+  wizardPort.value = row.port;
+  // Type and Model are already answered — land on Scripts, the missing part.
+  step.value = 3;
+  maxVisited.value = 3;
+  actionError.value = null;
+}
+
+/** Running-now managed row: jump straight to that setup's drawer. */
+function openManaged(row: RunningEngineRow): void {
+  const s = setups.value.find((x) => x.id === row.managedSetupId);
+  if (s !== undefined) void openDetail(s);
 }
 
 /* ── Detail drawer ────────────────────────────────────────────────────────── */
@@ -229,14 +309,18 @@ async function onRemove(setup: SetupInfo): Promise<void> {
     }, 4000);
     return;
   }
+  if (removingId.value !== null) return;
   clearTimeout(armedTimer);
   armedStop.value = null;
+  removingId.value = setup.id;
   try {
     await deleteSetup(setup.id);
     closeDetail();
     await load();
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    removingId.value = null;
   }
 }
 
@@ -246,6 +330,9 @@ const wizardOpen = ref(false);
 const step = ref(1);
 const busy = ref(false);
 const wizardError = ref<string | null>(null);
+/** IR-152: furthest step reached — step dots navigate back to visited steps
+ *  instead of only Next moving forward. */
+const maxVisited = ref(1);
 
 interface WizardState {
   editId: string | null;
@@ -326,6 +413,7 @@ function cleanWorkerIds(workerIds: string[], headNodeId: string): string[] {
 function openWizard(from?: SetupInfo): void {
   wizardOpen.value = true;
   step.value = 1;
+  maxVisited.value = 1;
   wizardError.value = null;
   validation.value = null;
   placementRows.value = null;
@@ -389,7 +477,30 @@ function closeWizard(): void {
 
 const STEPS = ["Type", "Model", "Scripts", "Placement", "Review"];
 
-function nextStep(): void {
+/** IR-152: field-level messages for typed-but-invalid paths (the error
+ *  banner alone left the owner guessing which box was wrong). Empty paths are
+ *  "required" errors surfaced by Next, not inline noise on untouched fields. */
+const startPathError = computed(() => (composedStart.value === "" ? null : scriptPathError(composedStart.value)));
+const stopPathError = computed(() => (composedStop.value === "" ? null : scriptPathError(composedStop.value)));
+/** A non-empty folder must itself be absolute; when the folder is empty the
+ *  name fields carry full paths and compose passes them verbatim. */
+const folderPathError = computed(() => (wizard.value.recipeFolder.trim() === "" ? null : scriptPathError(wizard.value.recipeFolder.trim())));
+const workerHint = computed(() => workerCapHint(wizard.value.workerIds.length, wizard.value.kind));
+const workerCap = MAX_SETUP_NODES - 1;
+
+function gotoStep(n: number): void {
+  if (n < 1 || n > maxVisited.value || n === step.value) return;
+  wizardError.value = null;
+  step.value = n;
+  if (n === 2) void loadModelChoices(modelSearch.value);
+  if (n === 4) void loadPlacement();
+}
+
+/** Step 3 gate: rules first, then an automatic head-side `test -x` (IR-152:
+ *  validation was opt-in and owners burned starts on DOA paths — the check
+ *  now happens before the row is ever saved). A failed head fetch never
+ *  blocks: the server re-checks at save/start with a precise error. */
+async function nextStep(): Promise<void> {
   wizardError.value = null;
   if (step.value === 1 && wizard.value.headNodeId === "") {
     wizardError.value = "pick a head node";
@@ -399,16 +510,34 @@ function nextStep(): void {
     wizardError.value = "pick a model";
     return;
   }
-  if (step.value === 3 && (composedStart.value === "" || composedStop.value === "")) {
-    wizardError.value = "a stop script is required — both paths are needed";
-    return;
-  }
-  if (step.value === 3 && (composedStart.value.length > 1024 || composedStop.value.length > 1024)) {
-    wizardError.value = "script path too long — the head caps script paths at 1024 characters";
-    return;
+  if (step.value === 3) {
+    if (composedStart.value === "" || composedStop.value === "") {
+      wizardError.value = "both a start and a stop script are required";
+      return;
+    }
+    if (startPathError.value !== null || stopPathError.value !== null) {
+      wizardError.value = startPathError.value ?? stopPathError.value;
+      return;
+    }
+    if (validation.value === null && !validating.value) {
+      validating.value = true;
+      try {
+        validation.value = await validateScripts(wizard.value.headNodeId, [composedStart.value, composedStop.value]);
+      } catch {
+        validation.value = null; // head unreachable — don't block, save/start re-check
+      } finally {
+        validating.value = false;
+      }
+      const bad = (validation.value ?? []).filter((v) => !v.ok);
+      if (bad.length > 0) {
+        wizardError.value = bad.map((v) => `${v.error} — ${v.script}`).join(" · ");
+        return;
+      }
+    }
   }
   if (step.value < 5) {
     step.value += 1;
+    maxVisited.value = Math.max(maxVisited.value, step.value);
     if (step.value === 2) void loadModelChoices("");
     if (step.value === 4) void loadPlacement();
   }
@@ -466,7 +595,7 @@ async function onValidate(): Promise<void> {
 
 /* Step 4 — placement: per-node plan + staged transfers on the created setup. */
 
-const placementRows = ref<null | Array<{ node: { id: string; name: string; role: string; online: boolean }; action: string; reason: string | null; bytes: number | null }>>(null);
+const placementRows = ref<null | PlacementRow[]>(null);
 
 // Placement tie-in (SPEC §11.6): a failed capacity check offers
 // "Clean up disk — est. +N GB" from the node's latest audit.
@@ -673,7 +802,8 @@ function fmtGiB(bytes: number | null): string {
     <header class="pagehead">
       <div>
         <h1>Serve</h1>
-        <p>Setups: model + nodes + your scripts. Irori validates, transfers, supervises — never edits your scripts.</p>
+        <p v-if="summaryLine !== ''">{{ summaryLine }}</p>
+        <p v-else>Setups: model + nodes + your scripts. Irori validates, transfers, supervises — never edits your scripts.</p>
       </div>
       <div class="row">
         <button class="btn btn--primary" @click="openWizard()">New setup…</button>
@@ -682,31 +812,75 @@ function fmtGiB(bytes: number | null): string {
 
     <p v-if="error" class="banner banner--warn">{{ error }}</p>
     <p v-else-if="actionError" class="banner banner--warn">{{ actionError }}</p>
-    <p v-else-if="loading && setups.length === 0" class="faint">loading…</p>
+
+    <!-- IR-152: probe truth, can never lie — every detected engine, managed
+         or not. Serve used to say "stopped" while Overview called the same
+         engine unmanaged; this section is the single source of both. -->
+    <section v-if="runningNow.length > 0" class="stack" style="margin-bottom: 18px">
+      <span class="label">Running now</span>
+      <article v-for="row in runningNow" :key="row.key" class="card runnow">
+        <div class="runnow__row">
+          <span class="dot dot--ok" aria-hidden="true"></span>
+          <span class="mono runnow__port">:{{ row.port }}</span>
+          <strong>{{ row.model ?? "engine" }}</strong>
+          <span class="chip">{{ row.backend }}</span>
+          <span class="chip">{{ row.nodeName }}</span>
+          <span v-if="row.decodeTps !== null" class="chip chip--ok">{{ row.decodeTps.toFixed(1) }} tok/s</span>
+          <span class="grow"></span>
+          <div class="row">
+            <template v-if="row.managedSetupId !== null">
+              <button class="btn btn--ghost btn--sm" @click="openManaged(row)">managed · {{ row.managedName }}</button>
+            </template>
+            <template v-else>
+              <span class="chip chip--muted">unmanaged</span>
+              <button class="btn btn--secondary btn--sm" @click="onAdopt(row)">Adopt</button>
+            </template>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <p v-if="loading && setups.length === 0" class="faint">loading…</p>
     <p v-else-if="setups.length === 0" class="faint">no setups yet — the usual case is one head + one worker</p>
 
+    <!-- IR-152: running first, then failed, then idle; stable by name. -->
     <section class="stack">
-      <article v-for="setup in setups" :key="setup.id" class="card setup" @click="openDetail(setup)">
+      <article v-for="setup in board" :key="setup.id" class="card setup" @click="openDetail(setup)">
         <div class="setup__head">
           <span class="stat__value" style="font-size: 16px">{{ setup.name }}</span>
-          <span class="chip" :class="setupChipCls(chipOf(setup))">
-            <span class="dot" :class="`dot--${chipOf(setup) === 'healthy' ? 'ok' : chipOf(setup) === 'foreign' ? 'warn' : chipOf(setup) === 'starting' || chipOf(setup) === 'stopping' ? 'run' : 'halt'}`" aria-hidden="true"></span>
-            {{ chipOf(setup) }}
+          <span class="chip" :class="chipView(setup).cls">
+            <span class="dot" :class="chipView(setup).dot" aria-hidden="true"></span>
+            {{ chipView(setup).label }}
           </span>
-          <span class="chip">{{ setup.kind }} · {{ setup.port }}</span>
+          <!-- IR-152: the head node line already carries :port — the chip is
+               kind only (port was shown twice per card). -->
+          <span class="chip">{{ setup.kind }}</span>
           <span class="grow"></span>
           <div class="row" @click.stop>
-            <button v-if="setup.status === 'stopped' || setup.status === 'failed'" class="btn btn--secondary btn--sm" @click="onStart(setup)">Start</button>
-            <button v-if="setup.status === 'starting' || setup.status === 'running' || probeSeesEngine(setup, headLlm)" class="btn btn--ghost btn--sm" :class="{ 'btn--danger': armedStop === setup.id }" @click="onArmStop(setup)">
-              {{ armedStop === setup.id ? "Confirm stop" : "Stop…" }}
+            <button
+              v-if="setup.status === 'stopped' || setup.status === 'failed'"
+              class="btn btn--secondary btn--sm"
+              :disabled="startingId !== null || stoppingId !== null"
+              @click="onStart(setup)"
+            >
+              {{ startingId === setup.id ? "Starting…" : "Start" }}
+            </button>
+            <button
+              v-if="setup.status === 'starting' || setup.status === 'running' || probeSees(setup)"
+              class="btn btn--ghost btn--sm"
+              :class="{ 'btn--danger': armedStop === setup.id }"
+              :disabled="stoppingId !== null"
+              @click="onArmStop(setup)"
+            >
+              {{ stoppingId === setup.id ? "Stopping…" : armedStop === setup.id ? "Confirm stop" : "Stop…" }}
             </button>
             <button class="btn btn--ghost btn--sm" @click="openDetail(setup)">Logs</button>
           </div>
         </div>
         <div class="card__body" style="padding-top: 10px">
           <div class="row row--wrap" style="gap: 8px">
-            <span v-for="line in setupNodeLines(setup, nodes, { decodeTps: decodeTps(setup) })" :key="line.nodeId" class="chip" :class="line.cls">
-              {{ line.label }} · <span class="dot" :class="line.cls.includes('ok') ? 'dot--ok' : line.cls.includes('warn') ? 'dot--warn' : line.cls.includes('halt') ? 'dot--halt' : 'dot--run'" aria-hidden="true"></span> {{ line.detail }}
+            <span v-for="line in setupNodeLines(setup, nodes, { decodeTps: decodeTps(setup), probeSees: probeSees(setup) })" :key="line.nodeId" class="chip" :class="line.cls">
+              {{ line.label }} · <span class="dot" :class="line.cls.includes('ok') ? 'dot--ok' : line.cls.includes('warn') ? 'dot--warn' : line.cls.includes('halt') || line.cls.includes('muted') ? 'dot--halt' : 'dot--run'" aria-hidden="true"></span> {{ line.detail }}
             </span>
           </div>
           <div v-if="selected !== null && selected.id === setup.id && latestStages.length > 0 && (setup.status === 'starting' || setup.status === 'running')" class="stages">
@@ -716,37 +890,66 @@ function fmtGiB(bytes: number | null): string {
               <span class="val">{{ stageVal(stage) }}</span>
             </div>
           </div>
-          <p v-if="setupSubline(setup) !== ''" class="stat__sub" style="margin-top: 8px">{{ setupSubline(setup) }}</p>
+          <!-- IR-152 (P2): failed reads warn with the reason visible on the
+               card, not only in a faint subline. -->
+          <p v-if="setup.status === 'failed' && setup.lastError !== null" class="fail-line">{{ setup.lastError }}</p>
+          <p v-if="setupSubline(setup) !== '' && setup.status !== 'failed'" class="stat__sub" style="margin-top: 8px">{{ setupSubline(setup) }}</p>
         </div>
       </article>
     </section>
 
-    <!-- Setup detail drawer: engine log, placement history, edit/duplicate/remove -->
+    <!-- Setup detail drawer: engine log, placement history, edit/duplicate/remove.
+         IR-152: focus-trapped + Escape-closable (v-dialog), aria-modal, the
+         Start/Stop the card has are reachable from the header, and failed
+         shows its reason next to the state chip. -->
     <div v-if="selected !== null" class="drawer-scrim" v-scrim-close="closeDetail">
-      <aside class="drawer" role="dialog" aria-label="Setup details">
+      <aside class="drawer" role="dialog" aria-modal="true" aria-label="Setup details" v-dialog="closeDetail">
         <div class="row row--between" style="margin-bottom: 10px">
-          <div class="row">
+          <div class="row row--wrap">
             <h3 style="font-size: 17px">{{ selected.name }}</h3>
-            <span class="chip" :class="setupChipCls(chipOf(selected))">{{ chipOf(selected) }}</span>
+            <span class="chip" :class="chipView(selected).cls">
+              <span class="dot" :class="chipView(selected).dot" aria-hidden="true"></span>
+              {{ chipView(selected).label }}
+            </span>
             <span class="chip">{{ selected.kind }}</span>
           </div>
-          <button class="iconbtn" aria-label="Close details" @click="closeDetail">✕</button>
+          <div class="row" style="align-items: center">
+            <button
+              v-if="selected.status === 'stopped' || selected.status === 'failed'"
+              class="btn btn--secondary btn--sm"
+              :disabled="startingId !== null || stoppingId !== null"
+              @click="onStart(selected)"
+            >
+              {{ startingId === selected.id ? "Starting…" : "Start" }}
+            </button>
+            <button
+              v-if="selected.status === 'starting' || selected.status === 'running' || probeSees(selected)"
+              class="btn btn--ghost btn--sm"
+              :class="{ 'btn--danger': armedStop === selected.id }"
+              :disabled="stoppingId !== null"
+              @click="onArmStop(selected)"
+            >
+              {{ stoppingId === selected.id ? "Stopping…" : armedStop === selected.id ? "Confirm stop" : "Stop…" }}
+            </button>
+            <button class="iconbtn" aria-label="Close details" @click="closeDetail">✕</button>
+          </div>
         </div>
+        <p v-if="selected.status === 'failed' && selected.lastError !== null" class="fail-line">{{ selected.lastError }}</p>
         <p v-if="detailError" class="banner banner--warn">{{ detailError }}</p>
         <div class="stack" style="overflow: auto">
           <dl class="kv">
             <dt>model</dt><dd class="mono">{{ selected.model }}</dd>
-            <dt>nodes</dt><dd>{{ setupNodeLines(selected, nodes).map((l) => l.label).join(" · ") }}</dd>
-            <dt>port</dt><dd>{{ selected.port }}</dd>
-            <dt>start</dt><dd class="mono">{{ selected.scriptStart }}</dd>
-            <dt>stop</dt><dd class="mono">{{ selected.scriptStop }}</dd>
+            <dt>nodes</dt><dd>{{ setupNodeLines(selected, nodes, { probeSees: probeSees(selected) }).map((l) => l.label).join(" · ") }}</dd>
+            <dt>scripts</dt><dd class="mono" style="overflow-wrap: anywhere;">{{ selected.scriptStart }} <span class="faint">start</span> · {{ selected.scriptStop }} <span class="faint">stop</span></dd>
             <dt>env</dt><dd>{{ [selected.env.modelName ? "MODEL_NAME" : null, selected.env.port && !selected.captureProxy ? "PORT" : null, selected.env.extraArgs !== "" ? "EXTRA_ARGS" : null, selected.env.modelPath ? "MODEL_PATH" : null].filter(Boolean).join(" · ") || "none" }}{{ selected.captureProxy ? " · capture on" : "" }}{{ selected.bodyRetention ? " · bodies kept" : "" }}</dd>
           </dl>
 
+          <!-- IR-152: the label says what it is (frames stream into telemetry
+               since IR-147); the empty state explains what to expect. -->
           <div>
-            <span class="label">Engine log · streaming into telemetry</span>
+            <span class="label">Engine log</span>
             <div class="log" style="margin-top: 8px; max-height: 220px">
-              <div v-if="logLines.length === 0" class="faint">no output yet</div>
+              <div v-if="logLines.length === 0" class="faint">{{ engineLogEmptyText(selected) }}</div>
               <div v-for="line in logLines.slice(-120)" :key="line.seq"><span class="dim">{{ fmtTime(line.ts) }}</span> {{ line.line }}</div>
             </div>
           </div>
@@ -765,7 +968,7 @@ function fmtGiB(bytes: number | null): string {
           <div class="row">
             <button class="btn btn--secondary btn--sm" @click="openWizard(selected); closeDetail()">Edit…</button>
             <button class="btn btn--secondary btn--sm" @click="onDuplicate(selected); closeDetail()">Duplicate…</button>
-            <button class="btn btn--danger btn--sm" @click="onRemove(selected)">{{ armedStop === `rm-${selected.id}` ? "Confirm remove" : "Remove…" }}</button>
+            <button class="btn btn--danger btn--sm" :disabled="removingId !== null" @click="onRemove(selected)">{{ removingId === selected.id ? "Removing…" : armedStop === `rm-${selected.id}` ? "Confirm remove" : "Remove…" }}</button>
           </div>
         </div>
       </aside>
@@ -773,13 +976,22 @@ function fmtGiB(bytes: number | null): string {
 
     <!-- Setup wizard: type → model → scripts → placement → review -->
     <div v-if="wizardOpen" class="drawer-scrim" v-scrim-close="closeWizard">
-      <div class="wizard" role="dialog" aria-modal="true" aria-label="New setup wizard">
+      <div class="wizard" role="dialog" aria-modal="true" aria-label="New setup wizard" v-dialog="closeWizard">
         <div class="card__head row--between wizard__head" style="display: flex">
           <div class="row"><h3>{{ wizard.editId !== null ? "Edit setup" : "New setup" }}</h3><span class="mono faint">nothing runs until you launch</span></div>
           <button class="iconbtn" aria-label="Close wizard" @click="closeWizard">✕</button>
         </div>
+        <!-- IR-152: dots navigate back to visited steps. -->
         <div class="steps" aria-label="Wizard progress">
-          <span v-for="(label, i) in STEPS" :key="label" class="step-dot" :class="{ 'is-done': i + 1 < step, 'is-cur': i + 1 === step }"><i></i>{{ label }}</span>
+          <button
+            v-for="(label, i) in STEPS"
+            :key="label"
+            type="button"
+            class="step-dot step-dot--btn"
+            :class="{ 'is-done': i + 1 < step, 'is-cur': i + 1 === step, 'is-locked': i + 1 > maxVisited }"
+            :disabled="i + 1 > maxVisited"
+            @click="gotoStep(i + 1)"
+          ><i></i>{{ label }}</button>
         </div>
 
         <section v-show="step === 1" class="step card__body">
@@ -796,11 +1008,13 @@ function fmtGiB(bytes: number | null): string {
             </div>
             <div v-if="wizard.kind === 'cluster'" class="field"><label>Workers</label>
               <div class="stack" style="gap: 6px">
-                <label v-for="n in nodes.filter((x) => x.id !== wizard.headNodeId && x.kind !== 'nas')" :key="n.id" class="pick" :class="{ 'is-on': wizard.workerIds.includes(n.id) }">
-                  <input type="checkbox" :checked="wizard.workerIds.includes(n.id)" @change="wizard.workerIds.includes(n.id) ? (wizard.workerIds = wizard.workerIds.filter((x) => x !== n.id)) : wizard.workerIds.length < 7 && wizard.workerIds.push(n.id)" />
+                <label v-for="n in nodes.filter((x) => x.id !== wizard.headNodeId && x.kind !== 'nas')" :key="n.id" class="pick" :class="{ 'is-on': wizard.workerIds.includes(n.id), 'is-capped': !wizard.workerIds.includes(n.id) && wizard.workerIds.length >= workerCap }">
+                  <input type="checkbox" :checked="wizard.workerIds.includes(n.id)" :disabled="!wizard.workerIds.includes(n.id) && wizard.workerIds.length >= workerCap" @change="wizard.workerIds.includes(n.id) ? (wizard.workerIds = wizard.workerIds.filter((x) => x !== n.id)) : wizard.workerIds.length < workerCap && wizard.workerIds.push(n.id)" />
                   {{ n.name }} · {{ n.kind }}{{ n.online ? "" : " (offline)" }}
                 </label>
               </div>
+              <!-- IR-152: the 8th click used to be silently ignored. -->
+              <p v-if="workerHint !== null" class="stat__sub">{{ workerHint }}</p>
             </div>
           </div>
         </section>
@@ -816,7 +1030,7 @@ function fmtGiB(bytes: number | null): string {
                   <span class="stat__sub mono" style="display: block; overflow-wrap: anywhere;">{{ m.repository }}</span>
                 </span>
               </label>
-              <p v-if="modelChoices.length === 0" class="faint">no catalog matches — the exact HF repo id can be typed in Review for a chained download</p>
+              <p v-if="modelChoices.length === 0" class="faint">no catalog matches — the exact HF repo id can be typed below for a chained download</p>
             </div>
             <div class="field"><label>Model (catalog name or HF repo id)</label><input v-model="wizard.model" class="input mono" /></div>
             <div class="field"><label>Serving port (script-defined; probed for health)</label><input v-model.number="wizardPort" class="input" type="number" min="1" max="65535" /></div>
@@ -825,13 +1039,23 @@ function fmtGiB(bytes: number | null): string {
 
         <section v-show="step === 3" class="step card__body">
           <div class="stack">
-            <div class="field"><label>Recipe folder — path on the head</label><input v-model="wizard.recipeFolder" class="input mono" placeholder="~/developer/recipes/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold" /></div>
+            <!-- IR-152: the old placeholder suggested ~ paths the head resolves
+                 literally; tilde is rejected with an actionable message. -->
+            <div class="field"><label>Scripts folder — absolute path on the head</label><input v-model="wizard.recipeFolder" class="input mono" :class="{ 'input--invalid': folderPathError !== null }" placeholder="/home/you/developer/recipes/GLM-5.3-Flash-EXL3" />
+              <p v-if="folderPathError !== null" class="field-error">{{ folderPathError }}</p>
+            </div>
             <div class="cols cols-2" style="gap: 10px">
-              <div class="field"><label>Start script</label><input v-model="wizard.startName" class="input mono" placeholder="start-tp3.sh" /></div>
-              <div class="field"><label>Stop script — required (armed stop is a core promise)</label><input v-model="wizard.stopName" class="input mono" placeholder="stop.sh" /></div>
+              <div class="field"><label>Start script</label><input v-model="wizard.startName" class="input mono" :class="{ 'input--invalid': startPathError !== null }" placeholder="start-tp3.sh" />
+                <p v-if="startPathError !== null" class="field-error">{{ startPathError }}</p>
+              </div>
+              <div class="field"><label>Stop script — required</label><input v-model="wizard.stopName" class="input mono" :class="{ 'input--invalid': stopPathError !== null }" placeholder="stop.sh" />
+                <p v-if="stopPathError !== null" class="field-error">{{ stopPathError }}</p>
+              </div>
             </div>
             <div class="row">
-              <button class="btn btn--secondary btn--sm" :disabled="validating" @click="onValidate">{{ validating ? "validating…" : "Validate on head (test -x)" }}</button>
+              <!-- IR-152: Next already validates on the head (test -x) before
+                   saving; this re-checks without moving. -->
+              <button class="btn btn--secondary btn--sm" :disabled="validating" @click="onValidate">{{ validating ? "validating…" : "Re-check scripts on head" }}</button>
               <template v-if="validation !== null">
                 <span v-for="v in validation" :key="v.script" class="chip" :class="v.ok ? 'chip--ok' : 'chip--warn'">
                   <span class="dot" :class="v.ok ? 'dot--ok' : 'dot--warn'" aria-hidden="true"></span>
@@ -855,10 +1079,16 @@ function fmtGiB(bytes: number | null): string {
 
         <section v-show="step === 4" class="step card__body">
           <div class="stack">
+            <!-- IR-152: state-shaped vocabulary shared with the Models page
+                 (placementChip) — raw verbs read as two meanings of one concept. -->
             <dl v-if="placementRows !== null" class="kv">
               <template v-for="row in placementRows" :key="row.node.id">
                 <dt>{{ row.node.name }} · {{ row.node.role }}</dt>
-                <dd>{{ row.action }}{{ row.reason !== null ? ` — ${row.reason}` : "" }}{{ row.bytes !== null ? ` · ${fmtGiB(row.bytes)}` : "" }}</dd>
+                <dd>
+                  <span class="chip" :class="placementChip(row.action).cls">{{ placementChip(row.action).label }}</span>
+                  <template v-if="row.reason !== null"> {{ row.reason }}</template>
+                  <template v-if="row.bytes !== null"> · {{ fmtGiB(row.bytes) }}</template>
+                </dd>
               </template>
             </dl>
             <p v-else class="stat__sub">{{ wizard.model }} is absent from the NAS catalog — staging will chain the HF download (NAS first, then the cluster).</p>
@@ -869,7 +1099,7 @@ function fmtGiB(bytes: number | null): string {
               </button>
             </div>
             <div class="row row--between">
-              <span class="stat__sub">missing models transfer in staged progress — start runs after activation.</span>
+              <span class="stat__sub">missing models are copied to the nodes in staged progress — Start runs whenever you launch it.</span>
               <button class="btn btn--secondary btn--sm" :disabled="staging" @click="onStageTransfers">{{ staging ? "staging…" : "Stage transfers" }}</button>
             </div>
             <div v-if="activeTransfer !== null" class="stack">
@@ -883,14 +1113,14 @@ function fmtGiB(bytes: number | null): string {
                 <button v-if="activeTransfer.status === 'running'" class="btn btn--ghost btn--sm" @click="onCancelTransfer">Cancel transfer</button>
               </div>
             </div>
-            <p class="stat__sub">"Pull from HF instead" = stage with HF → node download; skip staging and Start runs as-is.</p>
           </div>
         </section>
 
         <section v-show="step === 5" class="step card__body">
           <div class="stack" style="gap: 14px">
             <div>
-              <p class="stat__sub" style="margin: 0 0 4px"><strong>Runs</strong></p>
+              <!-- IR-152: this is a configuration summary, not what runs now. -->
+              <p class="stat__sub" style="margin: 0 0 4px"><strong>Configuration</strong></p>
               <dl class="kv">
                 <dt>name</dt><dd>{{ wizard.name.trim() || wizard.model }}</dd>
                 <dt>model</dt><dd class="mono">{{ wizard.model }}</dd>
@@ -907,14 +1137,14 @@ function fmtGiB(bytes: number | null): string {
             <div>
               <p class="stat__sub" style="margin: 0 0 4px"><strong>Port and health</strong></p>
               <dl class="kv">
-                <dt>port</dt><dd>{{ wizardPort }} <span class="faint">· probed for health (/v1/models with the model id) · timeout 15 m</span></dd>
+                <dt>port</dt><dd>{{ wizardPort }} <span class="faint">· probed for health</span></dd>
               </dl>
             </div>
             <div>
               <p class="stat__sub" style="margin: 0 0 4px"><strong>Scripts</strong></p>
               <dl class="kv">
                 <dt>start</dt><dd class="mono" style="overflow-wrap: anywhere;">{{ composedStart }}</dd>
-                <dt>stop</dt><dd class="mono" style="overflow-wrap: anywhere;">{{ composedStop }} <span class="faint">(re-validated at every start)</span></dd>
+                <dt>stop</dt><dd class="mono" style="overflow-wrap: anywhere;">{{ composedStop }} <span class="faint">(re-checked at every start)</span></dd>
               </dl>
             </div>
             <div>
@@ -927,16 +1157,19 @@ function fmtGiB(bytes: number | null): string {
           </div>
         </section>
 
+        <!-- IR-152: the error sits above the footer, next to the fields it
+             refers to (it used to render below the sticky footer, far away). -->
+        <p v-if="wizardError" class="banner banner--warn" style="margin: 0 16px 10px">{{ wizardError }}</p>
+
         <div class="card__head row--between wizard__foot" style="display: flex; border-top: 1px solid var(--border); border-bottom: 0">
           <span class="stat__sub">step {{ step }} of 5</span>
           <div class="row">
             <button v-if="step > 1" class="btn btn--secondary btn--sm" @click="prevStep">Back</button>
             <button v-if="step === 5 && wizard.editId === null" class="btn btn--secondary btn--sm" :disabled="busy" @click="onSaveOnly">{{ busy ? "working…" : "Save without starting" }}</button>
-            <button v-if="step < 5" class="btn btn--primary btn--sm" @click="nextStep">Next · {{ STEPS[step] }}</button>
+            <button v-if="step < 5" class="btn btn--primary btn--sm" :disabled="validating" @click="nextStep">{{ validating && step === 3 ? "checking…" : `Next · ${STEPS[step]}` }}</button>
             <button v-else class="btn btn--primary btn--sm" :disabled="busy" @click="onFinish">{{ busy ? "working…" : wizard.editId !== null ? "Save" : "Create & start" }}</button>
           </div>
         </div>
-        <p v-if="wizardError" class="banner banner--warn" style="margin: 0 16px 12px">{{ wizardError }}</p>
       </div>
     </div>
   </div>
@@ -950,6 +1183,39 @@ function fmtGiB(bytes: number | null): string {
   display: flex;
   flex-direction: column;
   cursor: pointer;
+}
+/* IR-152: Running-now rows — probe truth, dense one-liner per engine. */
+.runnow {
+  cursor: default;
+}
+.runnow__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+}
+.runnow__port {
+  color: var(--muted);
+}
+/* IR-152: the failure reason reads as a statement, not a faint hint. */
+.fail-line {
+  margin: 8px 0 0;
+  color: var(--thread-ink);
+  border: 1px solid var(--thread);
+  background: var(--thread-wash);
+  border-radius: var(--radius-sm, 6px);
+  padding: 6px 10px;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.field-error {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--thread-ink);
+}
+.input--invalid {
+  border-color: var(--thread);
 }
 .setup__head {
   display: flex;
@@ -1035,6 +1301,24 @@ function fmtGiB(bytes: number | null): string {
   content: "—";
   color: var(--rule-2, var(--border));
   margin: 0 6px;
+}
+/* IR-152: dots became navigation buttons — keep the span's look, drop the
+ * chrome, and grey the not-yet-visited ones. */
+.step-dot--btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.step-dot--btn:disabled,
+.step-dot--btn.is-locked {
+  cursor: default;
+  opacity: 0.55;
+}
+.pick.is-capped {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .pick {
   display: flex;
