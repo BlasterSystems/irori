@@ -594,6 +594,65 @@ d("setups service", () => {
     sendSpy.mockRestore();
   });
 
+  it("relaxes the shared-feed throttle to ~10 fps while starting (IR-148)", async () => {
+    const feedSetup = await ctx.service.create({
+      name: "feed-fast-setup",
+      kind: "single",
+      model: "Feed-Fast-Model",
+      port: 9148,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    });
+    const sendSpy = vi.spyOn(sse, "send");
+    const log = (seq: number, line: string) => ctx.service.onDriverLog({ type: "setup-log", setupId: feedSetup.id, seq, line, ts: seq }, ids.head);
+    const setupLogFrames = () => sendSpy.mock.calls.map((c) => c[0]).filter((e) => e.type === "setup-log");
+    // Real delay, not fake timers (same as the IR-124 test above): the
+    // embedded Postgres driver wedges under vi.useFakeTimers and the
+    // throttle window is Date.now()-based — the wait IS the behavior tested.
+    const pause = (ms: number): Promise<void> => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, ms);
+      return promise;
+    };
+
+    // Driver reports starting → relaxed window (weight-loading phase).
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: feedSetup.id, runId: null, state: "starting", exitCode: null, pid: 5, pgid: 5, error: null }, ids.head);
+    expect((await ctx.service.get(feedSetup.id))!.status).toBe("starting");
+
+    // Dense burst while starting: 6 distinct lines at ~115 ms spacing — far
+    // above the old 1 fps cap (which would have emitted 1).
+    for (let i = 1; i <= 6; i++) {
+      await log(i, `loading weights shard ${i}/6`);
+      await pause(115);
+    }
+    expect(setupLogFrames().length).toBeGreaterThanOrEqual(5);
+    // Identical consecutive line is still deduped at the fast rate.
+    await log(7, "loading weights shard 6/6");
+    expect(setupLogFrames().length).toBeGreaterThanOrEqual(5);
+    const fastCount = setupLogFrames().length;
+
+    // Probe confirms healthy → running → the 1 fps cap resumes.
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9148, host: "127.0.0.1", detected: true, model: "feed-fast-model" })],
+    });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: feedSetup.id, runId: null, state: "running", exitCode: null, pid: 5, pgid: 5, error: null }, ids.head);
+    await ctx.service.tick();
+    expect((await ctx.service.get(feedSetup.id))!.status).toBe("running");
+
+    await pause(1100); // clear the relaxed-window residue so the first line always emits
+    await log(8, "AVG decode 37.9 tok/s");
+    await log(9, "KV cache 62%"); // distinct but <1 s after the last emit → capped
+    expect(setupLogFrames().length).toBe(fastCount + 1);
+    await pause(1100);
+    await log(10, "AVG prefill 812 tok/s"); // next window → emitted
+    expect(setupLogFrames().length).toBe(fastCount + 2);
+    sendSpy.mockRestore();
+  });
+
   // IRI-050: fresh nodes for role-derivation tests — direct insert like the
   // spark4 case above; registered in extraOwned so getNodes surfaces them.
   async function makeRoleNode(name: string, role: "head" | "worker" | "standalone"): Promise<string> {
