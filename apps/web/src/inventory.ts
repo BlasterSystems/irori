@@ -2,6 +2,7 @@ import {
   jobInfoSchema,
   nodeInventorySchema,
   type InventoryLeftover,
+  type InventoryLocalCache,
   type InventoryModel,
   type NodeInventory,
 } from "@irori/core";
@@ -125,6 +126,42 @@ export function registerCopy(repo: string): { title: string; body: string; dange
     body: "Verifies this cache entry against the NAS object by hash (blob identity plus small-file hashes) and writes the registration. Nothing is transferred; any mismatch refuses the registration.",
     danger: "Register",
   };
+}
+
+/** IR-133: a resume-transfer request for a partial (resumable) sync-local.
+ *  Same name + cache user as the Register flow; the agent re-runs
+ *  `modelctl sync-local`, whose deterministic staging dir plus rsync
+ *  --partial makes completed files skip — it continues instead of re-copying. */
+export interface ResumeRequest {
+  kind: "sync-local";
+  params: { name: string; user: string };
+}
+
+export function resumeRequestFor(repo: string, user: string): ResumeRequest {
+  return { kind: "sync-local", params: { name: repo, user } };
+}
+
+/** Human title/body for the resume confirm card. */
+export function resumeCopy(repo: string): { title: string; body: string; danger: string } {
+  return {
+    title: `Resume transferring ${repo}?`,
+    body: "Continues the interrupted transfer from the staging area into this cache. Files already copied are not re-transferred.",
+    danger: "Resume transfer",
+  };
+}
+
+/** Per-state hint under the orphan row (IR-133). The table header copy stays
+ *  register-specific; resumable rows get the staging-resume explanation. */
+export function orphanHint(state: "adoptable" | "resumable" | "unknown"): string | null {
+  return state === "resumable" ? "partial transfer — Resume continues from staging; completed files are not re-copied" : null;
+}
+
+/** Orphan rows with their adoption state (IR-133). Reports from
+ *  pre-classification agents carry no states, so every row falls back to
+ *  `unknown` — the Register-only behavior they shipped with. */
+export function orphanRowsFor(cache: Pick<InventoryLocalCache, "orphans" | "orphanStates">): Array<{ repo: string; state: "adoptable" | "resumable" | "unknown" }> {
+  const states = new Map(cache.orphanStates.map((s) => [s.repo, s.state]));
+  return cache.orphans.map((repo) => ({ repo, state: states.get(repo) ?? "unknown" }));
 }
 
 /** The snapshot storage entry backing a store root (mount prefix, longest wins). */

@@ -167,6 +167,11 @@ describe("buildInventory", () => {
     mkdirSync(snapshot, { recursive: true });
     // IR-104: an unregistered models--* dir must surface as an orphan.
     mkdirSync(join(home, ".cache/huggingface/hub/models--other--orphan"), { recursive: true });
+    // IR-133: an orphan WITH a snapshot farm is adoptable (register-local's
+    // structural precondition), and one with only the deterministic staging
+    // dir is a resumable partial transfer.
+    mkdirSync(join(home, ".cache/huggingface/hub/models--adopter--adopted/snapshots", "c".repeat(40)), { recursive: true });
+    mkdirSync(join(home, ".cache/huggingface/hub/models--pauser--partial/.modelctl-staging", `${"d".repeat(40)}-0123456789abcdef`), { recursive: true });
     mkdirSync(join(home, ".cache/huggingface"), { recursive: true });
     writeFileSync(join(snapshot, "w.bin"), "1234567890");
 
@@ -194,7 +199,14 @@ describe("buildInventory", () => {
     expect(report.local).toHaveLength(1);
     expect(report.local[0]).toMatchObject({ user: "root", modelctlVersion: "0.20.1", error: null });
     expect(report.local[0]?.models).toEqual([{ name: "loc", repository: "o/r", runtime: "vllm", bytes: 10 }]);
-    expect(report.local[0]?.orphans).toEqual(["other/orphan"]);
+    expect(report.local[0]?.orphans).toEqual(["adopter/adopted", "other/orphan", "pauser/partial"]);
+    // IR-133: snapshot farm → adoptable; staging-only → resumable; neither →
+    // unknown (Register-only fallback).
+    expect(report.local[0]?.orphanStates).toEqual([
+      { repo: "adopter/adopted", state: "adoptable" },
+      { repo: "other/orphan", state: "unknown" },
+      { repo: "pauser/partial", state: "resumable" },
+    ]);
   });
 
   it("reports a local-only node and per-cache errors", async () => {
@@ -214,5 +226,6 @@ describe("buildInventory", () => {
     expect(report.local[0]?.error).toMatch(/modelctl exploded/);
     expect(report.local[0]?.models).toEqual([]);
     expect(report.local[0]?.orphans).toEqual([]);
+    expect(report.local[0]?.orphanStates).toEqual([]);
   });
 });

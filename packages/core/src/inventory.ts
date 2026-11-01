@@ -44,6 +44,24 @@ export const inventoryStoreSchema = z.object({
 
 export type InventoryStore = z.infer<typeof inventoryStoreSchema>;
 
+/** IR-133: adoption state of an unregistered cache dir, classified agent-side
+ *  from the on-disk layout (no NAS round-trip). `adoptable` = a snapshot farm
+ *  exists, so `modelctl register-local` can verify and adopt it; `resumable` =
+ *  only modelctl's deterministic staging dir exists — a canceled/failed
+ *  sync-local that resumes cheaply; `unknown` = neither, Register-only as
+ *  before (also the fallback for reports from pre-classification agents). */
+export const orphanStateSchema = z.enum(["adoptable", "resumable", "unknown"]);
+
+export type OrphanState = z.infer<typeof orphanStateSchema>;
+
+export const inventoryOrphanStateSchema = z.object({
+  /** Derivable repo id (`ORG/REPO`), matching the `orphans` strings. */
+  repo: z.string().min(1),
+  state: orphanStateSchema,
+});
+
+export type InventoryOrphanState = z.infer<typeof inventoryOrphanStateSchema>;
+
 /** One user's local HF cache (modelctl registrations). */
 export const inventoryLocalCacheSchema = z.object({
   user: z.string().min(1),
@@ -57,6 +75,10 @@ export const inventoryLocalCacheSchema = z.object({
   /** `models--*` dirs present but unregistered, as derivable repo ids (IR-104).
    *  Defaulted so reports from pre-0.23 agents (and old cached rows) parse. */
   orphans: z.array(z.string()).default([]),
+  /** IR-133: per-orphan classification. Defaulted so pre-classification agent
+   *  reports (and old cached rows) keep parsing — the UI then treats every
+   *  orphan as `unknown` and keeps the Register-only behavior. */
+  orphanStates: z.array(inventoryOrphanStateSchema).default([]),
 });
 
 export type InventoryLocalCache = z.infer<typeof inventoryLocalCacheSchema>;
