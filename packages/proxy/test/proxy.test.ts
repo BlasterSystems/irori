@@ -37,7 +37,10 @@ function startStreamEngine(): void {
       writeNext();
       return;
     }
-    if (req.method === "POST" && req.url?.split("?")[0] === "/v1/chat/completions") {
+    // TensorFold serves the bare and /v1-prefixed spellings identically
+    // (IR-154): the fixture answers both so the capture path is testable.
+    const endpointPath = req.url?.split("?")[0];
+    if (req.method === "POST" && (endpointPath === "/v1/chat/completions" || endpointPath === "/chat/completions")) {
       seenTrace.push(String(req.headers["traceparent"] ?? ""));
       if (req.url.includes("fail=1")) {
         res.writeHead(400, { "content-type": "application/json" });
@@ -225,6 +228,26 @@ describe("capture proxy", () => {
     expect(e.resBytes).toBe(res.raw.length);
     expect(e.setupId).toBe("11111111-1111-4111-8111-111111111111");
     expect(e.sourceAddr).toContain("127.0.0.1");
+  });
+
+  it("captures a /v1-less base URL request and canonicalizes the endpoint (IR-154)", async () => {
+    // omp-style provider: baseUrl without /v1 → POST /chat/completions.
+    // The engine serves it (same handler family); capture must match and
+    // the stored endpoint must equal its /v1 twin's identity.
+    const body = JSON.stringify({ model: "GLM-5.3-Flash-EXL3", stream: false, messages: [{ role: "user", content: "hi" }] });
+    const event = nextEvent();
+    const res = await post(body, "/chat/completions");
+    expect(res.status).toBe(200);
+    const e = await event;
+    expect(e.endpoint).toBe("/v1/chat/completions");
+    expect(e.model).toBe("GLM-5.3-Flash-EXL3");
+    expect(e.promptTokens).toBe(10);
+    expect(e.completionTokens).toBe(3);
+
+    // The bare and prefixed spellings produce identical endpoint identities.
+    const event2 = nextEvent();
+    await post(body, "/v1/chat/completions");
+    expect((await event2).endpoint).toBe(e.endpoint);
   });
 
   it("keeps the stream byte-identical while the client backpressures", async () => {

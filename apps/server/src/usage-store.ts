@@ -18,6 +18,7 @@ import {
 } from "@irori/core";
 import type { Granularity } from "./rollups.js";
 import { resolveIdentities } from "./usage-identity.js";
+import { log } from "./logger.js";
 
 /* ── IR-54: tool attribution ─────────────────────────────────────────────── */
 
@@ -287,7 +288,31 @@ function aggIntoPoint(a: Agg, t: string): UsageSeriesPoint {
   };
 }
 
-export function createUsageStore(db: Db): UsageStore {
+/** Per-store drop-warning rate limit (IRI-055): at most one line per window. */
+const DROPPED_LOG_INTERVAL_MS = 60_000;
+
+export interface UsageStoreOptions {
+  /** Injectable warning sink (tests); defaults to the hub logger. */
+  warn?: (message: string) => void;
+  /** Injectable clock for the drop-warning rate limit (tests). */
+  now?: () => number;
+}
+
+/** One-line description of a dropped event: identity fields + first schema issue. */
+function describeDropped(event: unknown, issue: string | undefined): string {
+  const e = (event ?? {}) as Record<string, unknown>;
+  const pick = (k: string): string => {
+    const v = e[k];
+    return typeof v === "string" || typeof v === "number" ? String(v) : "?";
+  };
+  return `id=${pick("id")} port=${pick("port")} endpoint=${pick("endpoint")} model=${pick("model")}${issue ? ` issue=${issue}` : ""}`;
+}
+
+export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageStore {
+  const warn = opts.warn ?? ((message: string) => log.warn(message));
+  const now = opts.now ?? Date.now;
+  let droppedCount = 0;
+  let lastDroppedLogMs = Number.NEGATIVE_INFINITY; // the first drop always warns
   return {
     async insertBatch(nodeId, events) {
       if (events.length === 0) return 0;
@@ -295,7 +320,21 @@ export function createUsageStore(db: Db): UsageStore {
       const parsedEvents: UsageRequest[] = [];
       for (const event of events) {
         const parsed = usageRequestSchema.safeParse(event);
-        if (!parsed.success) continue; // malformed frames never block the rest
+        if (!parsed.success) {
+          // Malformed frames never block the rest — but they must not vanish
+          // silently (IRI-055): the buffer is acked regardless, so a dropped
+          // event is lost forever. One rate-limited warning per store names
+          // the identity fields and the first schema issue.
+          droppedCount += 1;
+          const issue = parsed.error.issues[0];
+          const detail = describeDropped(event, issue ? `${issue.path.join(".")}: ${issue.message}` : undefined);
+          if (now() - lastDroppedLogMs >= DROPPED_LOG_INTERVAL_MS) {
+            lastDroppedLogMs = now();
+            warn(`usage ingest dropped ${droppedCount} malformed event(s) on node ${nodeId} since the last warning — last: ${detail}`);
+            droppedCount = 0;
+          }
+          continue;
+        }
         parsedEvents.push(parsed.data);
       }
       if (parsedEvents.length === 0) return 0;

@@ -3,6 +3,7 @@ import type { Socket } from "node:net";
 import { Capture, MAX_BODY_PARSE_BYTES, MAX_RESPONSE_PARSE_BYTES } from "./capture.js";
 import {
   iroriIdentityFromHeaders,
+  normalizeUsageEndpoint,
   parseIroriRetryHeader,
 } from "@irori/core";
 import type { BodyRetention, UsageRequest } from "@irori/core";
@@ -144,7 +145,7 @@ export class CaptureProxy {
       ? new Capture({
           setupId: this.opts.setupId,
           port: boundPort,
-          endpoint: (req.url ?? "").split("?")[0] ?? "/",
+          endpoint: normalizeUsageEndpoint((req.url ?? "").split("?")[0] ?? "/"),
           sourceAddr: req.socket.remoteAddress ?? null,
           retention: this.opts.retention,
           identity: iroriIdentityFromHeaders(req.headers),
