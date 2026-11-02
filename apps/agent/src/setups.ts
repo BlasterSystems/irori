@@ -1,5 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
-import { createServer } from "node:net";
+import { createServer, Socket } from "node:net";
 import { accessSync, appendFileSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, openSync, closeSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -51,6 +51,15 @@ export interface SetupDriverDeps {
   events: SetupDriverEvents;
   /** M8 capture proxy hooks (ADR-0008 §7); absent = capture unsupported. */
   capture?: SetupCaptureHooks;
+  /**
+   * IR-156: is anything listening on this loopback port? Injected for tests;
+   * the default is a TCP connect. Used by the capture-proxy watchdog to tell a
+   * daemonized engine (alive outside the recorded group) from a dead one.
+   */
+  engineAlive?: (port: number) => Promise<boolean>;
+  /** IR-156 test seams for the watchdog windows (defaults above). */
+  daemonEngineWarmupMs?: number;
+  daemonLogIdleMs?: number;
   log?: (message: string) => void;
 }
 
@@ -78,7 +87,46 @@ function fileSizeOrZero(path: string): number {
   }
 }
 
+/** Last write to the run log, 0 when it does not exist (IR-156 idleness). */
+function fileMtimeOrZero(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 const STOP_FALLBACK_GRACE_MS = 5_000;
+
+/**
+ * IR-156: minimum age before a daemonized run's capture proxy may be reclaimed.
+ * The engine binds its loopback port only after loading weights, so a young run
+ * is not evidence of death.
+ */
+const DAEMON_ENGINE_WARMUP_MS = 60_000;
+/** The run log must also be silent for this long — a loading engine writes. */
+const DAEMON_LOG_IDLE_MS = 60_000;
+/** TCP connect timeout for the loopback engine-port check. */
+const ENGINE_CONNECT_TIMEOUT_MS = 1_500;
+
+/** Default engine-aliveness check: does anything accept a loopback connection? */
+async function defaultEngineAlive(port: number): Promise<boolean> {
+  const socket = new Socket();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.setTimeout(ENGINE_CONNECT_TIMEOUT_MS);
+      socket.once("connect", resolve);
+      socket.once("timeout", () => reject(new Error("connect timeout")));
+      socket.once("error", reject);
+      socket.connect(port, "127.0.0.1");
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    socket.destroy();
+  }
+}
 
 interface DriverRecord {
   setupId: string;
@@ -634,6 +682,15 @@ export class SetupDriver {
     }
     const child = this.children.get(setupId);
     const alive = (child !== undefined && child.exitCode === null) || (record.pgid !== null && groupAlive(record.pgid));
+    if (!alive) {
+      // IR-156: the driver is the only owner of the capture proxy, so the
+      // driver must also be the one that releases it. A daemonized run whose
+      // engine then died left the listener bound forever — the port stayed
+      // occupied (the recipe's own restart failed with "port already in use")
+      // until someone pressed Stop. Reclaim on the same truth that reports
+      // stopped.
+      void this.reclaimIfDead(setupId, record);
+    }
     this.deps.events.onEvent(setupId, {
       runId: record.runId,
       state: alive ? "running" : "stopped",
@@ -642,6 +699,41 @@ export class SetupDriver {
       pgid: record.pgid,
       error: null,
     });
+  }
+
+  /**
+   * IR-156: release the capture proxy (and the retained record) of a run that
+   * is verifiably over: no child, dead process group, nothing answering the
+   * engine port, and no run-log traffic for a while. The grace windows keep a
+   * legitimately slow daemonizing engine (weights still loading, port not bound
+   * yet, log still streaming) from being torn down.
+   */
+  private async reclaimIfDead(setupId: string, record: DriverRecord): Promise<void> {
+    if (record.proxyPort === null || record.enginePort === null) return; // nothing leaked
+    if (this.stopping.has(setupId)) return; // stop() owns the teardown
+    if (this.records.get(setupId) !== record) return; // superseded by a newer run
+    const child = this.children.get(setupId);
+    if (child !== undefined && child.exitCode === null) return;
+    if (record.pgid !== null && groupAlive(record.pgid)) return;
+    // Both windows must pass: a young run may still be loading weights (the
+    // engine binds late) and a loading engine keeps writing its run log.
+    const ageMs = Date.now() - record.startedAt;
+    const idleMs = Date.now() - fileMtimeOrZero(record.logPath);
+    if (ageMs < (this.deps.daemonEngineWarmupMs ?? DAEMON_ENGINE_WARMUP_MS)) return;
+    if (idleMs < (this.deps.daemonLogIdleMs ?? DAEMON_LOG_IDLE_MS)) return;
+    if (await this.engineAlive(record.enginePort)) return; // engine lives outside the group
+    // Re-check: the connect check is async, a new run may have taken over.
+    if (this.records.get(setupId) !== record) return;
+    this.pushLog(
+      setupId,
+      `driver: engine on :${record.enginePort} is gone — releasing capture proxy :${record.proxyPort}`,
+    );
+    await this.stopCaptureProxy(setupId, record.proxyPort);
+    this.finish(setupId, null, `engine on port ${record.enginePort} stopped answering`);
+  }
+
+  private async engineAlive(port: number): Promise<boolean> {
+    return (this.deps.engineAlive ?? defaultEngineAlive)(port);
   }
 
   /** Spawns the stop script (own group); logs its output; resolves on exit. */

@@ -342,6 +342,27 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   serving engine forever. Only when nothing answers does the poll demote. A
   stop that settled within the last 30 s always demotes (the node's probe may
   still hold the pre-kill snapshot).
+- **One live setup per head port** (IR-155): `POST /api/v1/setups` and
+  `PATCH /api/v1/setups/:id` reject (`400`, `SetupInvalidError`) a head/port pair
+  already held by a `starting|running|stopping` setup, naming the holder;
+  `POST /api/v1/setups/:id/start` refuses the same situation with `409` for rows
+  that predate the guard. Two setups on one port cannot both bind it, and the
+  probe cannot say which of them started the engine — the sibling that never
+  started used to read the live engine as its own (a phantom `running/healthy`
+  row whose Stop then ran the shared script pair against the real engine). The
+  wizard warns at the port field before saving.
+- **Probe truth attributes the port to one row** (IR-155): the IR-151
+  promotion/demotion rules above apply only to the row that owns
+  `(headNodeId, port)` — a row that never started, or one whose live sibling
+  started more recently, is never promoted by the probe and is reported
+  `stopped` with the owning setup named. A sibling's live engine is not evidence
+  that this row is serving.
+- **The agent releases a leaked capture proxy** (IR-156): when a daemonized run's
+  driver is gone (no child, dead group) and nothing answers its engine port
+  after the warmup window with the run log idle, the driver closes the proxy and
+  drops the record on its status poll. Before this, the listener stayed bound
+  forever after such an engine died — the port was occupied (the recipe's own
+  restart failed with "port already in use") until a Stop was issued.
 - `POST /api/v1/setups/:id/stop` forwards the stop frame **regardless of row
   status** (IR-151) — no silent no-op for a `stopped` row. The agent answers
   harmlessly when its driver holds no record (that nack settles clean,
