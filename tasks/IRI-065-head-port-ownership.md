@@ -35,6 +35,15 @@ live engine, and nothing but the owner's `lastError` explains which row was real
   (`.input--invalid` + `.field-error`) while typing. An engine answering with no
   setup owning the port is deliberately NOT reported — adopting an unmanaged
   engine is the intended flow.
+- Client-side mirror of the same rule (the chip path had the identical defect,
+  visible in the browser check: three cards read `SERVING :9180` for one engine):
+  - `serve.ts`: `portRival` / `ownsProbePort` (same ownership rule as the hub),
+    and `runningEnginesFromProbes` attributes a port's engine via
+    `pickPortOwner` instead of the first matching row.
+  - `ServeView.vue`: `probeSees()` gates chips and node lines on ownership;
+    `canStop()` keeps Stop for any row that has actually run and whose port
+    answers — hiding the only control that kills a live engine would strand it
+    when the heuristic picks the wrong one of two live siblings.
 
 ## Out of scope
 
