@@ -20,6 +20,7 @@ import {
   runningEnginesFromProbes,
   sanitizeWorkerIds,
   probeSeesEngine,
+  portClashMessage,
   scriptPathError,
   setupChipView,
   setupNodeLines,
@@ -715,6 +716,22 @@ async function ensureFreshCreated(): Promise<SetupInfo> {
 /** Serving port — the script owns it; Irori needs it for probes and env. */
 const wizardPort = ref(8080);
 
+/**
+ * IR-155: one head port hosts exactly one engine, so a second LIVE setup on the
+ * same (head, port) is a config the platform cannot honour — the probe cannot
+ * attribute the engine between them, and the phantom row's Stop kills the
+ * sibling's engine. Warn where the port is typed; the server refuses the save.
+ * An unmanaged engine answering the port is NOT reported: adopting one is the
+ * intended flow (see onAdoptEngine).
+ */
+const portClash = computed<string | null>(() =>
+  portClashMessage(setups.value, {
+    editId: wizard.value.editId,
+    headNodeId: wizard.value.headNodeId,
+    port: wizardPort.value,
+  }, nodeName),
+);
+
 async function loadPlacement(): Promise<void> {
   placementRows.value = null;
   if (wizard.value.model === "") return;
@@ -1054,7 +1071,9 @@ function fmtGiB(bytes: number | null): string {
               <p v-if="modelChoices.length === 0" class="faint">no catalog matches — the exact HF repo id can be typed below for a chained download</p>
             </div>
             <div class="field"><label>Model (catalog name or HF repo id)</label><input v-model="wizard.model" class="input mono" /></div>
-            <div class="field"><label>Serving port (script-defined; probed for health)</label><input v-model.number="wizardPort" class="input" type="number" min="1" max="65535" /></div>
+            <div class="field"><label>Serving port (script-defined; probed for health)</label><input v-model.number="wizardPort" class="input" :class="{ 'input--invalid': portClash !== null }" type="number" min="1" max="65535" />
+              <p v-if="portClash !== null" class="field-error">{{ portClash }}</p>
+            </div>
           </div>
         </section>
 
