@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { createDbHandle, createNodeStore, nodes, type DbHandle, type NodeRecord, type NodeStore } from "@irori/db";
+import { createDbHandle, createNodeStore, nodes, setups, type DbHandle, type NodeRecord, type NodeStore } from "@irori/db";
 import { createRings, type Rings } from "../src/rings.js";
 import { createSseHub, type SseHub } from "../src/sse.js";
 import {
@@ -491,6 +491,92 @@ d("setups service", () => {
     const offline = await ctx.service.stop(setup.id);
     expect(offline!.status).toBe("stopped");
     ctx.online.add(ids.head);
+  });
+
+  it("refuses a second live setup on the same head port (IR-155)", async () => {
+    const base = {
+      kind: "single" as const,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    };
+    const holder = await ctx.service.create({ ...base, name: "clash-holder", model: "Clash-Holder", port: 9160 });
+    const starting = ctx.service.start(holder.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === holder.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: holder.id, ok: true, error: null }, ids.head);
+    await starting;
+
+    // Two engines cannot bind one port, and probe truth cannot tell them apart
+    // (IR-155): the sibling that never started reads the live engine as its own
+    // and its Stop kills the real engine via the shared script pair.
+    await expect(ctx.service.create({ ...base, name: "clash-dup", model: "Clash-Dup", port: 9160 })).rejects.toThrowError(SetupInvalidError);
+    const parked = await ctx.service.create({ ...base, name: "clash-parked", model: "Clash-Parked", port: 9170 });
+    await expect(ctx.service.patch(parked.id, { port: 9160 })).rejects.toThrowError(SetupInvalidError);
+    // The refused patch left the parked row on its own port, not half-moved.
+    expect((await ctx.service.get(parked.id))!.port).toBe(9170);
+
+    // A row sharing the port from before the guard cannot start onto the live
+    // engine either — the error names the holder so the owner can act.
+    await h.db.update(setups).set({ port: 9160 }).where(eq(setups.id, parked.id));
+    await expect(ctx.service.start(parked.id)).rejects.toThrowError(/already served by setup "clash-holder"/);
+
+    // Once the holder is stopped the port is free again.
+    const stopping = ctx.service.stop(holder.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === holder.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: holder.id, ok: true, error: null }, ids.head);
+    await stopping;
+    expect((await ctx.service.create({ ...base, name: "clash-after", model: "Clash-After", port: 9160 })).port).toBe(9160);
+  });
+
+  it("probe truth never promotes the sibling that never started (IR-155)", async () => {
+    const base = {
+      kind: "single" as const,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    };
+    // Both rows exist while stopped (the pre-guard shape the live fleet hit:
+    // TP2 and TP3 both declaring DGX-1:8081 + GLM-5.3).
+    const owner = await ctx.service.create({ ...base, name: "own-port", model: "Own-Port", port: 9161 });
+    const phantom = await ctx.service.create({ ...base, name: "phantom", model: "Own-Port", port: 9161 });
+
+    const starting = ctx.service.start(owner.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === owner.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: owner.id, ok: true, error: null }, ids.head);
+    await starting;
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9161, host: "127.0.0.1", detected: true, model: "own-port" })],
+    });
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: owner.id, runId: null, state: "stopped", exitCode: 0, pid: 10, pgid: 10, error: null }, ids.head);
+    expect((await ctx.service.get(owner.id))!.status).toBe("running");
+
+    // The real engine answers, but it is NOT the phantom's: driver-gone polls
+    // and the health watcher must both leave the never-started row stopped.
+    const pollPhantom = () => ctx.service.onDriverEvent(
+      { type: "setup-event", setupId: phantom.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null },
+      ids.head,
+    );
+    await pollPhantom();
+    expect((await ctx.service.get(phantom.id))!.status).toBe("stopped");
+    expect((await ctx.service.get(phantom.id))!.health).toBeNull();
+    await ctx.service.tick();
+    expect((await ctx.service.get(phantom.id))!.status).toBe("stopped");
+
+    // The owner keeps its promotion — the fix must not demote a real engine.
+    await ctx.service.onDriverEvent({ type: "setup-event", setupId: owner.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null }, ids.head);
+    const held = await ctx.service.get(owner.id);
+    expect(held!.status).toBe("running");
+    expect(held!.health).toBe("healthy");
+
+    const cleanup = ctx.service.stop(owner.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === owner.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: owner.id, ok: true, error: null }, ids.head);
+    await cleanup;
   });
 
   it("refuses a second concurrent stop instead of overwriting its ack slot (review fix)", async () => {

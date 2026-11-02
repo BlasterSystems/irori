@@ -6,6 +6,7 @@ import {
   fmtEta,
   fmtRate,
   probeSeesEngine,
+  portClashMessage,
   runningEnginesFromProbes,
   sanitizeWorkerIds,
   scriptPathError,
@@ -336,5 +337,43 @@ describe("probeSeesEngine (IR-151)", () => {
     expect(probeSeesEngine(s, new Map([[headId, { ports: [port(false, null)] }]]))).toBe(false);
     expect(probeSeesEngine(s, new Map([[headId, null]]))).toBe(false);
     expect(probeSeesEngine(s, new Map())).toBe(false);
+  });
+});
+
+describe("portClashMessage (IR-155)", () => {
+  const HEAD = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+  const OTHER_HEAD = "22222222-2222-4222-8222-222222222222";
+  const nameOf = (id: string): string => (id === HEAD ? "DGX-1" : id);
+  const draft = (o: Partial<{ editId: string | null; headNodeId: string; port: number }>) => ({
+    editId: null,
+    headNodeId: HEAD,
+    port: 8081,
+    ...o,
+  });
+
+  it("warns when a live setup already serves the head port", () => {
+    for (const status of ["starting", "running", "stopping"] as const) {
+      const msg = portClashMessage([setup({ headNodeId: HEAD, port: 8081, status })], draft({}), nameOf);
+      expect(msg).toContain("port 8081 on DGX-1");
+      expect(msg).toContain("GLM-5.3-Flash-EXL3");
+    }
+  });
+
+  it("stays quiet for a stopped sibling, another head, another port, or a bad port", () => {
+    const live = setup({ headNodeId: HEAD, port: 8081, status: "running" });
+    expect(portClashMessage([setup({ headNodeId: HEAD, port: 8081, status: "stopped" })], draft({}), nameOf)).toBeNull();
+    expect(portClashMessage([setup({ headNodeId: HEAD, port: 8081, status: "failed" })], draft({}), nameOf)).toBeNull();
+    expect(portClashMessage([live], draft({ headNodeId: OTHER_HEAD }), nameOf)).toBeNull();
+    expect(portClashMessage([live], draft({ port: 8082 }), nameOf)).toBeNull();
+    expect(portClashMessage([live], draft({ port: 0 }), nameOf)).toBeNull();
+    expect(portClashMessage([live], draft({ port: 8081.5 }), nameOf)).toBeNull();
+    expect(portClashMessage([live], draft({ headNodeId: "" }), nameOf)).toBeNull();
+  });
+
+  it("never warns about the row being edited, and flags the sibling among many", () => {
+    const mine = setup({ headNodeId: HEAD, port: 8081, status: "running" });
+    expect(portClashMessage([mine], draft({ editId: mine.id }), nameOf)).toBeNull();
+    const other = setup({ headNodeId: HEAD, port: 8081, status: "running" });
+    expect(portClashMessage([mine, other], draft({}), nameOf)).toContain("already served by");
   });
 });
