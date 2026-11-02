@@ -549,6 +549,34 @@ export interface RecipeSplit {
   stopName: string;
 }
 
+/** A live setup row can still own the engine answering its head port. */
+const LIVE_SETUP_STATUS: Record<string, true> = { starting: true, running: true, stopping: true };
+
+/**
+ * IR-155: one head port hosts exactly one engine, so a second LIVE setup on the
+ * same (head, port) is a configuration the platform cannot honour — probe truth
+ * cannot attribute the engine between siblings, and the phantom row's Stop runs
+ * the shared script pair, killing the real engine. The wizard warns at the port
+ * field; the server refuses the save. An engine that answers the port with no
+ * setup owning it is NOT a clash: adopting an unmanaged engine is intended.
+ */
+export function portClashMessage(
+  setups: readonly Pick<SetupInfo, "id" | "name" | "headNodeId" | "port" | "status">[],
+  draft: { editId: string | null; headNodeId: string; port: number },
+  nodeName: (nodeId: string) => string,
+): string | null {
+  if (draft.headNodeId === "" || !Number.isInteger(draft.port) || draft.port <= 0) return null;
+  const rival = setups.find(
+    (s) =>
+      s.id !== draft.editId &&
+      s.headNodeId === draft.headNodeId &&
+      s.port === draft.port &&
+      LIVE_SETUP_STATUS[s.status] === true,
+  );
+  if (rival === undefined) return null;
+  return `port ${draft.port} on ${nodeName(rival.headNodeId)} is already served by “${rival.name}” — stop it first, or pick another port`;
+}
+
 /**
  * IRI-051: splits stored start/stop paths into recipe-folder + name fields for
  * the wizard prefill. Shared dirname → folder + basenames (round-trips through

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Response } from "express";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   deriveNodeRoles,
   diffNodeRoles,
@@ -92,6 +92,10 @@ const STOP_ACK_TIMEOUT_MS = 75_000;
 const LOG_RING_LINES = 1000;
 const PROGRESS_EMIT_MS = 1_000;
 const DRIVER_POLL_EVERY = 3; // ticks
+
+/** Rows that may still own an engine on their head port (IR-155). */
+const LIVE_STATUS: Record<string, true> = { starting: true, running: true, stopping: true };
+const isLiveStatus = (status: string): boolean => LIVE_STATUS[status] === true;
 
 function iso(d: Date | null): string | null {
   return d === null ? null : d.toISOString();
@@ -395,6 +399,62 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     }
   };
 
+  /**
+   * IR-155: which row may claim the engine answering on (headNodeId, port).
+   * The probe cannot tell which sibling started an engine, so two setups on one
+   * head port used to produce a phantom row: a sibling that never started read
+   * the live engine as its own (running/healthy) and its Stop ran the shared
+   * script pair, killing the real engine. Two rules:
+   *  - a row that never started owns nothing;
+   *  - among live rows, the one started most recently owns the port.
+   * Returns the sibling that outranks `row`, or null when the row owns it.
+   */
+  const portRival = async (row: typeof setups.$inferSelect): Promise<typeof setups.$inferSelect | null> => {
+    const others = await deps.db
+      .select()
+      .from(setups)
+      .where(and(eq(setups.headNodeId, row.headNodeId), eq(setups.port, row.port), ne(setups.id, row.id)));
+    if (others.length === 0) return null;
+    if (row.lastStartedAt === null) return others.find((o) => o.lastStartedAt !== null) ?? null;
+    const mine = row.lastStartedAt.getTime();
+    return others.find((o) => isLiveStatus(o.status) && o.lastStartedAt !== null && o.lastStartedAt.getTime() > mine) ?? null;
+  };
+
+  /** Live sibling on the same head port — what refuses a second create/patch/start. */
+  const liveRivalOnPort = async (
+    headNodeId: string,
+    port: number,
+    exceptId: string | null,
+  ): Promise<typeof setups.$inferSelect | null> => {
+    const where =
+      exceptId === null
+        ? and(eq(setups.headNodeId, headNodeId), eq(setups.port, port))
+        : and(eq(setups.headNodeId, headNodeId), eq(setups.port, port), ne(setups.id, exceptId));
+    const rows = await deps.db.select().from(setups).where(where);
+    return rows.find((o) => isLiveStatus(o.status)) ?? null;
+  };
+
+  /**
+   * IR-155: one head port can host exactly one engine, so a second LIVE setup on
+   * the same (head, port) is not a configuration the platform can honour — it is
+   * the phantom-row setup of IR-155 (probe truth cannot attribute the engine,
+   * and its Stop runs a script pair that kills the sibling's engine). Refuse it
+   * at create/patch instead of discovering it in the live fleet.
+   */
+  const ensurePortFree = async (
+    headNodeId: string,
+    port: number,
+    exceptId: string | null,
+  ): Promise<void> => {
+    const rival = await liveRivalOnPort(headNodeId, port, exceptId);
+    if (rival !== null) {
+      const head = await deps.getNode(headNodeId);
+      throw new SetupInvalidError(
+        `port ${port} on ${head?.name ?? "that node"} is already served by setup "${rival.name}" — stop it first, or pick another port`,
+      );
+    }
+  };
+
   const ensurePortAssigned = async (headNodeId: string, port: number): Promise<void> => {
     const [row] = await deps.db.select().from(nodes).where(eq(nodes.id, headNodeId)).limit(1);
     if (!row) return;
@@ -436,16 +496,27 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
 
   const evaluateHealth = async (row: typeof setups.$inferSelect): Promise<void> => {
     const snap = latestPortSnap(row.headNodeId, row.port);
+    // IR-155: probe truth names the port's engine, not who started it. When a
+    // sibling owns the port, this row must not claim the engine as its own.
+    const rival = snap?.detected === true ? await portRival(row) : null;
     let health = row.health;
     let status: SetupStatus = row.status;
     let lastError = row.lastError;
-    if (snap?.detected === true && modelIdMatches(snap.model, row.model)) {
+    if (rival === null && snap?.detected === true && modelIdMatches(snap.model, row.model)) {
       health = "healthy";
       status = "running";
       lastError = null;
-    } else if (snap?.detected === true) {
+    } else if (rival === null && snap?.detected === true) {
       health = "foreign";
       status = "running";
+    } else if (rival !== null) {
+      // IR-155: the engine answering this port belongs to a sibling (the row
+      // that never started, or the one started later — see portRival). Its own
+      // driver is gone, so the row cannot be serving: report stopped instead of
+      // letting the probe's truth about the port read as a live engine here too.
+      health = null;
+      status = "stopped";
+      lastError = `port ${row.port} is served by "${rival?.name ?? "another setup"}" — this setup's own engine is not running`;
     } else if (row.health === "healthy") {
       // The engine stopped answering (crash, manual kill): demote until it
       // answers again — the probe is the source of truth for health.
@@ -475,6 +546,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
 
     async create(input) {
       await validateWorkers(input.nodes, input.headNodeId);
+      await ensurePortFree(input.headNodeId, input.port, null);
       const [row] = await deps.db
         .insert(setups)
         .values({
@@ -505,6 +577,9 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       const [row] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
       if (!row) throw new SetupNotFoundError("setup not found");
       if (patch.nodes !== undefined) await validateWorkers(patch.nodes, row.headNodeId);
+      if (patch.port !== undefined && patch.port !== row.port) {
+        await ensurePortFree(row.headNodeId, patch.port, id);
+      }
       if (patch.name !== undefined) nameBySetup.set(id, patch.name);
       await updateRow(id, {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
@@ -550,6 +625,16 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         throw new SetupBusyError(`setup is ${row.status}`);
       }
       if (!deps.online().has(row.headNodeId)) throw new SetupOfflineError("head node agent is offline");
+      // IR-155: rows created before the create/patch guard can still share a head
+      // port; the second start would fight the live engine for it (and the
+      // capture proxy for its port). Refuse instead.
+      const rival = await liveRivalOnPort(row.headNodeId, row.port, row.id);
+      if (rival !== null) {
+        const head = await deps.getNode(row.headNodeId);
+        throw new SetupStartError(
+          `port ${row.port} on ${head?.name ?? "the head node"} is already served by setup "${rival.name}" — stop it first, or pick another port`,
+        );
+      }
 
       const envCfg = envExportsSchema.parse(row.env);
       // Refuse fast: a MODEL_PATH start resolves on the head's local store via
@@ -767,7 +852,11 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
             // probe may still hold the pre-kill snapshot.
             const inStopGrace = Date.now() - (stopSettledMs.get(row.id) ?? 0) < STOP_TRUTH_GRACE_MS;
             const snap = latestPortSnap(row.headNodeId, row.port);
-            if (!inStopGrace && snap !== null && snap.detected) {
+            // IR-155: probe truth can name the port's engine but not who started
+            // it. When a sibling owns the port, this row's driver is gone and
+            // the engine answering is not ours — demote rather than resurrect.
+            const rival = snap?.detected === true ? await portRival(row) : null;
+            if (!inStopGrace && snap !== null && snap.detected && rival === null) {
               status = "running";
               health = modelIdMatches(snap.model, row.model) ? "healthy" : "foreign";
               // Mirror evaluateHealth: the engine answering clears the stale
