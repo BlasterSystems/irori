@@ -6,6 +6,7 @@ import {
   fmtEta,
   fmtRate,
   probeSeesEngine,
+  ownsProbePort,
   portClashMessage,
   runningEnginesFromProbes,
   sanitizeWorkerIds,
@@ -322,6 +323,31 @@ describe("runningEnginesFromProbes (IR-152 Running now)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]!.nodeName).toBe(otherId.slice(0, 8));
   });
+
+  it("attributes a duplicated head port to the row that owns it (IR-155)", () => {
+    // Pre-guard shape: three rows declare the same head port; only one ever ran.
+    const rows = runningEnginesFromProbes(
+      [{ nodeId: headId, ports: [p(8081, true, "glm-5.3-flash-exl3", 84.5)] }],
+      [node(headId, "dgx1", true)],
+      [
+        { id: "phantom", name: "phantom", headNodeId: headId, port: 8081, status: "stopped", lastStartedAt: null },
+        { id: "owner", name: "owner", headNodeId: headId, port: 8081, status: "running", lastStartedAt: "2026-11-02T01:00:00.000Z" },
+        { id: "successor", name: "successor", headNodeId: headId, port: 8081, status: "stopped", lastStartedAt: null },
+      ],
+    );
+    expect(rows[0]).toMatchObject({ managedSetupId: "owner", managedName: "owner" });
+
+    // Two live starters: the most recent start owns the engine.
+    const both = runningEnginesFromProbes(
+      [{ nodeId: headId, ports: [p(8081, true)] }],
+      [node(headId, "dgx1", true)],
+      [
+        { id: "older", name: "older", headNodeId: headId, port: 8081, status: "running", lastStartedAt: "2026-11-02T01:00:00.000Z" },
+        { id: "newer", name: "newer", headNodeId: headId, port: 8081, status: "running", lastStartedAt: "2026-11-02T05:00:00.000Z" },
+      ],
+    );
+    expect(both[0]).toMatchObject({ managedSetupId: "newer" });
+  });
 });
 
 describe("probeSeesEngine (IR-151)", () => {
@@ -337,6 +363,47 @@ describe("probeSeesEngine (IR-151)", () => {
     expect(probeSeesEngine(s, new Map([[headId, { ports: [port(false, null)] }]]))).toBe(false);
     expect(probeSeesEngine(s, new Map([[headId, null]]))).toBe(false);
     expect(probeSeesEngine(s, new Map())).toBe(false);
+  });
+});
+
+describe("ownsProbePort (IR-155)", () => {
+  const HEAD = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+  const OTHER = "33333333-3333-4333-8333-333333333333";
+  const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const row = (id: string, o: Partial<SetupInfo> = {}): SetupInfo =>
+    setup({ id, headNodeId: HEAD, port: 8081, ...o });
+
+  it("a row that never started owns nothing while a sibling has run", () => {
+    const never = row(A, { lastStartedAt: null, status: "stopped" });
+    const ran = row(B, { lastStartedAt: "2026-11-02T01:00:00.000Z", status: "running" });
+    expect(ownsProbePort(never, [never, ran])).toBe(false);
+    expect(ownsProbePort(ran, [never, ran])).toBe(true);
+  });
+
+  it("among live rows the most recent start owns the port", () => {
+    const first = row(A, { lastStartedAt: "2026-11-02T01:00:00.000Z", status: "running" });
+    const later = row(B, { lastStartedAt: "2026-11-02T03:00:00.000Z", status: "running" });
+    expect(ownsProbePort(first, [first, later])).toBe(false);
+    expect(ownsProbePort(later, [first, later])).toBe(true);
+  });
+
+  it("a dead sibling never outranks, and other heads/ports are irrelevant", () => {
+    const mine = row(A, { lastStartedAt: "2026-11-02T01:00:00.000Z", status: "running" });
+    const deadLater = row(B, { lastStartedAt: "2026-11-02T05:00:00.000Z", status: "stopped" });
+    const otherHead = row(C, { headNodeId: OTHER, lastStartedAt: "2026-11-02T05:00:00.000Z", status: "running" });
+    const otherPort = row("dddddddd-dddd-4ddd-8ddd-dddddddddddd", { port: 8082, lastStartedAt: "2026-11-02T05:00:00.000Z", status: "running" });
+    expect(ownsProbePort(mine, [mine, deadLater, otherHead, otherPort])).toBe(true);
+  });
+
+  it("a lone row always owns its port, including with two never-started rows", () => {
+    const alone = row(A, { lastStartedAt: null });
+    expect(ownsProbePort(alone, [alone])).toBe(true);
+    const p1 = row(A, { lastStartedAt: null });
+    const p2 = row(B, { lastStartedAt: null });
+    expect(ownsProbePort(p1, [p1, p2])).toBe(true);
+    expect(ownsProbePort(p2, [p1, p2])).toBe(true);
   });
 });
 

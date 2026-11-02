@@ -334,7 +334,10 @@ export interface RunningEngineRow {
 export function runningEnginesFromProbes(
   probes: Array<{ nodeId: string; ports: Array<{ port: number; detected: boolean; backend: string; model: string | null; decodeTps: number | null }> }>,
   nodes: Array<{ id: string; name: string }>,
-  setups: Array<{ id: string; name: string; headNodeId: string; port: number }>,
+  // IR-155: status/lastStartedAt are optional so callers that only know the
+  // identity fields keep compiling; without them attribution falls back to the
+  // first match, as before.
+  setups: Array<{ id: string; name: string; headNodeId: string; port: number; status?: string; lastStartedAt?: string | null }>,
 ): RunningEngineRow[] {
   const rows: RunningEngineRow[] = [];
   const seen = new Set<string>();
@@ -345,7 +348,12 @@ export function runningEnginesFromProbes(
       if (seen.has(key)) continue;
       seen.add(key);
       const node = nodes.find((n) => n.id === probe.nodeId);
-      const managed = setups.find((s) => s.headNodeId === probe.nodeId && s.port === p.port) ?? null;
+      // IR-155: pre-guard fleets can hold several rows on one head port. The
+      // probe cannot say which of them launched the engine, so name the owner by
+      // the same rule the hub applies (a row that never started owns nothing;
+      // among live rows, the most recent start) instead of the first row listed.
+      const candidates = setups.filter((s) => s.headNodeId === probe.nodeId && s.port === p.port);
+      const managed = pickPortOwner(candidates);
       rows.push({
         key,
         nodeId: probe.nodeId,
@@ -527,6 +535,27 @@ export function setupSubline(setup: SetupInfo): string {
   return "";
 }
 
+/** A candidate row declaring an engine on a head port (subset of SetupInfo). */
+type PortCandidate = { id: string; name: string; headNodeId: string; port: number; status?: string; lastStartedAt?: string | null };
+
+/**
+ * IR-155: which row a probe-detected engine on a head port belongs to. A live
+ * row that has started wins (most recent start), then any row that has ever
+ * started; a row that never started never wins. With no evidence at all — legacy
+ * callers that pass identity fields only — the first candidate is named, as
+ * before.
+ */
+function pickPortOwner(candidates: readonly PortCandidate[]): PortCandidate | null {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0]!;
+  const newest = (rows: PortCandidate[]): PortCandidate =>
+    rows.reduce((best, r) => (Date.parse(r.lastStartedAt!) > Date.parse(best.lastStartedAt!) ? r : best), rows[0]!);
+  const started = candidates.filter((c) => c.lastStartedAt != null);
+  if (started.length === 0) return candidates[0]!;
+  const live = started.filter((c) => c.status === undefined || isLiveSetup(c));
+  return newest(live.length > 0 ? live : started);
+}
+
 /**
  * IRI-051: composes a script path from an optional recipe folder and a script
  * name. A path-shaped name (starts with `/` or `~`, or contains `/`) is used
@@ -551,6 +580,32 @@ export interface RecipeSplit {
 
 /** A live setup row can still own the engine answering its head port. */
 const LIVE_SETUP_STATUS: Record<string, true> = { starting: true, running: true, stopping: true };
+const isLiveSetup = (s: { status?: string | null }): boolean => LIVE_SETUP_STATUS[s.status ?? ""] === true;
+
+type PortRow = Pick<SetupInfo, "id" | "name" | "headNodeId" | "port" | "status" | "lastStartedAt">;
+
+/**
+ * IR-155: the sibling that outranks `setup` for its head port, mirroring the
+ * server's rule in `setups-service.ts` — a row that never started owns nothing,
+ * and among live rows the one started most recently owns it. The node probe can
+ * only say that AN engine answers the port, so without this a second row sharing
+ * the port reads "serving :PORT" beside the real one and offers a Stop whose
+ * script pair can kill the sibling's engine.
+ */
+export function portRival(setup: PortRow, setups: readonly PortRow[]): PortRow | null {
+  const others = setups.filter(
+    (s) => s.id !== setup.id && s.headNodeId === setup.headNodeId && s.port === setup.port,
+  );
+  if (others.length === 0) return null;
+  if (setup.lastStartedAt === null) return others.find((o) => o.lastStartedAt !== null) ?? null;
+  const mine = Date.parse(setup.lastStartedAt);
+  return others.find((o) => isLiveSetup(o) && o.lastStartedAt !== null && Date.parse(o.lastStartedAt) > mine) ?? null;
+}
+
+/** True when this row may claim the engine answering its head port. */
+export function ownsProbePort(setup: PortRow, setups: readonly PortRow[]): boolean {
+  return portRival(setup, setups) === null;
+}
 
 /**
  * IR-155: one head port hosts exactly one engine, so a second LIVE setup on the
@@ -561,17 +616,13 @@ const LIVE_SETUP_STATUS: Record<string, true> = { starting: true, running: true,
  * setup owning it is NOT a clash: adopting an unmanaged engine is intended.
  */
 export function portClashMessage(
-  setups: readonly Pick<SetupInfo, "id" | "name" | "headNodeId" | "port" | "status">[],
+  setups: readonly PortRow[],
   draft: { editId: string | null; headNodeId: string; port: number },
   nodeName: (nodeId: string) => string,
 ): string | null {
   if (draft.headNodeId === "" || !Number.isInteger(draft.port) || draft.port <= 0) return null;
   const rival = setups.find(
-    (s) =>
-      s.id !== draft.editId &&
-      s.headNodeId === draft.headNodeId &&
-      s.port === draft.port &&
-      LIVE_SETUP_STATUS[s.status] === true,
+    (s) => s.id !== draft.editId && s.headNodeId === draft.headNodeId && s.port === draft.port && isLiveSetup(s),
   );
   if (rival === undefined) return null;
   return `port ${draft.port} on ${nodeName(rival.headNodeId)} is already served by “${rival.name}” — stop it first, or pick another port`;
