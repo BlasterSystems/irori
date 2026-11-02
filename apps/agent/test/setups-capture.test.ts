@@ -182,4 +182,96 @@ describe("SetupDriver capture lifecycle", () => {
 
     await h.driver.stop(ID, 2000);
   });
+
+  /**
+   * IR-156: a daemonizing recipe whose engine then died left the capture proxy
+   * bound forever — the port stayed occupied (the recipe's own restart failed
+   * with "port already in use") until someone pressed Stop. The driver owns the
+   * proxy, so the driver must release it on the same truth that reports stopped.
+   */
+  function makeDaemonHarness(opts: {
+    engineAlive: boolean;
+    warmupMs?: number;
+    idleMs?: number;
+  }): { h: Harness; hooks: Hooks; engineChecks: number[] } {
+    const hooks = makeHooks();
+    const dir = makeDir();
+    const events: RecordedEvent[] = [];
+    const engineChecks: number[] = [];
+    const driver = new SetupDriver({
+      stateDir: dir,
+      modelctlPath: "/nonexistent-modelctl",
+      events: { onEvent: (setupId, event) => events.push({ setupId, ...event }), onLog: () => {} },
+      capture: hooks.hooks,
+      engineAlive: async (port) => {
+        engineChecks.push(port);
+        return opts.engineAlive;
+      },
+      daemonEngineWarmupMs: opts.warmupMs ?? 0,
+      daemonLogIdleMs: opts.idleMs ?? 0,
+      log: () => {},
+    });
+    driver.init();
+    return { h: { driver, dir, events, hooks }, hooks, engineChecks };
+  }
+
+  /** A daemonizing start: the script exits 0 while the engine lives outside it. */
+  async function daemonize(h: Harness, proxyPort: number): Promise<number> {
+    const start = script(h.dir, "start-daemon.sh", `echo $PORT > ${join(h.dir, "p.txt")}\nexit 0`);
+    const result = await h.driver.start(ID, RUN, start, script(h.dir, "stop.sh", "true"), {}, null, { proxyPort, retention: null });
+    expect(result.ok).toBe(true);
+    await waitFor(() => h.events.some((e) => e.state === "stopped" && e.exitCode === 0));
+    return Number.parseInt(readFileSync(join(h.dir, "p.txt"), "utf8").trim(), 10);
+  }
+
+  /** The hub polls driver truth every 15 s; a driver only reclaims on a poll
+   *  that finds the run over, so the tests poll the way production does. */
+  async function pollUntil(driver: SetupDriver, pred: () => boolean, ms = 4000): Promise<boolean> {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      driver.reportStatus(ID);
+      if (pred()) return true;
+      if (Date.now() > deadline) return false;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  it("releases the capture proxy of a daemonized run whose engine died (IR-156)", async () => {
+    const { h, hooks, engineChecks } = makeDaemonHarness({ engineAlive: false });
+    const enginePort = await daemonize(h, 9110);
+    // Retained after the script's exit 0 (the daemonizing contract).
+    expect(hooks.stopped).toEqual([]);
+
+    expect(await pollUntil(h.driver, () => hooks.stopped.includes(ID))).toBe(true);
+    expect(engineChecks).toContain(enginePort);
+    // The leaked listener AND its retained record are gone — the next start can
+    // bind the port and is not blocked by "setup is already running".
+    expect(JSON.parse(readFileSync(join(h.dir, "setups.json"), "utf8"))).toEqual([]);
+    const again = await h.driver.start(ID, RUN, script(h.dir, "start.sh", "sleep 30"), script(h.dir, "stop.sh", "true"), {}, null, {
+      proxyPort: 9110,
+      retention: null,
+    });
+    expect(again.ok).toBe(true);
+    await h.driver.stop(ID, 2000);
+  });
+
+  it("keeps the proxy when the daemonized engine still answers (IR-156)", async () => {
+    const { h, hooks } = makeDaemonHarness({ engineAlive: true });
+    await daemonize(h, 9111);
+    // Many polls, engine answering every time: nothing may be torn down.
+    await pollUntil(h.driver, () => hooks.stopped.length > 0, 300);
+    expect(hooks.stopped).toEqual([]);
+    expect(JSON.parse(readFileSync(join(h.dir, "setups.json"), "utf8"))).toHaveLength(1);
+    // Stop still reaches the retained record and closes it.
+    expect((await h.driver.stop(ID, 2000)).ok).toBe(true);
+    expect(hooks.stopped).toEqual([ID]);
+  });
+
+  it("never reclaims inside the warmup window (IR-156)", async () => {
+    const { h, hooks } = makeDaemonHarness({ engineAlive: false, warmupMs: 60_000 });
+    await daemonize(h, 9112);
+    await pollUntil(h.driver, () => hooks.stopped.length > 0, 300);
+    expect(hooks.stopped).toEqual([]);
+    expect((await h.driver.stop(ID, 2000)).ok).toBe(true);
+  });
 });
