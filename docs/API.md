@@ -369,7 +369,9 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `lastError` untouched); with a retained record it runs the stop script and
   kills the real engine. `SetupOfflineError` still applies. The Serve card
   renders Stop for a stopped row whenever the head's probe sees the declared
-  engine on the declared port.
+  engine on the declared port **and that row has started at least once** (IR-155)
+  — a sibling that never ran cannot own the engine, so it shows neither the
+  `serving :PORT` chip nor Stop.
 - Setup frames (`setup-ack`, `setup-event`, `setup-log`) are accepted only
   from the setup's head node; `setup-validate-result` only from the node the
   validation was sent to. Frames from any other authenticated agent are

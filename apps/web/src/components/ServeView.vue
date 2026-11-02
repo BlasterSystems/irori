@@ -19,6 +19,7 @@ import {
   patchSetup,
   runningEnginesFromProbes,
   sanitizeWorkerIds,
+  ownsProbePort,
   probeSeesEngine,
   portClashMessage,
   scriptPathError,
@@ -79,8 +80,23 @@ const board = computed<SetupInfo[]>(() => {
 
 const summaryLine = computed(() => (setups.value.length === 0 ? "" : setupSummaryLine(setups.value)));
 
+/**
+ * IR-155: the "is this row's engine answering" truth for chips and node lines —
+ * only for the row that OWNS the port. A sibling that never started (or lost the
+ * port to a later start) must not read "serving :PORT" off someone else's engine.
+ */
 function probeSees(setup: SetupInfo): boolean {
-  return probeSeesEngine(setup, probes.value);
+  return ownsProbePort(setup, setups.value) && probeSeesEngine(setup, probes.value);
+}
+
+/**
+ * Stop stays available whenever an engine answers this row's port and this row
+ * has actually run one before: with two pre-guard live rows on one port the
+ * ownership rule is a heuristic (last start wins), and hiding the only control
+ * that kills a live engine would strand it.
+ */
+function canStop(setup: SetupInfo): boolean {
+  return setup.lastStartedAt !== null && probeSeesEngine(setup, probes.value);
 }
 
 function chipView(setup: SetupInfo) {
@@ -904,7 +920,7 @@ function fmtGiB(bytes: number | null): string {
               {{ startingId === setup.id ? "Starting…" : "Start" }}
             </button>
             <button
-              v-if="setup.status === 'starting' || setup.status === 'running' || probeSees(setup)"
+              v-if="setup.status === 'starting' || setup.status === 'running' || canStop(setup)"
               class="btn btn--ghost btn--sm"
               :class="{ 'btn--danger': armedStop === setup.id }"
               :disabled="stoppingId !== null"
@@ -961,7 +977,7 @@ function fmtGiB(bytes: number | null): string {
               {{ startingId === selected.id ? "Starting…" : "Start" }}
             </button>
             <button
-              v-if="selected.status === 'starting' || selected.status === 'running' || probeSees(selected)"
+              v-if="selected.status === 'starting' || selected.status === 'running' || canStop(selected)"
               class="btn btn--ghost btn--sm"
               :class="{ 'btn--danger': armedStop === selected.id }"
               :disabled="stoppingId !== null"
