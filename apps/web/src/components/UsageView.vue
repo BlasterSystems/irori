@@ -12,9 +12,11 @@ import {
   fetchUsageRequests,
   fetchUsageRetries,
   fetchUsageTools,
+  fetchRequestTrace,
   type UsageRangeName,
   type UsageRetriesResponse,
 } from "../api";
+import type { UsageTrace } from "@irori/core";
 import { live } from "../live";
 import { vScrimClose } from "../scrim";
 import { costText } from "../cost-format";
@@ -251,13 +253,30 @@ const mergedRows = computed<UsageRequestRow[]>(() => {
   return rows;
 });
 
+function copyTraceId(): void {
+  if (drawerTrace.value?.traceId !== null && drawerTrace.value?.traceId !== undefined) {
+    void navigator.clipboard.writeText(drawerTrace.value.traceId);
+  }
+}
+
+const traceSegmentSum = computed(() =>
+  drawerTrace.value === null ? 0 : drawerTrace.value.spans.reduce((a: number, s) => a + (s.endMs - s.startMs), 0),
+);
+
 async function openDrawer(row: UsageRequestRow): Promise<void> {
   drawer.value = { row, detail: null };
+  drawerTrace.value = null;
   try {
     const detail = await fetchUsageRequest(row.id);
     if (drawer.value?.row.id === row.id) drawer.value = { row, detail: detail ?? row };
   } catch {
     if (drawer.value?.row.id === row.id) drawer.value = { row, detail: row };
+  }
+  // IRI-079: waterfall data — a failure just hides the Trace tab.
+  try {
+    drawerTrace.value = await fetchRequestTrace(row.id);
+  } catch {
+    drawerTrace.value = null;
   }
 }
 
@@ -289,6 +308,8 @@ const toolsCostShown = computed(() => (tools.value?.costCurrency ?? null) !== nu
 const errorsCostShown = computed(() => (errors.value?.costCurrency ?? null) !== null);
 /** IRI-076: retry waste (superseded attempts per client key). */
 const retries = ref<UsageRetriesResponse | null>(null);
+/** IRI-079: drawer trace (waterfall) — fetched when the drawer opens. */
+const drawerTrace = ref<UsageTrace | null>(null);
 const retriesCostShown = computed(() => (retries.value?.costCurrency ?? null) !== null);
 
 const tokenMixRows = computed(() => (overview.value === null ? [] : tokenMix(overview.value.tokenMix)));
@@ -675,6 +696,33 @@ const liveAgeText = computed(() => {
           </tbody>
         </table>
         <pre v-if="detailJson !== null" class="log" style="margin-top: 10px; padding: 10px; font-size: 12px; white-space: pre-wrap">{{ detailJson }}</pre>
+
+        <!-- IRI-079: trace waterfall — segments sum to durationMs; speculative
+             acceptance rides the decode span; trace id copies and links out
+             when an OTLP endpoint is configured. -->
+        <template v-if="drawerTrace !== null">
+          <h4 class="stat__label" style="margin: 12px 0 6px">Trace</h4>
+          <div class="row" style="gap: 8px; align-items: center; margin-bottom: 8px">
+            <span class="mono faint">{{ drawerTrace.traceId ?? "no trace id" }}</span>
+            <button v-if="drawerTrace.traceId !== null" class="btn btn--ghost btn--sm" @click="copyTraceId">Copy trace id</button>
+          </div>
+          <div v-for="s in drawerTrace.spans" :key="s.name" style="margin-bottom: 6px">
+            <div class="row row--between" style="font-size: 11px">
+              <span class="mono">{{ s.name }}</span>
+              <span class="mono faint">{{ s.endMs - s.startMs }} ms</span>
+            </div>
+            <div style="position: relative; height: 14px; background: var(--surface); border-radius: 3px; overflow: hidden">
+              <div
+                style="position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.75; border-radius: 3px"
+                :style="{ left: `${(s.startMs / Math.max(1, drawerTrace.durationMs)) * 100}%`, width: `${((s.endMs - s.startMs) / Math.max(1, drawerTrace.durationMs)) * 100}%` }"
+              ></div>
+            </div>
+            <div v-if="Object.keys(s.attrs).length > 0" class="stat__sub" style="font-size: 11px">
+              <template v-for="(v, k) in s.attrs" :key="k">{{ k }} {{ v }} · </template>
+            </div>
+          </div>
+          <p class="stat__sub">segments sum to {{ traceSegmentSum }} ms of {{ drawerTrace.durationMs }} ms</p>
+        </template>
       </aside>
     </div>
 
