@@ -37,6 +37,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      # IRI-084 no-regression coverage gate (baseline thresholds per workspace;
+      # the 75% target lift for apps/server + packages/db tracks on IR-175).
+      - run: pnpm coverage
       - run: .agentic/bin/validate
       - run: .agentic/bin/docs-check
       - name: Stop disposable Postgres
