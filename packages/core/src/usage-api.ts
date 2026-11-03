@@ -88,6 +88,9 @@ export const usageOverviewResponseSchema = z.object({
   }),
   series: z.array(usageSeriesPointSchema),
   tokenMix: z.array(usageTokenMixRowSchema),
+  /** IRI-070: quarantined (schema-rejected) captures in range — a warn chip,
+   *  never silent loss. Absent on pre-IRI-070 hubs (old web defaults 0). */
+  rejected: z.number().int().nonnegative().default(0),
 });
 
 export type UsageOverviewResponse = z.infer<typeof usageOverviewResponseSchema>;

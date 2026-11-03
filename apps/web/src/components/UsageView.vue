@@ -336,6 +336,10 @@ const liveAgeText = computed(() => {
         <div><span class="stat__label">TTFT p95</span><span class="stat__value stat__value--sm">{{ fmtDurationMs(kpis.ttftP95Ms) }}</span></div>
         <div><span class="stat__label">Decode tok/s</span><span class="stat__value stat__value--sm">{{ fmtTps(kpis.decodeTps) }}</span></div>
       </div>
+      <!-- IRI-070: quarantined captures are visible, never silent loss. -->
+      <p v-if="(overview?.rejected ?? 0) > 0" class="row" style="margin-top: var(--space-2)" role="alert">
+        <span class="chip chip--warn" :title="'Schema-rejected captures quarantined in range — inspectable in rejected_usage, counted instead of dropped'">{{ fmtCount(overview?.rejected ?? 0) }} rejected capture{{ (overview?.rejected ?? 0) === 1 ? "" : "s" }} quarantined</span>
+      </p>
 
       <div v-if="activity !== null" class="cols cols-2" style="margin-top: var(--space-4)">
         <section class="card">
