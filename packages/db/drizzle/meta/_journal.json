@@ -148,6 +148,13 @@
       "when": 1793728640607,
       "tag": "0020_naive_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793734022555,
+      "tag": "0021_nasty_selene",
+      "breakpoints": true
     }
   ]
 }

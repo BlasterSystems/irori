@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { currencySchema } from "./currency.js";
 
 /**
  * Analytics (M7, SPEC §9): five lenses over the rollup buckets — never raw
@@ -152,6 +153,10 @@ export const analyticsResponseSchema = z.object({
    *  the same scope as `series` (respects setupId/nodeId filters). Null for
    *  every other lens. */
   fleet: tokenTotalsSchema.nullable().default(null),
+  /** Tokens lens only (IRI-072): fleet cost over the range in minor units of
+   *  `costCurrency`; 0 + null currency = no pricing configured. */
+  costMinor: z.number().int().nonnegative().default(0),
+  costCurrency: currencySchema.nullable().default(null),
 });
 
 export type AnalyticsResponse = z.infer<typeof analyticsResponseSchema>;

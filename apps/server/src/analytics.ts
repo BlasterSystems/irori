@@ -7,9 +7,11 @@ import {
   analyticsResponseSchema,
   DEFAULT_BASE_OVERHEAD_W,
   GB10_SYSTEM_ENVELOPE_W,
+  tokenCostMinor,
   type AnalyticsGroupBy,
   type AnalyticsLens,
   type AnalyticsRangeValue,
+  type Currency,
   type AnalyticsPointInput,
   type AnalyticsResponse,
   type AnalyticsSeriesInput,
@@ -48,7 +50,10 @@ interface Membership {
 
 type Bucket = { t: number; v: AnalyticsPointInput };
 
-export function createAnalyticsService(db: Db): AnalyticsService {
+export function createAnalyticsService(
+  db: Db,
+  opts: { pricing?: () => Promise<{ currency: Currency | null; resolve(model: string): { input: number; cached: number; output: number; currency: Currency } | null } | null> } = {},
+): AnalyticsService {
   async function membership(): Promise<Membership> {
     const nodeRows = await db.select({ id: nodes.id, name: nodes.name }).from(nodes);
     const nodeNames = new Map(nodeRows.map((n) => [n.id, n.name]));
@@ -100,6 +105,8 @@ export function createAnalyticsService(db: Db): AnalyticsService {
       // IRI-040: fleet macro totals — the same scope as `series` (filters
       // applied), summed client-visibly from the folded buckets.
       let fleet: TokenTotals | null = null;
+      let costMinor = 0;
+      let costCurrency: Currency | null = null;
       if (query.lens === "tokens") {
         let gen = 0;
         let prompt = 0;
@@ -121,8 +128,17 @@ export function createAnalyticsService(db: Db): AnalyticsService {
           cached: cachedSum,
           cacheHitPct: promptSum > 0 ? Math.round((cachedSum / promptSum) * 1000) / 10 : 0,
         };
+        // IRI-072: fleet cost priced per model (snapshot loaded once) so
+        // overrides apply exactly as in the usage views.
+        const pricing = opts.pricing === undefined ? null : await opts.pricing().catch(() => null);
+        if (pricing !== null) {
+          costCurrency = pricing.currency;
+          for (const m of models) {
+            costMinor += tokenCostMinor({ promptTokens: m.prompt, cachedTokens: m.cached, completionTokens: m.generated }, pricing.resolve(m.model)) ?? 0;
+          }
+        }
       }
-      return analyticsResponseSchema.parse({ lens: query.lens, range: query.range, groupBy: query.groupBy, granularity, series, models, fleet });
+      return analyticsResponseSchema.parse({ lens: query.lens, range: query.range, groupBy: query.groupBy, granularity, series, models, fleet, costMinor, costCurrency });
     },
   };
 }

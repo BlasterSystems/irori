@@ -92,6 +92,7 @@ describe("usage formatters", () => {
       agentType: "main",
       name: null,
       keyHash: null,
+      costMinor: 0,
       sourceAddrs: ["10.0.0.2"],
       requests: 1,
       errors: 0,
@@ -167,8 +168,8 @@ describe("usage charts", () => {
 
   it("folds the overview series into activity charts", () => {
     const series = [
-      { t: "2026-10-20T08:00:00.000Z", requests: 3, errors: 1, promptTokens: 1, completionTokens: 1, cachedTokens: 1, reasoningTokens: 1, totalTokens: 9, ttftP50Ms: 1, ttftP95Ms: 1, decodeTps: 1 },
-      { t: "2026-10-20T09:00:00.000Z", requests: 5, errors: 0, promptTokens: 1, completionTokens: 1, cachedTokens: 1, reasoningTokens: 1, totalTokens: 15, ttftP50Ms: 1, ttftP95Ms: 1, decodeTps: 1 },
+      { t: "2026-10-20T08:00:00.000Z", requests: 3, errors: 1, promptTokens: 1, completionTokens: 1, cachedTokens: 1, reasoningTokens: 1, totalTokens: 9, costMinor: 0, ttftP50Ms: 1, ttftP95Ms: 1, decodeTps: 1 },
+      { t: "2026-10-20T09:00:00.000Z", requests: 5, errors: 0, promptTokens: 1, completionTokens: 1, cachedTokens: 1, reasoningTokens: 1, totalTokens: 15, costMinor: 0, ttftP50Ms: 1, ttftP95Ms: 1, decodeTps: 1 },
     ];
     const charts = activityCharts(series, 200, 100);
     expect(charts.requests.series[0]!.points).toEqual([3, 5]);
@@ -180,14 +181,14 @@ describe("usage charts", () => {
 describe("usage tables", () => {
   it("computes token mix shares and sorts models for the selector", () => {
     const mix = tokenMix([
-      { model: "a", requests: 1, errors: 0, promptTokens: 1, completionTokens: 1, cachedTokens: 0, reasoningTokens: 0, totalTokens: 25 },
-      { model: "b", requests: 1, errors: 0, promptTokens: 1, completionTokens: 1, cachedTokens: 0, reasoningTokens: 0, totalTokens: 75 },
+      { model: "a", requests: 1, errors: 0, promptTokens: 1, completionTokens: 1, cachedTokens: 0, reasoningTokens: 0, totalTokens: 25, costMinor: 0 },
+      { model: "b", requests: 1, errors: 0, promptTokens: 1, completionTokens: 1, cachedTokens: 0, reasoningTokens: 0, totalTokens: 75, costMinor: 0 },
     ]);
     expect(mix.map((m) => m.share)).toEqual([0.25, 0.75]);
     expect(topModels([
-      { model: "", requests: 1, errors: 0, totalTokens: 99, ttftP50Ms: null, ttftP95Ms: null, decodeTps: null },
-      { model: "a", requests: 1, errors: 0, totalTokens: 1, ttftP50Ms: null, ttftP95Ms: null, decodeTps: null },
-      { model: "b", requests: 1, errors: 0, totalTokens: 5, ttftP50Ms: null, ttftP95Ms: null, decodeTps: null },
+      { model: "", requests: 1, errors: 0, totalTokens: 99, costMinor: 0, ttftP50Ms: null, ttftP95Ms: null, decodeTps: null },
+      { model: "a", requests: 1, errors: 0, totalTokens: 1, costMinor: 0, ttftP50Ms: null, ttftP95Ms: null, decodeTps: null },
+      { model: "b", requests: 1, errors: 0, totalTokens: 5, costMinor: 0, ttftP50Ms: null, ttftP95Ms: null, decodeTps: null },
     ], 6)).toEqual(["b", "a"]);
   });
 

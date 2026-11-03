@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { HardwareSnapshot, NodeInfo, SetupInfo } from "@irori/core";
-import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries } from "@irori/core";
+import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries, type Currency } from "@irori/core";
 import { live } from "../live";
 import { tier } from "../tiers";
 import NodeCard from "./NodeCard.vue";
@@ -31,7 +31,6 @@ import {
   relativeTime,
   TEMP_CRIT_C,
   TEMP_WARN_C,
-  tokenCostOf,
   tokenTotals,
   type FleetPowerPoint,
   type HeroData,
@@ -193,7 +192,14 @@ const fleetPoints = computed(() => fleetPowerSeries(rawPower.value, sparkIds.val
 const powerBars = computed(() => binFleetPower(fleetPoints.value, granularityMs(powerGranularity.value)));
 const energyKwh = computed(() => fleetEnergyKwh(fleetPoints.value, granularityMs(powerGranularity.value)));
 const tokenSum = computed(() => tokenTotals(rawTokens.value, sparkIds.value));
-const tokenCostValue = computed(() => (tokenCost.value === null ? null : tokenCostOf(tokenSum.value, tokenCost.value)));
+// IRI-072: server-priced; the web formats only.
+const tokenCostMinor = ref<number | null>(null);
+const tokenCostCurrency = ref<Currency | null>(null);
+const tokenCostLabel = computed(() =>
+  tokenCostMinor.value === null || tokenCostCurrency.value === null
+    ? null
+    : `≈ ${CURRENCY_SYMBOL[tokenCostCurrency.value]}${(tokenCostMinor.value / 100).toFixed(2)}`,
+);
 const currencySymbol = computed(() => {
   if (energyCost.value !== null) return CURRENCY_SYMBOL[energyCost.value.currency];
   if (tokenCost.value !== null) return CURRENCY_SYMBOL[tokenCost.value.currency];
@@ -209,9 +215,7 @@ const costText = computed(() => {
   if (energyKwh.value === null || energyCost.value === null) return null;
   return `≈ ${CURRENCY_SYMBOL[energyCost.value.currency]}${(energyKwh.value * energyCost.value.pricePerKwh).toFixed(2)}`;
 });
-const tokenCostText = computed(() =>
-  tokenCostValue.value === null || currencySymbol.value === null ? null : `≈ ${currencySymbol.value}${tokenCostValue.value.toFixed(2)}`,
-);
+const tokenCostText = computed(() => tokenCostLabel.value);
 const tokenPriceTip = computed(() => {
   if (tokenCost.value === null) return "";
   const s = CURRENCY_SYMBOL[tokenCost.value.currency];
@@ -259,6 +263,10 @@ async function refreshCards(): Promise<void> {
   try {
     const res = await fetchAnalytics("tokens", range.value, "node");
     rawTokens.value = res.series;
+    // IRI-072: cost is computed server-side (per-model pricing) — the web
+    // only formats.
+    tokenCostMinor.value = res.costMinor;
+    tokenCostCurrency.value = res.costCurrency;
   } catch {
     // Ledger unavailable — the token stats stay empty.
   }

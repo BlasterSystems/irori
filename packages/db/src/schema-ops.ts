@@ -134,6 +134,25 @@ export const logDropCounters = pgTable(
   },
 );
 
+/**
+ * Per-model token price overrides (IRI-072). Resolution: exact name match,
+ * then the LONGEST matching prefix, then the global token-cost setting.
+ * Zero is valid (free tier); absent rows mean "use the default".
+ */
+export const modelPrices = pgTable(
+  "model_prices",
+  {
+    pattern: text("pattern").primaryKey(),
+    input: real("input").notNull(),
+    cached: real("cached").notNull(),
+    output: real("output").notNull(),
+    currency: text("currency").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("model_prices_pattern_idx").on(t.pattern)],
+);
+
 /** Health-findings rules (IRI-069). Server-side thresholds; the web tier reads truth. */
 export const healthRules = pgTable(
   "health_rules",
