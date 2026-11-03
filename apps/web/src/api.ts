@@ -5,6 +5,7 @@ import {
   type EfficiencyRow,
   type HealthFinding,
   type UsageRetriesResponse,
+  type UsageTrace,
   usageRetriesResponseSchema,
   auditPageSchema,
   eventJournalPageSchema,
@@ -212,6 +213,13 @@ export async function fetchUsageRetries(range: UsageRangeName, opts: { nodeId?: 
   const parsed = usageRetriesResponseSchema.safeParse(body);
   if (!parsed.success) throw new Error("GET /api/v1/usage/retries: unexpected shape");
   return parsed.data;
+}
+
+/** IRI-079: normalized span tree for the drawer's Trace tab. */
+export async function fetchRequestTrace(id: string, signal?: AbortSignal): Promise<UsageTrace> {
+  const res = await fetch(`/api/v1/usage/requests/${encodeURIComponent(id)}/trace`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET trace failed: HTTP ${res.status}`);
+  return (await res.json()) as UsageTrace;
 }
 
 /** IRI-073: Wh-per-token efficiency (energy × ledger join). */

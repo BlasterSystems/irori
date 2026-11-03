@@ -363,6 +363,18 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   tokens lens renders a per-node statgrid (reason in the tooltip) and a
   per-model `Wh/ktok` column.
 
+## Trace inspector (IRI-079)
+
+- `llm_requests` carries typed timing columns parsed from the TensorFold
+  engineMeta at ingest (`prefill_ms`, `decode_ms`, `spec_rounds`,
+  `spec_drafted`, `spec_accepted`; the verbatim jsonb stays). Reset-safe
+  parser: unknown shapes yield nulls.
+- `GET /api/v1/usage/requests/:id/trace` — normalized span tree whose
+  segments sum to `durationMs`; engines without a breakdown degrade to two
+  segments (TTFT + decode). The drawer renders it as a waterfall with the
+  speculative acceptance rate and a Copy-trace-id button (the trace id joins
+  logs/OTLP externally).
+
 ## Cost of errors, sessions & retries (IRI-076)
 
 - `GET /api/v1/usage/requests/:id` + the list rows carry a read-time priced
