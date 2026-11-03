@@ -7,7 +7,7 @@ import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
 import { runNasDeleteApply } from "./delete-preflight.js";
-import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
+import { hygieneCleanParamsSchema, recipeInstallParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
 import { MAX_USAGE_BATCH, MAX_LOG_BATCH } from "@irori/core";
@@ -193,6 +193,27 @@ async function run(): Promise<void> {
           scriptPaths: Array.isArray(params.scriptPaths) ? (params.scriptPaths as unknown[]).filter((p): p is string => typeof p === "string") : [],
         });
         emit(JSON.stringify(report));
+        return { ok: true };
+      }
+      if (kind === "recipe-install") {
+        // IRI-082: stage the recipe's scripts onto the node (AGPL hygiene —
+        // fetched from the pinned URL hub-side, checksum-verified here, never
+        // vendored into the bundle).
+        const parsed = recipeInstallParamsSchema.safeParse(params);
+        if (!parsed.success) return { ok: false, error: "invalid recipe-install params" };
+        const { dir, files } = parsed.data;
+        const { mkdir, writeFile, chmod } = await import("node:fs/promises");
+        const { createHash } = await import("node:crypto");
+        await mkdir(dir, { recursive: true });
+        for (const f of files) {
+          const digest = createHash("sha256").update(f.content).digest("hex");
+          if (digest !== f.sha256) return { ok: false, error: `checksum mismatch for ${f.rel}` };
+          const path = `${dir}/${f.rel}`;
+          await writeFile(path, f.content, { mode: 0o755 });
+          await chmod(path, 0o755);
+          emit(JSON.stringify({ staged: path, sha256: digest }));
+        }
+        emit(JSON.stringify({ paths: files.map((f) => `${dir}/${f.rel}`) }));
         return { ok: true };
       }
       if (kind === "nas-delete-apply") {

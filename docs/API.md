@@ -371,6 +371,22 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   script → the Serve stale-recipe chip). Contract additive: agents without
   the report `versions` block render unknowns.
 
+## Curated recipes (IRI-082)
+
+- `GET /api/v1/recipes` - the catalog (SparkRun v2 YAML entries transpiled at
+ install; MiaAI script recipes staged verbatim). Unpinned entries (offline
+ boot) stay hidden until the pin pass lands. Seeds ship in-repo
+ (`apps/server/src/recipe-seed.json`, versioned) and upsert on boot.
+- `POST /api/v1/recipes/:id/install` - stages the start/stop scripts onto the
+ target node via a `recipe-install` job (sha256-verified by the agent; AGPL
+ bodies pass through at install time and are never vendored into the bundle).
+- `GET /api/v1/recipes/drafts/:jobId` - the settled job yields a wizard draft
+ (core `recipeInstallSchema`); the operator confirms in Serve
+ (`#/serve?recipeJob=<id>` deep-link) - nothing auto-starts.
+- `POST /api/v1/recipes/:id/pin|hide` - re-pin to the upstream default-branch
+ SHA; hide a card. Recipe caveats render verbatim on every card (core
+ `RECIPE_CAVEATS`: IR-151 status demotion + capture endpoint pattern).
+
 ## Trace inspector (IRI-079)
 - `llm_requests` carries typed timing columns parsed from the TensorFold
   engineMeta at ingest (`prefill_ms`, `decode_ms`, `spec_rounds`,

@@ -17,6 +17,8 @@ import type { CostService } from "./cost.js";
 import type { HealthService } from "./health.js";
 import { renderPrometheus } from "./metrics.js";
 import type { UpdateBaseline } from "./updates-baseline.js";
+import { recipeInstallRequestSchema } from "@irori/core";
+import type { RecipeService } from "./recipes.js";
 import type { ModelctlPinService } from "./modelctl-pin.js";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
@@ -211,6 +213,8 @@ export interface AppDeps {
   getNodesSnapshot?: () => Promise<Array<{ id: string; name: string; online: boolean; snapshot: HardwareSnapshot | null }>>;
   /** IRI-081: cached/release-notes baseline (created in index.ts with the db). */
   getBaseline?: () => Promise<UpdateBaseline | null>;
+  /** IRI-082: curated recipe catalog service. */
+  getRecipes?: () => RecipeService | null;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -1016,6 +1020,51 @@ export function createApp(deps: AppDeps): Express {
       }),
     );
     res.json({ baseline, nodes: matrix });
+  });
+
+  // ---- IRI-082: curated recipe catalog (SparkRun + MiaAI) ----
+  app.get("/api/v1/recipes", async (_req, res) => {
+    const recipes = deps.getRecipes?.();
+    if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await recipes.list());
+  });
+
+  app.post("/api/v1/recipes/:id/hide", async (req, res) => {
+    const recipes = deps.getRecipes?.();
+    if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
+    await recipes.setHidden(req.params.id ?? "", req.body?.hidden !== false);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/v1/recipes/:id/pin", async (req, res) => {
+    const recipes = deps.getRecipes?.();
+    if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
+    const sha = await recipes.pin(req.params.id ?? "");
+    if (sha === null) return res.status(502).json({ error: "pin failed (upstream unreachable or not a GitHub repo)" });
+    res.json({ pinnedSha: sha });
+  });
+
+  // Install = stage scripts on the target node (sha256-verified) via a job;
+  // the settled job yields a DRAFT the operator confirms (nothing starts).
+  app.post("/api/v1/recipes/:id/install", async (req, res) => {
+    const recipes = deps.getRecipes?.();
+    if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
+    const parsed = recipeInstallRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "invalid install request", issues: parsed.error.issues });
+    try {
+      const jobId = await recipes.install(req.params.id ?? "", parsed.data);
+      res.status(202).json({ jobId });
+    } catch (err) {
+      res.status(409).json({ error: err instanceof Error ? err.message : "install failed" });
+    }
+  });
+
+  app.get("/api/v1/recipes/drafts/:jobId", async (req, res) => {
+    const recipes = deps.getRecipes?.();
+    if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
+    const draft = await recipes.draft(req.params.jobId ?? "");
+    if (draft === null) return res.status(404).json({ error: "draft not ready (job not settled) or unknown" });
+    res.json(draft);
   });
 
   // ---- IRI-028: per-node model inventory (store + per-user local caches) ----

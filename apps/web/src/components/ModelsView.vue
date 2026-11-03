@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { fetchNodes } from "../api";
+import { fetchNodes, fetchRecipes, installRecipe, fetchRecipeDraft, type RecipeRow } from "../api";
+import { RECIPE_CAVEATS } from "@irori/core";
 import { live } from "../live";
 import { activeJobsByNode, blockingJobLabel, jobLabel, type JobLive } from "../jobs";
 import { fetchSetups } from "../serve";
@@ -108,6 +109,37 @@ function onSortToggle(): void {
 /** Store node for hygiene verbs and the modal banner (NAS-preferred, IRI-014). */
 const nodes = ref<NodeInfo[]>([]);
 const storeNode = computed(() => pickStoreNode(nodes.value)?.id ?? null);
+
+/** IRI-082: curated recipe catalog (SparkRun + MiaAI). */
+const recipes = ref<RecipeRow[]>([]);
+const recipeBusy = ref<string | null>(null);
+const recipeDraft = ref<{ slug: string; text: string } | null>(null);
+async function installRecipeCard(r: RecipeRow): Promise<void> {
+  recipeBusy.value = r.slug;
+  try {
+    const nodes = await fetchNodes();
+    const head = nodes.find((n) => n.online) ?? nodes[0];
+    if (head === undefined) throw new Error("no node available");
+    const jobId = await installRecipe(r.id, head.id);
+    for (let i = 0; i < 20; i++) {
+      await new Promise((res) => setTimeout(res, 1500));
+      try {
+        const draft = await fetchRecipeDraft(jobId);
+        recipeDraft.value = { slug: r.slug, text: draft.name + " on " + head.name + " :" + draft.port + " — scripts " + draft.scriptStart + "/" + draft.scriptStop };
+        location.hash = "#/serve?recipeJob=" + encodeURIComponent(jobId);
+        return;
+      } catch {
+        /* not settled yet */
+      }
+    }
+    recipeDraft.value = { slug: r.slug, text: "staging still running — check Activity, then Serve" };
+  } catch (err) {
+    recipeDraft.value = { slug: r.slug, text: err instanceof Error ? err.message : "install failed" };
+  } finally {
+    recipeBusy.value = null;
+  }
+}
+void fetchRecipes().then((r) => { recipes.value = r.recipes; }).catch(() => {});
 
 onMounted(() => {
   document.addEventListener("click", onDocClick); // IRI-020: row-menu click-away
@@ -1271,6 +1303,33 @@ onBeforeUnmount(() => {
       </section>
     </div>
   </div>
+
+  <!-- IRI-082: curated recipes (SparkRun + MiaAI) — install drafts a setup, never auto-starts -->
+  <section class="card section-gap">
+    <div class="card__head"><h3>Recipes</h3><span class="chip">curated</span></div>
+    <div class="card__body">
+      <div v-for="r in recipes" :key="r.slug" class="row" style="align-items: flex-start; gap: 10px; padding: 6px 0;">
+        <div style="min-width: 0; flex: 1;">
+          <strong>{{ r.name }}</strong>
+          <span class="chip" style="margin-left: 8px;">{{ r.engine }}</span>
+          <span class="chip" :class="r.copyleft ? 'chip--warn' : ''" style="margin-left: 4px;">{{ r.license }}</span>
+          <span v-if="r.kind === 'sparkrun-transpiled'" class="chip" style="margin-left: 4px;">transpiled</span>
+          <div class="muted">{{ r.summary }}</div>
+          <div class="mono faint">{{ r.upstreamUrl }} @ {{ r.commitSha.slice(0, 8) }}</div>
+          <div v-if="r.nodeCountMax > 1" class="faint">cluster: {{ r.nodeCountMin }}–{{ r.nodeCountMax }} nodes</div>
+        </div>
+        <button class="btn" :disabled="recipeBusy === r.slug" @click="installRecipeCard(r)">{{ recipeBusy === r.slug ? "staging…" : "Install" }}</button>
+      </div>
+      <p v-if="recipes.length === 0" class="muted">catalog empty (unpinned entries stay hidden until the pin pass lands)</p>
+      <p v-if="recipeDraft !== null" class="banner banner--ok">{{ recipeDraft.text }}</p>
+      <details class="muted" style="margin-top: 8px;">
+        <summary>Recipe caveats (apply to every card)</summary>
+        <ul style="margin: 6px 0 0 16px;">
+          <li v-for="c in RECIPE_CAVEATS" :key="c.id">{{ c.text }}</li>
+        </ul>
+      </details>
+    </div>
+  </section>
 </template>
 
 <style scoped>
