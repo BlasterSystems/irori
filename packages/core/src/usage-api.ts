@@ -313,6 +313,10 @@ export const usageTraceSchema = z.object({
   model: z.string().nullable(),
   traceId: z.string().nullable(),
   durationMs: z.number().int().nonnegative(),
+  /** IRI-079 p50 comparison: median duration of the same model's requests. */
+  modelP50Ms: z.number().nullable().default(null),
+  /** Terminal error text — the drawer highlights the failing request. */
+  error: z.string().nullable().default(null),
   spans: z.array(traceSpanSchema),
 });
 export type UsageTrace = z.infer<typeof usageTraceSchema>;
