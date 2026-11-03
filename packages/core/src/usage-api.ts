@@ -197,6 +197,26 @@ export const usageAgentsResponseSchema = z.object({
 
 export type UsageAgentsResponse = z.infer<typeof usageAgentsResponseSchema>;
 
+/** IRI-076: retry-waste groups — superseded attempts per client key. */
+export const usageRetryGroupSchema = z.object({
+  clientName: z.string().nullable(),
+  clientProject: z.string().nullable(),
+  clientAgentType: z.enum(["main", "subagent"]).nullable(),
+  sourceAddr: z.string().nullable(),
+  attempts: z.number().int().positive(),
+  costMinor: z.number().int().nonnegative().default(0),
+  lastSeenMs: z.number(),
+});
+export const usageRetriesResponseSchema = z.object({
+  range: usageRangeSchema,
+  groups: z.array(usageRetryGroupSchema),
+  /** Total wasted cost (superseded attempts) in range. */
+  retriesCostMinor: z.number().int().nonnegative().default(0),
+  /** Pricing currency; null = unset (UI shows the CTA). */
+  costCurrency: currencySchema.nullable().default(null),
+});
+export type UsageRetriesResponse = z.infer<typeof usageRetriesResponseSchema>;
+
 /** One (tool × model) attribution row of the Tools view (IR-54). */
 export const usageToolRowSchema = z.object({
   tool: z.string(),

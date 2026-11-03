@@ -1213,6 +1213,16 @@ export function createApp(deps: AppDeps): Express {
     res.json(await analytics.efficiency({ range: range.data, groupBy }));
   });
 
+  // IRI-076: retry waste — superseded attempts grouped per client key.
+  app.get("/api/v1/usage/retries", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const range = usageRangeSchema.safeParse(req.query.range ?? "24h");
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const nodeId = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
+    res.json(await usage.retries({ range: range.data, nodeId }));
+  });
+
   // IRI-071: ledger (engine counters) vs capture (requests) reconciliation.
   app.get("/api/v1/analytics/token-reconciliation", async (req, res) => {
     const analytics = deps.getAnalytics();

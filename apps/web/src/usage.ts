@@ -7,7 +7,7 @@ import type { LensChart } from "./analytics";
  * URL state, chart geometry, table cell mappers. DOM-free and unit-tested.
  */
 
-export const USAGE_TABS = ["overview", "requests", "errors", "agents", "tools", "models"] as const;
+export const USAGE_TABS = ["overview", "requests", "errors", "agents", "tools", "models", "retries"] as const;
 export type UsageTab = (typeof USAGE_TABS)[number];
 
 export const USAGE_RANGE_TABS: Array<{ value: UsageOverviewResponse["range"]; label: string }> = [
