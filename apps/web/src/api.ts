@@ -612,12 +612,13 @@ export type AnalyticsRangeName = "30m" | "1h" | "4h" | "24h" | "7d" | "30d" | "9
 export async function fetchAnalytics(
   lens: AnalyticsLensName,
   range: AnalyticsRangeName,
-  groupBy: "cluster" | "node",
-  opts: { setupId?: string; nodeId?: string; signal?: AbortSignal } = {},
+  groupBy: "cluster" | "node" | "setup",
+  opts: { setupId?: string; nodeId?: string; offsetMs?: number; signal?: AbortSignal } = {},
 ): Promise<AnalyticsResponse> {
   const params = new URLSearchParams({ range, groupBy });
   if (opts.setupId !== undefined) params.set("setupId", opts.setupId);
   if (opts.nodeId !== undefined) params.set("nodeId", opts.nodeId);
+  if (opts.offsetMs !== undefined) params.set("offsetMs", String(opts.offsetMs));
   const res = await fetch(`/api/v1/analytics/${lens}?${params}`, { headers: { accept: "application/json" }, signal: opts.signal });
   if (!res.ok) throw new Error(`GET /api/v1/analytics/${lens} failed: HTTP ${res.status}`);
   const body: unknown = await res.json();

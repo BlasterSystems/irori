@@ -22,7 +22,7 @@ export const analyticsRangeSchema = z.enum(ANALYTICS_RANGES);
 export type AnalyticsRange = (typeof ANALYTICS_RANGES)[number];
 export type AnalyticsRangeValue = AnalyticsRange;
 
-export const ANALYTICS_GROUP_BY = ["cluster", "node"] as const;
+export const ANALYTICS_GROUP_BY = ["cluster", "node", "setup"] as const;
 export const analyticsGroupBySchema = z.enum(ANALYTICS_GROUP_BY);
 export type AnalyticsGroupBy = (typeof ANALYTICS_GROUP_BY)[number];
 

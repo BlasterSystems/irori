@@ -15,6 +15,8 @@ export interface SeriesTotalsRow {
   generated: number;
   input: number;
   cached: number;
+  /** IRI-075: prompt minus cached — recomputed tokens. */
+  computed: number;
   cacheHitPct: number;
 }
 
@@ -26,6 +28,9 @@ function totalsRow(key: string, label: string, generated: number, prompt: number
     generated,
     input: prompt,
     cached,
+    /** IRI-075: computed = prompt minus cached — the tokens that were actually
+     *  recomputed (a 97% cache-hit run must not look like a full recompute). */
+    computed: Math.max(0, prompt - cached),
     cacheHitPct: prompt > 0 ? Math.round((cached / prompt) * 1000) / 10 : 0,
   };
 }
@@ -46,17 +51,72 @@ export function seriesTotals(series: AnalyticsResponse["series"]): SeriesTotalsR
   return rows.sort((a, b) => b.total - a.total);
 }
 
-/** The five fleet stat tiles, display-ready values (`null` fleet → dashes).
- *  Counts go through fmtCount so large numbers render like the tables. */
-export function fleetTiles(fleet: TokenTotals | null): Array<{ label: string; value: string }> {
+/** The six fleet stat tiles (IRI-075): prompt split into computed vs cached,
+ *  plus the range cost from the server. `null` fleet → coverage reason, never
+ *  an em dash (owner rule: no dash-filled labels). Counts go through fmtCount.
+ *  `delta` is the % change vs the previous period; null = no comparison. */
+export function fleetTiles(
+  fleet: TokenTotals | null,
+  costMinor = 0,
+  costCurrency: string | null = null,
+  deltaPct: number | null = null,
+): Array<{ label: string; value: string; delta: number | null }> {
+  const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
   const dash = "—";
+  const d = (v: number | null) => ({ delta: v });
+  if (fleet === null) {
+    return [
+      { label: "Total tokens", value: "no token counters in range", ...d(null) },
+      { label: "Generated", value: "—", ...d(null) },
+      { label: "Input computed", value: "—", ...d(null) },
+      { label: "Cached", value: "—", ...d(null) },
+      { label: "Cache hit", value: "—", ...d(null) },
+      { label: "Cost", value: costCurrency === null ? "Configure pricing" : "no data", ...d(null) },
+    ];
+  }
+  const sym = costCurrency === null ? "" : CURRENCY_SYMBOLS[costCurrency] ?? "";
+  const deltaLabel = deltaPct === null ? "" : ` · ${deltaPct > 0 ? "+" : ""}${Math.round(deltaPct * 10) / 10}% vs prev`;
   return [
-    { label: "Total tokens", value: fleet === null ? dash : fmtCount(fleet.total) },
-    { label: "Generated", value: fleet === null ? dash : fmtCount(fleet.generated) },
-    { label: "Input (prompt)", value: fleet === null ? dash : fmtCount(fleet.prompt) },
-    { label: "Cache", value: fleet === null ? dash : fmtCount(fleet.cached) },
-    { label: "Cache hit", value: fmtHitPct(fleet === null ? null : fleet.cacheHitPct) },
+    { label: "Total tokens", value: fmtCount(fleet.total) + deltaLabel, ...d(deltaPct) },
+    { label: "Generated", value: fmtCount(fleet.generated), ...d(null) },
+    { label: "Input computed", value: fmtCount(Math.max(0, fleet.prompt - fleet.cached)), ...d(null) },
+    { label: "Cached", value: fmtCount(fleet.cached), ...d(null) },
+    { label: "Cache hit", value: fmtHitPct(fleet.cacheHitPct), ...d(null) },
+    { label: "Cost", value: sym === "" ? "Configure pricing" : `${sym}${((costMinor ?? 0) / 100).toFixed(2)}`, ...d(null) },
   ];
+}
+
+/**
+ * Plain-English insight line — ONLY claims derivable from the data. Returns
+ * null when there is nothing to claim (no counters in range).
+ */
+export function tokenInsight(
+  fleet: TokenTotals | null,
+  models: Array<{ model: string; total: number; cacheHitPct: number }>,
+): string | null {
+  if (fleet === null || fleet.total === 0 || models.length === 0) return null;
+  const parts: string[] = [];
+  const top = [...models].sort((a, b) => b.total - a.total)[0]!;
+  parts.push(`${top.model} produced the most tokens in range (${fmtCount(top.total)})`);
+  const withHits = models.filter((m) => m.total >= 10_000);
+  if (withHits.length > 1) {
+    const bestCache = [...withHits].sort((a, b) => b.cacheHitPct - a.cacheHitPct)[0]!;
+    parts.push(`${bestCache.model} had the best cache hit (${fmtHitPct(bestCache.cacheHitPct)})`);
+  }
+  return parts.join(" · ") + ".";
+}
+
+/** CSV of the current per-model table (client-side, no new endpoint). */
+export function modelsCsv(models: Array<{ model: string; total: number; generated: number; prompt: number; cached: number; cacheHitPct: number }>): string {
+  const esc = (v: string | number): string => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+  };
+  const lines = ["model,total,generated,prompt,cached,cache_hit_pct"];
+  for (const m of [...models].sort((a, b) => b.total - a.total)) {
+    lines.push([esc(m.model), m.total, m.generated, m.prompt, m.cached, m.cacheHitPct].join(","));
+  }
+  return lines.join("\n") + "\n";
 }
 
 /** Cache hit percentage with one decimal; `null` renders as an em dash. */
