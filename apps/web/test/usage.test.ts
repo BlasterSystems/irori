@@ -195,9 +195,9 @@ describe("usage tables", () => {
 
   it("sorts error groups by count then recency", () => {
     const groups = errorGroupRows([
-      { sig: "a", count: 2, firstSeenMs: 1, lastSeenMs: 2, sample: "", models: [], status: 500 },
-      { sig: "b", count: 2, firstSeenMs: 1, lastSeenMs: 9, sample: "", models: [], status: 500 },
-      { sig: "c", count: 9, firstSeenMs: 1, lastSeenMs: 1, sample: "", models: [], status: 500 },
+      { sig: "a", count: 2, firstSeenMs: 1, lastSeenMs: 2, sample: "", models: [], status: 500, costMinor: 0 },
+      { sig: "b", count: 2, firstSeenMs: 1, lastSeenMs: 9, sample: "", models: [], status: 500, costMinor: 0 },
+      { sig: "c", count: 9, firstSeenMs: 1, lastSeenMs: 1, sample: "", models: [], status: 500, costMinor: 0 },
     ]);
     expect(groups.map((g) => g.sig)).toEqual(["c", "b", "a"]);
   });

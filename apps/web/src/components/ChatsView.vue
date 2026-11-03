@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { fetchChat, fetchChats, type UsageRangeName } from "../api";
+import { costText } from "../cost-format";
 import { fmtTimeIso, fmtTokens, parseUsageHash, clientLabel, USAGE_RANGE_TABS } from "../usage";
 import type { ChatDetail, ChatSession, ChatsResponse } from "@irori/core";
 
@@ -137,7 +138,8 @@ const hasRetentionHint = computed(() => (chats.value?.capturedWithoutBodies ?? 0
                   <span v-if="s.compacted" class="chip chip--warn" title="context compaction detected">compacted</span>
                 </span>
                 <span class="faint mono" style="font-size: 11px">
-                  {{ s.requests }} req · {{ s.messages }} msg · {{ fmtTokens(s.totalTokens) }} tok · {{ fmtTimeIso(s.lastMs) }}
+                  {{ s.requests }} req · {{ s.messages }} msg · {{ fmtTokens(s.totalTokens) }} tok ·
+                  <template v-if="(chats?.costCurrency ?? null) !== null">{{ costText(s.costMinor, chats?.costCurrency ?? null) }} · </template>{{ fmtTimeIso(s.lastMs) }}
                 </span>
               </button>
             </div>
