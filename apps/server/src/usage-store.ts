@@ -847,6 +847,32 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
         order by count(*) desc, max(r.received_at) desc
         limit 100
       `);
+      // IRI-076: cost of errors priced per (sig × model) via the snapshot —
+      // the expensive failure mode becomes obvious.
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
+      const costBySig = new Map<string, number>();
+      let errorsCostMinor = 0;
+      if (pricing !== null) {
+        const perSigModel = await db.execute(sql`
+          select r.error_sig as sig, r.model,
+                 coalesce(sum(r.prompt_tokens), 0)::float8 as prompt_tokens,
+                 coalesce(sum(r.cached_tokens), 0)::float8 as cached_tokens,
+                 coalesce(sum(r.completion_tokens), 0)::float8 as completion_tokens
+          from llm_requests r
+          where ${where}
+          group by r.error_sig, r.model
+        `);
+        for (const r of perSigModel as unknown as Array<Record<string, unknown>>) {
+          const minor =
+            tokenCostMinor(
+              { promptTokens: Number(r.prompt_tokens ?? 0), cachedTokens: Number(r.cached_tokens ?? 0), completionTokens: Number(r.completion_tokens ?? 0) },
+              pricing.resolve(typeof r.model === "string" ? r.model : ""),
+            ) ?? 0;
+          const sig = String(r.sig);
+          costBySig.set(sig, (costBySig.get(sig) ?? 0) + minor);
+          errorsCostMinor += minor;
+        }
+      }
       return {
         range,
         groups: rows.map((r) => ({
@@ -857,7 +883,10 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
           sample: String(r.sample ?? ""),
           models: (r.models as Array<string | null> | null)?.filter((m): m is string => m !== null) ?? [],
           status: typeof r.status === "number" ? r.status : null,
+          costMinor: costBySig.get(String(r.sig)) ?? 0,
         })),
+        errorsCostMinor,
+        costCurrency: pricing?.currency ?? null,
       };
     },
 

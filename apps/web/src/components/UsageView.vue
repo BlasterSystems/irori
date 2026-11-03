@@ -15,6 +15,7 @@ import {
 } from "../api";
 import { live } from "../live";
 import { vScrimClose } from "../scrim";
+import { costText } from "../cost-format";
 import { parseUsageHash, usageHashFor, agentGroupKey, agentGroupLabel, agentGroupSource, clientLabel, retryText, toolRowKey, type UsageTab, USAGE_TABS } from "../usage";
 import {
   activityCharts,
@@ -271,10 +272,7 @@ const activity = computed(() => {
 });
 
 // IRI-074: cost surfaces — every value renders from API cost fields.
-const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
 const costCurrency = computed(() => overview.value?.costCurrency ?? null);
-const costText = (minor: number, currency: string | null): string =>
-  currency === null || CURRENCY_SYMBOLS[currency] === undefined ? "—" : `${CURRENCY_SYMBOLS[currency]}${(minor / 100).toFixed(2)}`;
 const costChart = computed(() => {
   if (overview.value === null || overview.value.costCurrency === null) return null;
   return usageChart(overview.value.series.map((p) => ({ t: p.t, value: p.costMinor / 100 })), W, H);
@@ -282,6 +280,7 @@ const costChart = computed(() => {
 const modelsCostTotal = computed(() => (models.value?.models ?? []).reduce((acc, m) => acc + (m.costMinor ?? 0), 0));
 const agentsCostShown = computed(() => (agents.value?.costCurrency ?? null) !== null);
 const toolsCostShown = computed(() => (tools.value?.costCurrency ?? null) !== null);
+const errorsCostShown = computed(() => (errors.value?.costCurrency ?? null) !== null);
 
 const tokenMixRows = computed(() => (overview.value === null ? [] : tokenMix(overview.value.tokenMix)));
 
@@ -502,7 +501,7 @@ const liveAgeText = computed(() => {
         <div class="card__body card__body--flush">
           <table class="table">
             <thead>
-              <tr><th>Count</th><th>Status</th><th>Signature</th><th>Models</th><th>Last seen</th><th></th></tr>
+              <tr><th>Count</th><th>Status</th><th>Signature</th><th>Models</th><th>Cost</th><th>Last seen</th><th></th></tr>
             </thead>
             <tbody>
               <tr v-for="g in errorGroupRows(errors?.groups ?? [])" :key="g.sig">
@@ -510,14 +509,19 @@ const liveAgeText = computed(() => {
                 <td class="mono">{{ g.status ?? "—" }}</td>
                 <td class="mono" style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="g.sample">{{ g.sig }}</td>
                 <td class="mono">{{ g.models.length === 0 ? "—" : g.models.join(", ") }}</td>
+                <td class="mono">{{ errorsCostShown ? costText(g.costMinor, errors?.costCurrency ?? null) : "—" }}</td>
                 <td class="mono">{{ fmtTimeIso(g.lastSeenMs) }}</td>
                 <td><button class="btn btn--ghost btn--sm" @click="showErrorsFor(g.sig)">requests</button></td>
               </tr>
-              <tr v-if="(errors?.groups.length ?? 0) === 0"><td colspan="6" class="faint">No errors in this range.</td></tr>
+              <tr v-if="(errors?.groups.length ?? 0) === 0"><td colspan="7" class="faint">No errors in this range.</td></tr>
             </tbody>
           </table>
         </div>
       </section>
+      <!-- IRI-076: cost of errors for the range, split by signature above. -->
+      <p v-if="errorsCostShown && (errors?.errorsCostMinor ?? 0) > 0" class="row" style="margin-top: var(--space-3)">
+        <span class="chip chip--warn">Cost of errors: {{ costText(errors?.errorsCostMinor ?? 0, errors?.costCurrency ?? null) }}</span>
+      </p>
     </template>
 
     <!-- Tools: attribution from wire payloads (IR-54) -->
