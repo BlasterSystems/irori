@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dev": "node --env-file=../../.env --watch dist/index.js",
-    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=73"
+    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=75"
   },
   "dependencies": {
     "@irori/core": "workspace:*",
