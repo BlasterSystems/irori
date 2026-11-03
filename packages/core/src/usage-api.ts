@@ -41,6 +41,8 @@ export const usageRequestRowSchema = usageRequestSchema.extend({
   receivedAtMs: z.number(),
   /** Stored part metadata (no gz); empty until retention stores bodies. */
   parts: z.array(usagePartMetaSchema).default([]),
+  /** IRI-074: read-time priced cost (minor units); 0 when unpriced. */
+  costMinor: z.number().int().nonnegative().default(0),
 });
 
 export type UsageRequestRow = z.infer<typeof usageRequestRowSchema>;
@@ -106,6 +108,8 @@ export type UsageOverviewResponse = z.infer<typeof usageOverviewResponseSchema>;
 export const usageRequestsResponseSchema = z.object({
   total: z.number().int(),
   rows: z.array(usageRequestRowSchema),
+  /** IRI-074: pricing currency; null = unset (drawer shows no cost row). */
+  costCurrency: currencySchema.nullable().default(null),
 });
 
 export type UsageRequestsResponse = z.infer<typeof usageRequestsResponseSchema>;

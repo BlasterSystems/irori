@@ -25,6 +25,7 @@ import type { UsageAgentGroup, UsageEvent, UsageRequestRow } from "@irori/core";
 
 function row(overrides: Partial<UsageRequestRow> = {}): UsageRequestRow {
   return {
+    costMinor: 0,
     id: "00000000-0000-4000-8000-000000000001",
     nodeId: "00000000-0000-4000-8000-0000000000aa",
     setupId: null,

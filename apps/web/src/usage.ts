@@ -175,7 +175,7 @@ export function tokenMix(mix: UsageOverviewResponse["tokenMix"]): TokenMixRow[] 
 
 /** Merges a live SSE usage frame into a requests page (newest first). */
 export function mergeLiveRequest(rows: UsageRequestRow[], event: UsageEvent, cap: number): UsageRequestRow[] {
-  const merged = [{ ...event.request, nodeId: event.nodeId, receivedAtMs: event.serverTimeMs }, ...rows];
+  const merged = [{ ...event.request, nodeId: event.nodeId, receivedAtMs: event.serverTimeMs, costMinor: 0 }, ...rows];
   return merged.length > cap ? merged.slice(0, cap) : merged;
 }
 
