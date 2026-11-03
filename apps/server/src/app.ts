@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
 import { broadcastForLanIp, normalizeMac, sendWol } from "./wol.js";
-import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type HardwareSnapshot, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
@@ -14,6 +14,8 @@ import { type InventoryService } from "./inventory-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageCostGroupBySchema, usageRangeSchema, type UsageRange } from "@irori/core";
 import { energyCostPutSchema, tokenCostPutSchema, modelPricePutSchema, modelctlPinPutSchema, type EnergyCost, type TokenCost, type ModelctlPinResponse, type ModelPricesResponse } from "@irori/core";
 import type { CostService } from "./cost.js";
+import type { HealthService } from "./health.js";
+import { renderPrometheus } from "./metrics.js";
 import type { ModelctlPinService } from "./modelctl-pin.js";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
@@ -204,6 +206,8 @@ export interface AppDeps {
   /** SSE hub; when wrapped in the IRI-013 recording feed it also serves /events/recent history. */
   sse: SseHub & { recent?(limit?: number): SseEvent[] };
   getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig" | "clocks" | "setClocks" | "shutdownNode"> | null;
+  getHealth?: () => HealthService | null;
+  getNodesSnapshot?: () => Promise<Array<{ id: string; name: string; online: boolean; snapshot: HardwareSnapshot | null }>>;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -1196,6 +1200,72 @@ export function createApp(deps: AppDeps): Express {
       res.json({ capMHz, persistent, gpus: after?.ok ? after.gpus : [] });
     },
   );
+
+  // ---- IRI-069: health rules, findings, thresholds, prometheus ----
+
+  app.get("/api/v1/health/rules", async (_req, res) => {
+    const health = deps.getHealth?.() ?? null;
+    if (health === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ rules: await health.listRules() });
+  });
+
+  app.put(
+    "/api/v1/health/rules/:id",
+    audit({ action: "health.rule.put", targetType: "health-rule", targetId: (req) => (typeof req.params.id === "string" ? req.params.id : null), summary: (req) => `health rule updated (${req.params.id ?? "?"})` }, getAudit),
+    async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid rule id" });
+    const health = deps.getHealth?.() ?? null;
+    if (health === null) return res.status(503).json({ error: "database unavailable" });
+    const body = (req.body ?? null) as Record<string, unknown> | null;
+    if (body === null || typeof body !== "object") return res.status(400).json({ error: "body required" });
+    const rule = await health.setRule(id, body);
+    if (rule === null) return res.status(404).json({ error: "rule not found" });
+    res.json({ rule });
+  });
+
+  app.get("/api/v1/health/findings", async (_req, res) => {
+    const health = deps.getHealth?.() ?? null;
+    if (health === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ findings: await health.findings() });
+  });
+
+  app.get("/api/v1/health/thresholds", async (_req, res) => {
+    const health = deps.getHealth?.() ?? null;
+    if (health === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await health.thresholds());
+  });
+
+  app.get("/api/v1/settings/metrics", async (_req, res) => {
+    const health = deps.getHealth?.() ?? null;
+    if (health === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ enabled: await health.metricsEnabled() });
+  });
+
+  app.put(
+    "/api/v1/settings/metrics",
+    audit({ action: "settings.metrics.put", targetType: "settings", targetId: () => "metrics", summary: (req) => {
+      const body: unknown = req.body;
+      return `prometheus metrics export ${body && typeof body === "object" && (body as { enabled?: unknown }).enabled === true ? "enabled" : "disabled"}`;
+    } }, getAudit),
+    async (req, res) => {
+    const health = deps.getHealth?.() ?? null;
+    if (health === null) return res.status(503).json({ error: "database unavailable" });
+    const body = req.body as { enabled?: unknown } | null;
+    if (body === null || typeof body.enabled !== "boolean") return res.status(400).json({ error: "body must be { enabled: boolean }" });
+    await health.setMetricsEnabled(body.enabled);
+    res.json({ enabled: body.enabled });
+  });
+
+  // Prometheus export — 404 while the flag is off (default).
+  app.get("/api/v1/metrics", async (_req, res) => {
+    const health = deps.getHealth?.() ?? null;
+    if (health === null || !(await health.metricsEnabled().catch(() => false))) {
+      return res.status(404).json({ error: "metrics export disabled" });
+    }
+    const nodes = (await deps.getNodesSnapshot?.().catch(() => [])) ?? [];
+    res.type("text/plain; version=0.0.4").send(renderPrometheus(nodes));
+  });
 
   // Dedicated probe-assignment endpoint (M3); PATCH /nodes/:id covers the
   // same field via nodePatchSchema. Body: { ports: number[] }.

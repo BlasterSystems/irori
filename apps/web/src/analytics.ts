@@ -25,8 +25,6 @@ export const GROUP_TABS = [
 ] as const;
 
 /** Warn tier for temperatures app-wide (cards, node detail, analytics lens). */
-export const TEMPS_WARN_C = 70;
-export const TEMPS_CRITICAL_C = 90;
 
 export interface ChartSeries {
   label: string;
@@ -237,4 +235,3 @@ export function fmtBucket(t: number, granularity: "minute" | "hour" | "day"): st
 }
 
 /** Disk usage percent at which the value renders warn (owner rule: > 80 %). */
-export const DISK_WARN_PCT = 80;
