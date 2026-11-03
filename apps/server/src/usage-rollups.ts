@@ -124,15 +124,19 @@ async function stampBucketCost(
   fromTs: Date,
   toTs: Date,
   resolvePrice: (model: string) => Promise<{ input: number; cached: number; output: number; currency: Currency } | null>,
+  target?: { nodeId: string; model: string },
 ): Promise<number> {
   const bucketStart = bucketStartExpr(granularity);
+  // `target` constrains the stamp to ONE bucket (backfill semantics — other
+  // rows may exist concurrently); the engine path stamps the whole window.
+  const filter = target === undefined ? sql`` : sql` where node_id = ${target.nodeId}::uuid and model = ${target.model}`;
   const groups = await db.execute(sql`
     ${perRequestCte(fromTs, toTs)}
     select node_id, model, ${bucketStart} as bucket_start,
            coalesce(sum(prompt_tokens), 0)::bigint as prompt_tokens,
            coalesce(sum(cached_tokens), 0)::bigint as cached_tokens,
            coalesce(sum(completion_tokens), 0)::bigint as completion_tokens
-    from per_request
+    from per_request${filter}
     group by node_id, model, ${bucketStart}
   `);
   let stamped = 0;
@@ -191,7 +195,7 @@ export async function backfillUsageCost(
     const model = String(row.model);
     const start = new Date(row.bucket_start as string);
     const to = new Date(Math.min(start.getTime() + (granularity === "hour" ? 3_600_000 : 24 * 3_600_000), Date.now()));
-    stamped += await stampBucketCost(db, granularity, start, to, resolvePrice);
+    stamped += await stampBucketCost(db, granularity, start, to, resolvePrice, { nodeId: String(row.node_id), model: String(row.model) });
     if ((await resolvePrice(model)) !== null) pricedModels.add(model);
   }
   // `remaining` counts null buckets that CAN still be priced (the loop's

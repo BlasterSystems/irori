@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createDbHandle, llmRequests, nodes, usageBuckets, type Db, type DbHandle } from "@irori/db";
 import { tokenCostMinor, usageCostGroupBySchema } from "@irori/core";
 import { createCostService } from "../src/cost.js";
@@ -151,11 +151,14 @@ d("cost engine (db integration)", () => {
     await engine.runOnce(new Date(Date.now() + 3_600_000 * 3));
     await db.execute(sql`update usage_buckets set cost_minor = null, cost_currency = null`);
     const first = await backfillUsageCost(db, (model) => (model.startsWith("priced") ? { input: 1, cached: 0.1, output: 2, currency: "EUR" } : null), 500);
-    expect(first.stamped).toBe(1); // exactly one priced bucket (both events share the hour)
+    expect(first.stamped).toBe(2); // hour + day buckets for the priced model
     // Unpriced models resolve null → their buckets stay NULL (never fake
     // zero), so `remaining` counts only buckets that can still be priced.
     expect(first.remaining).toBe(0);
-    const priced = await db.select().from(usageBuckets).where(eq(usageBuckets.model, "priced-model"));
+    const priced = await db
+      .select()
+      .from(usageBuckets)
+      .where(and(eq(usageBuckets.model, "priced-model"), eq(usageBuckets.granularity, "hour")));
     expect(priced[0]!.costMinor).toBe(102);
     // Second pass: nothing left to stamp (idempotent).
     const second = await backfillUsageCost(db, (model) => (model.startsWith("priced") ? { input: 1, cached: 0.1, output: 2, currency: "EUR" } : null), 500);

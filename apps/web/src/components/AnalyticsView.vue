@@ -23,6 +23,8 @@ import { GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import type { AnalyticsResponse } from "@irori/core";
 import { fleetTiles, fmtHitPct, seriesTotals } from "../tokens-data";
 import { thresholds } from "../thresholds";
+import { fetchTokenReconciliation } from "../api";
+import type { TokenReconciliation } from "@irori/core";
 import LensChart from "./LensChart.vue";
 
 const lens = ref<AnalyticsLensName>("decode");
@@ -30,6 +32,8 @@ const range = ref<AnalyticsRangeName>("24h");
 const groupBy = ref<"cluster" | "node">("cluster");
 const data = ref<AnalyticsResponse | null>(null);
 const tempsStrip = ref<AnalyticsResponse | null>(null);
+/** IRI-071: ledger vs capture reconciliation (tokens lens only). */
+const recon = ref<TokenReconciliation | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 let loadSeq = 0;
@@ -39,13 +43,15 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const [main, strip] = await Promise.all([
+    const [main, strip, reconRows] = await Promise.all([
       fetchAnalytics(lens.value, range.value, groupBy.value),
       lens.value === "temps" ? fetchAnalytics("temps", range.value, "node") : Promise.resolve(null),
+      lens.value === "tokens" ? fetchTokenReconciliation(range.value) : Promise.resolve(null),
     ]);
     if (seq !== loadSeq) return;
     data.value = main;
     tempsStrip.value = strip;
+    recon.value = reconRows;
   } catch (err) {
     if (seq !== loadSeq) return;
     error.value = err instanceof Error ? err.message : String(err);
@@ -58,6 +64,10 @@ onMounted(() => void load());
 watch([lens, range, groupBy], () => void load());
 
 const W = 720;
+
+/** IRI-071 reconciliation cell formatters. */
+const shortNodeId = (id: string): string => id.slice(0, 8);
+const fmtDelta = (delta: number): string => (delta > 0 ? `+${fmtCount(delta)}` : delta < 0 ? `−${fmtCount(-delta)}` : "0");
 const H = 160;
 
 function lensConfig(name: AnalyticsLensName): { valueKey: keyof AnalyticsPoint; opts: LensChartOptions } {
@@ -287,7 +297,35 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">no token counters yet — engines publish them per backend (vLLM, llama.cpp, q27, ds4)</p>
+        <p v-else class="muted">no token counters yet — engines publish them per backend (vLLM, llama.cpp, q27, ds4, sglang)</p>
+      </div>
+    </section>
+
+    <!-- IRI-071: ledger (engine counters) vs capture (requests) — never a
+         silent preference: both sides labeled, costs price the capture rows. -->
+    <section v-if="lens === 'tokens' && recon !== null && recon.rows.length > 0" class="card" style="margin-bottom: 12px">
+      <div class="card__head">
+        <h3>Token reconciliation — engine counters vs captured requests</h3>
+        <span class="chip chip--warn" v-if="recon.rows.some((r) => r.warn)">◇ divergence &gt; 20%</span>
+      </div>
+      <div class="card__body">
+        <table class="tbl">
+          <thead>
+            <tr><th>node</th><th>port</th><th>model</th><th>engine counters</th><th>captured</th><th>Δ</th><th>divergence</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="r in recon.rows" :key="`${r.nodeId}:${r.port}:${r.model}`">
+              <td class="mono">{{ shortNodeId(r.nodeId) }}</td>
+              <td class="mono">{{ r.port }}</td>
+              <td class="mono">{{ r.model }}</td>
+              <td class="mono">{{ fmtCount(r.ledgerTokens) }}</td>
+              <td class="mono">{{ fmtCount(r.captureTokens) }}</td>
+              <td class="mono" :class="{ 'metric--hot': r.warn }">{{ fmtDelta(r.delta) }}</td>
+              <td class="mono">{{ r.divergencePct === null ? "—" : `${r.divergencePct}%` }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="stat__sub">costs are priced from the captured requests (llm_requests); engine counters come from the probes</p>
       </div>
     </section>
   </template>

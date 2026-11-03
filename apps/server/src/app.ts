@@ -1201,6 +1201,17 @@ export function createApp(deps: AppDeps): Express {
     },
   );
 
+  // IRI-071: ledger (engine counters) vs capture (requests) reconciliation.
+  app.get("/api/v1/analytics/token-reconciliation", async (req, res) => {
+    const analytics = deps.getAnalytics();
+    if (analytics === null) return res.status(503).json({ error: "database unavailable" });
+    const range = analyticsRangeSchema.safeParse(req.query.range ?? "4h");
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const nodeIdRaw = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
+    const nodeId = nodeIdRaw !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeIdRaw) ? nodeIdRaw : undefined;
+    res.json(await analytics.reconciliation({ range: range.data, nodeId }));
+  });
+
   // ---- IRI-069: health rules, findings, thresholds, prometheus ----
 
   app.get("/api/v1/health/rules", async (_req, res) => {
