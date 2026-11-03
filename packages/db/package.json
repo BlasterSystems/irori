@@ -16,7 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=69"
   },
   "dependencies": {
     "@irori/core": "workspace:*",
