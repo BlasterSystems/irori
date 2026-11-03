@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
-import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, type NodeInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
@@ -36,6 +36,9 @@ import type { SseHub } from "./sse.js";
 import { EVENT_FEED_CAP } from "./events-feed.js";
 import type { AgentHub } from "./hub.js";
 import { SetupBusyError, SetupInvalidError, SetupNotFoundError, SetupOfflineError, SetupStartError, type SetupsService } from "./setups-service.js";
+import type { AuditService } from "./audit.js";
+import type { EventJournalService } from "./event-journal.js";
+import { audit, auditReadOnly } from "./audit-routes.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
@@ -84,6 +87,42 @@ function serializeJob(job: {
     createdAt: job.createdAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
     finishedAt: job.finishedAt?.toISOString() ?? null,
+  };
+}
+
+/** Setup fields worth auditing — the definition, not the transient health. */
+function summarizeSetup(setup: SetupInfo): Record<string, unknown> {
+  return {
+    name: setup.name,
+    kind: setup.kind,
+    model: setup.model,
+    port: setup.port,
+    headNodeId: setup.headNodeId,
+    nodes: setup.nodes,
+    scriptStart: setup.scriptStart,
+    scriptStop: setup.scriptStop,
+    env: setup.env,
+    captureProxy: setup.captureProxy,
+    bodyRetention: setup.bodyRetention,
+    status: setup.status,
+    startupTimeoutMs: setup.startupTimeoutMs,
+  };
+}
+
+/** Node fields worth auditing — never the token material (redaction backstops it). */
+function summarizeNode(row: NodeRecord): Record<string, unknown> {
+  return {
+    name: row.name,
+    kind: row.kind,
+    role: row.role,
+    host: row.host,
+    enabled: row.enabled,
+    sortOrder: row.sortOrder,
+    llmPorts: row.llmPorts,
+    nasRoot: row.nasRoot,
+    cacheUser: row.cacheUser,
+    wolMac: row.wolMac,
+    gpuClockCapMHz: row.gpuClockCapMHz,
   };
 }
 
@@ -144,6 +183,13 @@ export interface AppDeps {
    *  (degraded), the setting routes answer 503 and no auto-provisioning is
    *  dispatched (agents keep their env pin). */
   getModelctlPin?: () => ModelctlPinService | null;
+  /**
+   * IRI-077: durable audit log. Optional — absent/null (degraded) routes
+   * behave exactly as unmanaged; mutating routes never fail because of it.
+   */
+  getAudit?: () => AuditService | null;
+  /** IRI-077: restart-surviving fleet event journal (GET /events/journal). */
+  getEventJournal?: () => EventJournalService | null;
   getCadenceMs?: () => number;
   setCadenceMs?: (cadenceMs: number) => void;
   /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
@@ -179,6 +225,10 @@ export function createApp(deps: AppDeps): Express {
     if (store === null) res.status(503).json({ error: "database unavailable" });
     return store;
   };
+
+  // IRI-077: audit is best-effort and optional — while the service is absent
+  // (degraded boot) marked routes behave exactly as unmanaged ones.
+  const getAudit = (): AuditService | null => deps.getAudit?.() ?? null;
 
   app.get("/healthz", async (_req, res) => {
     res.json({ ok: true, db: await deps.dbHealthy(), version: deps.version });
@@ -239,7 +289,24 @@ export function createApp(deps: AppDeps): Express {
     res.json({ configured } satisfies { configured: boolean });
   });
 
-  app.put("/api/v1/settings/hf-token", async (req, res) => {
+  app.put(
+    "/api/v1/settings/hf-token",
+    audit(
+      {
+        action: "settings.hf-token.put",
+        targetType: "settings",
+        targetId: () => "hf-token",
+        // Presence only, never the value: the summary says a token was set or
+        // cleared, and the redaction layer would strip the value anyway.
+        summary: (req) => {
+          const body: unknown = req.body;
+          const value = body && typeof body === "object" && "hfToken" in body ? body.hfToken : null;
+          return `hf-token ${value === null || value === undefined ? "cleared" : "set"}`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const hfToken = deps.getHfToken?.() ?? null;
     if (hfToken === null) return res.status(503).json({ error: "database unavailable" });
     const body = hfTokenPutSchema.safeParse(req.body);
@@ -261,7 +328,10 @@ export function createApp(deps: AppDeps): Express {
     res.json({ cadenceMs: await cadence.get() } satisfies { cadenceMs: number | null });
   });
 
-  app.put("/api/v1/settings/cadence-ms", async (req, res) => {
+  app.put(
+    "/api/v1/settings/cadence-ms",
+    audit({ action: "settings.cadence-ms.put", targetType: "settings", targetId: () => "cadence-ms" }, getAudit),
+    async (req, res) => {
     const cadence = deps.getCadence?.() ?? null;
     if (cadence === null) return res.status(503).json({ error: "database unavailable" });
     const body = cadencePutSchema.safeParse(req.body);
@@ -281,7 +351,10 @@ export function createApp(deps: AppDeps): Express {
     res.json({ energyCost: await cost.getEnergy() } satisfies { energyCost: EnergyCost | null });
   });
 
-  app.put("/api/v1/settings/energy-cost", async (req, res) => {
+  app.put(
+    "/api/v1/settings/energy-cost",
+    audit({ action: "settings.energy-cost.put", targetType: "settings", targetId: () => "energy-cost" }, getAudit),
+    async (req, res) => {
     const cost = deps.getCost?.() ?? null;
     if (cost === null) return res.status(503).json({ error: "database unavailable" });
     const body = energyCostPutSchema.safeParse(req.body);
@@ -299,7 +372,10 @@ export function createApp(deps: AppDeps): Express {
     res.json({ pin: await pin.get() } satisfies ModelctlPinResponse);
   });
 
-  app.put("/api/v1/settings/modelctl-pin", async (req, res) => {
+  app.put(
+    "/api/v1/settings/modelctl-pin",
+    audit({ action: "settings.modelctl-pin.put", targetType: "settings", targetId: () => "modelctl-pin" }, getAudit),
+    async (req, res) => {
     const pin = deps.getModelctlPin?.() ?? null;
     if (pin === null) return res.status(503).json({ error: "database unavailable" });
     const body = modelctlPinPutSchema.safeParse(req.body);
@@ -316,13 +392,39 @@ export function createApp(deps: AppDeps): Express {
     res.json({ tokenCost: await cost.getToken() } satisfies { tokenCost: TokenCost | null });
   });
 
-  app.put("/api/v1/settings/token-cost", async (req, res) => {
+  app.put(
+    "/api/v1/settings/token-cost",
+    audit({ action: "settings.token-cost.put", targetType: "settings", targetId: () => "token-cost" }, getAudit),
+    async (req, res) => {
     const cost = deps.getCost?.() ?? null;
     if (cost === null) return res.status(503).json({ error: "database unavailable" });
     const body = tokenCostPutSchema.safeParse(req.body);
     if (!body.success) return sendZodError(res, body.error);
     await cost.setToken(body.data);
     res.json({ tokenCost: body.data } satisfies { tokenCost: TokenCost });
+  });
+
+  // ---- IRI-077: durable audit log + event journal reads ----
+  app.get("/api/v1/audit", async (req, res) => {
+    const auditService = deps.getAudit?.() ?? null;
+    if (auditService === null) return res.status(503).json({ error: "database unavailable" });
+    const parsed = auditQuerySchema.safeParse(req.query);
+    if (!parsed.success) return sendZodError(res, parsed.error);
+    res.json(await auditService.list(parsed.data));
+  });
+
+  // Restart-surviving operational events (the /events/recent ring is memory-only).
+  app.get("/api/v1/events/journal", async (req, res) => {
+    const journal = deps.getEventJournal?.() ?? null;
+    if (journal === null) return res.status(503).json({ error: "database unavailable" });
+    const range = req.query.range === "1h" || req.query.range === "7d" || req.query.range === "30d" ? req.query.range : "24h";
+    const type = typeof req.query.type === "string" && req.query.type.length > 0 && req.query.type.length <= 64 ? req.query.type : undefined;
+    const nodeId = typeof req.query.nodeId === "string" && req.query.nodeId.length > 0 && req.query.nodeId.length <= 64 ? req.query.nodeId : undefined;
+    const limitRaw = Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "", 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100;
+    const cursorRaw = Number.parseInt(typeof req.query.cursor === "string" ? req.query.cursor : "", 10);
+    const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : undefined;
+    res.json(await journal.list({ range, type, nodeId, limit, cursor }));
   });
 
   app.get("/api/v1/events", (_req, res) => {
@@ -346,12 +448,29 @@ export function createApp(deps: AppDeps): Express {
     res.json((await store.list()).map((row) => toNodeDto(row, online.has(row.id))));
   });
 
-  app.post("/api/v1/nodes", async (req, res) => {
+  app.post(
+    "/api/v1/nodes",
+    audit(
+      {
+        action: "node.create",
+        targetType: "node",
+        // The id only exists after the insert; the handler publishes it.
+        targetId: () => null,
+        summary: (req) => {
+          const body: unknown = req.body;
+          const name = body && typeof body === "object" && "name" in body && typeof body.name === "string" ? body.name : "?";
+          return `node created (${name})`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const store = requireStore(res);
     if (!store) return;
     const body = nodeCreateSchema.safeParse(req.body);
     if (!body.success) return sendZodError(res, body.error);
     const created = await store.create(body.data);
+    res.locals.auditTargetId = created.id;
     const now = new Date().toISOString();
     const node = nodeInfoSchema.parse({
       id: created.id,
@@ -373,7 +492,21 @@ export function createApp(deps: AppDeps): Express {
     res.status(201).json({ node, token: created.token });
   });
 
-  app.patch("/api/v1/nodes/:id", async (req, res) => {
+  app.patch(
+    "/api/v1/nodes/:id",
+    audit(
+      {
+        action: "node.patch",
+        targetType: "node",
+        snapshot: async (req) => {
+          const id = parseUuidParam(req);
+          const row = id === null ? null : await (deps.getStore()?.get(id) ?? Promise.resolve(null));
+          return row === null ? null : summarizeNode(row);
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const store = requireStore(res);
     if (!store) return;
     const id = parseUuidParam(req);
@@ -398,7 +531,22 @@ export function createApp(deps: AppDeps): Express {
     res.json({ node: toNodeDto(row, onlineSet().has(id)) });
   });
 
-  app.delete("/api/v1/nodes/:id", async (req, res) => {
+  app.delete(
+    "/api/v1/nodes/:id",
+    audit(
+      {
+        action: "node.delete",
+        targetType: "node",
+        summary: (req) => `node deleted (${req.params.id ?? "?"})`,
+        snapshot: async (req) => {
+          const id = parseUuidParam(req);
+          const row = id === null ? null : await (deps.getStore()?.get(id) ?? Promise.resolve(null));
+          return row === null ? null : summarizeNode(row);
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const store = requireStore(res);
     if (!store) return;
     const id = parseUuidParam(req);
@@ -409,7 +557,18 @@ export function createApp(deps: AppDeps): Express {
     res.status(204).end();
   });
 
-  app.post("/api/v1/nodes/:id/token/rotate", async (req, res) => {
+  app.post(
+    "/api/v1/nodes/:id/token/rotate",
+    audit(
+      {
+        action: "node.token.rotate",
+        targetType: "node",
+        // The new token value is secret: only the fact of rotation is recorded.
+        summary: (req) => `agent token rotated for node ${req.params.id ?? "?"}`,
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const store = requireStore(res);
     if (!store) return;
     const id = parseUuidParam(req);
@@ -422,7 +581,17 @@ export function createApp(deps: AppDeps): Express {
   // ---- IRI-012 (ADR-0007): one-click agent update to the hub's own version.
   // Refuses while the node is busy: restarting the agent kills its jobs,
   // benches and running setups (the agent supervises them as children).
-  app.post("/api/v1/nodes/:id/agent-update", async (req, res) => {
+  app.post(
+    "/api/v1/nodes/:id/agent-update",
+    audit(
+      {
+        action: "node.agent-update",
+        targetType: "node",
+        summary: (req) => `agent update dispatched to node ${req.params.id ?? "?"}`,
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const store = requireStore(res);
@@ -592,7 +761,23 @@ export function createApp(deps: AppDeps): Express {
     res.json({ clients: await clients.list() });
   });
 
-  app.post("/api/v1/usage/clients", async (req, res) => {
+  app.post(
+    "/api/v1/usage/clients",
+    audit(
+      {
+        action: "usage-client.create",
+        targetType: "usage-client",
+        targetId: () => null,
+        // The issued key is secret and one-time; only the identity is recorded.
+        summary: (req) => {
+          const body: unknown = req.body;
+          const name = body && typeof body === "object" && "name" in body && typeof body.name === "string" ? body.name : "?";
+          return `client identity created (${name})`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const clients = requireUsageClients(res);
     if (clients === null) return;
     const body = req.body as { name?: unknown; project?: unknown; agentType?: unknown };
@@ -611,6 +796,7 @@ export function createApp(deps: AppDeps): Express {
         project: typeof body.project === "string" ? body.project : null,
         agentType: body.agentType === "main" || body.agentType === "subagent" ? body.agentType : null,
       });
+      res.locals.auditTargetId = created.id;
       res.status(201).json(created);
     } catch {
       // Validation already answered 400 above; everything else is a server fault.
@@ -618,7 +804,10 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.delete("/api/v1/usage/clients/:id", async (req, res) => {
+  app.delete(
+    "/api/v1/usage/clients/:id",
+    audit({ action: "usage-client.delete", targetType: "usage-client" }, getAudit),
+    async (req, res) => {
     const clients = requireUsageClients(res);
     if (clients === null) return;
     const id = parseUuidParam(req);
@@ -666,7 +855,21 @@ export function createApp(deps: AppDeps): Express {
     res.json({ latestAudit, history, prevention });
   });
 
-  app.put("/api/v1/nodes/:id/hygiene", async (req, res) => {
+  app.put(
+    "/api/v1/nodes/:id/hygiene",
+    audit(
+      {
+        action: "node.hygiene.put",
+        targetType: "hygiene",
+        summary: (req) => {
+          const body: unknown = req.body;
+          const weekly = body && typeof body === "object" && "weeklySafePass" in body ? String(body.weeklySafePass) : "?";
+          return `hygiene prevention set for node ${req.params.id ?? "?"} (weeklySafePass=${weekly})`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const store = requireStore(res);
@@ -697,7 +900,17 @@ export function createApp(deps: AppDeps): Express {
 
   // Dispatches the read-only inventory job; 409 while the node has any active
   // job (one-active-per-node), 202 otherwise.
-  app.post("/api/v1/nodes/:id/models/refresh", async (req, res) => {
+  app.post(
+    "/api/v1/nodes/:id/models/refresh",
+    audit(
+      {
+        action: "node.models-refresh",
+        targetType: "node",
+        summary: (req) => `inventory refresh dispatched for node ${req.params.id ?? "?"}`,
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const jobs = deps.getJobs();
@@ -750,7 +963,17 @@ export function createApp(deps: AppDeps): Express {
 
   // Dedicated probe-assignment endpoint (M3); PATCH /nodes/:id covers the
   // same field via nodePatchSchema. Body: { ports: number[] }.
-  app.put("/api/v1/nodes/:id/llm-ports", async (req, res) => {
+  app.put(
+    "/api/v1/nodes/:id/llm-ports",
+    audit(
+      {
+        action: "node.llm-ports.put",
+        targetType: "node",
+        summary: (req) => `llm probe ports set for node ${req.params.id ?? "?"}`,
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const store = requireStore(res);
@@ -771,7 +994,22 @@ export function createApp(deps: AppDeps): Express {
   // ---- M4: jobs, models, placement ----
 
   // Enqueue + dispatch a job to the node's agent (one active per node).
-  app.post("/api/v1/nodes/:id/jobs", async (req, res) => {
+  app.post(
+    "/api/v1/nodes/:id/jobs",
+    audit(
+      {
+        action: "node.job-dispatch",
+        targetType: "job",
+        targetId: () => null,
+        summary: (req) => {
+          const body: unknown = req.body;
+          const kind = body && typeof body === "object" && "kind" in body && typeof body.kind === "string" ? body.kind : "?";
+          return `job dispatched (${kind}) to node ${req.params.id ?? "?"}`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const body = req.body as { kind?: unknown; params?: unknown };
@@ -792,6 +1030,7 @@ export function createApp(deps: AppDeps): Express {
     const params = (body.params ?? {}) as Record<string, unknown>;
     try {
       const job = await jobs.create(id, body.kind, params);
+      res.locals.auditTargetId = job.id;
       res.status(202).json({ job: serializeJob(job) });
     } catch (err) {
       if (err instanceof JobBusyError) return res.status(409).json({ error: err.message });
@@ -822,7 +1061,10 @@ export function createApp(deps: AppDeps): Express {
     res.json({ job: serializeJob(job), output: job.output });
   });
 
-  app.post("/api/v1/jobs/:id/cancel", async (req, res) => {
+  app.post(
+    "/api/v1/jobs/:id/cancel",
+    audit({ action: "job.cancel", targetType: "job" }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid job id" });
     const jobs = deps.getJobs();
@@ -852,7 +1094,10 @@ export function createApp(deps: AppDeps): Express {
     res.json({ entries: await downloads.list() });
   });
 
-  app.post("/api/v1/downloads", async (req, res) => {
+  app.post(
+    "/api/v1/downloads",
+    audit({ action: "download.enqueue", targetType: "download", targetId: () => null }, getAudit),
+    async (req, res) => {
     const downloads = deps.getDownloads();
     if (downloads === null) return res.status(503).json({ error: "database unavailable" });
     try {
@@ -860,6 +1105,7 @@ export function createApp(deps: AppDeps): Express {
       // drain attempt); the single `{source, …}` shape stays for back-compat.
       const isBatch = typeof req.body === "object" && req.body !== null && "downloads" in req.body && Array.isArray(req.body.downloads);
       const body = isBatch ? await downloads.enqueueBatch(req.body) : [await downloads.enqueue(req.body)];
+      res.locals.auditTargetId = body.map((e) => e.id).join(",");
       res.status(202).json(body.length === 1 ? { entry: body[0] } : { entries: body });
     } catch (err) {
       if (err instanceof DownloadValidationError) return res.status(400).json({ error: err.message });
@@ -867,7 +1113,10 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.delete("/api/v1/downloads/:id", async (req, res) => {
+  app.delete(
+    "/api/v1/downloads/:id",
+    audit({ action: "download.delete", targetType: "download" }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid download id" });
     const downloads = deps.getDownloads();
@@ -882,7 +1131,10 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.post("/api/v1/downloads/:id/retry", async (req, res) => {
+  app.post(
+    "/api/v1/downloads/:id/retry",
+    audit({ action: "download.retry", targetType: "download" }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid download id" });
     const downloads = deps.getDownloads();
@@ -919,7 +1171,10 @@ export function createApp(deps: AppDeps): Express {
   });
 
   // Ask model-ops agents to re-report their store catalog.
-  app.post("/api/v1/models/refresh", async (_req, res) => {
+  app.post(
+    "/api/v1/models/refresh",
+    audit({ action: "model.catalog-refresh", targetType: "model", targetId: () => null }, getAudit),
+    async (_req, res) => {
     const hub = deps.getHub();
     const sent = hub === null ? 0 : [...hub.online()].filter((nodeId) => hub.sendToNode(nodeId, { type: "catalog-request" })).length;
     res.status(202).json({ requested: sent });
@@ -985,7 +1240,12 @@ export function createApp(deps: AppDeps): Express {
   });
 
   // Create-time script validation on the head agent (test -x; no side effects).
-  app.post("/api/v1/setups/validate-scripts", async (req, res) => {
+  app.post(
+    "/api/v1/setups/validate-scripts",
+    // Read-only probe: `test -x` on the head agent, no state changes (IRI-077
+    // declares the exemption so the coverage gate stays loud for the rest).
+    auditReadOnly("setup script validation (test -x, no side effects)"),
+    async (req, res) => {
     const setups = requireSetups(res);
     if (!setups) return;
     const body = req.body as { nodeId?: unknown; scripts?: unknown };
@@ -1004,7 +1264,22 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.post("/api/v1/setups", async (req, res) => {
+  app.post(
+    "/api/v1/setups",
+    audit(
+      {
+        action: "setup.create",
+        targetType: "setup",
+        targetId: () => null,
+        summary: (req) => {
+          const body: unknown = req.body;
+          const name = body && typeof body === "object" && "name" in body && typeof body.name === "string" ? body.name : "?";
+          return `setup created (${name})`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const setups = requireSetups(res);
     if (!setups) return;
     const body = setupCreateSchema.safeParse(req.body);
@@ -1013,7 +1288,10 @@ export function createApp(deps: AppDeps): Express {
     if (!store) return;
     if ((await store.get(body.data.headNodeId)) === null) return res.status(400).json({ error: "unknown head node" });
     try {
-      res.status(201).json({ setup: await setups.create(body.data) });
+      const createdSetup = await setups.create(body.data);
+      res.locals.auditTargetId = createdSetup.id;
+      res.locals.auditAfter = summarizeSetup(createdSetup);
+      res.status(201).json({ setup: createdSetup });
     } catch (err) {
       if (err instanceof SetupInvalidError) return res.status(400).json({ error: err.message });
       if (err instanceof SetupOfflineError) return res.status(409).json({ error: err.message });
@@ -1031,7 +1309,22 @@ export function createApp(deps: AppDeps): Express {
     res.json({ setup, transfers: await setups.transfers(id) });
   });
 
-  app.patch("/api/v1/setups/:id", async (req, res) => {
+  app.patch(
+    "/api/v1/setups/:id",
+    audit(
+      {
+        action: "setup.patch",
+        targetType: "setup",
+        snapshot: async (req) => {
+          const id = parseUuidParam(req);
+          if (id === null) return null;
+          const setup = await (deps.getSetups()?.get(id) ?? Promise.resolve(null));
+          return setup === null ? null : summarizeSetup(setup);
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid setup id" });
     const setups = requireSetups(res);
@@ -1047,7 +1340,23 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.delete("/api/v1/setups/:id", async (req, res) => {
+  app.delete(
+    "/api/v1/setups/:id",
+    audit(
+      {
+        action: "setup.delete",
+        targetType: "setup",
+        summary: (req) => `setup deleted (${req.params.id ?? "?"})`,
+        snapshot: async (req) => {
+          const id = parseUuidParam(req);
+          if (id === null) return null;
+          const setup = await (deps.getSetups()?.get(id) ?? Promise.resolve(null));
+          return setup === null ? null : summarizeSetup(setup);
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid setup id" });
     const setups = requireSetups(res);
@@ -1062,7 +1371,10 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.post("/api/v1/setups/:id/start", async (req, res) => {
+  app.post(
+    "/api/v1/setups/:id/start",
+    audit({ action: "setup.start", targetType: "setup", summary: (req) => `setup started (${req.params.id ?? "?"})` }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid setup id" });
     const setups = requireSetups(res);
@@ -1079,7 +1391,10 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.post("/api/v1/setups/:id/stop", async (req, res) => {
+  app.post(
+    "/api/v1/setups/:id/stop",
+    audit({ action: "setup.stop", targetType: "setup", summary: (req) => `setup stopped (${req.params.id ?? "?"})` }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid setup id" });
     const setups = requireSetups(res);
@@ -1105,7 +1420,19 @@ export function createApp(deps: AppDeps): Express {
   });
 
   // Staged transfers: build stages from the placement plan and chain them.
-  app.post("/api/v1/setups/:id/transfers", async (req, res) => {
+  app.post(
+    "/api/v1/setups/:id/transfers",
+    audit(
+      {
+        action: "setup.transfer",
+        targetType: "transfer",
+        // Default target is the route's :id — the setup; the created transfer
+        // id is published by the handler through res.locals once it exists.
+        targetId: (req) => (typeof req.params.id === "string" ? req.params.id : null),
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid setup id" });
     const setups = requireSetups(res);
@@ -1116,6 +1443,8 @@ export function createApp(deps: AppDeps): Express {
     }
     try {
       const transfer = await setups.createTransfer(id, body.targetNodeIds as string[]);
+      res.locals.auditTargetId = transfer.id;
+      res.locals.auditSummary = `transfer staged for setup ${id} (${body.targetNodeIds.length} target(s))`;
       res.status(202).json({ transfer });
     } catch (err) {
       if (err instanceof SetupNotFoundError) return res.status(404).json({ error: err.message });
@@ -1123,7 +1452,10 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  app.post("/api/v1/setups/transfers/:id/cancel", async (req, res) => {
+  app.post(
+    "/api/v1/setups/transfers/:id/cancel",
+    audit({ action: "transfer.cancel", targetType: "transfer" }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid transfer id" });
     const setups = requireSetups(res);
@@ -1156,7 +1488,22 @@ export function createApp(deps: AppDeps): Express {
     return bench;
   };
 
-  app.post("/api/v1/bench/:type", async (req, res) => {
+  app.post(
+    "/api/v1/bench/:type",
+    audit(
+      {
+        action: "bench.start",
+        targetType: "bench-run",
+        targetId: () => null,
+        summary: (req) => {
+          const body: unknown = req.body;
+          const nodeId = body && typeof body === "object" && "nodeId" in body && typeof body.nodeId === "string" ? body.nodeId : "?";
+          return `benchmark started (${req.params.type ?? "?"}) on node ${nodeId}`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
     const bench = requireBench(res);
     if (!bench) return;
     const type = benchTypeSchema.safeParse(req.params.type);
@@ -1169,6 +1516,7 @@ export function createApp(deps: AppDeps): Express {
     const config = (req.body?.config ?? req.body ?? {}) as Record<string, unknown>;
     try {
       const run = await bench.start(type.data, nodeId, config);
+      res.locals.auditTargetId = run.id;
       res.status(202).json({ run: serializeBenchRun(run) });
     } catch (err) {
       if (err instanceof BenchBusyError) return res.status(409).json({ error: err.message });
@@ -1206,7 +1554,10 @@ export function createApp(deps: AppDeps): Express {
     res.json({ run: serializeBenchRun(run) });
   });
 
-  app.post("/api/v1/bench/runs/:id/cancel", async (req, res) => {
+  app.post(
+    "/api/v1/bench/runs/:id/cancel",
+    audit({ action: "bench.cancel", targetType: "bench-run" }, getAudit),
+    async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid run id" });
     const bench = requireBench(res);

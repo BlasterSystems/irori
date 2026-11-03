@@ -460,6 +460,12 @@ reported in every snapshot; upgrade = re-run install.
   server-supplied jobs (argv or shell mode, output ring, per-node single-active
   job limit) — it is root, so the server↔agent channel is the security
   boundary; tokens are rotatable and nodes are revocable.
+- **Accountability (IRI-077):** every mutating hub route records a durable
+  `audit_log` row (actor, action, target, redacted before/after) best-effort
+  beside the response; the **Audit** view (`#/audit`) is the inspection
+  surface, with per-entity deep links and the restart-surviving event journal.
+  Redaction of secret-bearing keys is enforced at insert, not by caller
+  discipline.
 
 ## 13. API surface (v1)
 
@@ -474,6 +480,7 @@ reported in every snapshot; upgrade = re-run install.
 | Cleanup | `GET /api/v1/nodes/:id/cleanup`, `PUT /api/v1/nodes/:id/hygiene`; agent-side `hygiene-audit` / `hygiene-clean` / `hygiene-prevent` jobs (the clean still accepts `dryRun`, the UI no longer plans first) |
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
+| Audit & journal | `GET /api/v1/audit?range=&actor=&domain=&targetId=&q=&cursor=&limit=` (durable mutation record, IRI-077), `GET /api/v1/events/journal?range=&type=&nodeId=&limit=&cursor=` (restart-surviving SSE frames, IRI-077) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
 | Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), `GET/PUT /api/v1/settings/modelctl-pin` (modelctl pin + auto-provisioning, IR-105), WS `/agent-ws` |
 

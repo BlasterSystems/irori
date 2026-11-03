@@ -18,6 +18,7 @@ import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import { cancelJob, createJob, fetchJob, jobStatusChip, startAgentUpdate, type JobDetail } from "../models";
 import { activeJobFor, blockingJobLabel } from "../jobs";
+import { auditTargetHash } from "../audit-data";
 import {
   deleteConfirmCopy,
   deleteRequestFor,
@@ -648,6 +649,7 @@ onUnmounted(() => {
           <template v-if="node">
             <button class="btn btn--ghost btn--sm" @click="editOpen = true">Edit</button>
             <button class="btn btn--ghost btn--sm" @click="rotateOpen = true">Rotate token</button>
+            <a class="btn btn--ghost btn--sm" :href="auditTargetHash(nodeId)" title="Audited actions for this node">Audit</a>
             <button
               v-if="drift"
               class="btn btn--secondary btn--sm"

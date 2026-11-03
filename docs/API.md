@@ -112,6 +112,25 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   the next `hello-ok`. `GET /api/v1/version` includes the active `cadenceMs`.
   `503` while degraded.
 
+## Audit log + event journal (IRI-077)
+
+- `GET /api/v1/audit?range=&actor=&domain=&targetId=&q=&cursor=&limit=` — the
+  durable record of hub mutations (`audit_log`): `actor` (`hub|agent|client|
+  anonymous`), `action` (`domain.verb`), `targetType`/`targetId`, one-line
+  `summary`, and the `before`/`after` shapes with secret-bearing keys redacted
+  to `***` at insert time. Ranges `1h|24h|7d|30d|90d|1y`; cursor is the
+  descending decimal-string `id` of the last row shown; `total` is the bounded
+  count for the filter ignoring the cursor. `503` while degraded. Mutating
+  routes opt in via the `audit()` middleware; reads never record.
+- `GET /api/v1/events/journal?range=&type=&nodeId=&limit=&cursor=` — outgoing
+  SSE frames persisted at emit time (`event_journal`, 90 d), so operational
+  history survives hub restarts (the `/api/v1/events/recent` ring is
+  memory-only). Cache-stream frame types are excluded at journaling time.
+  `payload` validates as the same `sseEventSchema` the live feed carries.
+  `503` while degraded.
+- Both pass through the retention service (`AUDIT_KEEP_DAYS`, fixed 90 d for
+  the journal).
+
 ## Analytics (M7)
 
 - `GET /api/v1/analytics/:lens?range=&groupBy=` — five lenses
