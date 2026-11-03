@@ -7,6 +7,7 @@ import {
 } from "../api";
 import {
   GROUP_TABS,
+  TOKEN_GROUP_TABS,
   LENS_TABS,
   RANGE_TABS,
   fmtBucket,
@@ -19,9 +20,9 @@ import {
   type AnalyticsPoint,
   type LensChartOptions,
 } from "../analytics";
-import { GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
-import type { AnalyticsResponse } from "@irori/core";
-import { fleetTiles, fmtHitPct, seriesTotals } from "../tokens-data";
+import { analyticsRangeMs, GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
+import type { AnalyticsResponse, TokenTotals } from "@irori/core";
+import { fleetTiles, fmtHitPct, modelsCsv, seriesTotals, tokenInsight } from "../tokens-data";
 import { thresholds } from "../thresholds";
 import { fetchTokenReconciliation, fetchEfficiency } from "../api";
 import type { TokenReconciliation, EfficiencyRow } from "@irori/core";
@@ -29,7 +30,7 @@ import LensChart from "./LensChart.vue";
 
 const lens = ref<AnalyticsLensName>("decode");
 const range = ref<AnalyticsRangeName>("24h");
-const groupBy = ref<"cluster" | "node">("cluster");
+const groupBy = ref<"cluster" | "node" | "setup">("cluster");
 const data = ref<AnalyticsResponse | null>(null);
 const tempsStrip = ref<AnalyticsResponse | null>(null);
 /** IRI-071: ledger vs capture reconciliation (tokens lens only). */
@@ -37,6 +38,8 @@ const recon = ref<TokenReconciliation | null>(null);
 /** IRI-073: Wh-per-token efficiency (node statgrid + per-model column). */
 const efficiencyNodes = ref<EfficiencyRow[]>([]);
 const efficiencyModels = ref<Map<string, EfficiencyRow>>(new Map());
+/** IRI-075: delta-vs-previous-period (same window shifted back one range). */
+const prevFleet = ref<TokenTotals | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 let loadSeq = 0;
@@ -46,12 +49,14 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const [main, strip, reconRows, effNodes, effModels] = await Promise.all([
+    const [main, strip, reconRows, effNodes, effModels, prevTokens] = await Promise.all([
       fetchAnalytics(lens.value, range.value, groupBy.value),
       lens.value === "temps" ? fetchAnalytics("temps", range.value, "node") : Promise.resolve(null),
       lens.value === "tokens" ? fetchTokenReconciliation(range.value) : Promise.resolve(null),
       lens.value === "tokens" ? fetchEfficiency(range.value, "node") : Promise.resolve(null),
       lens.value === "tokens" ? fetchEfficiency(range.value, "model") : Promise.resolve(null),
+      // IRI-075: delta-vs-previous-period (same window shifted back one range).
+      lens.value === "tokens" ? fetchAnalytics(lens.value, range.value, groupBy.value, { offsetMs: analyticsRangeMs(range.value) }) : Promise.resolve(null),
     ]);
     if (seq !== loadSeq) return;
     data.value = main;
@@ -59,6 +64,7 @@ async function load(): Promise<void> {
     recon.value = reconRows;
     efficiencyNodes.value = effNodes?.rows ?? [];
     efficiencyModels.value = new Map((effModels?.rows ?? []).map((r) => [r.label.split(" · ").slice(1).join(" · "), r]));
+    prevFleet.value = prevTokens?.fleet ?? null;
   } catch (err) {
     if (seq !== loadSeq) return;
     error.value = err instanceof Error ? err.message : String(err);
@@ -69,6 +75,10 @@ async function load(): Promise<void> {
 
 onMounted(() => void load());
 watch([lens, range, groupBy], () => void load());
+watch(lens, (l) => {
+  // Setup grouping exists only on the tokens lens.
+  if (l !== "tokens" && groupBy.value === "setup") groupBy.value = "cluster";
+});
 
 const W = 720;
 
@@ -170,7 +180,19 @@ const headline = computed(() => {
 });
 
 /** IRI-040: the five fleet macro tiles (tokens lens only). */
-const tokenTiles = computed(() => (data.value?.lens === "tokens" ? fleetTiles(data.value.fleet) : []));
+const tokenTiles = computed(() => {
+  if (data.value?.lens !== "tokens") return [];
+  const cur = data.value.fleet?.total ?? null;
+  const prev = prevFleet.value?.total ?? null;
+  const deltaPct = cur !== null && prev !== null && prev > 0 ? ((cur - prev) / prev) * 100 : null;
+  return fleetTiles(data.value.fleet, data.value.costMinor ?? 0, data.value.costCurrency ?? null, deltaPct);
+});
+/** IRI-075: plain-English insight, derived only from the response data. */
+const tokenInsightLine = computed(() =>
+  data.value?.lens === "tokens" ? tokenInsight(data.value.fleet, data.value.models) : null,
+);
+/** IRI-075: client-side CSV of the current per-model table. */
+const csvHref = computed(() => `data:text/csv;charset=utf-8,${encodeURIComponent(modelsCsv(data.value?.models ?? []))}`);
 
 /** IRI-040: By-cluster/node macro totals, folded from the lens series. */
 const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesTotals(data.value.series) : []));
@@ -184,7 +206,7 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
     </div>
     <div class="row">
       <div class="seg" role="group" aria-label="Group by">
-        <button v-for="g in GROUP_TABS" :key="g.key" :class="{ 'is-active': groupBy === g.key }" @click="groupBy = g.key">{{ g.label }}</button>
+        <button v-for="g in lens === 'tokens' ? TOKEN_GROUP_TABS : GROUP_TABS" :key="g.key" :class="{ 'is-active': groupBy === g.key }" @click="groupBy = g.key as typeof groupBy">{{ g.label }}</button>
       </div>
       <div class="seg" role="group" aria-label="Range">
         <button v-for="r in RANGE_TABS" :key="r" :class="{ 'is-active': range === r }" @click="range = r">{{ r }}</button>
@@ -202,7 +224,8 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
   <p v-else-if="loading && data === null" class="muted">loading…</p>
 
   <template v-if="data !== null">
-    <!-- IRI-040: fleet macro tiles (tokens lens). -->
+    <!-- IRI-040/075: fleet macro tiles (tokens lens) — computed/cached split,
+         cost tile, insight line, CSV export. -->
     <section v-if="lens === 'tokens'" class="card" style="margin-bottom: 12px">
       <div class="card__body">
         <div class="statgrid statgrid--6">
@@ -211,7 +234,11 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
             <span class="stat__value">{{ t.value }}</span>
           </div>
         </div>
-        <p class="stat__sub">{{ range }} · total = generated + input · cache hit = cache / input</p>
+        <p class="stat__sub">{{ range }} · total = generated + input · input = computed + cached · cache hit = cached / input</p>
+        <p v-if="tokenInsightLine !== null" class="stat__sub" style="margin-top: 4px"><strong>Insight:</strong> {{ tokenInsightLine }}</p>
+        <div v-if="(data.models.length ?? 0) > 0" class="row" style="margin-top: 8px">
+          <a class="btn btn--ghost btn--sm" download="token-models.csv" :href="csvHref" aria-label="Export per-model token table as CSV">Export CSV</a>
+        </div>
       </div>
     </section>
 
@@ -270,14 +297,14 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
       <div class="card__body">
         <table class="tbl">
           <thead>
-            <tr><th>{{ groupBy }}</th><th>total</th><th>generated</th><th>input</th><th>cache</th><th>cache hit</th></tr>
+            <tr><th>{{ groupBy }}</th><th>total</th><th>generated</th><th>input computed</th><th>cached</th><th>cache hit</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in tokenGroupTotals" :key="r.key">
               <td class="mono">{{ r.label }}</td>
               <td class="mono">{{ fmtCount(r.total) }}</td>
               <td class="mono">{{ fmtCount(r.generated) }}</td>
-              <td class="mono">{{ fmtCount(r.input) }}</td>
+              <td class="mono">{{ fmtCount(r.computed) }}</td>
               <td class="mono">{{ fmtCount(r.cached) }}</td>
               <td class="mono">{{ fmtHitPct(r.cacheHitPct) }}</td>
             </tr>
