@@ -593,6 +593,37 @@ const liveAgeText = computed(() => {
     </template>
 
     <!-- Models: aggregates + per-model series -->
+
+    <!-- IRI-076: retry waste — superseded attempts per client key, costed. -->
+    <template v-else-if="tab === 'retries'">
+      <section class="card" style="margin-top: var(--space-4)">
+        <div class="card__head">
+          <h3 style="font-size: 15px">Retry waste</h3>
+          <span class="row" style="gap: 8px">
+            <span v-if="retriesCostShown && (retries?.retriesCostMinor ?? 0) > 0" class="chip chip--warn">Wasted: {{ costText(retries?.retriesCostMinor ?? 0, retries?.costCurrency ?? null) }}</span>
+            <span class="mono faint">{{ range }}</span>
+          </span>
+        </div>
+        <div class="card__body card__body--flush">
+          <table class="table">
+            <thead>
+              <tr><th>Client</th><th>Agent type</th><th>Project</th><th>Superseded attempts</th><th>Wasted cost</th><th>Last seen</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(g, i) in retries?.groups ?? []" :key="i">
+                <td class="mono">{{ g.clientName ?? g.sourceAddr ?? "—" }}</td>
+                <td><span v-if="g.clientAgentType !== null" :class="['chip', g.clientAgentType === 'main' ? 'chip--accent' : 'chip--muted']">{{ g.clientAgentType }}</span><span v-else class="faint">—</span></td>
+                <td class="mono">{{ g.clientProject ?? "—" }}</td>
+                <td class="mono">{{ fmtCount(g.attempts) }}</td>
+                <td class="mono">{{ retriesCostShown ? costText(g.costMinor, retries?.costCurrency ?? null) : "—" }}</td>
+                <td class="mono">{{ fmtTimeIso(g.lastSeenMs) }}</td>
+              </tr>
+              <tr v-if="(retries?.groups.length ?? 0) === 0"><td colspan="6" class="faint">No superseded retry attempts in this range.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </template>
     <template v-else>
       <section class="card" style="margin-top: var(--space-4)">
         <div class="card__head"><h3 style="font-size: 15px">Models</h3><span class="mono faint">{{ range }}</span></div>
@@ -637,37 +668,6 @@ const liveAgeText = computed(() => {
           <div class="card__body"><LensChart :chart="modelCharts.tps" unit="tok/s" aria-label="Decode tok/s per bucket" :format="fmtTps" :time-format="fmtBucketShort" /></div>
         </section>
       </div>
-    </template>
-
-    <!-- IRI-076: retry waste — superseded attempts per client key, costed. -->
-    <template v-else-if="tab === 'retries'">
-      <section class="card" style="margin-top: var(--space-4)">
-        <div class="card__head">
-          <h3 style="font-size: 15px">Retry waste</h3>
-          <span class="row" style="gap: 8px">
-            <span v-if="retriesCostShown && (retries?.retriesCostMinor ?? 0) > 0" class="chip chip--warn">Wasted: {{ costText(retries?.retriesCostMinor ?? 0, retries?.costCurrency ?? null) }}</span>
-            <span class="mono faint">{{ range }}</span>
-          </span>
-        </div>
-        <div class="card__body card__body--flush">
-          <table class="table">
-            <thead>
-              <tr><th>Client</th><th>Agent type</th><th>Project</th><th>Superseded attempts</th><th>Wasted cost</th><th>Last seen</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="(g, i) in retries?.groups ?? []" :key="i">
-                <td class="mono">{{ g.clientName ?? g.sourceAddr ?? "—" }}</td>
-                <td><span v-if="g.clientAgentType !== null" :class="['chip', g.clientAgentType === 'main' ? 'chip--accent' : 'chip--muted']">{{ g.clientAgentType }}</span><span v-else class="faint">—</span></td>
-                <td class="mono">{{ g.clientProject ?? "—" }}</td>
-                <td class="mono">{{ fmtCount(g.attempts) }}</td>
-                <td class="mono">{{ retriesCostShown ? costText(g.costMinor, retries?.costCurrency ?? null) : "—" }}</td>
-                <td class="mono">{{ fmtTimeIso(g.lastSeenMs) }}</td>
-              </tr>
-              <tr v-if="(retries?.groups.length ?? 0) === 0"><td colspan="6" class="faint">No superseded retry attempts in this range.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
     </template>
 
     <!-- Request detail drawer -->

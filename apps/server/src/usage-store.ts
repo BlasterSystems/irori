@@ -434,6 +434,8 @@ export function requestTraceOf(raw: Record<string, unknown>): UsageTrace {
     model: typeof raw.model === "string" ? raw.model : null,
     traceId: typeof raw.trace_id === "string" ? raw.trace_id : null,
     durationMs,
+    modelP50Ms: null,
+    error: null,
     spans,
   };
 }
