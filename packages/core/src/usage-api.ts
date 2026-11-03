@@ -297,6 +297,27 @@ export const chatsResponseSchema = z.object({
 });
 export type ChatsResponse = z.infer<typeof chatsResponseSchema>;
 
+/** IRI-079: normalized span tree for the request drawer's Trace tab.
+ *  Segments are ms offsets within the request; they sum to durationMs
+ *  (± tolerance) and degrade to two segments (TTFT + decode) for engines
+ *  without a timing breakdown. */
+export const traceSpanSchema = z.object({
+  name: z.string(),
+  startMs: z.number().nonnegative(),
+  endMs: z.number().nonnegative(),
+  attrs: z.record(z.string(), z.union([z.string(), z.number()])).default({}),
+});
+export const usageTraceSchema = z.object({
+  requestId: z.string().uuid(),
+  nodeId: z.string().uuid(),
+  model: z.string().nullable(),
+  traceId: z.string().nullable(),
+  durationMs: z.number().int().nonnegative(),
+  spans: z.array(traceSpanSchema),
+});
+export type UsageTrace = z.infer<typeof usageTraceSchema>;
+export type TraceSpan = z.infer<typeof traceSpanSchema>;
+
 export const chatDetailSchema = z.object({
   id: z.string().uuid(),
   startMs: z.number().int(),

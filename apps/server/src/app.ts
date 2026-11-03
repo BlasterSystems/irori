@@ -1213,6 +1213,17 @@ export function createApp(deps: AppDeps): Express {
     res.json(await analytics.efficiency({ range: range.data, groupBy }));
   });
 
+  // IRI-079: normalized span tree for the request drawer's Trace tab.
+  app.get("/api/v1/usage/requests/:id/trace", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid request id" });
+    const trace = await usage.requestTrace(id);
+    if (trace === null) return res.status(404).json({ error: "request not found" });
+    res.json(trace);
+  });
+
   // IRI-076: retry waste — superseded attempts grouped per client key.
   app.get("/api/v1/usage/retries", async (req, res) => {
     const usage = requireUsage(res);

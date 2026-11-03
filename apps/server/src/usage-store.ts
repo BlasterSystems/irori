@@ -9,6 +9,8 @@ import {
   type Currency,
   type UsageAgentsResponse,
   type UsageRetriesResponse,
+  type UsageTrace,
+  type TraceSpan,
   type UsageCostGroupBy,
   type UsageCostResponse,
   type UsageErrorsResponse,
@@ -156,6 +158,8 @@ export interface UsageStore {
     filters: UsageFilters & { page: number; limit: number; errorOnly?: boolean; sig?: string; status?: number },
   ): Promise<UsageRequestsResponse>;
   requestById(id: string): Promise<UsageRequestRow | null>;
+  /** IRI-079: normalized span tree for the drawer's Trace tab. */
+  requestTrace(id: string): Promise<UsageTrace | null>;
   errorGroups(filters: UsageFilters): Promise<UsageErrorsResponse>;
   models(filters: UsageFilters): Promise<UsageModelsResponse>;
   /** Client-identity groups over raw rows (IR-55 Agents view). */
@@ -361,6 +365,79 @@ function describeDropped(event: unknown, issue: string | undefined): string {
   return `id=${pick("id")} port=${pick("port")} endpoint=${pick("endpoint")} model=${pick("model")}${issue ? ` issue=${issue}` : ""}`;
 }
 
+/**
+ * IRI-079: typed timing/speculative fields parsed from the TensorFold
+ * engineMeta blob. Defensive: any numeric field whose key matches the
+ * speculative vocabulary (rounds/drafted/accepted, at any nesting depth)
+ * is lifted; unknown shapes yield nulls — the verbatim jsonb stays.
+ */
+export function timingFromEngineMeta(
+  meta: unknown,
+): { prefillMs: number | null; decodeMs: number | null; specRounds: number | null; specDrafted: number | null; specAccepted: number | null } {
+  const out = { prefillMs: null as number | null, decodeMs: null as number | null, specRounds: null as number | null, specDrafted: null as number | null, specAccepted: null as number | null };
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (value !== null && typeof value === "object") {
+        walk(value);
+        continue;
+      }
+      if (typeof value !== "number" || !Number.isFinite(value)) continue;
+      const k = key.toLowerCase();
+      if (out.prefillMs === null && /prefill.*ms|.*_prefill$/.test(k)) out.prefillMs = Math.round(value);
+      else if (out.decodeMs === null && /decode.*ms$/.test(k)) out.decodeMs = Math.round(value);
+      else if (out.specRounds === null && /rounds?$/.test(k)) out.specRounds = Math.round(value);
+      else if (out.specDrafted === null && /drafted?$/.test(k)) out.specDrafted = Math.round(value);
+      else if (out.specAccepted === null && /accepted?$/.test(k)) out.specAccepted = Math.round(value);
+    }
+  };
+  walk(meta);
+  return out;
+}
+
+/** IRI-079: pure span-tree builder — segments sum to durationMs; engines
+ *  without a breakdown degrade to two segments (TTFT + decode), never a
+ *  blank panel. Speculative attributes ride the decode span. */
+export function requestTraceOf(raw: Record<string, unknown>): UsageTrace {
+  const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
+  const durationMs = Math.max(0, int(raw.duration_ms) ?? 0);
+  const ttft = int(raw.ttft_ms) ?? 0;
+  const prefill = int(raw.prefill_ms);
+  const decode = int(raw.decode_ms);
+  const rounds = int(raw.spec_rounds);
+  const drafted = int(raw.spec_drafted);
+  const accepted = int(raw.spec_accepted);
+  const attrs: Record<string, string | number> = {};
+  if (rounds !== null) attrs.specRounds = rounds;
+  if (drafted !== null) attrs.specDrafted = drafted;
+  if (accepted !== null) attrs.specAccepted = accepted;
+  if (drafted !== null && drafted > 0 && accepted !== null) attrs.acceptanceRate = Math.round((accepted / drafted) * 1000) / 10;
+  const spans: TraceSpan[] = [];
+  let prefillEnd: number;
+  if (prefill !== null) {
+    prefillEnd = Math.min(prefill, durationMs);
+    spans.push({ name: "queue + prefill", startMs: 0, endMs: prefillEnd, attrs: {} });
+    const decodeEnd = Math.min(prefill + (decode ?? Math.max(0, durationMs - prefill)), durationMs);
+    spans.push({ name: "decode", startMs: prefillEnd, endMs: decodeEnd, attrs });
+  } else {
+    prefillEnd = Math.min(ttft, durationMs);
+    spans.push({ name: "queue + prefill (TTFT)", startMs: 0, endMs: prefillEnd, attrs: {} });
+    spans.push({ name: "decode", startMs: prefillEnd, endMs: durationMs, attrs });
+  }
+  return {
+    requestId: String(raw.id),
+    nodeId: String(raw.node_id),
+    model: typeof raw.model === "string" ? raw.model : null,
+    traceId: typeof raw.trace_id === "string" ? raw.trace_id : null,
+    durationMs,
+    spans,
+  };
+}
+
 export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageStore {
   const warn = opts.warn ?? ((message: string) => log.warn(message));
   const now = opts.now ?? Date.now;
@@ -442,6 +519,8 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
           sourceAddr: e.sourceAddr,
           // IRI-070: W3C trace context → queryable columns (span join).
           ...traceIdsOf(e.traceparent),
+          // IRI-079: typed timing/speculative fields from the engine blob.
+          ...timingFromEngineMeta(e.engineMeta),
           clientKeyHash: e.clientKeyHash,
           clientName: mapped?.name ?? e.clientName ?? null,
           clientProject: mapped?.project ?? e.clientProject ?? null,
@@ -737,6 +816,13 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
     async requestById(id) {
       const rows = await db.select().from(llmRequests).where(eq(llmRequests.id, id)).limit(1);
       return rows[0] !== undefined ? rowToRequest(rows[0] as unknown as Record<string, unknown>) : null;
+    },
+
+    /** IRI-079: normalized span tree for the drawer's Trace tab. */
+    async requestTrace(id) {
+      const rows = await db.select().from(llmRequests).where(eq(llmRequests.id, id)).limit(1);
+      if (rows[0] === undefined) return null;
+      return requestTraceOf(rows[0] as unknown as Record<string, unknown>);
     },
 
     /**
