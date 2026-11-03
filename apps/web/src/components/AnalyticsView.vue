@@ -23,8 +23,8 @@ import { GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import type { AnalyticsResponse } from "@irori/core";
 import { fleetTiles, fmtHitPct, seriesTotals } from "../tokens-data";
 import { thresholds } from "../thresholds";
-import { fetchTokenReconciliation } from "../api";
-import type { TokenReconciliation } from "@irori/core";
+import { fetchTokenReconciliation, fetchEfficiency } from "../api";
+import type { TokenReconciliation, EfficiencyRow } from "@irori/core";
 import LensChart from "./LensChart.vue";
 
 const lens = ref<AnalyticsLensName>("decode");
@@ -34,6 +34,9 @@ const data = ref<AnalyticsResponse | null>(null);
 const tempsStrip = ref<AnalyticsResponse | null>(null);
 /** IRI-071: ledger vs capture reconciliation (tokens lens only). */
 const recon = ref<TokenReconciliation | null>(null);
+/** IRI-073: Wh-per-token efficiency (node statgrid + per-model column). */
+const efficiencyNodes = ref<EfficiencyRow[]>([]);
+const efficiencyModels = ref<Map<string, EfficiencyRow>>(new Map());
 const loading = ref(false);
 const error = ref<string | null>(null);
 let loadSeq = 0;
@@ -43,15 +46,19 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const [main, strip, reconRows] = await Promise.all([
+    const [main, strip, reconRows, effNodes, effModels] = await Promise.all([
       fetchAnalytics(lens.value, range.value, groupBy.value),
       lens.value === "temps" ? fetchAnalytics("temps", range.value, "node") : Promise.resolve(null),
       lens.value === "tokens" ? fetchTokenReconciliation(range.value) : Promise.resolve(null),
+      lens.value === "tokens" ? fetchEfficiency(range.value, "node") : Promise.resolve(null),
+      lens.value === "tokens" ? fetchEfficiency(range.value, "model") : Promise.resolve(null),
     ]);
     if (seq !== loadSeq) return;
     data.value = main;
     tempsStrip.value = strip;
     recon.value = reconRows;
+    efficiencyNodes.value = effNodes?.rows ?? [];
+    efficiencyModels.value = new Map((effModels?.rows ?? []).map((r) => [r.label.split(" · ").slice(1).join(" · "), r]));
   } catch (err) {
     if (seq !== loadSeq) return;
     error.value = err instanceof Error ? err.message : String(err);
@@ -284,7 +291,7 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
       <div class="card__body">
         <table v-if="data.models.length > 0" class="tbl">
           <thead>
-            <tr><th>model</th><th>total</th><th>generated</th><th>input (prompt)</th><th>cache</th><th>cache hit</th></tr>
+            <tr><th>model</th><th>total</th><th>generated</th><th>input (prompt)</th><th>cache</th><th>cache hit</th><th title="Wh per 1,000 tokens — energy join, NAS excluded">Wh/ktok</th></tr>
           </thead>
           <tbody>
             <tr v-for="m in data.models" :key="m.model">
@@ -294,10 +301,31 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
               <td class="mono">{{ fmtCount(m.prompt) }}</td>
               <td class="mono">{{ fmtCount(m.cached) }}</td>
               <td class="mono">{{ fmtHitPct(m.cacheHitPct) }}</td>
+              <td class="mono" :title="efficiencyModels.get(m.model)?.reason ?? ''">
+                <template v-if="efficiencyModels.get(m.model)?.whPerKToken !== null && efficiencyModels.get(m.model)?.whPerKToken !== undefined">{{ efficiencyModels.get(m.model)!.whPerKToken }}</template>
+                <template v-else>—</template>
+              </td>
             </tr>
           </tbody>
         </table>
         <p v-else class="muted">no token counters yet — engines publish them per backend (vLLM, llama.cpp, q27, ds4, sglang)</p>
+      </div>
+    </section>
+
+    <!-- IRI-073: Wh-per-1k-tokens statgrid; the NAS is excluded from fleet
+         power so efficiency never divides by idle box watts. -->
+    <section v-if="lens === 'tokens' && efficiencyNodes.length > 0" class="card" style="margin-bottom: 12px">
+      <div class="card__head"><h3>Efficiency — Wh per 1,000 tokens</h3><span class="stat__sub">estimated, not wall-metered · NAS excluded from energy</span></div>
+      <div class="card__body">
+        <div class="statgrid">
+          <div v-for="e in efficiencyNodes" :key="e.key" class="stat" :title="e.reason ?? `coverage ${e.energyCoverage === null ? '—' : Math.round(e.energyCoverage * 100) + '%'}`">
+            <p class="stat__label">{{ e.label }}</p>
+            <p class="stat__val" :class="{ 'metric--hot': e.reason !== null }">
+              {{ e.whPerKToken === null ? "—" : `${e.whPerKToken} Wh/ktok` }}
+            </p>
+            <p class="stat__sub">{{ e.reason ?? `${e.tokens.toLocaleString("en-US")} tok` }}</p>
+          </div>
+        </div>
       </div>
     </section>
 

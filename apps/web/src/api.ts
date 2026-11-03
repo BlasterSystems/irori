@@ -1,6 +1,8 @@
 import {
   type AnalyticsResponse,
   type TokenReconciliation,
+  type EfficiencyResponse,
+  type EfficiencyRow,
   type HealthFinding,
   auditPageSchema,
   eventJournalPageSchema,
@@ -194,6 +196,13 @@ export async function setClockCap(id: string, capMHz: number | null, persistent:
     const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
     throw new Error(msg);
   }
+}
+
+/** IRI-073: Wh-per-token efficiency (energy × ledger join). */
+export async function fetchEfficiency(range: AnalyticsRangeName, groupBy: "node" | "model"): Promise<EfficiencyResponse> {
+  const res = await fetch(`/api/v1/analytics/efficiency?range=${encodeURIComponent(range)}&groupBy=${groupBy}`);
+  if (!res.ok) throw new Error(`GET /api/v1/analytics/efficiency failed: HTTP ${res.status}`);
+  return (await res.json()) as EfficiencyResponse;
 }
 
 /** IRI-071: ledger vs capture token reconciliation. */

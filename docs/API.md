@@ -351,6 +351,32 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   with the same name is refused, never overwritten. `400` on
   `persistent` without `capMHz` or a non-integer cap.
 
+## Efficiency — Wh per token (IRI-073)
+
+- `GET /api/v1/analytics/efficiency?range=&groupBy=node|model` — read-time
+  join: energy (Wh) from power buckets clamped to the GB10 envelope × bucket
+  duration, tokens from the ledger → `whPerKToken`, plus an estimated
+  `costPerMToken` (pricing snapshot × ledger tokens). **The NAS is excluded
+  from energy** (fleet rule) — efficiency is never computed against idle box
+  watts. Missing coverage → `whPerKToken: null` + `reason` (partial power
+  coverage < 50%, no readings, no token counters), never zero. The Analytics
+  tokens lens renders a per-node statgrid (reason in the tooltip) and a
+  per-model `Wh/ktok` column.
+
+## Token reconciliation (IRI-071)
+
+- `GET /api/v1/analytics/token-reconciliation?range=&nodeId=` — per
+  node/port/model: `{ledgerTokens}` (engine lifetime counters, M7 ledger) vs
+  `{captureTokens}` (llm_requests), `delta`, `divergencePct`, and `warn`
+  (both sides have data and diverge > 20%). The tokens lens renders the
+  table with the warn chip; **costs are priced from the capture side** — both
+  sources are labeled, never silently preferred.
+- SGLang now feeds the ledger: `generation_tokens_total` +
+  `realtime_tokens_total{mode=prefill_compute|prefill_cache}` (prompt =
+  compute + cache, cached = the cache subset) with a `server_info` totals
+  fallback. ollama and LM Studio publish no cumulative token counters over
+  their HTTP APIs — the ledger records no-coverage for them (never a guess).
+
 ## Health rules, findings & metrics (IRI-069)
 
 - `GET /api/v1/health/rules` — the seeded rule set (GPU temp warn/critical,
