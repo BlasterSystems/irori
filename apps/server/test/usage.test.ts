@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
+import { randomUUID } from "node:crypto";
 import request from "supertest";
 import { WebSocket } from "ws";
 import { SCHEMA_VERSION, usageRequestSchema, type UsageRequest } from "@irori/core";
@@ -242,6 +243,88 @@ describe("agent hub log batches", () => {
     await new Promise((r) => setTimeout(r, 50));
     // No ack frame, no pulse — the agent's durable buffer keeps the rows.
     ws.close();
+  });
+});
+
+// ---- IRI-070: schema rejections quarantine (never ack-drop) + trace columns ----
+
+import { eq } from "drizzle-orm";
+import { createDbHandle, llmRequests, nodes, rejectedUsage } from "@irori/db";
+import { logEventSchema, type LogEvent } from "@irori/core";
+import { createLogStore } from "../src/logs-store.js";
+import { createUsageStore as createRealUsageStore, traceIdsOf } from "../src/usage-store.js";
+
+describe("usage ingest quarantine + trace columns (IRI-070, db-gated)", () => {
+  it("traceIdsOf parses the W3C form and rejects garbage", () => {
+    expect(traceIdsOf("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")).toEqual({
+      traceId: "4bf92f3577b34da6a3ce929d0e0e4736",
+      spanId: "00f067aa0ba902b7",
+    });
+    expect(traceIdsOf("not a traceparent")).toEqual({ traceId: null, spanId: null });
+    expect(traceIdsOf(undefined)).toEqual({ traceId: null, spanId: null });
+  });
+
+  it("the real store quarantines malformed events into rejected_usage", async () => {
+    const url = process.env.IRORI_TEST_DATABASE_URL;
+    if (url === undefined) {
+      console.warn("skipping quarantine db test — no IRORI_TEST_DATABASE_URL");
+      return;
+    }
+    const handle = createDbHandle(url);
+    await handle.migrate();
+    try {
+      const nodeId = randomUUID();
+      await handle.db.insert(nodes).values({
+        id: nodeId,
+        name: `usage-contract-${nodeId.slice(0, 8)}`,
+        kind: "spark",
+        role: "standalone",
+        host: "localhost",
+        agentTokenHash: "x",
+        agentTokenEnc: "x",
+      });
+      const store = createRealUsageStore(handle.db);
+      const good = usageRequest({ id: randomUUID() }); // fresh id — the shared test DB persists rows
+      const bad: Record<string, unknown> = { ...usageRequest({ id: randomUUID() }) };
+      delete bad.id; // required — simulates an old-agent contract break
+      const inserted = await store.insertBatch(nodeId, [good, bad as UsageRequest]);
+      expect(inserted).toBe(1); // only the good one stored…
+      const rejects = await handle.db.select().from(rejectedUsage).where(eq(rejectedUsage.nodeId, nodeId));
+      expect(rejects).toHaveLength(1); // …the bad one QUARANTINED with a reason
+      expect(rejects[0]!.nodeId).toBe(nodeId);
+      expect(rejects[0]!.payload).toBeTruthy();
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("stored requests carry the W3C trace ids derived from the proxy-lifted header", async () => {
+    const url = process.env.IRORI_TEST_DATABASE_URL;
+    if (url === undefined) {
+      console.warn("skipping trace db test — no IRORI_TEST_DATABASE_URL");
+      return;
+    }
+    const handle = createDbHandle(url);
+    await handle.migrate();
+    try {
+      const nodeId = randomUUID();
+      await handle.db.insert(nodes).values({
+        id: nodeId,
+        name: `usage-trace-${nodeId.slice(0, 8)}`,
+        kind: "spark",
+        role: "standalone",
+        host: "localhost",
+        agentTokenHash: "x",
+        agentTokenEnc: "x",
+      });
+      const store = createRealUsageStore(handle.db);
+      await store.insertBatch(nodeId, [usageRequest({ id: randomUUID(), traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" })]);
+      const [row] = await handle.db.select().from(llmRequests).where(eq(llmRequests.nodeId, nodeId));
+      expect(row!.traceId).toBe("4bf92f3577b34da6a3ce929d0e0e4736");
+      expect(row!.spanId).toBe("00f067aa0ba902b7");
+    } finally {
+      await handle.close();
+    }
   });
 });
 

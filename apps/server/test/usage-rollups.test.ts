@@ -140,7 +140,7 @@ d("usage store (postgres)", () => {
     clock += 60_000;
     await store.insertBatch(nodeId, [bad(4)]);
     expect(warns).toHaveLength(2);
-    expect(warns[1]).toContain("dropped 3 malformed event(s)");
+    expect(warns[1]).toContain("quarantined 3 malformed event(s)");
     expect(warns[1]).toContain("port=8094");
   });
 

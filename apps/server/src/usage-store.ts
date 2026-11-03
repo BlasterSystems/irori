@@ -1,5 +1,5 @@
 import { and, desc, eq, lt, sql, type SQL } from "drizzle-orm";
-import { llmParts, llmRequestParts, llmRequestTools, llmRequests, usageBuckets } from "@irori/db";
+import { llmParts, llmRequestParts, llmRequestTools, llmRequests, rejectedUsage, usageBuckets } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
   usageRequestSchema,
@@ -291,6 +291,26 @@ function aggIntoPoint(a: Agg, t: string): UsageSeriesPoint {
 /** Per-store drop-warning rate limit (IRI-055): at most one line per window. */
 const DROPPED_LOG_INTERVAL_MS = 60_000;
 
+/** JSON round-trip so jsonb never rejects BigInt/Date payloads (audit.ts style). */
+function serializeUnknown(value: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(value ?? null));
+  } catch {
+    return { truncated: true };
+  }
+}
+
+/**
+ * IRI-070: parses a W3C traceparent into (traceId, spanId) so the row joins
+ * the GenAI span OTEL already exports. Tolerant of garbage: null on any
+ * mismatch — a missing trace is metadata absence, never an ingest failure.
+ */
+export function traceIdsOf(traceparent: string | null | undefined): { traceId: string | null; spanId: string | null } {
+  if (traceparent === null || traceparent === undefined) return { traceId: null, spanId: null };
+  const m = /^[\da-f]{2}-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/i.exec(traceparent.trim());
+  return m === null ? { traceId: null, spanId: null } : { traceId: m[1]!.toLowerCase(), spanId: m[2]!.toLowerCase() };
+}
+
 export interface UsageStoreOptions {
   /** Injectable warning sink (tests); defaults to the hub logger. */
   warn?: (message: string) => void;
@@ -318,24 +338,43 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       if (events.length === 0) return 0;
       const rows = [];
       const parsedEvents: UsageRequest[] = [];
+      const quarantined: Array<{ captureId: string | null; setupId: string | null; payload: unknown; reason: string }> = [];
       for (const event of events) {
         const parsed = usageRequestSchema.safeParse(event);
         if (!parsed.success) {
-          // Malformed frames never block the rest — but they must not vanish
-          // silently (IRI-055): the buffer is acked regardless, so a dropped
-          // event is lost forever. One rate-limited warning per store names
-          // the identity fields and the first schema issue.
+          // IRI-070: a rejected event is BILLING-GRADE data — it is never
+          // dropped silently again. Quarantine the raw payload with the first
+          // zod issue, ack it with the rest (stored-or-quarantined), and keep
+          // one rate-limited warning so operators still see drift.
           droppedCount += 1;
           const issue = parsed.error.issues[0];
-          const detail = describeDropped(event, issue ? `${issue.path.join(".")}: ${issue.message}` : undefined);
+          const reason = issue ? `${issue.path.join(".")}: ${issue.message}`.slice(0, 512) : "unknown";
+          quarantined.push({
+            captureId: typeof (event as { id?: unknown }).id === "string" ? (event as { id: string }).id : null,
+            setupId: typeof (event as { setupId?: unknown }).setupId === "string" ? (event as { setupId: string }).setupId : null,
+            payload: event,
+            reason,
+          });
+          const detail = describeDropped(event, reason);
           if (now() - lastDroppedLogMs >= DROPPED_LOG_INTERVAL_MS) {
             lastDroppedLogMs = now();
-            warn(`usage ingest dropped ${droppedCount} malformed event(s) on node ${nodeId} since the last warning — last: ${detail}`);
+            warn(`usage ingest quarantined ${droppedCount} malformed event(s) on node ${nodeId} since the last warning — last: ${detail}`);
             droppedCount = 0;
           }
           continue;
         }
         parsedEvents.push(parsed.data);
+      }
+      if (quarantined.length > 0) {
+        await db.insert(rejectedUsage).values(
+          quarantined.map((q) => ({
+            captureId: q.captureId,
+            nodeId,
+            setupId: q.setupId,
+            payload: serializeUnknown(q.payload),
+            reason: q.reason,
+          })),
+        );
       }
       if (parsedEvents.length === 0) return 0;
       // IR-55: resolve issued-key identities once per batch; header-declared
@@ -368,6 +407,8 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
           reqBytes: e.reqBytes,
           resBytes: e.resBytes,
           sourceAddr: e.sourceAddr,
+          // IRI-070: W3C trace context → queryable columns (span join).
+          ...traceIdsOf(e.traceparent),
           clientKeyHash: e.clientKeyHash,
           clientName: mapped?.name ?? e.clientName ?? null,
           clientProject: mapped?.project ?? e.clientProject ?? null,
@@ -580,7 +621,16 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       const weight = series.reduce((s, p) => s + p.completionTokens, 0);
       kpis.decodeTps = weight > 0 ? (series.reduce((s, p) => s + (p.decodeTps ?? 0) * p.completionTokens, 0) / weight) || null : null;
 
-      return { range, granularity, kpis, series, tokenMix };
+      // IRI-070: quarantined captures in the same window — visible loss, not
+      // silent. Model doesn't apply (the event never parsed far enough).
+      const rejectConds = [sql`received_at >= ${sinceIso}::timestamptz`];
+      if (nodeId !== undefined) rejectConds.push(sql`node_id = ${nodeId}`);
+      const rejectRows = await db.execute(sql`
+        select count(*)::int as n from rejected_usage where ${sql.join(rejectConds, sql` and `)}
+      `);
+      const rejected = rejectRows.length > 0 ? num(rejectRows[0]!.n) : 0;
+
+      return { range, granularity, kpis, series, tokenMix, rejected };
     },
 
     async requests({ range, nodeId, model, project, agentType, page, limit, errorOnly, sig, status }) {

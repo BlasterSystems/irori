@@ -473,6 +473,12 @@ reported in every snapshot; upgrade = re-run install.
   the **Logs** view (`#/logs`) searches the fleet by level/scope/source/
   substring with live tail; Serve's Log button deep-links a setup's run and
   Audit rows link back to their target's logs.
+- **Capture integrity (IRI-070):** a schema-invalid usage capture is
+  quarantined verbatim in `rejected_usage` (reason = first zod issue) and
+  counted on the usage overview — billing-grade data is never ack-dropped;
+  a per-engine contract test fails CI when agent and hub schemas drift.
+  W3C trace context from the capture proxy lands as indexed
+  `trace_id`/`span_id` on `llm_requests`, joining rows to their OTEL spans.
 
 ## 13. API surface (v1)
 
