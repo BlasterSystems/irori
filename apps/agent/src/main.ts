@@ -2,6 +2,7 @@ import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
+import { readClocks, setSmCap } from "./clocks.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
@@ -319,6 +320,20 @@ async function run(): Promise<void> {
     },
     onSetupValidate: (validateId, scripts) => {
       transport.sendAgentServer({ type: "setup-validate-result", validateId, results: driver.validate(scripts) });
+    },
+    onClocksGet: (id) => {
+      void readClocks()
+        .then((r) => transport.sendAgentServer({ type: "clocks-get-result", id, ok: r.ok, gpus: r.gpus, error: r.error }))
+        .catch((err: unknown) =>
+          transport.sendAgentServer({ type: "clocks-get-result", id, ok: false, gpus: [], error: err instanceof Error ? err.message : String(err) }),
+        );
+    },
+    onClocksSet: (id, smMaxMHz) => {
+      void setSmCap(smMaxMHz)
+        .then((r) => transport.sendAgentServer({ type: "clocks-set-result", id, ok: r.ok, error: r.error }))
+        .catch((err: unknown) =>
+          transport.sendAgentServer({ type: "clocks-set-result", id, ok: false, error: err instanceof Error ? err.message : String(err) }),
+        );
     },
     onCatalogRequest: () => {
       const root = transport.getNasRoot();

@@ -15,9 +15,12 @@ import {
   type SetupEventMsg,
   type SetupLogMsg,
   type SetupValidateResultMsg,
+  type ClocksGetResultMsg,
+  type ClocksSetResultMsg,
   type TransferProgress,
   type UsageRequest,
 } from "@irori/core";
+import { randomUUID } from "node:crypto";
 import type { NodeStore } from "@irori/db";
 import type { LlmStore } from "./llm-store.js";
 import { nodeLlmAssignments } from "./llm-store.js";
@@ -117,6 +120,10 @@ export interface AgentHub {
   sendToNode(nodeId: string, msg: unknown): boolean;
   /** Resends the node's config-update (probe ports, cadence, nasRoot, HF token) live. */
   refreshConfig(nodeId: string): Promise<boolean>;
+  /** IRI-067: per-GPU clocks + cap state; null = agent offline or no reply (8 s). */
+  clocks(nodeId: string): Promise<ClocksGetResultMsg | null>;
+  /** IRI-067: apply (or null = reset) the SM application clock cap. */
+  setClocks(nodeId: string, smMaxMHz: number | null): Promise<ClocksSetResultMsg | null>;
   stop(): void;
 }
 
@@ -195,6 +202,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     pending.push({ nodeId, kind, payload });
     while (pending.length > MAX_PENDING_WRITES) pending.shift(); // drop oldest
   }
+
+  // IRI-067: clocks request/response — keyed `${nodeId}:${requestId}` (uuids
+  // cannot collide, so a hub-wide map is safe across reconnects).
+  const clocksPending = new Map<string, { resolve: (frame: ClocksGetResultMsg | ClocksSetResultMsg) => void; timer: NodeJS.Timeout }>();
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let nodeId: string | null = null;
@@ -353,7 +364,17 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       log.error(`agentServerFrame ${parsed.data.type} from ${nodeId}`);
       const currentId: string = nodeId;
       const frame = parsed.data;
-      if (frame.type === "job-output" || frame.type === "job-done" || frame.type === "job-cancel-ack") {
+      if (frame.type === "clocks-get-result" || frame.type === "clocks-set-result") {
+        // IRI-067: resolve the matching pending request; a reply after the
+        // caller timed out is dropped (the map entry is already gone).
+        const key = `${currentId}:${frame.id}`;
+        const pending = clocksPending.get(key);
+        if (pending !== undefined) {
+          clocksPending.delete(key);
+          clearTimeout(pending.timer);
+          pending.resolve(frame);
+        }
+      } else if (frame.type === "job-output" || frame.type === "job-done" || frame.type === "job-cancel-ack") {
         jobChain = jobChain.then(async () => {
           try {
             if (frame.type === "job-output") await deps.jobEvents.onOutput(currentId, frame.jobId, frame.seq, frame.line);
@@ -476,6 +497,36 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) return false;
       await sendConfigUpdate(nodeId, (msg) => ws.send(JSON.stringify(msg)));
       return true;
+    },
+    async clocks(nodeId) {
+      // IRI-067: request/response over the agent socket; null = offline or
+      // no reply within 8 s (nvidia-smi timeouts are bounded at 3 s).
+      const id = randomUUID();
+      const ws = nodeSockets.get(nodeId);
+      if (ws === undefined || ws.readyState !== WebSocket.OPEN) return null;
+      const reply = await new Promise<ClocksGetResultMsg | null>((resolve) => {
+        const timer = setTimeout(() => {
+          clocksPending.delete(`${nodeId}:${id}`);
+          resolve(null);
+        }, 8000);
+        clocksPending.set(`${nodeId}:${id}`, { resolve: (f) => resolve(f as ClocksGetResultMsg), timer });
+        ws.send(JSON.stringify({ type: "clocks-get", id }));
+      });
+      return reply;
+    },
+    async setClocks(nodeId, smMaxMHz) {
+      const id = randomUUID();
+      const ws = nodeSockets.get(nodeId);
+      if (ws === undefined || ws.readyState !== WebSocket.OPEN) return null;
+      const reply = await new Promise<ClocksSetResultMsg | null>((resolve) => {
+        const timer = setTimeout(() => {
+          clocksPending.delete(`${nodeId}:${id}`);
+          resolve(null);
+        }, 8000);
+        clocksPending.set(`${nodeId}:${id}`, { resolve: (f) => resolve(f as ClocksSetResultMsg), timer });
+        ws.send(JSON.stringify({ type: "clocks-set", id, smMaxMHz }));
+      });
+      return reply;
     },
     stop() {
       clearInterval(flushTimer);

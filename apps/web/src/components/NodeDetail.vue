@@ -12,7 +12,7 @@ import {
   type LlmHistoryResponse,
   type LlmSnapshot,
 } from "../api";
-import { computeCardData, formatPct, formatTemp, isHotTemp } from "../card-data";
+import { computeCardData, formatGiB, formatPct, formatTemp, isHotTemp } from "../card-data";
 import { computeDetailData, formatRate } from "../detail-data";
 import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
@@ -177,6 +177,53 @@ const llmPanels = computed<LlmPanelVm[]>(() => {
 const detail = computed(() =>
   computeDetailData(snapshot.value, history.value, range.value),
 );
+
+/* ── IRI-067: bandwidth sparkline + interface/storage/kernel detail ────────── */
+
+const BW_POINTS = 90;
+/** Client-side ring of unified-memory-bandwidth readings (B/s), newest last. */
+const bwSeries = ref<number[]>([]);
+watch(
+  () => props.nodeId,
+  () => {
+    bwSeries.value = []; // a node switch must not inherit the previous ring
+  },
+);
+watch(
+  () => snapshot.value?.memoryBandwidth?.sampledAtMs,
+  (stamped) => {
+    const bw = snapshot.value?.memoryBandwidth;
+    if (stamped === null || stamped === undefined || bw === null || bw === undefined) return;
+    const total = (bw.readBps ?? 0) + (bw.writeBps ?? 0);
+    bwSeries.value.push(total);
+    if (bwSeries.value.length > BW_POINTS) bwSeries.value.shift();
+  },
+  { immediate: true },
+);
+
+/** Header warn chip when the journal shows GPU faults or OOM kills. */
+const kernelWarn = computed(() => {
+  const k = snapshot.value?.kernel;
+  if (!k || (k.xidCount === 0 && k.oomCount === 0)) return null;
+  const title = [...k.xidRecent, ...k.oomRecent].slice(0, 4).join("\n");
+  return { count: k.xidCount + k.oomCount, title };
+});
+
+const interfaces = computed(() => snapshot.value?.network ?? []);
+const storageRows = computed(() => snapshot.value?.storage ?? []);
+
+const linkLabel = (speedMbps: number | null): string =>
+  speedMbps === null ? "?" : speedMbps >= 1000 ? `${(speedMbps / 1000).toLocaleString("en-US")} Gb/s` : `${speedMbps.toLocaleString("en-US")} Mb/s`;
+
+const storageRowLabel = (row: { totalBytes: number; usedBytes: number; readBps: number | null; writeBps: number | null; device: string | null }): string => {
+  const used = formatGiB(row.usedBytes) ?? "?";
+  const total = formatGiB(row.totalBytes) ?? "?";
+  const rw =
+    row.readBps !== null || row.writeBps !== null
+      ? ` · R ${formatRate(row.readBps) ?? "0"} / W ${formatRate(row.writeBps) ?? "0"}`
+      : "";
+  return `${used} / ${total} GB${rw}${row.device !== null ? ` · ${row.device}` : ""}`;
+};
 
 const historyMeta = computed(() => {
   if (loadState.value === "loading") return "loading…";
@@ -645,6 +692,11 @@ onUnmounted(() => {
             <span class="chip">{{ node?.host }}</span>
             <span v-if="card.agentVersion" class="chip">Agent {{ card.agentVersion }}</span>
             <span v-if="drift" class="chip chip--warn">update available</span>
+            <span
+              v-if="kernelWarn"
+              class="chip chip--warn"
+              :title="kernelWarn.title"
+            >kernel {{ kernelWarn.count }} err</span>
           </template>
           <template v-if="node">
             <button class="btn btn--ghost btn--sm" @click="editOpen = true">Edit</button>
@@ -950,6 +1002,12 @@ onUnmounted(() => {
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.memory.current">
             <Sparkline :points="detail.memory.series" :format="fmtBytes" :aria-label="`Memory used, ${range}`" />
+            <!-- IRI-067: unified-memory bandwidth live ring (client-side accumulation). -->
+            <div v-if="bwSeries.length > 1" class="barrow" style="margin-top: 8px;">
+              <span>MEM BW</span>
+              <Sparkline :points="bwSeries" :height="36" :format="tipRate" aria-label="Unified memory bandwidth, live" />
+              <span class="val">{{ tipRate(bwSeries.at(-1) ?? 0) }}</span>
+            </div>
             <p v-if="detail.memory.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.memory.sub }}</p>
             <p v-for="note in detail.memory.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
@@ -970,6 +1028,19 @@ onUnmounted(() => {
       </article>
 
       <article class="card">
+        <div class="card__head"><h3>Storage</h3><span class="mono faint">{{ storageRows.length }} mounts</span></div>
+        <div class="card__body" style="padding-top: 12px;">
+          <template v-if="storageRows.length > 0">
+            <div v-for="s in storageRows" :key="s.mount" class="barrow">
+              <span :title="`${s.fs} · ${s.mount}`">{{ s.mount }}</span>
+              <span class="val">{{ storageRowLabel(s) }}</span>
+            </div>
+          </template>
+          <p v-else class="muted">no data yet</p>
+        </div>
+      </article>
+
+      <article class="card">
         <div class="card__head"><h3>Network</h3><span class="mono faint">{{ detail.network.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.network.current">
@@ -982,6 +1053,10 @@ onUnmounted(() => {
               <span>TX</span>
               <Sparkline :points="detail.network.series2" :height="36" :format="tipRate" :aria-label="`Network transmit, ${range}`" />
               <span class="val">{{ detail.network.sub }}</span>
+            </div>
+            <div v-for="n in interfaces" :key="n.iface" class="barrow">
+              <span :title="n.operState ?? ''">{{ n.iface }}</span>
+              <span class="val">{{ linkLabel(n.speedMbps) }} · {{ n.operState ?? "?" }}<template v-if="n.addrs.length > 0"> · {{ n.addrs.join(", ") }}</template></span>
             </div>
           </template>
           <p v-else class="muted">no data yet</p>

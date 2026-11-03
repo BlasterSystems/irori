@@ -317,6 +317,31 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   dedicated probe-assignment endpoint and hardcodes the probe host to
   `127.0.0.1`.
 
+## Cost (IRI-072)
+
+- `GET /api/v1/usage/cost?groupBy=model|client|setup|day|node&range=…` —
+  `{totalMinor, currency, rows: [{key, requests, promptTokens, completionTokens,
+  cachedTokens, costMinor}]}`; `costMinor` is null for unpriced groups (never
+  a fake zero). Consistent with `usage.overview` cost totals and the underlying
+  `usage_buckets` stamps.
+- `GET /api/v1/settings/token-cost` / `PUT …/token-cost` (`{input, cached,
+  output, currency}` — €/Mtok per class) — the global default price.
+- `GET /api/v1/settings/model-prices` / `PUT …/model-prices` (`{pattern,
+  input, cached, output, currency}`) / `DELETE …/model-prices/:pattern` —
+  per-model overrides; exact match beats the longest glob prefix beats the
+  default. Writes re-price stamped buckets via the resumable backfill.
+
+## Clocks (IRI-067)
+
+- `GET /api/v1/nodes/:id/clocks` — live per-GPU clocks + application clock
+  cap via the agent (`nvidia-smi` query): `{gpus: [{index, name, smMHz,
+  smMaxMHz, memMHz, memMaxMHz, smCapMHz}]}`. `504` when the agent is offline
+  or does not answer within 8 s; `502` carries the tool error.
+- `POST /api/v1/nodes/:id/clocks` (`{smMaxMHz: number | null}`) — applies
+  `nvidia-smi -lgc 0,<max>` on every GPU (null = `-rgc` reset) and returns
+  `{applied, gpus}` with a fresh reading. Audited (`node.clocks.post`).
+  Requires the root agent; nothing persists across reboots.
+
 ## Agent onboarding & updates (IRI-011/012, ADR-0007)
 
 - `GET /install-agent.sh`, `GET /irori-agent.service`,

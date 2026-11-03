@@ -139,8 +139,13 @@ flowchart LR
 
 - **Collect** (in-agent): GPU via `nvidia-smi` (per-card usage, temp, power,
   VRAM, clocks, throttle reasons, processes), CPU (usage, temp, package power,
-  per-core current/max clocks), memory, storage, network. GB10 unified-memory split and
-  bandwidth on Sparks; RAM vs VRAM separation on discrete hosts.
+  per-core current/max clocks), memory, storage (capacity + per-device
+  read/write rates from block-stat deltas), network (rates, link speed,
+  operstate, addresses). GB10 unified-memory split and bandwidth
+  (`nvidia-smi dmon -s B`, slower cadence) on Sparks; RAM vs VRAM separation on
+  discrete hosts. Kernel error counters (journal Xid / OOM, 60 s cadence,
+  deduped) surface as a warn chip. Clock endpoints (SPEC §13) read live clocks
+  and apply SM caps via the agent verb.
 - **Stream**: agent pushes snapshots on a server-configured cadence (default
   2 s) over the WS link; server keeps per-node ring buffers, broadcasts to SSE;
   browsers attach/detach without affecting collection. Poll loops run headless.
@@ -318,6 +323,16 @@ node**, with time ranges backed by rollups:
 - Decode/prefill rates over time (per engine port, per node, per cluster).
 - Tokens: generated / cached / prompt, minute + hourly + daily (ledger per
   model) — minute rows feed the Overview 30m/4h cost preview (IRI-025).
+- **Cost (IRI-072):** `llm_requests` rows carry per-model price snapshots at
+  ingest; the usage rollup engine stamps `usage_buckets.cost_minor` /
+  `cost_currency` per (node, model, bucket) with per-model override precedence
+  (exact match > longest glob prefix > global default; unpriced models stay
+  NULL, never a fake zero). A resumable chunked backfill re-prices completed
+  buckets after a price change (settings writes call `resetCostStamps`).
+  Reads: `GET /api/v1/usage/cost?groupBy=model|client|setup|day|node` returns
+  `{totalMinor, currency, rows}` consistent with the underlying buckets; the
+  Overview token-cost preview and per-model tables read the same engine.
+  Minor-unit integer math (no floats), one shared currency (settings).
 - **Token macro views (IRI-040/IR-118, inside the tokens lens):** fleet tiles
   (total = generated + input, generated, input, cache, cache hit % =
   cache / input), a By-cluster/node totals table folded from the series, and
