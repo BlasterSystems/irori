@@ -24,6 +24,15 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `usage-batch-ack {ids}` **only after** a successful insert — a failed or
   degraded insert sends no ack, and the agent's SQLite buffer redelivers.
   Redelivery is a no-op by UUID (exactly-once).
+- **Rejections quarantine (IRI-070):** a schema-invalid event is never
+  ack-dropped — it is stored verbatim in `rejected_usage` (capture id, node,
+  setup, payload, first zod issue as `reason`) and acked with the rest, and
+  `GET /api/v1/usage/overview` carries `rejected` (count in range) which the
+  Usage view shows as a warn chip. A per-engine contract test pins the
+  agent→hub event shape on every push (drift fails CI, not production).
+- **Trace columns (IRI-070):** the proxy lifts `traceparent` verbatim
+  (IRI-039) and the store derives `trace_id`/`span_id` columns on
+  `llm_requests` (indexed) from it — one row joins its OTEL GenAI span.
 - Setups: `captureProxy` on create/patch flips the head's engine port to the
   agent's capture proxy. Flagged setups get **no `PORT` env from the
   server** — the agent binds the declared port and injects a fresh loopback
