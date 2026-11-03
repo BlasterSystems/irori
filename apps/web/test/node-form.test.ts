@@ -24,6 +24,9 @@ const NODE: NodeInfo = {
   llmPorts: [8080, 8081],
   nasRoot: null,
   cacheUser: null,
+  wolMac: null,
+  gpuClockCapMHz: null,
+  gpuClockCapPersistent: false,
   createdAt: "2026-10-19T09:00:00.000Z",
   updatedAt: "2026-10-19T09:00:00.000Z",
 };

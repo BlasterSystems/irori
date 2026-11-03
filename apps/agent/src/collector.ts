@@ -133,6 +133,10 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
       swapUsedBytes,
     },
     unifiedMemory: resolveUnifiedMemory(gpus, meminfo),
+    // IRI-067 replaces these nulls with the dmon/journal collectors; until
+    // then the fields ship unmeasured so the wire contract is stable.
+    memoryBandwidth: null,
+    kernel: null,
     storage,
     network: networkRates(window.net0, window.net1, window.dtMs),
     gpus,
@@ -672,7 +676,7 @@ export async function readStorage(procRoot: string): Promise<HardwareSnapshot["s
       const totalBytes = stats.blocks * stats.bsize;
       if (!(totalBytes > 0)) continue;
       const usedBytes = Math.max(0, (stats.blocks - stats.bfree) * stats.bsize);
-      storage.push({ mount: entry.mount, fs: entry.fsType, totalBytes, usedBytes });
+      storage.push({ mount: entry.mount, fs: entry.fsType, totalBytes, usedBytes, readBps: null, writeBps: null, device: null });
     } catch {
       // Listed but not statfs-able (stale automount, permissions) — skip.
     }
@@ -748,6 +752,10 @@ export function networkRates(
       iface,
       rxBps: c0 ? Math.max(0, Math.round((c1.rx - c0.rx) / (dtMs / 1000))) : null,
       txBps: c0 ? Math.max(0, Math.round((c1.tx - c0.tx) / (dtMs / 1000))) : null,
+      // IRI-067 fills /sys/class/net readings; unmeasured until then.
+      speedMbps: null,
+      operState: null,
+      addrs: [],
     });
   }
   return rates;

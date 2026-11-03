@@ -19,6 +19,9 @@ function nodeFixture(overrides: Partial<NodeInfo> = {}): NodeInfo {
     llmPorts: [],
     nasRoot: null,
     cacheUser: null,
+    wolMac: null,
+    gpuClockCapMHz: null,
+    gpuClockCapPersistent: false,
     createdAt: "2026-10-16T09:00:00.000Z",
     updatedAt: "2026-10-17T12:00:00.000Z",
     ...overrides,
@@ -58,6 +61,8 @@ const SNAPSHOT: HardwareSnapshot = {
   ],
   storage: [],
   network: [],
+  memoryBandwidth: null,
+  kernel: null,
 };
 
 describe("computeCardData", () => {
@@ -119,9 +124,9 @@ describe("computeCardData", () => {
 
   it("puts disk first on NAS cards, from the largest real mount", () => {
     const storage: HardwareSnapshot["storage"] = [
-      { mount: "/", fs: "ext4", totalBytes: 21_171_355_648, usedBytes: 4_802_015_232 },
-      { mount: "/mnt/nas", fs: "ext4", totalBytes: 18_108_599_115_776, usedBytes: 11_603_944_087_552 },
-      { mount: "/mnt/llms", fs: "cifs", totalBytes: 18_108_599_115_776, usedBytes: 11_604_497_735_680 },
+      { mount: "/", fs: "ext4", totalBytes: 21_171_355_648, usedBytes: 4_802_015_232, readBps: null, writeBps: null, device: null },
+      { mount: "/mnt/nas", fs: "ext4", totalBytes: 18_108_599_115_776, usedBytes: 11_603_944_087_552, readBps: null, writeBps: null, device: null },
+      { mount: "/mnt/llms", fs: "cifs", totalBytes: 18_108_599_115_776, usedBytes: 11_604_497_735_680, readBps: null, writeBps: null, device: null },
     ];
     const card = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage });
     expect(card.rows.map((r) => r.key)).toEqual(["disk", "mem", "cpu"]);
@@ -133,8 +138,8 @@ describe("computeCardData", () => {
 
   it("shows the device disk on sparks, ignoring mounted volumes (IR-98)", () => {
     const storage: HardwareSnapshot["storage"] = [
-      { mount: "/", fs: "ext4", totalBytes: 3_999_872_163_840, usedBytes: 3_599_884_947_456 },
-      { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200 },
+      { mount: "/", fs: "ext4", totalBytes: 3_999_872_163_840, usedBytes: 3_599_884_947_456, readBps: null, writeBps: null, device: null },
+      { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200, readBps: null, writeBps: null, device: null },
     ];
     const card = computeCardData(nodeFixture(), { ...SNAPSHOT, storage });
     const disk = card.rows.find((r) => r.key === "disk");
@@ -149,7 +154,7 @@ describe("computeCardData", () => {
 
   it("falls back to the largest mount when the snapshot has no / entry", () => {
     const storage: HardwareSnapshot["storage"] = [
-      { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200 },
+      { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200, readBps: null, writeBps: null, device: null },
     ];
     const card = computeCardData(nodeFixture(), { ...SNAPSHOT, storage });
     expect(card.rows.find((r) => r.key === "disk")?.line).toBe("14.2 TB / 18.1 TB");
@@ -169,8 +174,8 @@ describe("computeCardData", () => {
 
   it("warns when the disk mount is at or above 80 % usage", () => {
     const total = 18_108_599_115_776;
-    const hot: HardwareSnapshot["storage"] = [{ mount: "/mnt/nas", fs: "ext4", totalBytes: total, usedBytes: 15_000_000_000_000 }];
-    const cool: HardwareSnapshot["storage"] = [{ mount: "/mnt/nas", fs: "ext4", totalBytes: total, usedBytes: 11_603_944_087_552 }];
+    const hot: HardwareSnapshot["storage"] = [{ mount: "/mnt/nas", fs: "ext4", totalBytes: total, usedBytes: 15_000_000_000_000, readBps: null, writeBps: null, device: null }];
+    const cool: HardwareSnapshot["storage"] = [{ mount: "/mnt/nas", fs: "ext4", totalBytes: total, usedBytes: 11_603_944_087_552, readBps: null, writeBps: null, device: null }];
     const hotCard = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage: hot });
     const coolCard = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage: cool });
     expect(hotCard.rows[0]?.warn).toBe(true);
