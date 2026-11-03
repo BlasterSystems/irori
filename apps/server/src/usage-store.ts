@@ -2,10 +2,14 @@ import { and, desc, eq, lt, sql, type SQL } from "drizzle-orm";
 import { llmParts, llmRequestParts, llmRequestTools, llmRequests, rejectedUsage, usageBuckets } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
-  usageRequestSchema,
+  tokenCostMinor,
   usageGranularity,
   usageRangeMs,
+  usageRequestSchema,
+  type Currency,
   type UsageAgentsResponse,
+  type UsageCostGroupBy,
+  type UsageCostResponse,
   type UsageErrorsResponse,
   type UsageFilters,
   type UsageModelsResponse,
@@ -16,6 +20,7 @@ import {
   type UsageRequestsResponse,
   type UsageToolsResponse,
 } from "@irori/core";
+import type { ResolvedPrice } from "./cost.js";
 import type { Granularity } from "./rollups.js";
 import { resolveIdentities } from "./usage-identity.js";
 import { log } from "./logger.js";
@@ -144,6 +149,8 @@ export interface UsageStore {
   /** Inserts a batch; returns the number of NEW rows (duplicates skipped). */
   insertBatch(nodeId: string, events: UsageRequest[]): Promise<number>;
   overview(filters: UsageFilters): Promise<UsageOverviewResponse>;
+  /** IRI-072: per-group cost rows (model|client|setup|day|node). */
+  cost(query: UsageCostQuery): Promise<UsageCostResponse>;
   requests(
     filters: UsageFilters & { page: number; limit: number; errorOnly?: boolean; sig?: string; status?: number },
   ): Promise<UsageRequestsResponse>;
@@ -189,6 +196,8 @@ interface Agg {
   cachedTokens: number;
   reasoningTokens: number;
   totalTokens: number;
+  /** IRI-072: bucket cost sum (minor units); open-fold rows price in JS. */
+  costMinor: number;
   ttftP50Ms: number | null;
   ttftP95Ms: number | null;
   decodeTps: number | null;
@@ -212,6 +221,7 @@ function openBucketCte(openStartIso: string, nodeId?: string, model?: string): S
 function toAgg(r: Record<string, unknown>): Agg {
   const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
   const nullable = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const minor = (v: unknown): number => (v === null || v === undefined ? 0 : num(v));
   return {
     requests: num(r.requests),
     errors: num(r.errors),
@@ -220,6 +230,7 @@ function toAgg(r: Record<string, unknown>): Agg {
     cachedTokens: num(r.cached_tokens),
     reasoningTokens: num(r.reasoning_tokens),
     totalTokens: num(r.total_tokens),
+    costMinor: minor(r.cost_minor),
     ttftP50Ms: nullable(r.ttft_p50),
     ttftP95Ms: nullable(r.ttft_p95),
     decodeTps: nullable(r.decode_tps),
@@ -249,6 +260,7 @@ function mergeAgg(a: Agg, b: Agg): Agg {
     cachedTokens: a.cachedTokens + b.cachedTokens,
     reasoningTokens: a.reasoningTokens + b.reasoningTokens,
     totalTokens: a.totalTokens + b.totalTokens,
+    costMinor: a.costMinor + b.costMinor,
     ttftP50Ms: weighted(a.ttftP50Ms, wA, b.ttftP50Ms, wB),
     ttftP95Ms: weighted(a.ttftP95Ms, wA, b.ttftP95Ms, wB),
     decodeTps: dW > 0 ? ((a.decodeTps ?? 0) * a.completionTokens + (b.decodeTps ?? 0) * b.completionTokens) / dW : null,
@@ -266,6 +278,7 @@ function aggOfPoint(p: UsageSeriesPoint): Agg {
     cachedTokens: p.cachedTokens,
     reasoningTokens: p.reasoningTokens,
     totalTokens: p.totalTokens,
+    costMinor: p.costMinor,
     ttftP50Ms: p.ttftP50Ms,
     ttftP95Ms: p.ttftP95Ms,
     decodeTps: p.decodeTps,
@@ -282,6 +295,7 @@ function aggIntoPoint(a: Agg, t: string): UsageSeriesPoint {
     cachedTokens: a.cachedTokens,
     reasoningTokens: a.reasoningTokens,
     totalTokens: a.totalTokens,
+    costMinor: a.costMinor,
     ttftP50Ms: a.ttftP50Ms,
     ttftP95Ms: a.ttftP95Ms,
     decodeTps: a.decodeTps,
@@ -316,6 +330,22 @@ export interface UsageStoreOptions {
   warn?: (message: string) => void;
   /** Injectable clock for the drop-warning rate limit (tests). */
   now?: () => number;
+  /** IRI-072: pricing snapshot provider (CostService.snapshot) — null when
+   *  the hub is degraded; without it raw-fold and group costs are skipped. */
+  pricing?: () => Promise<PricingSnapshot | null>;
+}
+
+/** One pricing load: the configured currency plus a synchronous resolver. */
+export interface PricingSnapshot {
+  currency: Currency | null;
+  resolve(model: string): ResolvedPrice | null;
+}
+
+/** The cost() read: per-group cost rows (IRI-072). */
+export interface UsageCostQuery {
+  range: UsageRange;
+  nodeId?: string;
+  groupBy: UsageCostGroupBy;
 }
 
 /** One-line description of a dropped event: identity fields + first schema issue. */
@@ -496,6 +526,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
                sum(b.prompt_tokens)::float8 as prompt_tokens, sum(b.completion_tokens)::float8 as completion_tokens,
                sum(b.cached_tokens)::float8 as cached_tokens, sum(b.reasoning_tokens)::float8 as reasoning_tokens,
                sum(b.total_tokens)::float8 as total_tokens,
+               sum(b.cost_minor)::int as cost_minor,
                (sum(b.ttft_p50_ms * b.requests) / nullif(sum(b.requests), 0))::float8 as ttft_p50_ms,
                (sum(b.ttft_p95_ms * b.requests) / nullif(sum(b.requests), 0))::float8 as ttft_p95_ms,
                (sum(b.decode_tps * b.decode_tps_weight) / nullif(sum(b.decode_tps_weight), 0))::float8 as decode_tps
@@ -508,7 +539,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
         select b.model, sum(b.requests)::int as requests, sum(b.errors)::int as errors,
                sum(b.prompt_tokens)::float8 as prompt_tokens, sum(b.completion_tokens)::float8 as completion_tokens,
                sum(b.cached_tokens)::float8 as cached_tokens, sum(b.reasoning_tokens)::float8 as reasoning_tokens,
-               sum(b.total_tokens)::float8 as total_tokens
+               sum(b.total_tokens)::float8 as total_tokens, sum(b.cost_minor)::int as cost_minor
         from usage_buckets b
         where ${where}
         group by b.model
@@ -517,6 +548,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
 
       const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
       const nullable = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+      const minorOf = (v: unknown): number => (v === null || v === undefined ? 0 : num(v));
       const series = seriesRows.map((r) => ({
         t: new Date(r.t as string).toISOString(),
         requests: num(r.requests),
@@ -526,11 +558,12 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
         cachedTokens: num(r.cached_tokens),
         reasoningTokens: num(r.reasoning_tokens),
         totalTokens: num(r.total_tokens),
+        costMinor: minorOf(r.cost_minor),
         ttftP50Ms: nullable(r.ttft_p50_ms),
         ttftP95Ms: nullable(r.ttft_p95_ms),
         decodeTps: nullable(r.decode_tps),
       }));
-      const tokenMix: Array<{ model: string; requests: number; errors: number; promptTokens: number; completionTokens: number; cachedTokens: number; reasoningTokens: number; totalTokens: number }> = mixRows.map((r) => ({
+      const tokenMix: Array<{ model: string; requests: number; errors: number; promptTokens: number; completionTokens: number; cachedTokens: number; reasoningTokens: number; totalTokens: number; costMinor: number }> = mixRows.map((r) => ({
         model: String(r.model),
         requests: num(r.requests),
         errors: num(r.errors),
@@ -539,6 +572,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
         cachedTokens: num(r.cached_tokens),
         reasoningTokens: num(r.reasoning_tokens),
         totalTokens: num(r.total_tokens),
+        costMinor: minorOf(r.cost_minor),
       }));
 
       // Fold the still-open bucket's raw rows in on read — buckets are only
@@ -561,6 +595,14 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       if (openRows.length > 0) {
         const openByModel = new Map<string, Agg>();
         for (const r of openRows) openByModel.set(String(r.model), toAgg(r));
+        // IRI-072: open rows have no bucket yet — price them here (one
+        // rounding per model) so live traffic carries cost too.
+        const pricing = opts.pricing === undefined ? null : await opts.pricing();
+        if (pricing !== null) {
+          for (const [m, agg] of openByModel) {
+            agg.costMinor = tokenCostMinor(agg, pricing.resolve(m)) ?? 0;
+          }
+        }
         // Series tail: merge into the open bucket point (or append it).
         const openAgg = sumAggs([...openByModel.values()]);
         const existing = series.find((p) => p.t === openStart);
@@ -580,6 +622,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
             row.cachedTokens += agg.cachedTokens;
             row.reasoningTokens += agg.reasoningTokens;
             row.totalTokens += agg.totalTokens;
+            row.costMinor += agg.costMinor;
           } else {
             tokenMix.push({ model: m, ...agg });
           }
@@ -630,7 +673,11 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       `);
       const rejected = rejectRows.length > 0 ? num(rejectRows[0]!.n) : 0;
 
-      return { range, granularity, kpis, series, tokenMix, rejected };
+      // IRI-072: cost = sum of the series' per-bucket costs (one rounding per
+      // bucket at stamp time); currency null when no pricing is configured.
+      const costMinor = series.reduce((s, p) => s + p.costMinor, 0);
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
+      return { range, granularity, kpis, series, tokenMix, rejected, costMinor, costCurrency: pricing?.currency ?? null };
     },
 
     async requests({ range, nodeId, model, project, agentType, page, limit, errorOnly, sig, status }) {
@@ -676,6 +723,99 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       return rows[0] !== undefined ? rowToRequest(rows[0] as unknown as Record<string, unknown>) : null;
     },
 
+    /**
+     * IRI-072: per-group cost. Bucket-backed groups (model/node/day) sum the
+     * stamped `cost_minor`; raw-backed groups (client/setup) price their
+     * (group × model) token sums via the pricing snapshot — one rounding per
+     * group-model. Failed requests keep their prompt tokens in cost.
+     */
+    async cost({ range, nodeId, groupBy }) {
+      const { granularity, sinceIso } = rangeWindow(range);
+      const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+      const conds = [sql`b.granularity = ${granularity}::bucket_granularity`, sql`b.bucket_start >= ${sinceIso}::timestamptz`];
+      if (nodeId !== undefined) conds.push(sql`b.node_id = ${nodeId}`);
+      const where = sql.join(conds, sql` and `);
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
+
+      const row = (key: string, label: string, costMinor: number, requests: number, promptTokens: number, completionTokens: number, cachedTokens: number) => ({
+        key,
+        label,
+        costMinor,
+        requests,
+        promptTokens,
+        completionTokens,
+        cachedTokens,
+      });
+
+      if (groupBy === "model" || groupBy === "node" || groupBy === "day") {
+        const key = groupBy === "day" ? sql`to_char(b.bucket_start, 'YYYY-MM-DD')` : groupBy === "node" ? sql`b.node_id::text` : sql`b.model`;
+        const label = groupBy === "day" ? key : groupBy === "node" ? sql`coalesce((select n.name from nodes n where n.id = b.node_id), b.node_id::text)` : key;
+        const rows = await db.execute(sql`
+          select ${key} as key, ${label} as label, sum(b.requests)::int as requests,
+                 sum(b.prompt_tokens)::float8 as prompt_tokens, sum(b.completion_tokens)::float8 as completion_tokens,
+                 sum(b.cached_tokens)::float8 as cached_tokens, sum(b.cost_minor)::int as cost_minor
+          from usage_buckets b
+          where ${where}
+          group by ${key}${groupBy === "node" ? sql`, ${label}` : sql``}
+          order by sum(b.cost_minor) desc nulls last
+        `);
+        const pricedRows = rows.map((r) => row(String(r.key), String(r.label), r.cost_minor === null ? 0 : num(r.cost_minor), num(r.requests), num(r.prompt_tokens), num(r.completion_tokens), num(r.cached_tokens)));
+        return {
+          range,
+          groupBy,
+          currency: pricing?.currency ?? null,
+          rows: pricedRows,
+          totalMinor: pricedRows.reduce((s, r) => s + r.costMinor, 0),
+        };
+      }
+      // Raw-backed groups: groups first, then one (group × model) pass priced
+      // via the snapshot (one rounding per group-model, summed per group).
+      const groups = await db.execute(sql`
+        select
+          ${groupBy === "client" ? sql`coalesce(client_key_hash, client_name, client_project, source_addr, 'anonymous')` : sql`coalesce(setup_id::text, 'unassigned')`} as key,
+          ${groupBy === "client" ? sql`coalesce(client_name, client_project, client_key_hash, source_addr, 'anonymous')` : sql`coalesce((select s.name from setups s where s.id = setup_id), setup_id::text, 'unassigned')`} as label,
+          count(*)::int as requests,
+          coalesce(sum(prompt_tokens), 0)::float8 as prompt_tokens,
+          coalesce(sum(completion_tokens), 0)::float8 as completion_tokens,
+          coalesce(sum(cached_tokens), 0)::float8 as cached_tokens
+        from llm_requests
+        where received_at >= ${sinceIso}::timestamptz
+          ${nodeId === undefined ? sql`` : sql`and node_id = ${nodeId}`}
+        group by 1, 2
+        order by 1
+      `);
+      const perModel = await db.execute(sql`
+        select
+          ${groupBy === "client" ? sql`coalesce(client_key_hash, client_name, client_project, source_addr, 'anonymous')` : sql`coalesce(setup_id::text, 'unassigned')`} as key,
+          model,
+          coalesce(sum(prompt_tokens), 0)::float8 as prompt_tokens,
+          coalesce(sum(cached_tokens), 0)::float8 as cached_tokens,
+          coalesce(sum(completion_tokens), 0)::float8 as completion_tokens
+        from llm_requests
+        where received_at >= ${sinceIso}::timestamptz
+          ${nodeId === undefined ? sql`` : sql`and node_id = ${nodeId}`}
+        group by 1, 2
+      `);
+      const costByKey = new Map<string, number>();
+      if (pricing !== null) {
+        for (const r of perModel) {
+          const minor = tokenCostMinor(
+            { promptTokens: num(r.prompt_tokens), cachedTokens: num(r.cached_tokens), completionTokens: num(r.completion_tokens) },
+            pricing.resolve(String(r.model)),
+          );
+          if (minor !== null) costByKey.set(String(r.key), (costByKey.get(String(r.key)) ?? 0) + minor);
+        }
+      }
+      const rowsOut = groups.map((r) => row(String(r.key), String(r.label), costByKey.get(String(r.key)) ?? 0, num(r.requests), num(r.prompt_tokens), num(r.completion_tokens), num(r.cached_tokens)));
+      return {
+        range,
+        groupBy,
+        currency: pricing?.currency ?? null,
+        rows: rowsOut,
+        totalMinor: rowsOut.reduce((s, r) => s + r.costMinor, 0),
+      };
+    },
+
     async errorGroups({ range, nodeId, model }) {
       const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
       const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`, sql`r.error_sig is not null`];
@@ -716,7 +856,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
 
       const modelRows = await db.execute(sql`
         select b.model, sum(b.requests)::int as requests, sum(b.errors)::int as errors,
-               sum(b.total_tokens)::float8 as total_tokens,
+               sum(b.total_tokens)::float8 as total_tokens, sum(b.cost_minor)::int as cost_minor,
                (sum(b.ttft_p50_ms * b.requests) / nullif(sum(b.requests), 0))::float8 as ttft_p50_ms,
                (sum(b.ttft_p95_ms * b.requests) / nullif(sum(b.requests), 0))::float8 as ttft_p95_ms,
                (sum(b.decode_tps * b.decode_tps_weight) / nullif(sum(b.decode_tps_weight), 0))::float8 as decode_tps
@@ -774,6 +914,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
         requests: num(r.requests),
         errors: num(r.errors),
         totalTokens: num(r.total_tokens),
+        costMinor: r.cost_minor === null || r.cost_minor === undefined ? 0 : num(r.cost_minor),
         ttftP50Ms: nullable(r.ttft_p50_ms),
         ttftP95Ms: nullable(r.ttft_p95_ms),
         decodeTps: nullable(r.decode_tps),
@@ -790,6 +931,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
               cachedTokens: 0,
               reasoningTokens: 0,
               totalTokens: row.totalTokens,
+              costMinor: row.costMinor,
               ttftP50Ms: row.ttftP50Ms,
               ttftP95Ms: row.ttftP95Ms,
               decodeTps: row.decodeTps,
@@ -799,18 +941,19 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
           row.requests = merged.requests;
           row.errors = merged.errors;
           row.totalTokens = merged.totalTokens;
+          row.costMinor = merged.costMinor;
           row.ttftP50Ms = merged.ttftP50Ms;
           row.ttftP95Ms = merged.ttftP95Ms;
           row.decodeTps = merged.decodeTps;
         } else {
-          modelList.push({ model: m, requests: agg.requests, errors: agg.errors, totalTokens: agg.totalTokens, ttftP50Ms: agg.ttftP50Ms, ttftP95Ms: agg.ttftP95Ms, decodeTps: agg.decodeTps });
+          modelList.push({ model: m, requests: agg.requests, errors: agg.errors, totalTokens: agg.totalTokens, costMinor: agg.costMinor, ttftP50Ms: agg.ttftP50Ms, ttftP95Ms: agg.ttftP95Ms, decodeTps: agg.decodeTps });
         }
         const points = byModel.get(m) ?? [];
         const openPoint = points.find((p) => p.t === openStart);
         const pointAgg = { ...agg, completionTokens: Math.trunc(agg.completionTokens) };
         if (openPoint !== undefined) {
           const mergedPoint = mergeAgg(
-            { requests: 0, errors: 0, promptTokens: 0, completionTokens: openPoint.completionTokens, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, ttftP50Ms: openPoint.ttftP50Ms, ttftP95Ms: null, decodeTps: openPoint.decodeTps },
+            { requests: 0, errors: 0, promptTokens: 0, completionTokens: openPoint.completionTokens, cachedTokens: 0, reasoningTokens: 0, totalTokens: 0, costMinor: 0, ttftP50Ms: openPoint.ttftP50Ms, ttftP95Ms: null, decodeTps: openPoint.decodeTps },
             pointAgg,
           );
           openPoint.ttftP50Ms = mergedPoint.ttftP50Ms;
@@ -863,6 +1006,36 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       const truncated = rows.length > 200;
       const visible = truncated ? rows.slice(0, 200) : rows;
       const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+      // IRI-072: per-(group × model) sums priced via the snapshot — one
+      // rounding per group-model, summed per group.
+      const groupKey = (r: Record<string, unknown>): string =>
+        `${str(r.project) ?? ""}|${str(r.agent_type) ?? ""}|${str(r.name) ?? ""}|${str(r.key_hash) ?? ""}|${str(r.fallback_addr) ?? ""}`;
+      const costByGroup = new Map<string, number>();
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
+      if (pricing !== null) {
+        const perModel = await db.execute(sql`
+          select
+            r.client_project as project, r.client_agent_type as agent_type,
+            r.client_name as name, r.client_key_hash as key_hash,
+            case when r.client_key_hash is null and r.client_name is null
+                      and r.client_project is null and r.client_agent_type is null
+                 then r.source_addr else null end as fallback_addr,
+            r.model,
+            coalesce(sum(r.prompt_tokens), 0)::float8 as prompt_tokens,
+            coalesce(sum(r.cached_tokens), 0)::float8 as cached_tokens,
+            coalesce(sum(r.completion_tokens), 0)::float8 as completion_tokens
+          from llm_requests r
+          where ${where}
+          group by 1, 2, 3, 4, 5, r.model
+        `);
+        for (const r of perModel as unknown as Array<Record<string, unknown>>) {
+          const minor = tokenCostMinor(
+            { promptTokens: Number(r.prompt_tokens ?? 0), cachedTokens: Number(r.cached_tokens ?? 0), completionTokens: Number(r.completion_tokens ?? 0) },
+            pricing.resolve(str(r.model) ?? ""),
+          );
+          if (minor !== null) costByGroup.set(groupKey(r), (costByGroup.get(groupKey(r)) ?? 0) + minor);
+        }
+      }
       return {
         range,
         truncated,
@@ -880,6 +1053,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
             promptTokens: Number(r.prompt_tokens ?? 0),
             completionTokens: Number(r.completion_tokens ?? 0),
             totalTokens: Number(r.total_tokens ?? 0),
+            costMinor: costByGroup.get(groupKey(r as unknown as Record<string, unknown>)) ?? 0,
             lastSeenMs: new Date(String(r.last_seen)).getTime(),
           };
         }),
@@ -935,19 +1109,31 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       }
 
       const int = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : 0);
+      // IRI-072: priced from the row's own model at read time.
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
       return {
         range,
-        tools: (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
-          tool: String(r.tool),
-          model: typeof r.model === "string" && r.model.length > 0 ? r.model : null,
-          calls: int(r.calls),
-          errors: int(r.errors),
-          argsChars: int(r.args_chars),
-          resultChars: int(r.result_chars),
-          promptTokens: int(r.prompt_tokens),
-          completionTokens: int(r.completion_tokens),
-          lastSeenMs: new Date(String(r.last_seen)).getTime(),
-        })),
+        tools: (rows as unknown as Array<Record<string, unknown>>).map((r) => {
+          const model = typeof r.model === "string" && r.model.length > 0 ? r.model : null;
+          return {
+            tool: String(r.tool),
+            model,
+            calls: int(r.calls),
+            errors: int(r.errors),
+            argsChars: int(r.args_chars),
+            resultChars: int(r.result_chars),
+            promptTokens: int(r.prompt_tokens),
+            completionTokens: int(r.completion_tokens),
+            costMinor:
+              pricing === null || model === null
+                ? 0
+                : (tokenCostMinor(
+                    { promptTokens: int(r.prompt_tokens), cachedTokens: 0, completionTokens: int(r.completion_tokens) },
+                    pricing.resolve(model),
+                  ) ?? 0),
+            lastSeenMs: new Date(String(r.last_seen)).getTime(),
+          };
+        }),
         series,
       };
     },

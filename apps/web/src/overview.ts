@@ -256,12 +256,6 @@ export function tokenTotals(series: AnalyticsSeries[], sparkIds: Set<string>): T
   return { input, cached, generated };
 }
 
-/** Billable cost: (prompt − cached) × input + cached × cached + generated × output, per Mtok. */
-export function tokenCostOf(t: TokenTotals, prices: { input: number; cached: number; output: number }): number {
-  const billableInput = Math.max(0, t.input - t.cached);
-  return (billableInput * prices.input + t.cached * prices.cached + t.generated * prices.output) / 1_000_000;
-}
-
 // ─── NAS store card ─────────────────────────────────────────────────────────
 
 export interface NasData {
