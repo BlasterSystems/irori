@@ -1,0 +1,349 @@
+import { and, eq, isNull, desc, sql } from "drizzle-orm";
+import { decryptSecret, encryptSecret, healthFindings, healthRules, secrets, settings, type Db } from "@irori/db";
+import { HEALTH_SEED_RULES, healthRuleSchema, type HealthFinding, type HealthRule, type HealthThresholds } from "@irori/core";
+import type { HardwareSnapshot } from "@irori/core";
+import type { SseEvent } from "@irori/core";
+import type { EventJournalService } from "./event-journal.js";
+
+/**
+ * IRI-069: server-side health rules engine. Rules are evaluated on snapshot
+ * ingest (plus a periodic offline/gap sweep); appear/clear transitions write
+ * durable journal events; per-rule webhooks enforce a cooldown and record
+ * delivery rows. The webhook URL lives encrypted in `secrets` (ADR-0002).
+ */
+
+export interface HealthSinks {
+  sse: (event: SseEvent) => void;
+  journal: (event: SseEvent) => Promise<void>;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+}
+
+const SEED_BY_NAME = new Map(HEALTH_SEED_RULES.map((r) => [r.name, r]));
+
+/** Metric value from one snapshot; null = not measurable (rule skipped). */
+export function metricValue(metric: string, snapshot: HardwareSnapshot): number | null {
+  switch (metric) {
+    case "gpu_temp_c": {
+      const temps = snapshot.gpus.map((g) => g.tempC).filter((t): t is number => t !== null);
+      return temps.length > 0 ? Math.max(...temps) : null;
+    }
+    case "disk_pct": {
+      const pcts = snapshot.storage
+        .filter((s) => s.totalBytes > 0)
+        .map((s) => (s.usedBytes / s.totalBytes) * 100);
+      return pcts.length > 0 ? Math.max(...pcts) : null;
+    }
+    case "kernel_xid":
+      return snapshot.kernel?.xidCount ?? null;
+    case "throttle_active":
+      return snapshot.gpus.some((g) => g.throttleReasons.length > 0) ? 1 : 0;
+    case "power_w":
+      return snapshot.cpu.packagePowerW;
+    default:
+      return null;
+  }
+}
+
+/** op comparison; null operand never breaches. */
+export function breaches(op: string, value: number | null, threshold: number): boolean {
+  if (value === null) return false;
+  switch (op) {
+    case "gt":
+      return value > threshold;
+    case "gte":
+      return value >= threshold;
+    case "lt":
+      return value < threshold;
+    case "lte":
+      return value <= threshold;
+    case "eq":
+      return value === threshold;
+    default:
+      return false;
+  }
+}
+
+function summaryFor(rule: { name: string; metric: string; op: string; threshold: number }, value: number | null): string {
+  const v = value === null ? "?" : Math.round(value * 10) / 10;
+  return `${rule.name}: ${v} ${opSymbol(rule.op)} ${rule.threshold}`;
+}
+
+function opSymbol(op: string): string {
+  return { gt: ">", gte: "≥", lt: "<", lte: "≤", eq: "=" }[op] ?? op;
+}
+
+export interface HealthService {
+  ensureSeed(): Promise<void>;
+  listRules(): Promise<HealthRule[]>;
+  setRule(id: string, put: Record<string, unknown>): Promise<HealthRule | null>;
+  thresholds(): Promise<HealthThresholds>;
+  /** Evaluate present-snapshot rules; fire-and-forget from the ingest path. */
+  onSnapshot(nodeId: string, snapshot: HardwareSnapshot): Promise<void>;
+  /** Offline + telemetry-gap rules over the whole fleet (30 s cadence). */
+  sweep(nodes: Array<{ id: string; name: string }>, onlineIds: ReadonlySet<string>, lastSeen: ReadonlyMap<string, number>): Promise<void>;
+  findings(): Promise<HealthFinding[]>;
+  metricsEnabled(): Promise<boolean>;
+  setMetricsEnabled(v: boolean): Promise<void>;
+  /** Latest snapshot per node for the /metrics renderer. */
+  latest: Map<string, HardwareSnapshot>;
+}
+
+export function createHealthService(db: Db, encryptionKey: string, opts: HealthSinks): HealthService {
+  const now = opts.now ?? (() => Date.now());
+  const fetchImpl = opts.fetchImpl ?? fetch;
+  const latest = new Map<string, HardwareSnapshot>();
+
+  async function ruleRows() {
+    return db.select().from(healthRules).orderBy(healthRules.createdAt);
+  }
+
+  function toWire(row: typeof healthRules.$inferSelect): HealthRule {
+    return healthRuleSchema.parse({
+      id: row.id,
+      name: row.name,
+      metric: row.metric,
+      op: row.op,
+      threshold: row.threshold,
+      severity: row.severity,
+      scope: row.scope,
+      cooldownSec: row.cooldownSec,
+      enabled: row.enabled,
+      hasWebhook: false, // replaced below for channel rows
+    });
+  }
+
+  async function webhookUrlFor(ruleId: string): Promise<string | null> {
+    const rows = await db.select().from(secrets).where(eq(secrets.name, `health:webhook:${ruleId}`)).limit(1);
+    if (rows.length === 0 || rows[0]!.valueEnc === null) return null;
+    try {
+      return decryptSecret(encryptionKey, rows[0]!.valueEnc);
+    } catch {
+      return null;
+    }
+  }
+
+  async function emit(event: Extract<SseEvent, { type: "health" }>): Promise<void> {
+    opts.sse(event);
+    await opts.journal(event);
+  }
+
+  interface RuleRef {
+    id: string;
+    name: string;
+    metric: string;
+    severity: string;
+    url: string | null;
+  }
+
+  async function notify(
+    rule: RuleRef,
+    nodeId: string | null,
+    kind: "appear" | "clear",
+    summary: string,
+    value: number | null,
+  ): Promise<void> {
+    if (rule.url === null) return;
+    let ok = false;
+    let status: number | null = null;
+    let error: string | null = null;
+    try {
+      const res = await fetchImpl(rule.url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rule: rule.name, metric: rule.metric, severity: rule.severity, state: kind, nodeId, summary, observed: value, at: new Date(now()).toISOString() }),
+      });
+      status = res.status;
+      ok = res.ok;
+      if (!res.ok) error = `HTTP ${res.status}`;
+    } catch (err: unknown) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    // Delivery result recorded (best effort — a failed write must not break ingest).
+    try {
+      await db.execute(
+        // alert_deliveries insert; channel resolved by rule below via SQL.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sql`insert into alert_deliveries (channel_id, rule_id, node_id, kind, ok, status, error)
+          select c.id, ${rule.id}::uuid, ${nodeId}::uuid, ${kind}, ${ok}, ${status}, ${error}
+          from alert_channels c where c.rule_id = ${rule.id}::uuid limit 1`,
+      );
+    } catch {
+      // Table may not exist in old schemas — the journal event still lands.
+    }
+  }
+
+  async function transition(
+    rule: { id: string; name: string; metric: string; op: string; threshold: number; severity: string; cooldownSec: number; url: string | null } & RuleRef,
+    nodeId: string | null,
+    kind: "appear" | "clear",
+    value: number | null,
+  ): Promise<void> {
+    const summary = kind === "appear" ? summaryFor(rule, value) : `${rule.name}: cleared`;
+    await emit({ type: "health", serverTimeMs: now(), nodeId, ruleId: rule.id, ruleName: rule.name, metric: rule.metric, severity: rule.severity, state: kind === "appear" ? "open" : "clear", summary });
+    // Cooldown applies to appear notifications only (a clear is always sent).
+    if (kind === "appear" && rule.url !== null) {
+      await notify({ ...rule, url: rule.url }, nodeId, "appear", summary, value);
+    } else if (kind === "clear") {
+      await notify({ ...rule, url: rule.url }, nodeId, "clear", summary, value);
+    }
+  }
+
+  const service: HealthService = {
+    latest,
+    async ensureSeed() {
+      for (const seed of HEALTH_SEED_RULES) {
+        await db
+          .insert(healthRules)
+          .values({
+            seed: seed.name,
+            name: seed.name,
+            metric: seed.metric,
+            op: seed.op,
+            threshold: seed.threshold,
+            severity: seed.severity,
+            scope: "node",
+            cooldownSec: seed.cooldownSec,
+            enabled: true,
+          })
+          .onConflictDoNothing();
+      }
+    },
+    async listRules() {
+      const rows = await ruleRows();
+      const out: HealthRule[] = [];
+      for (const row of rows) {
+        const wire = toWire(row);
+        out.push({ ...wire, hasWebhook: (await webhookUrlFor(row.id)) !== null });
+      }
+      return out;
+    },
+    async setRule(id, put) {
+      const patch: Record<string, unknown> = { updatedAt: new Date() };
+      if (put.name !== undefined) patch.name = put.name;
+      if (put.threshold !== undefined) patch.threshold = put.threshold;
+      if (put.severity !== undefined) patch.severity = put.severity;
+      if (put.cooldownSec !== undefined) patch.cooldownSec = put.cooldownSec;
+      if (put.enabled !== undefined) patch.enabled = put.enabled;
+      await db.update(healthRules).set(patch).where(eq(healthRules.id, id));
+      if (put.webhookUrl !== undefined) {
+        if (put.webhookUrl === null) {
+          await db.delete(secrets).where(eq(secrets.name, `health:webhook:${id}`));
+        } else if (typeof put.webhookUrl === "string") {
+          const enc = encryptSecret(encryptionKey, put.webhookUrl);
+          await db
+            .insert(secrets)
+            .values({ name: `health:webhook:${id}`, valueEnc: enc })
+            .onConflictDoUpdate({ target: secrets.name, set: { valueEnc: enc } });
+          await db.execute(
+            sql`insert into alert_channels (id, name, rule_id, enabled)
+              values (gen_random_uuid(), ${"webhook:" + id}, ${id}::uuid, true)
+              on conflict do nothing`,
+          ).catch(() => {});
+        }
+      }
+      const rows = await db.select().from(healthRules).where(eq(healthRules.id, id)).limit(1);
+      if (rows.length === 0) return null;
+      const wire = toWire(rows[0]!);
+      return { ...wire, hasWebhook: (await webhookUrlFor(id)) !== null };
+    },
+    async thresholds() {
+      // Live thresholds come from the seeded rules the operator may have
+      // tuned; falls back to the seed constants when a rule is missing.
+      const rows = await ruleRows();
+      const bySeed = new Map(rows.map((r) => [r.seed, r]));
+      const gpuWarn = bySeed.get("GPU temp warn")?.threshold ?? 70;
+      const gpuCritical = bySeed.get("GPU temp critical")?.threshold ?? 90;
+      const disk = bySeed.get("Disk usage warn")?.threshold ?? 80;
+      return { tempWarnC: gpuWarn ?? 70, tempCriticalC: gpuCritical ?? 90, diskWarnPct: disk ?? 80 };
+    },
+    async onSnapshot(nodeId, snapshot) {
+      latest.set(nodeId, snapshot);
+      const rules = (await ruleRows()).filter((r) => r.enabled && r.scope === "node");
+      for (const row of rules) {
+        const value = metricValue(row.metric, snapshot);
+        if (value === null) continue;
+        const breach = breaches(row.op, value, row.threshold ?? 0);
+        const open = await db
+          .select()
+          .from(healthFindings)
+          .where(and(eq(healthFindings.ruleId, row.id), eq(healthFindings.nodeId, nodeId), isNull(healthFindings.clearedAt)))
+          .limit(1);
+        if (breach && open.length === 0) {
+          await db.insert(healthFindings).values({ ruleId: row.id, nodeId, observedValue: value, lastNotifiedAt: new Date(now()) });
+          const url = await webhookUrlFor(row.id);
+          await transition({ id: row.id, name: row.name, metric: row.metric, op: row.op, threshold: row.threshold ?? 0, severity: row.severity, cooldownSec: row.cooldownSec, url }, nodeId, "appear", value);
+        } else if (breach && open.length > 0) {
+          // Cooldown re-notify (only rules with a channel).
+          const last = open[0]!.lastNotifiedAt?.getTime() ?? 0;
+          const url = await webhookUrlFor(row.id);
+          if (url !== null && now() - last > row.cooldownSec * 1000) {
+            await db.update(healthFindings).set({ lastNotifiedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
+            await notify({ id: row.id, name: row.name, metric: row.metric, severity: row.severity, url }, nodeId, "appear", summaryFor({ name: row.name, metric: row.metric, op: row.op, threshold: row.threshold ?? 0 }, value), value);
+          }
+        } else if (!breach && open.length > 0) {
+          await db.update(healthFindings).set({ clearedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
+          const url = await webhookUrlFor(row.id);
+          await transition({ id: row.id, name: row.name, metric: row.metric, op: row.op, threshold: row.threshold ?? 0, severity: row.severity, cooldownSec: row.cooldownSec, url }, nodeId, "clear", value);
+        }
+      }
+    },
+    async sweep(nodes, onlineIds, lastSeen) {
+      const rules = (await ruleRows()).filter((r) => r.enabled);
+      const offlineRule = rules.find((r) => r.metric === "node_offline");
+      const gapRule = rules.find((r) => r.metric === "telemetry_gap_s");
+      for (const node of nodes) {
+        const online = onlineIds.has(node.id);
+        const gapS = Math.round(((now() - (lastSeen.get(node.id) ?? now())) / 1000) * 10) / 10;
+        for (const rule of [offlineRule, gapRule]) {
+          if (rule === undefined) continue;
+          const value = rule.metric === "node_offline" ? (online ? 0 : 1) : gapS;
+          const breach = breaches(rule.op, value, rule.threshold ?? 0);
+          const open = await db
+            .select()
+            .from(healthFindings)
+            .where(and(eq(healthFindings.ruleId, rule.id), eq(healthFindings.nodeId, node.id), isNull(healthFindings.clearedAt)))
+            .limit(1);
+          if (breach && open.length === 0) {
+            await db.insert(healthFindings).values({ ruleId: rule.id, nodeId: node.id, observedValue: value, lastNotifiedAt: new Date(now()) });
+            const url = await webhookUrlFor(rule.id);
+            await transition({ id: rule.id, name: rule.name, metric: rule.metric, op: rule.op, threshold: rule.threshold ?? 0, severity: rule.severity, cooldownSec: rule.cooldownSec, url }, node.id, "appear", value);
+          } else if (!breach && open.length > 0) {
+            await db.update(healthFindings).set({ clearedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
+            const url = await webhookUrlFor(rule.id);
+            await transition({ id: rule.id, name: rule.name, metric: rule.metric, op: rule.op, threshold: rule.threshold ?? 0, severity: rule.severity, cooldownSec: rule.cooldownSec, url }, node.id, "clear", value);
+          }
+        }
+      }
+    },
+    async findings() {
+      const rows = await db
+        .select({ f: healthFindings, rule: healthRules })
+        .from(healthFindings)
+        .innerJoin(healthRules, eq(healthFindings.ruleId, healthRules.id))
+        .where(isNull(healthFindings.clearedAt))
+        .orderBy(desc(healthFindings.since))
+        .limit(200);
+      return rows.map(({ f, rule }) => ({
+        nodeId: f.nodeId ?? "",
+        ruleId: rule.id,
+        metric: rule.metric as HealthFinding["metric"],
+        severity: rule.severity as HealthFinding["severity"],
+        summary: `${rule.name}: ${f.observedValue === null ? "?" : Math.round(f.observedValue * 10) / 10} ${opSymbol(rule.op)} ${rule.threshold ?? "?"}`,
+        since: f.since.toISOString(),
+      }));
+    },
+    async metricsEnabled() {
+      const rows = await db.select().from(settings).where(eq(settings.key, "metrics_enabled")).limit(1);
+      return rows[0]?.value === true;
+    },
+    async setMetricsEnabled(v) {
+      await db.execute(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sql`insert into settings (key, value) values ('metrics_enabled', ${v ? "true" : "false"})
+          on conflict (key) do update set value = ${v ? "true" : "false"}`,
+      );
+    },
+  };
+  return service;
+}

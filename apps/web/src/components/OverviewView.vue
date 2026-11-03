@@ -36,7 +36,8 @@ import {
   type HeroData,
   type OverviewRange,
 } from "../overview";
-import { DISK_WARN_PCT, fmtBytes, fmtBucket, fmtTps, fmtWatts, type LensChart } from "../analytics";
+import { fmtBytes, fmtBucket, fmtTps, fmtWatts, type LensChart } from "../analytics";
+import { thresholds } from "../thresholds";
 import { clampTipX } from "../sparkline";
 
 const { sortedNodes } = live;
@@ -574,7 +575,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
         <div v-if="storeText !== null" style="margin-top: 10px;" class="barrow">
           <span>store</span>
           <div class="bar"><div class="bar__fill" :style="{ width: (nas.storePct ?? 0) + '%' }"></div></div>
-          <span class="val" :class="{ 'metric--hot': nas.storePct !== null && nas.storePct >= DISK_WARN_PCT }">{{ storeText }}</span>
+          <span class="val" :class="{ 'metric--hot': nas.storePct !== null && nas.storePct >= thresholds.diskWarnPct }">{{ storeText }}</span>
         </div>
         <p v-if="newestText !== null" class="stat__sub" style="margin-top: 10px;">newest added {{ newestText }}</p>
         <div v-if="activeDownload !== null" style="margin-top: 12px;">

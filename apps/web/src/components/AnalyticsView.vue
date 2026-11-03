@@ -16,14 +16,13 @@ import {
   fmtTps,
   fmtWatts,
   lensChart,
-  TEMPS_WARN_C,
-  TEMPS_CRITICAL_C,
   type AnalyticsPoint,
   type LensChartOptions,
 } from "../analytics";
 import { GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import type { AnalyticsResponse } from "@irori/core";
 import { fleetTiles, fmtHitPct, seriesTotals } from "../tokens-data";
+import { thresholds } from "../thresholds";
 import LensChart from "./LensChart.vue";
 
 const lens = ref<AnalyticsLensName>("decode");
@@ -70,7 +69,7 @@ function lensConfig(name: AnalyticsLensName): { valueKey: keyof AnalyticsPoint; 
     case "power":
       return { valueKey: "watts", opts: { floorZero: true, ceiling: GB10_SYSTEM_ENVELOPE_W } };
     case "temps":
-      return { valueKey: "gpuMax", opts: { floor: 30, guides: [TEMPS_WARN_C, TEMPS_CRITICAL_C], markers: { key: "gpuMax", warn: TEMPS_WARN_C, critical: TEMPS_CRITICAL_C } } };
+      return { valueKey: "gpuMax", opts: { floor: 30, guides: [thresholds.tempWarnC, thresholds.tempCriticalC], markers: { key: "gpuMax", warn: thresholds.tempWarnC, critical: thresholds.tempCriticalC } } };
     case "tokens":
       return { valueKey: "generated", opts: { floorZero: true } };
   }
@@ -101,7 +100,7 @@ const stripRows = computed(() => {
         gpu: last?.gpuMax ?? null,
         cpu: last?.cpuMax ?? null,
         peak24: Number.isFinite(peak) ? peak : null,
-        tier: peak >= 90 ? "critical" : peak >= TEMPS_WARN_C ? "warn" : "ok",
+        tier: peak >= 90 ? "critical" : peak >= thresholds.tempWarnC ? "warn" : "ok",
       };
     })
     .sort((a, b) => (b.peak24 ?? -1) - (a.peak24 ?? -1));
@@ -234,7 +233,7 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
           <LensChart :chart="chart" :unit="unit" :aria-label="`${lens} over ${range}`" :format="fmtPoint" :time-format="bucketFmt" />
           <p class="stat__sub">{{ headline }}</p>
           <p v-if="lens === 'power'" class="stat__sub">estimated, not wall-metered — GPU board + CPU package + base overhead, clamped to the GB10 envelope (240 W)</p>
-          <p v-if="lens === 'temps'" class="stat__sub">◇ warn ≥{{ TEMPS_WARN_C }}°C · ▫ critical ≥90°C — markers are bucket crossings, no rules engine</p>
+          <p v-if="lens === 'temps'" class="stat__sub">◇ warn ≥{{ thresholds.tempWarnC }}°C · ▫ critical ≥{{ thresholds.tempCriticalC }}°C — markers are bucket crossings, no rules engine</p>
         </template>
         <p v-else class="muted">no data in range</p>
       </div>

@@ -1,148 +1,100 @@
 import { z } from "zod";
 
 /**
- * Health findings rules engine, alert channels and the Prometheus gate
- * (IRI-069, epic IR-157 WS1). Rules are evaluated server-side on snapshot
- * ingest (ADR-0006) — the web tier never holds thresholds, so a finding is
- * one number in one place.
+ * IRI-069: health rules engine. Server-side thresholds over the ingest path —
+ * the single source of truth (the web reads `/api/v1/health/thresholds`).
  */
 
-export const RULE_METRICS = [
-  "gpuTempC",
-  "gpuPowerW",
-  "cpuTempC",
-  "diskUsedPct",
-  "telemetryGapS",
-  "offline",
-  "gpuThrottled",
-  "kernelXidCount",
-  "kernelOomCount",
-  "queueDepth",
-] as const;
-export const ruleMetricSchema = z.enum(RULE_METRICS);
-export type RuleMetric = z.infer<typeof ruleMetricSchema>;
+export const healthMetricSchema = z.enum([
+  "gpu_temp_c",
+  "disk_pct",
+  "kernel_xid",
+  "throttle_active",
+  "power_w",
+  "node_offline",
+  "telemetry_gap_s",
+]);
+export type HealthMetric = z.infer<typeof healthMetricSchema>;
 
-export const RULE_OPS = ["gt", "gte", "lt", "lte"] as const;
-export const ruleOpSchema = z.enum(RULE_OPS);
-export type RuleOp = z.infer<typeof ruleOpSchema>;
+export const healthSeveritySchema = z.enum(["info", "warn", "critical"]);
+export type HealthSeverity = z.infer<typeof healthSeveritySchema>;
 
-export const FINDING_SEVERITIES = ["info", "warn", "critical"] as const;
-export const findingSeveritySchema = z.enum(FINDING_SEVERITIES);
-export type FindingSeverity = z.infer<typeof findingSeveritySchema>;
+export const healthOpSchema = z.enum(["gte", "lte", "gt", "lt", "eq"]);
 
-export const RULE_SCOPES = ["node", "fleet"] as const;
-export const ruleScopeSchema = z.enum(RULE_SCOPES);
-export type RuleScope = z.infer<typeof ruleScopeSchema>;
-
-/** A rule as stored; `threshold` is meaningless for boolean metrics (offline, throttled). */
+/** One rule row (wire form). `hasWebhook` never exposes the encrypted URL. */
 export const healthRuleSchema = z.object({
   id: z.string().uuid(),
-  /** Stable seed key for built-in rules ("gpu-temp-warn"); user rules are null. */
-  seed: z.string().max(64).nullable().default(null),
-  name: z.string().min(1).max(96),
-  metric: ruleMetricSchema,
-  op: ruleOpSchema.default("gt"),
-  threshold: z.number().nullable().default(null),
-  severity: findingSeveritySchema,
-  scope: ruleScopeSchema.default("node"),
-  /** Null-scoped node for scope=node rules; null = every node. */
-  nodeId: z.string().uuid().nullable().default(null),
-  /** Seconds between repeat notifications of the same appear (default 900). */
-  cooldownSec: z.number().int().positive().max(86_400).default(900),
-  enabled: z.boolean().default(true),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  name: z.string().min(1).max(120),
+  metric: healthMetricSchema,
+  op: healthOpSchema,
+  threshold: z.number(),
+  severity: healthSeveritySchema,
+  scope: z.enum(["node", "fleet"]),
+  cooldownSec: z.number().int().min(0).max(86_400),
+  enabled: z.boolean(),
+  hasWebhook: z.boolean(),
 });
 export type HealthRule = z.infer<typeof healthRuleSchema>;
 
-export const healthRuleCreateSchema = healthRuleSchema.omit({ id: true, seed: true, createdAt: true, updatedAt: true });
-export type HealthRuleCreate = z.infer<typeof healthRuleCreateSchema>;
-export const healthRulePatchSchema = healthRuleCreateSchema.partial();
-export type HealthRulePatch = z.infer<typeof healthRulePatchSchema>;
-
-/** A currently-active finding on a node (appear without a matching clear). */
-export const nodeFindingSchema = z.object({
-  ruleId: z.string().uuid(),
-  ruleName: z.string(),
-  severity: findingSeveritySchema,
-  metric: ruleMetricSchema,
-  /** Observed value at appear time (null for boolean metrics). */
-  value: z.number().nullable(),
-  threshold: z.number().nullable(),
-  since: z.string(),
+export const healthRulePutSchema = z.object({
+  name: z.string().min(1).max(120).optional(),
+  threshold: z.number().optional(),
+  severity: healthSeveritySchema.optional(),
+  cooldownSec: z.number().int().min(0).max(86_400).optional(),
+  enabled: z.boolean().optional(),
+  /** Plaintext in, stored encrypted (ADR-0002); null clears the channel. */
+  webhookUrl: z.string().url().max(500).nullable().optional(),
 });
-export type NodeFinding = z.infer<typeof nodeFindingSchema>;
+export type HealthRulePut = z.infer<typeof healthRulePutSchema>;
 
-export const healthRulesResponseSchema = z.object({ rules: z.array(healthRuleSchema) });
-export type HealthRulesResponse = z.infer<typeof healthRulesResponseSchema>;
-export const nodeFindingsResponseSchema = z.object({
+/** One open finding (per node). */
+export const healthFindingSchema = z.object({
   nodeId: z.string().uuid(),
-  findings: z.array(nodeFindingSchema),
-});
-export type NodeFindingsResponse = z.infer<typeof nodeFindingsResponseSchema>;
-
-/** Alert channel: one webhook URL per channel, secret stored in `secrets` (ADR-0002). */
-export const alertChannelSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().min(1).max(96),
-  /** Rule id or null = all rules. */
-  ruleId: z.string().uuid().nullable().default(null),
-  enabled: z.boolean().default(true),
-  /** True when a URL is stored; the URL itself never leaves the secrets table. */
-  hasUrl: z.boolean(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-export type AlertChannel = z.infer<typeof alertChannelSchema>;
-
-export const alertChannelCreateSchema = z.object({
-  name: z.string().min(1).max(96),
-  ruleId: z.string().uuid().nullable().default(null),
-  webhookUrl: z.string().url().max(2048),
-  enabled: z.boolean().default(true),
-});
-export type AlertChannelCreate = z.infer<typeof alertChannelCreateSchema>;
-
-/** Last delivery attempts, newest first (bounded window, not a queue). */
-export const alertDeliverySchema = z.object({
-  /** Decimal string: Postgres BIGINT, JSON-safe on the wire (BigInt is not). */
-  id: z.string().regex(/^\d+$/),
-  channelId: z.string().uuid(),
   ruleId: z.string().uuid(),
-  nodeId: z.string().uuid().nullable(),
-  kind: z.enum(["appear", "clear"]),
-  ok: z.boolean(),
-  status: z.number().int().nullable(),
-  error: z.string().nullable(),
-  ts: z.string(),
+  metric: healthMetricSchema,
+  severity: healthSeveritySchema,
+  summary: z.string(),
+  since: z.string().datetime({ offset: true }),
 });
-export type AlertDelivery = z.infer<typeof alertDeliverySchema>;
+export type HealthFinding = z.infer<typeof healthFindingSchema>;
 
-export const alertChannelsResponseSchema = z.object({
-  channels: z.array(alertChannelSchema),
-  deliveries: z.array(alertDeliverySchema),
+/** Threshold values the web consumes (seed-rule thresholds). */
+export const healthThresholdsSchema = z.object({
+  tempWarnC: z.number(),
+  tempCriticalC: z.number(),
+  diskWarnPct: z.number(),
 });
-export type AlertChannelsResponse = z.infer<typeof alertChannelsResponseSchema>;
-
-/** Settings rows: Prometheus export gate. Off by default (SPEC §14). */
-export const prometheusSettingsSchema = z.object({ enabled: z.boolean() });
-export type PrometheusSettings = z.infer<typeof prometheusSettingsSchema>;
-export const prometheusSettingsResponseSchema = z.object({ prometheus: prometheusSettingsSchema.nullable() });
-export type PrometheusSettingsResponse = z.infer<typeof prometheusSettingsResponseSchema>;
+export type HealthThresholds = z.infer<typeof healthThresholdsSchema>;
 
 /**
- * The generic webhook payload. Shaped so Discord/Slack-compatible wrappers
- * are trivial downstream; the delivery is a plain JSON POST.
+ * The seed rule set (single source: the server seeds these on first boot and
+ * the web falls back to the same values until the API answers). Metric →
+ * meaning: gpu_temp_c (°C per GPU), disk_pct (used %), kernel_xid (count),
+ * throttle_active (any reason), power_w (package power), node_offline,
+ * telemetry_gap_s (seconds since last snapshot).
  */
-export const alertWebhookPayloadSchema = z.object({
-  source: z.literal("irori"),
-  kind: z.enum(["appear", "clear"]),
-  severity: findingSeveritySchema,
-  rule: z.string(),
-  metric: ruleMetricSchema,
-  value: z.number().nullable(),
-  threshold: z.number().nullable(),
-  node: z.string().nullable(),
-  ts: z.string(),
-});
-export type AlertWebhookPayload = z.infer<typeof alertWebhookPayloadSchema>;
+export const HEALTH_SEED_RULES: Array<{
+  name: string;
+  metric: HealthMetric;
+  op: "gte" | "lte" | "gt" | "lt" | "eq";
+  threshold: number;
+  severity: HealthSeverity;
+  cooldownSec: number;
+}> = [
+  { name: "GPU temp warn", metric: "gpu_temp_c", op: "gte", threshold: 70, severity: "warn", cooldownSec: 600 },
+  { name: "GPU temp critical", metric: "gpu_temp_c", op: "gte", threshold: 90, severity: "critical", cooldownSec: 600 },
+  { name: "Disk usage warn", metric: "disk_pct", op: "gte", threshold: 80, severity: "warn", cooldownSec: 3600 },
+  { name: "Kernel Xid", metric: "kernel_xid", op: "gt", threshold: 0, severity: "warn", cooldownSec: 3600 },
+  { name: "Throttle active", metric: "throttle_active", op: "gt", threshold: 0, severity: "warn", cooldownSec: 1800 },
+  { name: "Power envelope breach", metric: "power_w", op: "gt", threshold: 240, severity: "warn", cooldownSec: 1800 },
+  { name: "Node offline", metric: "node_offline", op: "eq", threshold: 1, severity: "critical", cooldownSec: 600 },
+  { name: "Telemetry gap", metric: "telemetry_gap_s", op: "gte", threshold: 15, severity: "warn", cooldownSec: 1800 },
+];
+
+/** Shared threshold values for the web (from the seed rules). */
+export function seedThresholds(): HealthThresholds {
+  const gpuWarn = HEALTH_SEED_RULES.find((r) => r.metric === "gpu_temp_c" && r.severity === "warn")!;
+  const gpuCritical = HEALTH_SEED_RULES.find((r) => r.metric === "gpu_temp_c" && r.severity === "critical")!;
+  const disk = HEALTH_SEED_RULES.find((r) => r.metric === "disk_pct")!;
+  return { tempWarnC: gpuWarn.threshold, tempCriticalC: gpuCritical.threshold, diskWarnPct: disk.threshold };
+}

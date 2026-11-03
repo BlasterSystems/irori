@@ -1,5 +1,6 @@
 import {
   type AnalyticsResponse,
+  type HealthFinding,
   auditPageSchema,
   eventJournalPageSchema,
   logPageSchema,
@@ -192,6 +193,18 @@ export async function setClockCap(id: string, capMHz: number | null, persistent:
     const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
     throw new Error(msg);
   }
+}
+
+/** IRI-069: open health findings (per node). */
+export type { HealthFinding } from "@irori/core";
+export async function fetchHealthFindings(): Promise<HealthFinding[]> {
+  const res = await fetch("/api/v1/health/findings");
+  if (!res.ok) throw new Error(`GET /api/v1/health/findings failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || !Array.isArray((body as { findings?: unknown }).findings)) {
+    throw new Error("GET /api/v1/health/findings: expected {findings: []}");
+  }
+  return (body as { findings: HealthFinding[] }).findings;
 }
 
 /** Rotate a node's agent token. The old token fails at the agent's next hello. */
