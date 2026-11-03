@@ -29,6 +29,14 @@ export interface CollectorOptions {
 
 type GpuProcess = { pid: number; name: string; memBytes: number | null };
 type NetCounters = Map<string, { rx: number; tx: number }>;
+/** IRI-067: cumulative block-device sector counters from /sys/block/<dev>/stat. */
+export type BlockCounters = Map<string, { readSectors: number; writeSectors: number }>;
+/** IRI-067: static link detail keyed by interface name. */
+export interface LinkDetail {
+  speedMbps: number | null;
+  operState: string | null;
+  addrs: string[];
+}
 
 export interface Meminfo {
   memTotalBytes: number | null;
@@ -48,6 +56,8 @@ interface SampleWindow {
   cpu1: os.CpuInfo[];
   net0: NetCounters | null;
   net1: NetCounters | null;
+  block0: BlockCounters | null;
+  block1: BlockCounters | null;
   dtMs: number;
   packagePowerW: number | null;
 }
@@ -96,11 +106,10 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
   const [load1] = os.loadavg();
 
   const meminfo = await readMeminfo(procRoot);
-  const [tempC, perCoreClocksKHz, perCoreMaxClocksKHz, storage] = await Promise.all([
+  const [tempC, perCoreClocksKHz, perCoreMaxClocksKHz] = await Promise.all([
     readCpuTempC(sysRoot),
     readPerCoreClocksKHz(sysRoot),
     readPerCoreMaxClocksKHz(sysRoot),
-    readStorage(procRoot),
   ]);
   const packagePowerW = window.packagePowerW ?? (await readHwmonPowerW(sysRoot));
 
@@ -133,12 +142,10 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
       swapUsedBytes,
     },
     unifiedMemory: resolveUnifiedMemory(gpus, meminfo),
-    // IRI-067 replaces these nulls with the dmon/journal collectors; until
-    // then the fields ship unmeasured so the wire contract is stable.
-    memoryBandwidth: null,
-    kernel: null,
-    storage,
-    network: networkRates(window.net0, window.net1, window.dtMs),
+    memoryBandwidth: memoryBandwidthReading(),
+    kernel: kernelCountersReading(),
+    storage: await readStorage(procRoot, blockRatesOf(window)),
+    network: networkRates(window.net0, window.net1, window.dtMs, await readLinkDetail(sysRoot)),
     gpus,
     load1,
     uptimeS: Math.floor(os.uptime()),
@@ -151,21 +158,23 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
 
 async function sampleWindow(procRoot: string, sysRoot: string): Promise<SampleWindow> {
   const started = performance.now();
-  const [cpu0, net0, energy0] = await Promise.all([
+  const [cpu0, net0, block0, energy0] = await Promise.all([
     Promise.resolve(os.cpus()),
     sampleNetCounters(procRoot),
+    sampleBlockCounters(sysRoot),
     readRaplEnergyUj(sysRoot),
   ]);
   const { promise: windowDelay, resolve: windowDelayDone } = Promise.withResolvers<void>();
   setTimeout(windowDelayDone, CPU_SAMPLE_DELAY_MS);
   await windowDelay;
-  const [cpu1, net1, energy1] = await Promise.all([
+  const [cpu1, net1, block1, energy1] = await Promise.all([
     Promise.resolve(os.cpus()),
     sampleNetCounters(procRoot),
+    sampleBlockCounters(sysRoot),
     readRaplEnergyUj(sysRoot),
   ]);
   const dtMs = performance.now() - started;
-  return { cpu0, cpu1, net0, net1, dtMs, packagePowerW: raplPowerW(energy0, energy1, dtMs) };
+  return { cpu0, cpu1, net0, net1, block0, block1, dtMs, packagePowerW: raplPowerW(energy0, energy1, dtMs) };
 }
 
 /** CPU busy percentage from two os.cpus() samples (M1 algorithm, injected). */
@@ -666,7 +675,10 @@ async function readMounts(procRoot: string): Promise<MountEntry[] | null> {
   return null;
 }
 
-export async function readStorage(procRoot: string): Promise<HardwareSnapshot["storage"]> {
+export async function readStorage(
+  procRoot: string,
+  blockRates?: Map<string, { readBps: number; writeBps: number }>,
+): Promise<HardwareSnapshot["storage"]> {
   const mounts = await readMounts(procRoot);
   if (mounts === null) return [];
   const storage: HardwareSnapshot["storage"] = [];
@@ -676,7 +688,20 @@ export async function readStorage(procRoot: string): Promise<HardwareSnapshot["s
       const totalBytes = stats.blocks * stats.bsize;
       if (!(totalBytes > 0)) continue;
       const usedBytes = Math.max(0, (stats.blocks - stats.bfree) * stats.bsize);
-      storage.push({ mount: entry.mount, fs: entry.fsType, totalBytes, usedBytes, readBps: null, writeBps: null, device: null });
+      let device: string | null = null;
+      let readBps: number | null = null;
+      let writeBps: number | null = null;
+      if (blockRates !== undefined) {
+        device = resolveBlockDev(entry.device, blockRates);
+        if (device !== null) {
+          const rates = blockRates.get(device);
+          if (rates !== undefined) {
+            readBps = rates.readBps;
+            writeBps = rates.writeBps;
+          }
+        }
+      }
+      storage.push({ mount: entry.mount, fs: entry.fsType, totalBytes, usedBytes, readBps, writeBps, device });
     } catch {
       // Listed but not statfs-able (stale automount, permissions) — skip.
     }
@@ -742,21 +767,273 @@ export function networkRates(
   net0: NetCounters | null,
   net1: NetCounters | null,
   dtMs: number,
+  link?: Map<string, LinkDetail>,
 ): HardwareSnapshot["network"] {
   if (net0 === null || net1 === null || !(dtMs > 0)) return [];
   const rates: HardwareSnapshot["network"] = [];
   for (const [iface, c1] of net1) {
     if (iface === "lo") continue;
     const c0 = net0.get(iface);
+    const detail = link?.get(iface);
     rates.push({
       iface,
       rxBps: c0 ? Math.max(0, Math.round((c1.rx - c0.rx) / (dtMs / 1000))) : null,
       txBps: c0 ? Math.max(0, Math.round((c1.tx - c0.tx) / (dtMs / 1000))) : null,
-      // IRI-067 fills /sys/class/net readings; unmeasured until then.
-      speedMbps: null,
-      operState: null,
-      addrs: [],
+      speedMbps: detail?.speedMbps ?? null,
+      operState: detail?.operState ?? null,
+      addrs: detail?.addrs ?? [],
     });
   }
   return rates;
+}
+
+// ---------------------------------------------------------------------------
+// Storage I/O rates (IRI-067): /sys/block/<dev>/stat sector deltas
+// ---------------------------------------------------------------------------
+
+const BLOCK_SKIP_PREFIXES = ["loop", "ram", "zram", "dm-", "md", "sr", "fd"];
+
+/** Cumulative read/write sectors per block device (null without sysfs). */
+export async function sampleBlockCounters(sysRoot: string): Promise<BlockCounters | null> {
+  const counters: BlockCounters = new Map();
+  try {
+    const devs = await fs.readdir(path.join(sysRoot, "block"));
+    await Promise.all(
+      devs
+        .filter((d) => !BLOCK_SKIP_PREFIXES.some((p) => d.startsWith(p)))
+        .map(async (d) => {
+          try {
+            // Kernel block stat fields: read I/Os, merged, SECTORS (idx 2), time, write I/Os, merged, SECTORS (idx 6), …
+            const fields = (await fs.readFile(path.join(sysRoot, "block", d, "stat"), "utf8")).trim().split(/\s+/);
+            const readSectors = Number(fields[2]);
+            const writeSectors = Number(fields[6]);
+            if (Number.isFinite(readSectors) && Number.isFinite(writeSectors)) {
+              counters.set(d, { readSectors, writeSectors });
+            }
+          } catch {
+            // Device vanished mid-scan or stat unreadable — skip it.
+          }
+        }),
+    );
+  } catch {
+    return null; // no sysfs (macOS dev boxes, containers without /sys)
+  }
+  return counters;
+}
+
+/** Map a mount's device path to its /sys/block entry (strip partition suffix). */
+export function resolveBlockDev(mountDevice: string, known: { has(dev: string): boolean }): string | null {
+  const base = mountDevice.split("/").pop() ?? "";
+  if (known.has(base)) return base;
+  // nvme0n1p2 → nvme0n1 and mmcblk0p1 → mmcblk0 (p-suffixed partitions), then
+  // sda2 → sda (plain digit suffix). Disk names ending in digits (nvme0n1)
+  // resolve via the `known` check above, never by stripping.
+  const pSuffix = /^(.+)(p\d+)$/.exec(base);
+  if (pSuffix !== null && known.has(pSuffix[1]!)) return pSuffix[1]!;
+  const digitSuffix = /^([a-z]+)\d+$/.exec(base);
+  if (digitSuffix !== null && known.has(digitSuffix[1]!)) return digitSuffix[1]!;
+  return null;
+}
+
+/** Per-device byte rates over the sample window (sector = 512 B). */
+export function blockRatesOf(window: Pick<SampleWindow, "block0" | "block1" | "dtMs">): Map<string, { readBps: number; writeBps: number }> {
+  const rates = new Map<string, { readBps: number; writeBps: number }>();
+  if (window.block0 === null || window.block1 === null || !(window.dtMs > 0)) return rates;
+  for (const [dev, c1] of window.block1) {
+    const c0 = window.block0.get(dev);
+    if (c0 === undefined) continue;
+    const ds = 512 / (window.dtMs / 1000);
+    rates.set(dev, {
+      readBps: Math.max(0, Math.round((c1.readSectors - c0.readSectors) * ds)),
+      writeBps: Math.max(0, Math.round((c1.writeSectors - c0.writeSectors) * ds)),
+    });
+  }
+  return rates;
+}
+
+// ---------------------------------------------------------------------------
+// Network link detail (IRI-067): speed/operstate from sysfs, addrs from os
+// ---------------------------------------------------------------------------
+
+/** /sys/class/net link details; addrs come from os.networkInterfaces() everywhere. */
+export async function readLinkDetail(sysRoot: string): Promise<Map<string, LinkDetail>> {
+  const detail = new Map<string, LinkDetail>();
+  const addrsByIface = new Map<string, string[]>();
+  for (const [iface, infos] of Object.entries(os.networkInterfaces())) {
+    const list = infos ?? [];
+    const v4 = list.filter((i) => i.family === "IPv4").map((i) => i.address);
+    const v6 = list.filter((i) => i.family === "IPv6").map((i) => i.address);
+    addrsByIface.set(iface, [...v4, ...v6]);
+  }
+  let ifaces: string[];
+  try {
+    ifaces = await fs.readdir(path.join(sysRoot, "class", "net"));
+  } catch {
+    // No sysfs (macOS): address detail only; speed/operstate stay null.
+    for (const [iface, addrs] of addrsByIface) detail.set(iface, { speedMbps: null, operState: null, addrs });
+    return detail;
+  }
+  await Promise.all(
+    ifaces.map(async (iface) => {
+      let speedMbps: number | null = null;
+      let operState: string | null = null;
+      try {
+        const speedRaw = await fs.readFile(path.join(sysRoot, "class", "net", iface, "speed"), "utf8");
+        const speed = Number.parseInt(speedRaw.trim(), 10);
+        // EINVAL/ENOTTY surfaces as a non-numeric read (lo, tun devices).
+        speedMbps = Number.isInteger(speed) && speed > 0 ? speed : null;
+      } catch {
+        // Interface without a speed concept (lo, wg, tun) — null.
+      }
+      try {
+        operState = (await fs.readFile(path.join(sysRoot, "class", "net", iface, "operstate"), "utf8")).trim() || null;
+      } catch {
+        // operstate is optional in old kernels.
+      }
+      detail.set(iface, { speedMbps, operState, addrs: addrsByIface.get(iface) ?? [] });
+    }),
+  );
+  return detail;
+}
+
+// ---------------------------------------------------------------------------
+// Unified-memory bandwidth (IRI-067): nvidia-smi dmon -s B, cached
+// ---------------------------------------------------------------------------
+
+/** dmon -c 1 -d 1 blocks ~1 s: refresh in the background at most every 10 s. */
+const DMON_REFRESH_MS = 10_000;
+
+export interface MemoryBandwidthReading {
+  readBps: number | null;
+  writeBps: number | null;
+  sampledAtMs: number | null;
+}
+
+let dmonCache: MemoryBandwidthReading = { readBps: null, writeBps: null, sampledAtMs: null };
+let dmonLastAttemptMs = 0;
+let dmonInFlight: Promise<void> | null = null;
+
+/**
+ * sparkDash-proven parse: the last data row of `dmon -c 1 -d 1 -s B` carries
+ * read and write MB/s in columns 2 and 3 (0 = gpu index). Returns null when
+ * the tool is absent or the output shape is unrecognized.
+ */
+export function parseDmonBw(stdout: string): { readBps: number; writeBps: number } | null {
+  const rows = stdout.split("\n").filter((l) => !l.startsWith("#") && l.trim().length > 0);
+  const last = rows.at(-1);
+  if (last === undefined) return null;
+  const parts = last.trim().split(/\s+/);
+  if (parts.length < 4) return null;
+  const readMBs = Number.parseFloat(parts[2] ?? "");
+  const writeMBs = Number.parseFloat(parts[3] ?? "");
+  if (!Number.isFinite(readMBs) || !Number.isFinite(writeMBs) || (readMBs === 0 && writeMBs === 0)) return null;
+  return { readBps: Math.round(readMBs * 1e6), writeBps: Math.round(writeMBs * 1e6) };
+}
+
+function refreshDmonCache(): void {
+  if (dmonInFlight !== null || Date.now() - dmonLastAttemptMs < DMON_REFRESH_MS) return;
+  dmonLastAttemptMs = Date.now();
+  dmonInFlight = (async () => {
+    try {
+      const out = await runNvidiaSmi(["dmon", "-c", "1", "-d", "1", "-s", "B"]);
+      if (out !== null) {
+        const parsed = parseDmonBw(out);
+        if (parsed !== null) dmonCache = { ...parsed, sampledAtMs: Date.now() };
+      }
+    } finally {
+      dmonInFlight = null;
+    }
+  })();
+}
+
+/** Cached dmon reading; kicks a background refresh when older than 10 s. */
+export function memoryBandwidthReading(): MemoryBandwidthReading {
+  refreshDmonCache();
+  return dmonCache;
+}
+
+// ---------------------------------------------------------------------------
+// Kernel Xid/OOM counters (IRI-067): journalctl -k, 60 s cadence
+// ---------------------------------------------------------------------------
+
+const KERNEL_REFRESH_MS = 60_000;
+const KERNEL_LINE_CAP = 512;
+const KERNEL_RECENT_CAP = 20;
+
+export interface KernelCounters {
+  xidCount: number;
+  xidRecent: string[];
+  oomCount: number;
+  oomRecent: string[];
+}
+
+let kernelCache: KernelCounters | null = null;
+let kernelLastAttemptMs = 0;
+let kernelInFlight: Promise<void> | null = null;
+/** Dedupe keys (unix-ts + message head) of already-counted journal lines. */
+const kernelSeen = new Set<string>();
+
+/**
+ * Pure journal parser: Xid GPU-fault lines and oom-killer events since boot.
+ * `seen` dedupes across refreshes (journal re-reads replay old lines); the
+ * recent lists are newest-first and bounded. Returns null when the line set
+ * is unusable (caller keeps its previous cache).
+ */
+export function parseKernelJournal(
+  text: string,
+  seen: Set<string>,
+): { xidCount: number; xidRecent: string[]; oomCount: number; oomRecent: string[] } {
+  const xidRecent: string[] = [];
+  const oomRecent: string[] = [];
+  let xidCount = 0;
+  let oomCount = 0;
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (line.length === 0) continue;
+    const isXid = /Xid/.test(line);
+    const isOom = /oom-kill|Out of memory: Killed process/i.test(line);
+    if (!isXid && !isOom) continue;
+    const key = line.slice(0, 200);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const msg = line.slice(-KERNEL_LINE_CAP);
+    if (isXid) {
+      xidCount += 1;
+      xidRecent.unshift(msg);
+      if (xidRecent.length > KERNEL_RECENT_CAP) xidRecent.pop();
+    } else {
+      oomCount += 1;
+      oomRecent.unshift(msg);
+      if (oomRecent.length > KERNEL_RECENT_CAP) oomRecent.pop();
+    }
+  }
+  return { xidCount, xidRecent, oomCount, oomRecent };
+}
+
+function refreshKernelCache(): void {
+  if (kernelInFlight !== null || Date.now() - kernelLastAttemptMs < KERNEL_REFRESH_MS) return;
+  kernelLastAttemptMs = Date.now();
+  kernelInFlight = (async () => {
+    try {
+      // Bounded tail of the current boot's kernel ring; the dedupe set makes
+      // re-reads idempotent. 16 MiB buffer guards long-uptime nodes.
+      const { stdout } = await execFileAsync(
+        "journalctl",
+        ["-k", "-b", "-n", "5000", "-o", "short-unix", "--no-pager", "-q"],
+        { timeout: 8000, maxBuffer: 16 * 1024 * 1024 },
+      );
+      const parsed = parseKernelJournal(stdout, kernelSeen);
+      kernelCache = parsed;
+    } catch {
+      // No systemd journal (macOS dev boxes, containers) — keep the cache.
+    } finally {
+      kernelInFlight = null;
+    }
+  })();
+}
+
+/** Cached kernel counters; kicks a background refresh when older than 60 s. */
+export function kernelCountersReading(): KernelCounters | null {
+  refreshKernelCache();
+  return kernelCache;
 }

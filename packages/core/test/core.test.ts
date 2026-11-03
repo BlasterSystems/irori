@@ -38,6 +38,28 @@ describe("hardwareSnapshotSchema", () => {
     expect(s.gpus[0]?.name).toBe("NVIDIA GB10");
   });
 
+  it("IRI-067: accepts OLD-agent snapshots (no new fields) and fills defaults", () => {
+    const s = hardwareSnapshotSchema.parse(validSnapshot);
+    expect(s.memoryBandwidth).toBeNull();
+    expect(s.kernel).toBeNull();
+    expect(s.storage).toEqual([]);
+    expect(s.network).toEqual([]);
+  });
+
+  it("IRI-067: accepts snapshots carrying the new telemetry domains", () => {
+    const s = hardwareSnapshotSchema.parse({
+      ...validSnapshot,
+      memoryBandwidth: { readBps: 812_400_000, writeBps: 402_100_000, sampledAtMs: 1792252541000 },
+      kernel: { xidCount: 2, xidRecent: ["NVRM: Xid (PCI:0000:07:00.0): 13"], oomCount: 1, oomRecent: ["Out of memory: Killed process 4321"] },
+      storage: [{ mount: "/", fs: "ext4", totalBytes: 4e12, usedBytes: 1e12, readBps: 512_000, writeBps: 256_000, device: "nvme0n1" }],
+      network: [{ iface: "eth0", rxBps: 1500, txBps: 300, speedMbps: 10000, operState: "up", addrs: ["10.20.30.4"] }],
+    });
+    expect(s.memoryBandwidth?.readBps).toBe(812_400_000);
+    expect(s.kernel?.xidCount).toBe(2);
+    expect(s.storage[0]?.device).toBe("nvme0n1");
+    expect(s.network[0]?.speedMbps).toBe(10000);
+  });
+
   it("strips unknown fields (tolerant readers)", () => {
     const s = hardwareSnapshotSchema.parse({ ...validSnapshot, futureField: 1 });
     expect("futureField" in s).toBe(false);

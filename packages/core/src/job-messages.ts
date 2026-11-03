@@ -142,6 +142,47 @@ export const jobCancelAckMsgSchema = z.object({
   jobId: z.string().uuid(),
 });
 
+/** Server → agent: read per-GPU clocks + application clock cap (IRI-067). */
+export const clocksGetMsgSchema = z.object({
+  type: z.literal("clocks-get"),
+  id: z.string().uuid(),
+});
+
+export const clocksGpuSchema = z.object({
+  index: z.number().int().nonnegative(),
+  name: z.string().nullable(),
+  smMHz: z.number().int().nonnegative().nullable(),
+  smMaxMHz: z.number().int().nonnegative().nullable(),
+  memMHz: z.number().int().nonnegative().nullable(),
+  memMaxMHz: z.number().int().nonnegative().nullable(),
+  /** Applied application clock cap (nvidia-smi clocks.applications.sm); null = default. */
+  smCapMHz: z.number().int().nonnegative().nullable(),
+});
+
+/** Agent → server: clocks reading; ok=false carries the tool error. */
+export const clocksGetResultMsgSchema = z.object({
+  type: z.literal("clocks-get-result"),
+  id: z.string().uuid(),
+  ok: z.boolean(),
+  gpus: z.array(clocksGpuSchema).default([]),
+  error: z.string().nullable().default(null),
+});
+
+/** Server → agent: apply an SM clock cap (null resets to default via -rgc). */
+export const clocksSetMsgSchema = z.object({
+  type: z.literal("clocks-set"),
+  id: z.string().uuid(),
+  smMaxMHz: z.number().int().positive().nullable(),
+});
+
+/** Agent → server: cap application outcome. */
+export const clocksSetResultMsgSchema = z.object({
+  type: z.literal("clocks-set-result"),
+  id: z.string().uuid(),
+  ok: z.boolean(),
+  error: z.string().nullable().default(null),
+});
+
 export const agentServerMsgSchema = z.discriminatedUnion("type", [
   jobOutputMsgSchema,
   jobDoneMsgSchema,
@@ -155,8 +196,15 @@ export const agentServerMsgSchema = z.discriminatedUnion("type", [
   setupValidateResultMsgSchema,
   usageBatchMsgSchema,
   logBatchMsgSchema,
+  clocksGetResultMsgSchema,
+  clocksSetResultMsgSchema,
 ]);
 
+export type ClocksGetMsg = z.infer<typeof clocksGetMsgSchema>;
+export type ClocksGpu = z.infer<typeof clocksGpuSchema>;
+export type ClocksGetResultMsg = z.infer<typeof clocksGetResultMsgSchema>;
+export type ClocksSetMsg = z.infer<typeof clocksSetMsgSchema>;
+export type ClocksSetResultMsg = z.infer<typeof clocksSetResultMsgSchema>;
 export type AgentServerMsg = z.infer<typeof agentServerMsgSchema>;
 export type JobRequestMsg = z.infer<typeof jobRequestMsgSchema>;
 export type JobCancelMsg = z.infer<typeof jobCancelMsgSchema>;
