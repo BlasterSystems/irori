@@ -131,6 +131,7 @@ export function createAnalyticsService(
       let fleet: TokenTotals | null = null;
       let costMinor = 0;
       let costCurrency: Currency | null = null;
+      let costSeries: Array<{ t: number; costMinor: number }> = [];
       if (query.lens === "tokens") {
         let gen = 0;
         let prompt = 0;
@@ -160,9 +161,28 @@ export function createAnalyticsService(
           for (const m of models) {
             costMinor += tokenCostMinor({ promptTokens: m.prompt, cachedTokens: m.cached, completionTokens: m.generated }, pricing.resolve(m.model)) ?? 0;
           }
+          // IRI-075: hourly cost trend — the ledger is per (bucket, model),
+          // so each bucket prices its own model mix with the same snapshot.
+          const perBucketModel = await db
+            .select({
+              t: tokenLedger.bucketStart,
+              model: tokenLedger.model,
+              gen: sql<number>`sum(${tokenLedger.generatedTokens})::float8`,
+              prompt: sql<number>`sum(${tokenLedger.promptTokens})::float8`,
+              cached: sql<number>`sum(${tokenLedger.cachedTokens})::float8`,
+            })
+            .from(tokenLedger)
+            .where(and(eq(tokenLedger.granularity, granularity), gte(tokenLedger.bucketStart, since)))
+            .groupBy(tokenLedger.bucketStart, tokenLedger.model);
+          const perBucket = new Map<number, number>();
+          for (const r of perBucketModel) {
+            const minor = tokenCostMinor({ promptTokens: r.prompt ?? 0, cachedTokens: r.cached ?? 0, completionTokens: r.gen ?? 0 }, pricing.resolve(r.model)) ?? 0;
+            perBucket.set(r.t.getTime(), (perBucket.get(r.t.getTime()) ?? 0) + minor);
+          }
+          costSeries = [...perBucket.entries()].map(([t, minor]) => ({ t, costMinor: minor })).sort((a, b) => a.t - b.t);
         }
       }
-      return analyticsResponseSchema.parse({ lens: query.lens, range: query.range, groupBy: query.groupBy, granularity, series, models, fleet, costMinor, costCurrency });
+      return analyticsResponseSchema.parse({ lens: query.lens, range: query.range, groupBy: query.groupBy, granularity, series, models, fleet, costMinor, costCurrency, costSeries });
     },
   };
 }

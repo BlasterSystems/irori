@@ -134,6 +134,9 @@ export const analyticsResponseSchema = z.object({
   groupBy: analyticsGroupBySchema,
   granularity: z.enum(["minute", "hour", "day"]),
   series: z.array(analyticsSeriesSchema),
+  /** IRI-075: tokens lens only — estimated cost per bucket (pricing snapshot
+   *  × ledger model mix); empty when pricing is unset. */
+  costSeries: z.array(z.object({ t: z.number(), costMinor: z.number() })).default([]),
   /** Tokens lens only: per-model totals over the selected range — whole-ledger
    *  sums (never a top-N subset; capped at 100 rows), with the macro columns
    *  (IRI-040). */
