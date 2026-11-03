@@ -174,6 +174,8 @@ export function makeSnapshot(overrides: Partial<HardwareSnapshot> = {}): Hardwar
     unifiedMemory: null,
     storage: [],
     network: [],
+    memoryBandwidth: null,
+    kernel: null,
     gpus: [
       {
         index: 0,

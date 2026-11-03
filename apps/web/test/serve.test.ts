@@ -80,9 +80,12 @@ function node(id: string, name: string, online: boolean): NodeInfo {
     llmPorts: [],
     nasRoot: null,
     cacheUser: null,
+    wolMac: null,
+    gpuClockCapMHz: null,
+    gpuClockCapPersistent: false,
     createdAt: "2026-10-18T00:00:00.000Z",
     updatedAt: "2026-10-18T00:00:00.000Z",
-  } as NodeInfo;
+  };
 }
 
 function setup(overrides: Partial<SetupInfo>): SetupInfo {

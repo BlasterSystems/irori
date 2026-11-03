@@ -20,6 +20,12 @@ export interface NodeStore {
   /** Node id for a presented agent token, or null (disabled nodes never match). */
   verifyToken(token: string): Promise<string | null>;
   markSeen(nodeId: string, agentVersion: string): Promise<void>;
+  /**
+   * IRI-068: record the GPU clock cap the node is now running with. Separate
+   * from patch() because it is a consequence of a dispatched action (the
+   * agent's answer), not an operator-editable node field.
+   */
+  setGpuClockCap(nodeId: string, capMHz: number | null, persistent: boolean): Promise<void>;
   insertSnapshot(nodeId: string, payload: unknown): Promise<void>;
   pruneSnapshots(olderThan: Date): Promise<number>;
   countSnapshots(nodeId: string): Promise<number>;
@@ -41,6 +47,10 @@ const nodeRecordColumns = {
   llmPorts: nodes.llmPorts,
   nasRoot: nodes.nasRoot,
   cacheUser: nodes.cacheUser,
+  // IRI-068: power control state (WOL target + GPU clock cap).
+  wolMac: nodes.wolMac,
+  gpuClockCapMHz: nodes.gpuClockCapMHz,
+  gpuClockCapPersistent: nodes.gpuClockCapPersistent,
   createdAt: nodes.createdAt,
   updatedAt: nodes.updatedAt,
 } satisfies Record<keyof NodeRecord, unknown>;
@@ -76,6 +86,7 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
           llmPorts: (input.llmPorts ?? []).map((p) => ({ port: p, host: "127.0.0.1" })),
           nasRoot: input.nasRoot ?? null,
           cacheUser: input.cacheUser ?? null,
+          wolMac: input.wolMac ? input.wolMac.toLowerCase() : null,
           ...tokenPair(token),
         })
         .returning({ id: nodes.id });
@@ -139,6 +150,13 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
       await db
         .update(nodes)
         .set({ agentVersion, lastSeenAt: new Date(), updatedAt: new Date() })
+        .where(eq(nodes.id, nodeId));
+    },
+
+    async setGpuClockCap(nodeId, capMHz, persistent) {
+      await db
+        .update(nodes)
+        .set({ gpuClockCapMHz: capMHz, gpuClockCapPersistent: persistent, updatedAt: new Date() })
         .where(eq(nodes.id, nodeId));
     },
 

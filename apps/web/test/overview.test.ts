@@ -358,6 +358,8 @@ describe("fleet temperatures (IR-129)", () => {
       unifiedMemory: null,
       storage: [],
       network: [],
+      memoryBandwidth: null,
+      kernel: null,
       gpus: gpuTemps.map((tempC, index) => ({ index, name: `GPU ${index}`, uuid: null, usagePct: null, tempC, memUsedBytes: null, memTotalBytes: null, powerW: null, powerLimitW: null, smClockMHz: null, smClockMaxMHz: null, throttleReasons: [], processes: [] })),
     };
   }

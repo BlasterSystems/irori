@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import * as schema from "./schema.js";
+import * as baseSchema from "./schema.js";
+import * as opsSchema from "./schema-ops.js";
+
+/** Fleet-ops tables live in schema-ops.ts; both are one drizzle schema. */
+const schema = { ...baseSchema, ...opsSchema };
 
 export type Db = PostgresJsDatabase<typeof schema>;
 

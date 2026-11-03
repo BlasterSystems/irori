@@ -31,6 +31,12 @@ export const nodeInfoSchema = z.object({
   nasRoot: z.string().nullable().default(null),
   /** IR-101: cache owner for transfers; null = the agent's own user (root). */
   cacheUser: z.string().regex(CACHE_USER_PATTERN).nullable().default(null),
+  /** IRI-068: Wake-on-LAN target MAC (aa:bb:cc:dd:ee:ff); null = cannot wake. */
+  wolMac: z.string().regex(/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i).nullable().default(null),
+  /** IRI-068: GPU clock cap in MHz applied on the node; null = uncapped. */
+  gpuClockCapMHz: z.number().int().min(300).max(4000).nullable().default(null),
+  /** IRI-068: cap is re-applied at boot by a transient systemd unit. */
+  gpuClockCapPersistent: z.boolean().default(false),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });
@@ -39,12 +45,23 @@ export type NodeInfo = z.infer<typeof nodeInfoSchema>;
 
 /** Payload for POST /api/v1/nodes. */
 export const nodeCreateSchema = nodeInfoSchema
-  .pick({ name: true, kind: true, role: true, host: true, llmPorts: true, nasRoot: true, cacheUser: true })
+  .pick({ name: true, kind: true, role: true, host: true, llmPorts: true, nasRoot: true, cacheUser: true, wolMac: true })
   .extend({ enabled: z.boolean().optional() });
 
 /** Payload for PATCH /api/v1/nodes/:id. */
 export const nodePatchSchema = nodeInfoSchema
-  .pick({ name: true, kind: true, role: true, host: true, enabled: true, sortOrder: true, llmPorts: true, nasRoot: true, cacheUser: true })
+  .pick({
+    name: true,
+    kind: true,
+    role: true,
+    host: true,
+    enabled: true,
+    sortOrder: true,
+    llmPorts: true,
+    nasRoot: true,
+    cacheUser: true,
+    wolMac: true,
+  })
   .partial();
 
 export type NodeCreateInput = z.infer<typeof nodeCreateSchema>;
