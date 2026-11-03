@@ -201,7 +201,7 @@ export interface AppDeps {
   rings: Rings;
   /** SSE hub; when wrapped in the IRI-013 recording feed it also serves /events/recent history. */
   sse: SseHub & { recent?(limit?: number): SseEvent[] };
-  getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig"> | null;
+  getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig" | "clocks" | "setClocks"> | null;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -1031,6 +1031,63 @@ export function createApp(deps: AppDeps): Express {
     if (build === null) return res.status(503).json({ error: "database unavailable" });
     res.json(await build(id, range));
   });
+
+  // ---- IRI-067: clock endpoints (SPEC §13) — live read + SM cap via the agent ----
+
+  app.get("/api/v1/nodes/:id/clocks", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const hub = deps.getHub();
+    if (hub === null) return res.status(503).json({ error: "agent hub unavailable" });
+    const result = await hub.clocks(id);
+    if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
+    if (!result.ok) return res.status(502).json({ error: result.error ?? "clocks query failed" });
+    res.json({ gpus: result.gpus });
+  });
+
+  app.post(
+    "/api/v1/nodes/:id/clocks",
+    audit(
+      {
+        action: "node.clocks.post",
+        targetType: "node",
+        summary: (req) => {
+          const body: unknown = req.body;
+          const smMax = body && typeof body === "object" && "smMaxMHz" in body ? String((body as { smMaxMHz: unknown }).smMaxMHz) : "?";
+          return `clock cap set for node ${req.params.id ?? "?"} (smMaxMHz=${smMax})`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
+      const id = parseUuidParam(req);
+      if (id === null) return res.status(400).json({ error: "invalid node id" });
+      const store = requireStore(res);
+      if (!store) return;
+      if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+      const body = req.body as { smMaxMHz?: unknown } | null;
+      // null (or absent) resets to driver defaults; otherwise a positive int.
+      const smMaxMHz =
+        body === null || body === undefined || body.smMaxMHz === undefined || body.smMaxMHz === null
+          ? null
+          : typeof body.smMaxMHz === "number" && Number.isInteger(body.smMaxMHz) && body.smMaxMHz > 0
+            ? body.smMaxMHz
+            : null;
+      if (smMaxMHz === null && body !== null && body !== undefined && body.smMaxMHz !== undefined && body.smMaxMHz !== null) {
+        return res.status(400).json({ error: "smMaxMHz must be a positive integer or null" });
+      }
+      const hub = deps.getHub();
+      if (hub === null) return res.status(503).json({ error: "agent hub unavailable" });
+      const result = await hub.setClocks(id, smMaxMHz);
+      if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
+      if (!result.ok) return res.status(502).json({ error: result.error ?? "clock cap failed" });
+      const after = await hub.clocks(id);
+      res.json({ applied: smMaxMHz, gpus: after?.ok ? after.gpus : [] });
+    },
+  );
 
   // Dedicated probe-assignment endpoint (M3); PATCH /nodes/:id covers the
   // same field via nodePatchSchema. Body: { ports: number[] }.

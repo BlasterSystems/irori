@@ -4,7 +4,7 @@ import { MODELCTL_PIN_RE } from "./modelctl-pin.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmMsgSchema } from "./llm.js";
 import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
-import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema } from "./job-messages.js";
+import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema, clocksGetMsgSchema, clocksSetMsgSchema } from "./job-messages.js";
 import { usageBatchAckMsgSchema } from "./usage.js";
 import { logBatchAckMsgSchema } from "./logs.js";
 
@@ -112,6 +112,8 @@ export const serverMsgSchema = z.discriminatedUnion("type", [
   setupValidateMsgSchema,
   usageBatchAckMsgSchema,
   logBatchAckMsgSchema,
+  clocksGetMsgSchema,
+  clocksSetMsgSchema,
 ]);
 
 export type HelloOkMsg = z.infer<typeof helloOkMsgSchema>;
