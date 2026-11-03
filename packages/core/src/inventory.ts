@@ -87,6 +87,17 @@ export const nodeInventorySchema = z.object({
   generatedAtMs: z.number().nonnegative(),
   store: inventoryStoreSchema.nullable(),
   local: z.array(inventoryLocalCacheSchema),
+  /** IRI-080: standing versions + provenance (additive; pre-0.4 agents omit it
+   *  and every consumer treats it as unknown). */
+  versions: z
+    .object({
+      nodeRuntime: z.string().nullable(),
+      uv: z.string().nullable(),
+      catalog: z.object({ schema: z.number(), generatedAt: z.string().nullable() }).nullable(),
+      scripts: z.array(z.object({ path: z.string(), present: z.boolean(), executable: z.boolean(), mtimeMs: z.number().nullable() })),
+    })
+    .nullable()
+    .default(null),
 });
 
 export type NodeInventory = z.infer<typeof nodeInventorySchema>;
