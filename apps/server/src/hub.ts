@@ -17,6 +17,7 @@ import {
   type SetupValidateResultMsg,
   type ClocksGetResultMsg,
   type ClocksSetResultMsg,
+  type NodeShutdownAckMsg,
   type TransferProgress,
   type UsageRequest,
 } from "@irori/core";
@@ -123,7 +124,9 @@ export interface AgentHub {
   /** IRI-067: per-GPU clocks + cap state; null = agent offline or no reply (8 s). */
   clocks(nodeId: string): Promise<ClocksGetResultMsg | null>;
   /** IRI-067: apply (or null = reset) the SM application clock cap. */
-  setClocks(nodeId: string, smMaxMHz: number | null): Promise<ClocksSetResultMsg | null>;
+  setClocks(nodeId: string, smMaxMHz: number | null, persist?: boolean): Promise<ClocksSetResultMsg | null>;
+  /** IRI-068: armed node shutdown; the agent acks, then powers off after graceS. */
+  shutdownNode(nodeId: string, graceS: number, origin: string): Promise<NodeShutdownAckMsg | null>;
   stop(): void;
 }
 
@@ -203,9 +206,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     while (pending.length > MAX_PENDING_WRITES) pending.shift(); // drop oldest
   }
 
-  // IRI-067: clocks request/response — keyed `${nodeId}:${requestId}` (uuids
+  // IRI-067/068: clocks + shutdown request/response — keyed `${nodeId}:${requestId}` (uuids
   // cannot collide, so a hub-wide map is safe across reconnects).
-  const clocksPending = new Map<string, { resolve: (frame: ClocksGetResultMsg | ClocksSetResultMsg) => void; timer: NodeJS.Timeout }>();
+  const clocksPending = new Map<string, { resolve: (frame: ClocksGetResultMsg | ClocksSetResultMsg | NodeShutdownAckMsg) => void; timer: NodeJS.Timeout }>();
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let nodeId: string | null = null;
@@ -364,7 +367,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       log.error(`agentServerFrame ${parsed.data.type} from ${nodeId}`);
       const currentId: string = nodeId;
       const frame = parsed.data;
-      if (frame.type === "clocks-get-result" || frame.type === "clocks-set-result") {
+      if (frame.type === "clocks-get-result" || frame.type === "clocks-set-result" || frame.type === "node-shutdown-ack") {
         // IRI-067: resolve the matching pending request; a reply after the
         // caller timed out is dropped (the map entry is already gone).
         const key = `${currentId}:${frame.id}`;
@@ -514,7 +517,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       });
       return reply;
     },
-    async setClocks(nodeId, smMaxMHz) {
+    async setClocks(nodeId, smMaxMHz, persist = false) {
       const id = randomUUID();
       const ws = nodeSockets.get(nodeId);
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) return null;
@@ -524,7 +527,22 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
           resolve(null);
         }, 8000);
         clocksPending.set(`${nodeId}:${id}`, { resolve: (f) => resolve(f as ClocksSetResultMsg), timer });
-        ws.send(JSON.stringify({ type: "clocks-set", id, smMaxMHz }));
+        ws.send(JSON.stringify({ type: "clocks-set", id, smMaxMHz, ...(persist ? { persist: true } : {}) }));
+      });
+      return reply;
+    },
+    async shutdownNode(nodeId, graceS, origin) {
+      // IRI-068: fire-and-ack — the agent acks BEFORE the grace poweroff.
+      const id = randomUUID();
+      const ws = nodeSockets.get(nodeId);
+      if (ws === undefined || ws.readyState !== WebSocket.OPEN) return null;
+      const reply = await new Promise<NodeShutdownAckMsg | null>((resolve) => {
+        const timer = setTimeout(() => {
+          clocksPending.delete(`${nodeId}:${id}`);
+          resolve(null);
+        }, 8000);
+        clocksPending.set(`${nodeId}:${id}`, { resolve: (f) => resolve(f as NodeShutdownAckMsg), timer });
+        ws.send(JSON.stringify({ type: "node-shutdown", id, graceS, origin }));
       });
       return reply;
     },

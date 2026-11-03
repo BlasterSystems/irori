@@ -15,10 +15,12 @@ export interface NodeFormState {
   ports: string;
   nasRoot: string;
   cacheUser: string;
+  /** IRI-068: Wake-on-LAN MAC (aa:bb:cc:dd:ee:ff); empty = cannot wake. */
+  wolMac: string;
 }
 
 export function emptyNodeForm(): NodeFormState {
-  return { name: "", kind: "spark", role: "standalone", host: "", ports: "", nasRoot: "", cacheUser: "" };
+  return { name: "", kind: "spark", role: "standalone", host: "", ports: "", nasRoot: "", cacheUser: "", wolMac: "" };
 }
 
 export function formFromNode(node: NodeInfo): NodeFormState {
@@ -30,6 +32,7 @@ export function formFromNode(node: NodeInfo): NodeFormState {
     ports: node.llmPorts.join(", "),
     nasRoot: node.nasRoot ?? "",
     cacheUser: node.cacheUser ?? "",
+    wolMac: node.wolMac ?? "",
   };
 }
 
@@ -63,6 +66,7 @@ export function toCreatePayload(state: NodeFormState): NodeCreatePayload {
     llmPorts: parsePorts(state.ports),
     nasRoot: state.nasRoot.trim() === "" ? null : state.nasRoot.trim(),
     cacheUser: state.cacheUser.trim() === "" ? null : state.cacheUser.trim(),
+    wolMac: state.wolMac.trim() === "" ? null : state.wolMac.trim().toLowerCase(),
   };
 }
 
@@ -77,5 +81,6 @@ export function toPatchPayload(state: NodeFormState): NodePatchPayload {
     llmPorts: parsePorts(state.ports),
     nasRoot: state.nasRoot.trim() === "" ? null : state.nasRoot.trim(),
     cacheUser: state.cacheUser.trim() === "" ? null : state.cacheUser.trim(),
+    wolMac: state.wolMac.trim() === "" ? null : state.wolMac.trim().toLowerCase(),
   };
 }

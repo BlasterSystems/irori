@@ -189,6 +189,11 @@ async function copyToken(): Promise<void> {
               <input v-model="form.cacheUser" class="input mono" placeholder="piresbruno" />
               <p class="stat__sub">Model transfers and serve engines run as this user; it needs its own modelctl and GPU access. Empty = the agent user (root).</p>
             </div>
+            <div class="field">
+              <label>Wake-on-LAN MAC (optional)</label>
+              <input v-model="form.wolMac" class="input mono" placeholder="aa:bb:cc:dd:ee:ff" />
+              <p class="stat__sub">Enables the Wake action (magic packet to the node's /24 broadcast). Empty = cannot wake.</p>
+            </div>
           </div>
         </template>
       </div>

@@ -168,11 +168,31 @@ export const clocksGetResultMsgSchema = z.object({
   error: z.string().nullable().default(null),
 });
 
-/** Server → agent: apply an SM clock cap (null resets to default via -rgc). */
+/** Server → agent: apply an SM clock cap (null resets to default via -rgc).
+ *  `persist` (IRI-068) additionally installs/removes the systemd oneshot —
+ *  absent on old agents (cap applies for the session only). */
 export const clocksSetMsgSchema = z.object({
   type: z.literal("clocks-set"),
   id: z.string().uuid(),
   smMaxMHz: z.number().int().positive().nullable(),
+  persist: z.boolean().optional(),
+});
+
+/** Server → agent: power the node off (armed confirm already checked hub-side).
+ *  The agent logs the origin, acks, waits the grace period, then powers off. */
+export const nodeShutdownMsgSchema = z.object({
+  type: z.literal("node-shutdown"),
+  id: z.string().uuid(),
+  graceS: z.number().int().positive().max(300),
+  origin: z.string().min(1).max(200),
+});
+
+/** Agent → server: shutdown frame accepted (the poweroff follows the grace). */
+export const nodeShutdownAckMsgSchema = z.object({
+  type: z.literal("node-shutdown-ack"),
+  id: z.string().uuid(),
+  ok: z.boolean(),
+  error: z.string().nullable().default(null),
 });
 
 /** Agent → server: cap application outcome. */
@@ -198,6 +218,7 @@ export const agentServerMsgSchema = z.discriminatedUnion("type", [
   logBatchMsgSchema,
   clocksGetResultMsgSchema,
   clocksSetResultMsgSchema,
+  nodeShutdownAckMsgSchema,
 ]);
 
 export type ClocksGetMsg = z.infer<typeof clocksGetMsgSchema>;
@@ -205,6 +226,8 @@ export type ClocksGpu = z.infer<typeof clocksGpuSchema>;
 export type ClocksGetResultMsg = z.infer<typeof clocksGetResultMsgSchema>;
 export type ClocksSetMsg = z.infer<typeof clocksSetMsgSchema>;
 export type ClocksSetResultMsg = z.infer<typeof clocksSetResultMsgSchema>;
+export type NodeShutdownMsg = z.infer<typeof nodeShutdownMsgSchema>;
+export type NodeShutdownAckMsg = z.infer<typeof nodeShutdownAckMsgSchema>;
 export type AgentServerMsg = z.infer<typeof agentServerMsgSchema>;
 export type JobRequestMsg = z.infer<typeof jobRequestMsgSchema>;
 export type JobCancelMsg = z.infer<typeof jobCancelMsgSchema>;

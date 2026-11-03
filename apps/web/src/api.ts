@@ -151,6 +151,49 @@ export async function deleteNode(id: string): Promise<void> {
   }
 }
 
+/** IRI-068: arm (step 1) or confirm (step 2) a node shutdown. */
+export async function shutdownNode(id: string, confirmToken?: string): Promise<{ armed: boolean; confirmToken?: string; scheduled?: boolean }> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/shutdown`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(confirmToken === undefined ? {} : { confirmToken, origin: "web" }),
+  });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return body as { armed: boolean; confirmToken?: string; scheduled?: boolean };
+}
+
+/** IRI-068: wake a shut-off node via WoL (uses the stored wolMac). */
+export async function wakeNode(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/wake`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+}
+
+/** IRI-068: apply (null = clear) the GPU clock cap; optionally persist via oneshot. */
+export async function setClockCap(id: string, capMHz: number | null, persistent: boolean): Promise<void> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/clock-cap`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ capMHz, persistent }),
+  });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+}
+
 /** Rotate a node's agent token. The old token fails at the agent's next hello. */
 export async function rotateNodeToken(id: string): Promise<string> {
   const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/token/rotate`, {

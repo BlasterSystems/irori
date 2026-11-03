@@ -71,7 +71,8 @@ export interface AgentTransportOptions {
   onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   onSetupValidate?: (validateId: string, scripts: string[]) => void;
   onClocksGet?: (id: string) => void;
-  onClocksSet?: (id: string, smMaxMHz: number | null) => void;
+  onClocksSet?: (id: string, smMaxMHz: number | null, persist: boolean) => void;
+  onNodeShutdown?: (id: string, graceS: number, origin: string) => void;
   /** Server acked a durable usage-batch insert (ids safe to delete locally). */
   onUsageAck?: (ids: string[]) => void;
   /** IRI-078: server acked a durable log-batch insert (ids safe to delete). */
@@ -118,7 +119,8 @@ export class AgentTransport {
   private readonly onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   private readonly onSetupValidate?: (validateId: string, scripts: string[]) => void;
   private readonly onClocksGet?: (id: string) => void;
-  private readonly onClocksSet?: (id: string, smMaxMHz: number | null) => void;
+  private readonly onClocksSet?: (id: string, smMaxMHz: number | null, persist: boolean) => void;
+  private readonly onNodeShutdown?: (id: string, graceS: number, origin: string) => void;
   private readonly onUsageAck?: (ids: string[]) => void;
   private readonly onLogAck?: (ids: string[]) => void;
   private readonly onReconnect?: () => void;
@@ -178,6 +180,7 @@ export class AgentTransport {
     this.onSetupValidate = options.onSetupValidate;
     this.onClocksGet = options.onClocksGet;
     this.onClocksSet = options.onClocksSet;
+    this.onNodeShutdown = options.onNodeShutdown;
     this.onUsageAck = options.onUsageAck;
     this.onLogAck = options.onLogAck;
     this.onReconnect = options.onReconnect;
@@ -471,7 +474,10 @@ export class AgentTransport {
         this.onClocksGet?.(parsed.data.id);
         break;
       case "clocks-set":
-        this.onClocksSet?.(parsed.data.id, parsed.data.smMaxMHz);
+        this.onClocksSet?.(parsed.data.id, parsed.data.smMaxMHz, parsed.data.persist ?? false);
+        break;
+      case "node-shutdown":
+        this.onNodeShutdown?.(parsed.data.id, parsed.data.graceS, parsed.data.origin);
         break;
       case "usage-batch-ack":
         this.onUsageAck?.(parsed.data.ids);

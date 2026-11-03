@@ -2,7 +2,7 @@ import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
-import { readClocks, setSmCap } from "./clocks.js";
+import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown } from "./clocks.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
@@ -328,12 +328,28 @@ async function run(): Promise<void> {
           transport.sendAgentServer({ type: "clocks-get-result", id, ok: false, gpus: [], error: err instanceof Error ? err.message : String(err) }),
         );
     },
-    onClocksSet: (id, smMaxMHz) => {
-      void setSmCap(smMaxMHz)
-        .then((r) => transport.sendAgentServer({ type: "clocks-set-result", id, ok: r.ok, error: r.error }))
-        .catch((err: unknown) =>
-          transport.sendAgentServer({ type: "clocks-set-result", id, ok: false, error: err instanceof Error ? err.message : String(err) }),
-        );
+    onClocksSet: (id, smMaxMHz, persist) => {
+      void (async () => {
+        const apply = await setSmCap(smMaxMHz);
+        if (!apply.ok) {
+          transport.sendAgentServer({ type: "clocks-set-result", id, ok: false, error: apply.error });
+          return;
+        }
+        // IRI-068: persistence is best-effort after the live cap — a failed
+        // unit install must not roll back the applied cap.
+        let persistError: string | null = null;
+        if (persist) {
+          const persisted = await persistClockCap(smMaxMHz);
+          if (!persisted.ok) persistError = persisted.error;
+        }
+        transport.sendAgentServer({ type: "clocks-set-result", id, ok: persistError === null, error: persistError });
+      })().catch((err: unknown) =>
+        transport.sendAgentServer({ type: "clocks-set-result", id, ok: false, error: err instanceof Error ? err.message : String(err) }),
+      );
+    },
+    onNodeShutdown: (id, graceS, origin) => {
+      scheduleNodeShutdown(graceS, origin, (line) => log(line));
+      transport.sendAgentServer({ type: "node-shutdown-ack", id, ok: true, error: null });
     },
     onCatalogRequest: () => {
       const root = transport.getNasRoot();
