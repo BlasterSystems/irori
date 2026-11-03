@@ -704,12 +704,19 @@ export class LlmPortProbe {
     //    most once per probe, so the server_info fallbacks below stay valid.
     let genSampled = false;
     let prefillSampled = false;
+    // IRI-071: cumulative counters feed the M7 ledger (prompt = prefill
+    // compute + cache; cached = the cache subset). Reset-safe: the ledger
+    // drops non-monotonic samples.
+    let genCounter: number | null = null;
+    let promptCounter: number | null = null;
+    let cachedCounter: number | null = null;
     const metricsText = await this.getText("/metrics");
     if (metricsText !== null) {
       const series = parsePromText(metricsText.text);
       const gen = promSum(series, "sglang:generation_tokens_total");
       if (gen !== null) {
         genSampled = true;
+        genCounter = gen;
         const genS = this.sample("sglang:gen", gen);
         if (genS !== null) out.decodeTps = genS.rate;
       }
@@ -718,8 +725,15 @@ export class LlmPortProbe {
         "sglang:realtime_tokens_total",
         (l) => l.mode === "prefill_compute",
       );
+      const cache = promLabeledSum(
+        series,
+        "sglang:realtime_tokens_total",
+        (l) => l.mode === "prefill_cache",
+      );
       if (compute !== null) {
         prefillSampled = true;
+        promptCounter = compute + (cache ?? 0);
+        cachedCounter = cache;
         const computeS = this.sample("sglang:prefill_compute", compute);
         if (computeS !== null) out.prefillTps = computeS.rate;
       }
@@ -748,6 +762,7 @@ export class LlmPortProbe {
       if (!genSampled) {
         const totalOut = num(body.total_output_tokens);
         if (totalOut !== null) {
+          genCounter = totalOut;
           const totalS = this.sample("sglang:gen", totalOut);
           if (totalS !== null) out.decodeTps = totalS.rate;
         }
@@ -755,6 +770,7 @@ export class LlmPortProbe {
       if (!prefillSampled) {
         const totalIn = num(body.total_input_tokens);
         if (totalIn !== null) {
+          promptCounter = totalIn;
           const totalInS = this.sample("sglang:prefill_compute", totalIn);
           if (totalInS !== null) out.prefillTps = totalInS.rate;
         }
@@ -780,6 +796,11 @@ export class LlmPortProbe {
 
     if (running !== null) out.queueRunning = running;
     if (waiting !== null) out.queueWaiting = waiting;
+    // IRI-071: cumulative counters feed the M7 ledger — nulls pass through so
+    // coverage (not a zero guess) is recorded when a counter is absent.
+    if (genCounter !== null || promptCounter !== null) {
+      out.tokens = { generated: genCounter, prompt: promptCounter, cached: cachedCounter };
+    }
     if (Object.keys(engineMeta).length > 0) out.engineMeta = engineMeta;
     return out;
   }

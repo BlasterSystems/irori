@@ -186,3 +186,27 @@ export const energyMonthlySchema = z.object({
 });
 
 export type EnergyMonthly = z.infer<typeof energyMonthlySchema>;
+
+/** IRI-071: ledger (engine counters) vs capture (llm_requests) reconciliation. */
+export const tokenReconciliationRowSchema = z.object({
+  nodeId: z.string().uuid(),
+  port: z.number().int().positive(),
+  model: z.string(),
+  /** Engine-counter ledger total (generated + prompt). */
+  ledgerTokens: z.number().nonnegative(),
+  /** Captured-request total (completion + prompt). */
+  captureTokens: z.number().nonnegative(),
+  delta: z.number().int(),
+  /** |delta| / max(both, 1) as a fraction; null when a side has no data. */
+  divergencePct: z.number().min(0).nullable(),
+  /** Both sides have data and diverge > 20% — surface the warn chip. */
+  warn: z.boolean(),
+  /** Costs are priced from the capture side (llm_requests); stated in the UI. */
+  costsUse: z.literal("capture"),
+});
+export const tokenReconciliationSchema = z.object({
+  range: analyticsRangeSchema,
+  rows: z.array(tokenReconciliationRowSchema),
+});
+export type TokenReconciliation = z.infer<typeof tokenReconciliationSchema>;
+export type TokenReconciliationRow = z.infer<typeof tokenReconciliationRowSchema>;

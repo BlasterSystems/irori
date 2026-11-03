@@ -1,6 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "@irori/db";
-import { llmBuckets, nodes, setups, snapshotBuckets, tokenLedger } from "@irori/db";
+import { llmBuckets, llmRequests, nodes, setups, snapshotBuckets, tokenLedger } from "@irori/db";
 import {
   analyticsGranularity,
   analyticsRangeMs,
@@ -16,6 +16,8 @@ import {
   type AnalyticsResponse,
   type AnalyticsSeriesInput,
   type TokenTotals,
+  type TokenReconciliation,
+  type TokenReconciliationRow,
 } from "@irori/core";
 
 /**
@@ -35,6 +37,8 @@ export interface AnalyticsQuery {
 
 export interface AnalyticsService {
   build(query: AnalyticsQuery): Promise<AnalyticsResponse>;
+  /** IRI-071: ledger vs capture reconciliation per node/port/model. */
+  reconciliation(query: { range: AnalyticsRangeValue; nodeId?: string }): Promise<TokenReconciliation>;
 }
 
 interface Membership {
@@ -74,6 +78,9 @@ export function createAnalyticsService(
   }
 
   return {
+    async reconciliation(query) {
+      return tokenReconciliation(db, query.range, query.nodeId);
+    },
     async build(query) {
       const granularity = analyticsGranularity(query.lens, query.range);
       const since = new Date(Date.now() - analyticsRangeMs(query.range));
@@ -350,4 +357,62 @@ async function tokenModels(db: Db, since: Date, granularity: "minute" | "hour" |
 function toWorkerIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.flatMap((item) => (typeof item === "object" && item !== null && typeof (item as { nodeId?: unknown }).nodeId === "string" ? [(item as { nodeId: string }).nodeId] : []));
+}
+
+/** IRI-071: ledger (engine lifetime counters) vs capture (llm_requests) totals
+ *  per node/port/model over the range. Never silently prefers one side — the
+ *  UI labels both and states that costs price the capture rows. */
+async function tokenReconciliation(
+  db: Db,
+  range: AnalyticsRangeValue,
+  nodeId: string | undefined,
+): Promise<TokenReconciliation> {
+  const granularity = analyticsGranularity("tokens", range);
+  const since = new Date(Date.now() - analyticsRangeMs(range));
+  const ledgerRows = await db
+    .select({
+      nodeId: tokenLedger.nodeId,
+      port: tokenLedger.port,
+      model: tokenLedger.model,
+      total: sql<number>`sum(${tokenLedger.generatedTokens} + ${tokenLedger.promptTokens})::float8`,
+    })
+    .from(tokenLedger)
+    .where(and(eq(tokenLedger.granularity, granularity), gte(tokenLedger.bucketStart, since)))
+    .groupBy(tokenLedger.nodeId, tokenLedger.port, tokenLedger.model);
+  const captureRows = await db
+    .select({
+      nodeId: llmRequests.nodeId,
+      port: llmRequests.port,
+      model: sql<string>`coalesce(${llmRequests.model}, '')`,
+      total: sql<number>`sum(${llmRequests.completionTokens} + ${llmRequests.promptTokens})::float8`,
+    })
+    .from(llmRequests)
+    .where(gte(llmRequests.receivedAt, since))
+    .groupBy(llmRequests.nodeId, llmRequests.port, llmRequests.model);
+
+  const byKey = new Map<string, TokenReconciliationRow>();
+  const rowFor = (node: string, port: number, model: string): TokenReconciliationRow => {
+    const key = `${node}:${port}:${model}`;
+    let row = byKey.get(key);
+    if (row === undefined) {
+      row = { nodeId: node, port, model, ledgerTokens: 0, captureTokens: 0, delta: 0, divergencePct: null, warn: false, costsUse: "capture" };
+      byKey.set(key, row);
+    }
+    return row;
+  };
+  for (const r of ledgerRows) {
+    if (nodeId !== undefined && r.nodeId !== nodeId) continue;
+    rowFor(r.nodeId, r.port, r.model).ledgerTokens = Math.round(r.total ?? 0);
+  }
+  for (const r of captureRows) {
+    if (nodeId !== undefined && r.nodeId !== nodeId) continue;
+    rowFor(r.nodeId, r.port, r.model).captureTokens = Math.round(r.total ?? 0);
+  }
+  for (const row of byKey.values()) {
+    row.delta = row.ledgerTokens - row.captureTokens;
+    const both = row.ledgerTokens > 0 && row.captureTokens > 0;
+    row.divergencePct = both ? Math.min(100, Math.round((Math.abs(row.delta) / Math.max(row.ledgerTokens, row.captureTokens)) * 1000) / 10) : null;
+    row.warn = both && (row.divergencePct ?? 0) > 20;
+  }
+  return { range, rows: [...byKey.values()].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)) };
 }

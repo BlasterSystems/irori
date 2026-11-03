@@ -525,6 +525,9 @@ it("detects SGLang; counter diffs win while advancing, sticky gauge fills idle",
   const busy = parseSnapshot(await probe.probe(false));
   expect(busy.decodeTps).toBe(200); // Δgen 400 / 2 s
   expect(busy.prefillTps).toBe(50); // Δcompute 100 / 2 s (cache excluded)
+  // IRI-071: cumulative counters feed the M7 ledger — prompt includes the
+  // prefill-cache subset (cached is a subset of prompt, never extra).
+  expect(busy.tokens).toEqual({ generated: 3324, prompt: 600 + 9000, cached: 9000 });
 
   // Counters flat → gen_throughput gauge (changed at the previous poll) is live.
   clock.advance(2000);

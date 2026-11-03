@@ -1,5 +1,6 @@
 import {
   type AnalyticsResponse,
+  type TokenReconciliation,
   type HealthFinding,
   auditPageSchema,
   eventJournalPageSchema,
@@ -193,6 +194,13 @@ export async function setClockCap(id: string, capMHz: number | null, persistent:
     const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
     throw new Error(msg);
   }
+}
+
+/** IRI-071: ledger vs capture token reconciliation. */
+export async function fetchTokenReconciliation(range: AnalyticsRangeName): Promise<TokenReconciliation> {
+  const res = await fetch(`/api/v1/analytics/token-reconciliation?range=${encodeURIComponent(range)}`);
+  if (!res.ok) throw new Error(`GET /api/v1/analytics/token-reconciliation failed: HTTP ${res.status}`);
+  return (await res.json()) as TokenReconciliation;
 }
 
 /** IRI-069: open health findings (per node). */
