@@ -715,7 +715,20 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
         order by r.received_at desc
         limit ${limit} offset ${Math.max(0, (page - 1) * limit)}
       `);
-      return { total, rows: rows.map(rowToRequest) };
+      // IRI-074: per-request cost priced read-time via the snapshot (failed
+      // requests keep their prompt tokens — a failed 300k request is money).
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
+      const mapped = rows.map(rowToRequest);
+      if (pricing !== null) {
+        for (const row of mapped) {
+          row.costMinor =
+            tokenCostMinor(
+              { promptTokens: row.promptTokens ?? 0, cachedTokens: row.cachedTokens ?? 0, completionTokens: row.completionTokens ?? 0 },
+              pricing.resolve(row.model ?? ""),
+            ) ?? 0;
+        }
+      }
+      return { total, rows: mapped, costCurrency: pricing?.currency ?? null };
     },
 
     async requestById(id) {
@@ -1228,5 +1241,6 @@ function rowToRequest(raw: Record<string, unknown>): UsageRequestRow {
     retryStatus: str(raw.retryStatus),
     retrySupersededBy: str(raw.retrySupersededBy),
     receivedAtMs: dateMs(raw.receivedAt),
+    costMinor: int(raw.costMinor) ?? 0,
   };
 }

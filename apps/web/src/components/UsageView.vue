@@ -147,6 +147,8 @@ const totalPages = computed(() => (requests.value === null ? 1 : Math.max(1, Mat
 const selectedModel = ref<string | null>(null);
 
 const drawer = ref<{ row: UsageRequestRow; detail: UsageRequestRow | null } | null>(null);
+/** IRI-074: pricing currency of the last requests fetch (drawer cost row). */
+const requestsCurrency = ref<string | null>(null);
 
 function syncHash(): void {
   const next = usageHashFor(tab.value, range.value);
@@ -175,6 +177,7 @@ async function load(): Promise<void> {
       });
       if (seq !== loadSeq) return;
       requests.value = data;
+      requestsCurrency.value = data.costCurrency;
     } else if (tab.value === "errors") {
       const data = await fetchUsageErrors(range.value);
       if (seq !== loadSeq) return;
@@ -619,6 +622,7 @@ const liveAgeText = computed(() => {
             <tr><td class="faint">Duration / TTFT</td><td class="mono">{{ fmtDurationMs(drawer.row.durationMs) }} / {{ fmtDurationMs(drawer.row.ttftMs) }}</td></tr>
             <tr><td class="faint">Decode tok/s</td><td class="mono">{{ fmtTps(drawer.row.decodeTps) }}</td></tr>
             <tr><td class="faint">Tokens</td><td class="mono">prompt {{ fmtTokens(drawer.row.promptTokens) }} · completion {{ fmtTokens(drawer.row.completionTokens) }} · cached {{ fmtTokens(drawer.row.cachedTokens) }} · reasoning {{ fmtTokens(drawer.row.reasoningTokens) }} · total {{ fmtTokens(drawer.row.totalTokens) }}</td></tr>
+            <tr v-if="requestsCurrency !== null"><td class="faint">Cost</td><td class="mono">{{ costText(drawer.row.costMinor, requestsCurrency) }}</td></tr>
             <tr><td class="faint">Payload sizes</td><td class="mono">req {{ fmtCount(drawer.row.reqBytes) }} B · res {{ fmtCount(drawer.row.resBytes) }} B</td></tr>
             <tr><td class="faint">Source</td><td class="mono">{{ drawer.row.sourceAddr ?? "—" }}</td></tr>
             <tr><td class="faint">Client</td><td class="mono">{{ clientLabel(drawer.row) }}<template v-if="drawer.row.clientProject !== null"> · {{ drawer.row.clientProject }}</template><template v-if="drawer.row.clientAgentType !== null"> · {{ drawer.row.clientAgentType }}</template></td></tr>
