@@ -98,6 +98,23 @@ export const nodeInventorySchema = z.object({
     })
     .nullable()
     .default(null),
+  /** IRI-081: on-node OS/firmware/driver update state (read-only; null when
+   *  the agent has not collected it yet). */
+  updates: z
+    .object({
+      osPrettyName: z.string().nullable(),
+      kernelVersion: z.string().nullable(),
+      dgxOsVersion: z.string().nullable(),
+      nvidiaDriverVersion: z.string().nullable(),
+      firmwareUpdates: z.array(z.object({ device: z.string(), toVersion: z.string() })),
+      otaPackages: z.array(z.object({ name: z.string(), version: z.string() })),
+      pendingReboot: z.boolean(),
+      unattendedUpgradesLastResult: z.string().nullable(),
+      upgradableCount: z.number().int().nonnegative().nullable(),
+      aptPresent: z.boolean(),
+    })
+    .nullable()
+    .default(null),
 });
 
 export type NodeInventory = z.infer<typeof nodeInventorySchema>;
