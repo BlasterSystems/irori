@@ -198,6 +198,7 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3) var(--space-4); }
 .statgrid--3 { grid-template-columns: repeat(3, 1fr); }
 .statgrid--6 { grid-template-columns: repeat(6, 1fr); }
+.statgrid--7 { grid-template-columns: repeat(7, 1fr); }
 .stat__label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); display: block; }
 .stat__value { font-family: var(--font-mono); font-size: 20px; font-weight: 500; line-height: 1.2; margin-top: 2px; white-space: nowrap; }
 .stat__value--sm { font-size: 15px; }
@@ -302,7 +303,7 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
 @media (max-width: 1080px) {
   .topbar__in { gap: var(--space-3); }
   .nav a { padding: 6px 6px; }
-  .statgrid, .statgrid--6 { grid-template-columns: repeat(3, 1fr); }
+  .statgrid, .statgrid--6, .statgrid--7 { grid-template-columns: repeat(3, 1fr); }
   .cols-4, .cols-3 { grid-template-columns: repeat(2, 1fr); }
   .cols-side { grid-template-columns: 1fr; }
 }
@@ -331,7 +332,7 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   .card__head .row { flex-wrap: wrap; }
   .toolbar { flex-wrap: wrap; }
   .cols-2, .cols-3, .cols-4 { grid-template-columns: 1fr; }
-  .statgrid, .statgrid--3, .statgrid--6 { grid-template-columns: repeat(2, 1fr); }
+  .statgrid, .statgrid--3, .statgrid--6, .statgrid--7 { grid-template-columns: repeat(2, 1fr); }
   .stat__value { font-size: 17px; }
   .statgrid .stat__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
