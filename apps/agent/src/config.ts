@@ -29,6 +29,10 @@ export interface AgentConfig {
   usageFlushMs: number;
   /** IRORI_USAGE_MAX_ROWS — hard cap on buffered usage rows (drop-oldest). */
   usageMaxRows: number;
+  /** IRORI_LOG_FLUSH_MS — durable log buffer ship interval (IRI-078). */
+  logFlushMs: number;
+  /** IRORI_LOG_QUEUE_MAX — in-memory log queue cap before drop-oldest (IRI-078). */
+  logQueueMax: number;
   /** IRORI_HF_TOKEN — optional HF token handed to modelctl as HF_TOKEN (gated/private repos). Bootstrap fallback: a hub-set global token (IRI-019, config-update) wins over this env. */
   hfToken: string;
 }
@@ -85,9 +89,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const usageMaxRowsRaw = Number.parseInt(env.IRORI_USAGE_MAX_ROWS?.trim() ?? "", 10);
   const usageMaxRows = Number.isFinite(usageMaxRowsRaw) && usageMaxRowsRaw > 0 ? usageMaxRowsRaw : 200_000;
 
+  // IRI-078: logs ship faster than usage (an operator tails them live), but
+  // still batched — a flooded engine is drained in bounded ticks.
+  const logFlushMsRaw = Number.parseInt(env.IRORI_LOG_FLUSH_MS?.trim() ?? "", 10);
+  const logFlushMs = Number.isFinite(logFlushMsRaw) && logFlushMsRaw >= 200 ? logFlushMsRaw : 2_000;
+  const logQueueMaxRaw = Number.parseInt(env.IRORI_LOG_QUEUE_MAX?.trim() ?? "", 10);
+  const logQueueMax = Number.isFinite(logQueueMaxRaw) && logQueueMaxRaw > 0 ? logQueueMaxRaw : 10_000;
+
   const hfToken = env.IRORI_HF_TOKEN?.trim() ?? "";
 
-  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows, hfToken };
+  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows, logFlushMs, logQueueMax, hfToken };
 }
 
 /** Parse "host:port,host:port" (a bare "port" probes 127.0.0.1). */

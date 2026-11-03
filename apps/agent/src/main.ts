@@ -9,9 +9,11 @@ import { runNasDeleteApply } from "./delete-preflight.js";
 import { hygieneCleanParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
-import { MAX_USAGE_BATCH } from "@irori/core";
+import { MAX_USAGE_BATCH, MAX_LOG_BATCH } from "@irori/core";
 import { UsageBuffer } from "./usage-buffer.js";
 import { UsageSync } from "./usage-sync.js";
+import { LogBuffer } from "./log-buffer.js";
+import { LogSink } from "./log-sink.js";
 import { CaptureProxy } from "@irori/proxy";
 import { emitUsageSpan, initOtel, shutdownOtel } from "./otel.js";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
@@ -134,6 +136,28 @@ async function run(): Promise<void> {
     log,
   });
 
+  // IRI-078: durable log path — bounded queue → node buffer → hub `logs`.
+  // Constructed before the driver (its events reference the sink).
+  let logAckHandler: ((ids: string[]) => void) | null = null;
+  const logBuffer = new LogBuffer(config.stateDir);
+  const logSink = new LogSink({
+    buffer: logBuffer,
+    connected: () => transport.isReady(),
+    send: (events, dropped) => transport.sendLogBatch(events, dropped),
+    onAck: (handler) => {
+      logAckHandler = handler;
+    },
+    flushMs: config.logFlushMs,
+    batchSize: MAX_LOG_BATCH,
+    queueMax: config.logQueueMax,
+    log: (message) => logger.warn(message), // never the wrapper — no recursion
+  });
+  /** Agent-lifecycle lines (transport/driver chatter) also go durable. */
+  const durableLog = (message: string): void => {
+    log(message);
+    logSink.emit({ scope: "agent", source: "system", line: message });
+  };
+
   const jobs: JobManager = new JobManager(
     () => ({
       nasRoot: transport.getNasRoot(),
@@ -147,7 +171,11 @@ async function run(): Promise<void> {
       resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
     }),
     {
-      onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
+      onOutput: (jobId, seq, line) => {
+        transport.sendAgentServer({ type: "job-output", jobId, seq, line });
+        // IRI-078: job output also persists (was a 400-line ring only).
+        logSink.emit({ scope: "job", jobId, source: "system", seq, line });
+      },
       onDone: (jobId, status, exitCode) => {
         log(`job ${jobId} done: ${status} (exit ${exitCode})`);
         transport.sendAgentServer({ type: "job-done", jobId, status, exitCode });
@@ -213,9 +241,20 @@ async function run(): Promise<void> {
     events: {
       onEvent: (setupId, event) => transport.sendAgentMsg({ type: "setup-event", setupId, ...event }),
       onLog: (setupId, seq, line, ts) => transport.sendAgentMsg({ type: "setup-log", setupId, seq, line, ts }),
+      onDurableLog: (setupId, entry) =>
+        logSink.emit({
+          scope: "setup",
+          setupId,
+          runId: entry.runId,
+          source: entry.source,
+          seq: entry.seq,
+          line: entry.line,
+        }),
     },
     capture: captureHooks,
-    log,
+    // Agent chatter (open failures, watchdog notes) is operator-relevant
+    // after a restart — durable, not just stdout.
+    log: durableLog,
   });
 
   const benches = new BenchRunner(
@@ -304,9 +343,15 @@ async function run(): Promise<void> {
       llmDetectOnly: config.llmDetectOnly,
     },
     onUsageAck: (ids) => usageAckHandler?.(ids),
-    onReconnect: () => void usageSync.flush(),
+    onLogAck: (ids) => logAckHandler?.(ids),
+    onReconnect: () => {
+      void usageSync.flush();
+      void logSink.flush();
+    },
     getActiveJobIds: () => jobs.activeJobs(),
-    log,
+    // Transport chatter (handshakes, dropped frames, reconnects) explains
+    // node flapping after the fact — durable alongside the setups (IRI-078).
+    log: durableLog,
   });
   // Persisted-driver re-attach runs only after `transport` exists: init
   // re-announces live records through the event callbacks, which close over
@@ -316,22 +361,38 @@ async function run(): Promise<void> {
   // IR-131: kill orphans left by a previous process BEFORE the first hello —
   // the job-done frames buffer offline and replay on hello-ok.
   await reconcileOrphanedJobs(config.stateDir, {
-    onOutput: (jobId, seq, line) => transport.sendAgentServer({ type: "job-output", jobId, seq, line }),
+    onOutput: (jobId, seq, line) => {
+      transport.sendAgentServer({ type: "job-output", jobId, seq, line });
+      logSink.emit({ scope: "job", jobId, source: "system", seq, line });
+    },
     onDone: (jobId) => transport.sendAgentServer({ type: "job-done", jobId, status: "failed", exitCode: null }),
   });
   transport.connect(config.serverUrl);
   usageSync.start();
+  logSink.start();
 
   let stopping = false;
   const shutdown = (signal: string): void => {
     if (stopping) return;
     stopping = true;
-    log(`${signal} received, stopping`);
+    durableLog(`${signal} received, stopping`);
     usageSync.stop();
     buffer.close();
+    logSink.stop();
     // IRI-039/IR-116: flush the last batching window before exit.
     void shutdownOtel();
-    void transport.stop().then(() => process.exit(0));
+    // Best-effort tail ship, BOUNDED at 5 s so a huge backlog can never stall
+    // the stop past systemd's patience. Anything unsent stays durable in the
+    // node buffer and replays on the next hello (hub dedupes by eventId).
+    const ship = Promise.race([logSink.flush().catch(() => {}), new Promise<void>((r) => setTimeout(r, 5_000).unref())]);
+    void ship.finally(() => {
+      try {
+        logBuffer.close();
+      } catch {
+        /* already closed */
+      }
+      void transport.stop().then(() => process.exit(0));
+    });
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));

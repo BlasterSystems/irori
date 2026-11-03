@@ -89,6 +89,9 @@ export const logs = pgTable(
   "logs",
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
+    /** Emitter-generated UUID; redelivery-safe dedupe (same pattern as
+     *  llm_requests.clientUuid — a buffer replay after a crash is a no-op). */
+    eventId: uuid("event_id").notNull(),
     nodeId: uuid("node_id")
       .notNull()
       .references(() => nodes.id, { onDelete: "cascade" }),
@@ -111,7 +114,11 @@ export const logs = pgTable(
     index("logs_node_ts_idx").on(t.nodeId, t.ts),
     index("logs_setup_ts_idx").on(t.setupId, t.ts),
     index("logs_level_ts_idx").on(t.level, t.ts),
-    uniqueIndex("logs_run_seq_uq").on(t.setupId, t.runId, t.seq).where(sql`seq is not null`),
+    uniqueIndex("logs_event_id_uq").on(t.eventId),
+    // Resume-ordering read key, NOT uniqueness: seq is per-run monotonic but
+    // shared with the driver counter, so distinct lines can share a seq.
+    // Idempotent ingest is the eventId unique index above.
+    index("logs_run_seq_idx").on(t.setupId, t.runId, t.seq),
   ],
 );
 

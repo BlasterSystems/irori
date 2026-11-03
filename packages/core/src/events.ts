@@ -147,6 +147,19 @@ export const usageEventSchema = z.object({
   request: usageRequestSchema.extend({ parts: z.array(usagePartMetaSchema).default([]) }),
 });
 
+/** IRI-078: a durable log batch landed for this node — the wake-up the Logs
+ *  view tails on. Deliberately a pulse, not the rows: the record is REST
+ *  (GET /api/v1/logs?after=), and a flooding engine cannot turn the WS into
+ *  a per-line channel. */
+export const logUpdateEventSchema = z.object({
+  type: z.literal("log-update"),
+  serverTimeMs: z.number(),
+  nodeId: z.string().uuid(),
+  count: z.number().int().nonnegative(),
+  /** Highest stored id for the node (tail resume hint; null = none stored). */
+  latestId: z.string().regex(/^\d+$/).nullable(),
+});
+
 export const sseEventSchema = z.discriminatedUnion("type", [
   snapshotEventSchema,
   nodeStatusEventSchema,
@@ -160,6 +173,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   jobProgressEventSchema,
   thermalEventSchema,
   usageEventSchema,
+  logUpdateEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;
@@ -174,3 +188,4 @@ export type JobEvent = z.infer<typeof jobEventSchema>;
 export type JobProgressEvent = z.infer<typeof jobProgressEventSchema>;
 export type ThermalEvent = z.infer<typeof thermalEventSchema>;
 export type UsageEvent = z.infer<typeof usageEventSchema>;
+export type LogUpdateEvent = z.infer<typeof logUpdateEventSchema>;

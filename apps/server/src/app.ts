@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
-import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
@@ -38,6 +38,7 @@ import type { AgentHub } from "./hub.js";
 import { SetupBusyError, SetupInvalidError, SetupNotFoundError, SetupOfflineError, SetupStartError, type SetupsService } from "./setups-service.js";
 import type { AuditService } from "./audit.js";
 import type { EventJournalService } from "./event-journal.js";
+import type { LogStore } from "./logs-store.js";
 import { audit, auditReadOnly } from "./audit-routes.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -190,6 +191,8 @@ export interface AppDeps {
   getAudit?: () => AuditService | null;
   /** IRI-077: restart-surviving fleet event journal (GET /events/journal). */
   getEventJournal?: () => EventJournalService | null;
+  /** IRI-078: durable structured logs (GET /logs, /logs/summary). */
+  getLogs?: () => LogStore | null;
   getCadenceMs?: () => number;
   setCadenceMs?: (cadenceMs: number) => void;
   /** IRI-016: read-only HF quantization listing; store-independent (works degraded). */
@@ -425,6 +428,26 @@ export function createApp(deps: AppDeps): Express {
     const cursorRaw = Number.parseInt(typeof req.query.cursor === "string" ? req.query.cursor : "", 10);
     const cursor = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : undefined;
     res.json(await journal.list({ range, type, nodeId, limit, cursor }));
+  });
+
+  // IRI-078: durable structured logs — the record behind the ring/feed.
+  // `after` switches to ascending tail mode (the Logs view's live tail).
+  app.get("/api/v1/logs", async (req, res) => {
+    const store = deps.getLogs?.() ?? null;
+    if (store === null) return res.status(503).json({ error: "database unavailable" });
+    const parsed = logQuerySchema.safeParse(req.query);
+    if (!parsed.success) return sendZodError(res, parsed.error);
+    res.json(await store.list(parsed.data));
+  });
+
+  // Counts per level for the filter-bar chips (same filters, no paging).
+  app.get("/api/v1/logs/summary", async (req, res) => {
+    const store = deps.getLogs?.() ?? null;
+    if (store === null) return res.status(503).json({ error: "database unavailable" });
+    const parsed = logQuerySchema.safeParse({ ...req.query, limit: 1 });
+    if (!parsed.success) return sendZodError(res, parsed.error);
+    const { limit: _limit, cursor: _cursor, after: _after, ...filters } = parsed.data;
+    res.json(await store.summary(filters));
   });
 
   app.get("/api/v1/events", (_req, res) => {

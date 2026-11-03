@@ -6,6 +6,7 @@ import { llmMsgSchema } from "./llm.js";
 import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
 import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema } from "./job-messages.js";
 import { usageBatchAckMsgSchema } from "./usage.js";
+import { logBatchAckMsgSchema } from "./logs.js";
 
 /**
  * Agent → server messages. First frame on a connection MUST be hello;
@@ -110,6 +111,7 @@ export const serverMsgSchema = z.discriminatedUnion("type", [
   setupLogAttachMsgSchema,
   setupValidateMsgSchema,
   usageBatchAckMsgSchema,
+  logBatchAckMsgSchema,
 ]);
 
 export type HelloOkMsg = z.infer<typeof helloOkMsgSchema>;

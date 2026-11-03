@@ -22,6 +22,12 @@ export interface Config {
    * asks about months later.
    */
   auditKeepDays: number;
+  /**
+   * IRI-078: raw logs below warn kept this long; warn+ kept
+   * logWarnKeepDays (the "what went wrong" window outlives the noise).
+   */
+  logKeepDays: number;
+  logWarnKeepDays: number;
 }
 
 const DEFAULT_PORT = 3947;
@@ -31,6 +37,8 @@ const DEFAULT_HOUR_KEEP_DAYS = 90;
 const DEFAULT_DAY_KEEP_DAYS = 365;
 const DEFAULT_CADENCE_MS = 2000;
 const DEFAULT_AUDIT_KEEP_DAYS = 365;
+const DEFAULT_LOG_KEEP_DAYS = 30;
+const DEFAULT_LOG_WARN_KEEP_DAYS = 180;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const databaseUrl = env.DATABASE_URL?.trim() || null;
@@ -50,6 +58,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dayKeepDays: parsePositiveInt(env.DAY_KEEP_DAYS, DEFAULT_DAY_KEEP_DAYS),
     cadenceMs: parseCadenceMs(env.CADENCE_MS),
     auditKeepDays: parsePositiveInt(env.AUDIT_KEEP_DAYS, DEFAULT_AUDIT_KEEP_DAYS),
+    logKeepDays: parsePositiveInt(env.LOG_KEEP_DAYS, DEFAULT_LOG_KEEP_DAYS),
+    logWarnKeepDays: parsePositiveInt(env.LOG_WARN_KEEP_DAYS, DEFAULT_LOG_WARN_KEEP_DAYS),
   };
 }
 

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
+import type { Express } from "express";
 import { redactAuditValue, type AuditEntry } from "@irori/core";
 import { createApp, type AppDeps } from "../src/app.js";
 import { auditInventory, audit, auditReadOnly } from "../src/audit-routes.js";
 import type { AuditInput, AuditService } from "../src/audit.js";
+import type { LogStore } from "../src/logs-store.js";
 import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore } from "./helpers.js";
@@ -243,6 +245,78 @@ describe("audit answer surface (IRI-077)", () => {
   it("GET /api/v1/events/journal answers 503 while degraded", async () => {
     const { app } = makeApp();
     expect((await request(app).get("/api/v1/events/journal")).status).toBe(503);
+  });
+});
+
+describe("logs answer surface (IRI-078)", () => {
+  const noopStore = (): LogStore => ({
+    ingestBatch: async () => ({ inserted: 0, latestId: null }),
+    list: async () => ({ rows: [], nextCursor: null, latestId: null, truncated: false }),
+    summary: async () => ({ counts: { trace: 0, debug: 0, info: 0, warn: 0, error: 0 }, total: 0, truncated: false }),
+    pruneRaw: async () => 0,
+    pruneAll: async () => 0,
+  });
+
+  function makeLogApp(logs: LogStore | null | undefined): Express {
+    const fake = makeFakeStore();
+    return createApp({
+      getStore: () => fake.store,
+      getLlmStore: () => null,
+      getHistory: () => null,
+      getLlmHistory: () => null,
+      getJobs: () => null,
+      getSetups: () => null,
+      getBench: () => null,
+      getAnalytics: () => null,
+      getCleanup: () => null,
+      getUsage: () => null,
+      getUsageClients: () => null,
+      getUsageChats: () => null,
+      getDownloads: () => null,
+      dbHealthy: async () => true,
+      rings: createRings(),
+      sse: createSseHub({ heartbeatMs: 0 }),
+      getHub: () => null,
+      hfQuants: { listQuants: async () => ({}) } as never,
+      version: "test",
+      tag: null,
+      staticDir: null,
+      getAudit: () => null,
+      // `undefined` (absent) vs null (degraded) — both answer 503.
+      ...(logs === undefined ? {} : { getLogs: () => logs }),
+    } as AppDeps);
+  }
+
+  it("GET /api/v1/logs answers 503 while degraded (absent or null)", async () => {
+    expect((await request(makeLogApp(undefined)).get("/api/v1/logs")).status).toBe(503);
+    expect((await request(makeLogApp(null)).get("/api/v1/logs")).status).toBe(503);
+  });
+
+  it("GET /api/v1/logs validates the query", async () => {
+    expect((await request(makeLogApp(noopStore())).get("/api/v1/logs").query({ range: "nope" })).status).toBe(400);
+    expect((await request(makeLogApp(noopStore())).get("/api/v1/logs").query({ limit: "9999" })).status).toBe(400);
+  });
+
+  it("GET /api/v1/logs returns the store page and passes the tail cursor", async () => {
+    const page = { rows: [], nextCursor: null, latestId: "42", truncated: false };
+    const seen: unknown[] = [];
+    const store = noopStore();
+    store.list = async (q) => {
+      seen.push(q);
+      return page;
+    };
+    const res = await request(makeLogApp(store)).get("/api/v1/logs").query({ range: "1h", level: "warn", after: "41" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(page);
+    expect(seen[0]).toMatchObject({ range: "1h", level: "warn", after: "41" });
+  });
+
+  it("GET /api/v1/logs/summary returns per-level counts", async () => {
+    const store = noopStore();
+    store.summary = async () => ({ counts: { trace: 0, debug: 0, info: 3, warn: 1, error: 0 }, total: 4, truncated: true });
+    const res = await request(makeLogApp(store)).get("/api/v1/logs/summary").query({ range: "24h" });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ counts: { trace: 0, debug: 0, info: 3, warn: 1, error: 0 }, total: 4, truncated: true });
   });
 });
 

@@ -2,10 +2,18 @@ import {
   type AnalyticsResponse,
   auditPageSchema,
   eventJournalPageSchema,
+  logPageSchema,
+  logSummarySchema,
   type AuditActor,
   type AuditPage,
   type AuditRange,
   type EventJournalPageWire,
+  type LogPage,
+  type LogQuery,
+  type LogScope,
+  type LogSource,
+  type LogLevel,
+  type LogSummary,
   clientIdentityCreatedSchema,
   chatDetailSchema,
   chatsResponseSchema,
@@ -955,5 +963,60 @@ export async function fetchEventJournal(filters: JournalFilters, signal?: AbortS
   if (!res.ok) await throwApiError(res, "GET /api/v1/events/journal");
   const parsed = eventJournalPageSchema.safeParse(await res.json());
   if (!parsed.success) throw new Error("GET /api/v1/events/journal: unexpected shape");
+  return parsed.data;
+}
+
+/* ── Durable logs (IRI-078) ───────────────────────────────────────────── */
+
+export interface LogFilters {
+  range: LogQuery["range"];
+  nodeId?: string;
+  setupId?: string;
+  runId?: string;
+  jobId?: string;
+  scope?: LogScope;
+  source?: LogSource;
+  /** Inclusive minimum level. */
+  level?: LogLevel;
+  q?: string;
+  /** Backward pagination (id < cursor, newest first). */
+  cursor?: string;
+  /** Live-tail delta (id > after, ascending). */
+  after?: string;
+}
+
+function logParams(filters: LogFilters): URLSearchParams {
+  const params = new URLSearchParams({ range: filters.range });
+  if (filters.nodeId) params.set("nodeId", filters.nodeId);
+  if (filters.setupId) params.set("setupId", filters.setupId);
+  if (filters.runId) params.set("runId", filters.runId);
+  if (filters.jobId) params.set("jobId", filters.jobId);
+  if (filters.scope) params.set("scope", filters.scope);
+  if (filters.source) params.set("source", filters.source);
+  if (filters.level) params.set("level", filters.level);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.cursor) params.set("cursor", filters.cursor);
+  if (filters.after) params.set("after", filters.after);
+  return params;
+}
+
+/** One page of the durable log record; `nextCursor` null = last page. */
+export async function fetchLogs(filters: LogFilters, signal?: AbortSignal): Promise<LogPage> {
+  const res = await fetch(`/api/v1/logs?${logParams(filters).toString()}`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) await throwApiError(res, "GET /api/v1/logs");
+  const parsed = logPageSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("GET /api/v1/logs: unexpected shape");
+  return parsed.data;
+}
+
+/** Counts per level for the filter-bar chips (same filters, no paging). */
+export async function fetchLogSummary(filters: Omit<LogFilters, "cursor" | "after">, signal?: AbortSignal): Promise<LogSummary> {
+  const params = logParams(filters);
+  params.delete("cursor");
+  params.delete("after");
+  const res = await fetch(`/api/v1/logs/summary?${params.toString()}`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) await throwApiError(res, "GET /api/v1/logs/summary");
+  const parsed = logSummarySchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("GET /api/v1/logs/summary: unexpected shape");
   return parsed.data;
 }

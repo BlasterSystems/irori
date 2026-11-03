@@ -108,6 +108,7 @@ CREATE TABLE "log_drop_counters" (
 --> statement-breakpoint
 CREATE TABLE "logs" (
 	"id" bigserial PRIMARY KEY NOT NULL,
+	"event_id" uuid NOT NULL,
 	"node_id" uuid NOT NULL,
 	"ts" timestamp with time zone DEFAULT now() NOT NULL,
 	"event_ts" bigint NOT NULL,
@@ -219,7 +220,8 @@ CREATE INDEX "health_rules_enabled_idx" ON "health_rules" USING btree ("enabled"
 CREATE INDEX "logs_node_ts_idx" ON "logs" USING btree ("node_id","ts");--> statement-breakpoint
 CREATE INDEX "logs_setup_ts_idx" ON "logs" USING btree ("setup_id","ts");--> statement-breakpoint
 CREATE INDEX "logs_level_ts_idx" ON "logs" USING btree ("level","ts");--> statement-breakpoint
-CREATE UNIQUE INDEX "logs_run_seq_uq" ON "logs" USING btree ("setup_id","run_id","seq") WHERE seq is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "logs_event_id_uq" ON "logs" USING btree ("event_id");--> statement-breakpoint
+CREATE INDEX "logs_run_seq_idx" ON "logs" USING btree ("setup_id","run_id","seq");--> statement-breakpoint
 CREATE UNIQUE INDEX "recipe_catalog_slug_uq" ON "recipe_catalog" USING btree ("slug");--> statement-breakpoint
 CREATE INDEX "recipe_catalog_kind_idx" ON "recipe_catalog" USING btree ("kind","hidden");--> statement-breakpoint
 CREATE INDEX "rejected_usage_received_idx" ON "rejected_usage" USING btree ("received_at");--> statement-breakpoint
