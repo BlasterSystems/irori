@@ -43,6 +43,8 @@ export interface InventoryCtx {
   modelctlPath: string;
   /** The agent's own user; its cache is listed directly, no runuser. */
   agentUser: string;
+  /** IRI-080: setup script paths to stat for the stale-recipe chip. */
+  scriptPaths?: string[];
   /** Test seams. */
   passwdPath?: string;
   users?: PasswdUser[];
@@ -404,5 +406,50 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
       };
     }
   }
-  return { generatedAtMs, store, local: await discoverLocalCaches(ctx) };
+  /** IRI-080: standing versions — node runtime, uv, catalog freshness and
+   *  setup script stats. Every read is best-effort (null/absent on failure). */
+  const execBin = ctx.exec ?? (async (file, args, opts) => {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const p = promisify(execFile);
+    try {
+      const r = await p(file, args, { timeout: opts.timeout });
+      return { stdout: r.stdout, stderr: r.stderr };
+    } catch (err) {
+      return { stdout: "", stderr: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  const firstLine = (s: string): string | null => {
+    const line = s.trim().split("\n")[0]?.trim() ?? "";
+    return line.length > 0 && line.length <= 200 ? line : null;
+  };
+  const nodeRuntime = firstLine((await execBin(process.execPath, ["--version"], { timeout: 5000 })).stdout) ?? `node ${process.version}`;
+  const uvOut = await execBin("uv", ["--version"], { timeout: 5000 });
+  const uv = firstLine(uvOut.stdout) ?? (uvOut.stderr.includes("No such file") ? null : firstLine(uvOut.stderr));
+  let catalog: { schema: number; generatedAt: string | null } | null = null;
+  if (ctx.nasRoot !== null) {
+    try {
+      const raw = JSON.parse(await (await import("node:fs/promises")).readFile(`${ctx.nasRoot}/catalog.json`, "utf8")) as { schema?: unknown; generatedAt?: unknown };
+      catalog = { schema: typeof raw.schema === "number" ? raw.schema : 0, generatedAt: typeof raw.generatedAt === "string" ? raw.generatedAt : null };
+    } catch {
+      catalog = null;
+    }
+  }
+  const scripts: Array<{ path: string; present: boolean; executable: boolean; mtimeMs: number | null }> = [];
+  const fsp = await import("node:fs/promises");
+  for (const path of ctx.scriptPaths ?? []) {
+    if (path === null || path === undefined) continue;
+    try {
+      const st = await fsp.stat(path);
+      scripts.push({ path, present: true, executable: (st.mode & 0o111) !== 0, mtimeMs: st.mtimeMs });
+    } catch {
+      scripts.push({ path, present: false, executable: false, mtimeMs: null });
+    }
+  }
+  return {
+    generatedAtMs,
+    store,
+    local: await discoverLocalCaches(ctx),
+    versions: { nodeRuntime, uv, catalog, scripts },
+  };
 }

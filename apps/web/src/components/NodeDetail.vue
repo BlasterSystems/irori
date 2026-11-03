@@ -4,6 +4,7 @@ import { live } from "../live";
 import {
   deleteNode,
   fetchHistory,
+  fetchNodeVersions,
   fetchLlmHistory,
   fetchNodeLlm,
   setClockCap,
@@ -12,6 +13,7 @@ import {
   fetchHealthFindings,
   HISTORY_RANGES,
   type HealthFinding,
+  type NodeVersionsResponse,
   type HistoryRange,
   type HistoryResponse,
   type LlmHistoryResponse,
@@ -305,6 +307,26 @@ const storageRows = computed(() => snapshot.value?.storage ?? []);
 
 /** IRI-069: open health findings for this node (severity chips in the header). */
 const findings = ref<HealthFinding[]>([]);
+
+/* ── IRI-080: version provenance + drift ──────────────────────────────────── */
+const versions = ref<NodeVersionsResponse | null>(null);
+const versionsState = ref<"loading" | "ready" | "error">("loading");
+watch(
+  () => props.nodeId,
+  () => {
+    versionsState.value = "loading";
+    void fetchNodeVersions(props.nodeId)
+      .then((v) => {
+        versions.value = v;
+        versionsState.value = "ready";
+      })
+      .catch(() => {
+        versionsState.value = "error";
+      });
+  },
+  { immediate: true },
+);
+const staleScripts = computed(() => (versions.value?.versions?.scripts ?? []).filter((s) => !s.present));
 watch(
   () => props.nodeId,
   () => {
@@ -1168,6 +1190,47 @@ onUnmounted(() => {
             <p v-for="note in detail.gpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
           <p v-else class="muted">no data yet</p>
+        </div>
+      </article>
+
+      <!-- IRI-080: version provenance — pin vs actual, catalog freshness,
+           missing recipe scripts (the Serve stale chip lives here too). -->
+      <article v-if="versionsState !== 'error'" class="card">
+        <div class="card__head">
+          <h3>Versions</h3>
+          <span class="mono faint">{{ versions?.updatedAt !== null ? `read ${new Date(versions?.updatedAt ?? 0).toLocaleTimeString()}` : "" }}</span>
+        </div>
+        <div class="card__body" style="padding-top: 12px;">
+          <template v-if="versions !== null">
+            <div class="barrow"><span>Agent</span><span class="val">{{ versions.agentVersion ?? "unknown" }}</span></div>
+            <div class="barrow"><span>Node runtime</span><span class="val">{{ versions.versions?.nodeRuntime ?? "unknown" }}</span></div>
+            <div class="barrow"><span>uv</span><span class="val">{{ versions.versions?.uv ?? "missing" }}</span></div>
+            <div class="barrow" :title="`hub pin ${versions.pin ?? 'unset'}`"><span>modelctl pin</span><span class="val">{{ versions.pin ?? 'unset' }}</span></div>
+            <div v-for="d in versions.drift" :key="d.user" class="barrow">
+              <span :class="{ 'metric--hot': d.belowPin }">{{ d.user }}</span>
+              <span class="val">
+                {{ d.modelctlVersion ?? "unknown" }}
+                <span v-if="d.belowPin" class="chip chip--warn">below pin</span>
+              </span>
+            </div>
+            <div class="barrow" :title="versions.versions?.catalog === null ? 'catalog.json missing' : ''">
+              <span>Catalog</span>
+              <span class="val">
+                <template v-if="versions.versions?.catalog">schema {{ versions.versions.catalog.schema }} · {{ versions.versions.catalog.generatedAt ?? "no timestamp" }}</template>
+                <template v-else>missing</template>
+              </span>
+            </div>
+            <div v-for="s in versions.versions?.scripts ?? []" :key="s.path" class="barrow">
+              <span class="mono" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="s.path">{{ s.path.split("/").pop() }}</span>
+              <span class="val" :class="{ 'metric--hot': !s.present }">
+                {{ s.present ? `executable ${s.executable ? "yes" : "no"} · mtime ${new Date(s.mtimeMs ?? 0).toLocaleDateString()}` : "MISSING — stale recipe" }}
+              </span>
+            </div>
+            <p v-if="staleScripts.length > 0" class="row">
+              <span class="chip chip--warn" :title="staleScripts.map((s) => s.path).join('\n')">◇ {{ staleScripts.length }} stale recipe script{{ staleScripts.length === 1 ? "" : "s" }} — start would fail</span>
+            </p>
+          </template>
+          <p v-else class="muted">no inventory report yet — run Models → Refresh</p>
         </div>
       </article>
 
