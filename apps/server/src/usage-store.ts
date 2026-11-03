@@ -1059,6 +1059,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
             lastSeenMs: new Date(String(r.last_seen)).getTime(),
           };
         }),
+        costCurrency: pricing?.currency ?? null,
       };
     },
 
@@ -1137,6 +1138,7 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
           };
         }),
         series,
+        costCurrency: pricing?.currency ?? null,
       };
     },
 

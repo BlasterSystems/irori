@@ -277,6 +277,8 @@ const costChart = computed(() => {
   return usageChart(overview.value.series.map((p) => ({ t: p.t, value: p.costMinor / 100 })), W, H);
 });
 const modelsCostTotal = computed(() => (models.value?.models ?? []).reduce((acc, m) => acc + (m.costMinor ?? 0), 0));
+const agentsCostShown = computed(() => (agents.value?.costCurrency ?? null) !== null);
+const toolsCostShown = computed(() => (tools.value?.costCurrency ?? null) !== null);
 
 const tokenMixRows = computed(() => (overview.value === null ? [] : tokenMix(overview.value.tokenMix)));
 
@@ -468,7 +470,7 @@ const liveAgeText = computed(() => {
         <div class="card__body card__body--flush">
           <table class="table">
             <thead>
-              <tr><th>Client</th><th>Agent type</th><th>Project</th><th>Requests</th><th>Errors</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Last seen</th></tr>
+              <tr><th>Client</th><th>Agent type</th><th>Project</th><th>Requests</th><th>Errors</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Cost</th><th>Last seen</th></tr>
             </thead>
             <tbody>
               <tr v-for="g in agents?.groups ?? []" :key="agentGroupKey(g)">
@@ -480,9 +482,10 @@ const liveAgeText = computed(() => {
                 <td class="mono">{{ fmtTokens(g.promptTokens) }}</td>
                 <td class="mono">{{ fmtTokens(g.completionTokens) }}</td>
                 <td class="mono">{{ fmtTokens(g.totalTokens) }}</td>
+                <td class="mono">{{ agentsCostShown ? costText(g.costMinor, agents?.costCurrency ?? null) : "—" }}</td>
                 <td class="mono">{{ fmtTimeIso(g.lastSeenMs) }}</td>
               </tr>
-              <tr v-if="(agents?.groups.length ?? 0) === 0"><td colspan="9" class="faint">No captured traffic in this range. Unidentified clients appear here by source IP.</td></tr>
+              <tr v-if="(agents?.groups.length ?? 0) === 0"><td colspan="10" class="faint">No captured traffic in this range. Unidentified clients appear here by source IP.</td></tr>
             </tbody>
           </table>
         </div>
@@ -521,7 +524,7 @@ const liveAgeText = computed(() => {
         <div class="card__body card__body--flush">
           <table class="table">
             <thead>
-              <tr><th>Tool</th><th>Model</th><th>Calls</th><th>Errors</th><th>Args chars</th><th>Result chars</th><th>Prompt share</th><th>Completion share</th><th>Last seen</th></tr>
+              <tr><th>Tool</th><th>Model</th><th>Calls</th><th>Errors</th><th>Args chars</th><th>Result chars</th><th>Prompt share</th><th>Completion share</th><th>Cost</th><th>Last seen</th></tr>
             </thead>
             <tbody>
               <tr v-for="t in tools?.tools ?? []" :key="toolRowKey(t)">
@@ -533,9 +536,10 @@ const liveAgeText = computed(() => {
                 <td class="mono">{{ fmtCount(t.resultChars) }}</td>
                 <td class="mono">{{ fmtTokens(t.promptTokens) }}</td>
                 <td class="mono">{{ fmtTokens(t.completionTokens) }}</td>
+                <td class="mono">{{ toolsCostShown ? costText(t.costMinor, tools?.costCurrency ?? null) : "—" }}</td>
                 <td class="mono">{{ fmtTimeIso(t.lastSeenMs) }}</td>
               </tr>
-              <tr v-if="(tools?.tools.length ?? 0) === 0"><td colspan="9" class="faint">No tool usage captured in this range.</td></tr>
+              <tr v-if="(tools?.tools.length ?? 0) === 0"><td colspan="10" class="faint">No tool usage captured in this range.</td></tr>
             </tbody>
           </table>
         </div>
