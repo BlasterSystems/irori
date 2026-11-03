@@ -23,6 +23,8 @@ export const GROUP_TABS = [
   { key: "cluster", label: "Cluster" },
   { key: "node", label: "Node" },
 ] as const;
+/** IRI-075: setup grouping is tokens-lens-only (per Serve setup). */
+export const TOKEN_GROUP_TABS = [...GROUP_TABS, { key: "setup", label: "Setup" }] as const;
 
 /** Warn tier for temperatures app-wide (cards, node detail, analytics lens). */
 

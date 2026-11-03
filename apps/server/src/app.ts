@@ -724,12 +724,14 @@ export function createApp(deps: AppDeps): Express {
     const range = analyticsRangeSchema.safeParse(req.query.range);
     if (!range.success) return res.status(400).json({ error: "unknown range" });
     const rawGroup = req.query.groupBy;
-    const groupBy = rawGroup === "cluster" || rawGroup === "node" ? rawGroup : "node";
+    const groupBy = rawGroup === "cluster" || rawGroup === "node" || rawGroup === "setup" ? rawGroup : "node";
     const setupId = typeof req.query.setupId === "string" ? req.query.setupId : undefined;
+    const offsetMsRaw = Number.parseInt(typeof req.query.offsetMs === "string" ? req.query.offsetMs : "", 10);
+    const offsetMs = Number.isFinite(offsetMsRaw) && offsetMsRaw > 0 ? offsetMsRaw : undefined;
     const nodeId = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
     const service = deps.getAnalytics();
     if (service === null) return res.status(503).json({ error: "database unavailable" });
-    res.json(await service.build({ lens: lens.data, range: range.data, groupBy, setupId, nodeId }));
+    res.json(await service.build({ lens: lens.data, range: range.data, groupBy, setupId, nodeId, offsetMs }));
   });
 
   // ---- M8: usage capture (SPEC §13, ADR-0008) ----

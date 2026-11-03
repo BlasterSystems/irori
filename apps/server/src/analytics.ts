@@ -35,6 +35,8 @@ export interface AnalyticsQuery {
   /** Filter to one setup (cluster view) or one node. */
   setupId?: string;
   nodeId?: string;
+  /** IRI-075: shift the window back (delta-vs-previous-period fetches). */
+  offsetMs?: number;
 }
 
 export interface AnalyticsService {
@@ -91,7 +93,7 @@ export function createAnalyticsService(
     },
     async build(query) {
       const granularity = analyticsGranularity(query.lens, query.range);
-      const since = new Date(Date.now() - analyticsRangeMs(query.range));
+      const since = new Date(Date.now() - analyticsRangeMs(query.range) - (query.offsetMs ?? 0));
 
       const member = await membership();
       const perNode = await lensBuckets(db, query, granularity, since);
@@ -100,6 +102,13 @@ export function createAnalyticsService(
       if (query.groupBy === "node") {
         for (const [nodeId, buckets] of perNode) {
           series.push({ key: nodeId, label: member.nodeNames.get(nodeId) ?? nodeId, points: [...buckets.values()].map((b) => b.v).sort((a, b) => a.t - b.t) });
+        }
+      } else if (query.groupBy === "setup") {
+        // IRI-075: one series per Serve setup (standalone nodes excluded —
+        // they belong to no setup and would double-count the fleet fold).
+        for (const [key, ids] of member.members) {
+          if (query.setupId !== undefined && query.setupId !== key) continue;
+          series.push({ key, label: member.labels.get(key) ?? key, points: foldCluster(ids, perNode, query.lens) });
         }
       } else {
         const groups: Array<{ key: string; label: string; ids: string[] }> = [];
