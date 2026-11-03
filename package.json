@@ -21,7 +21,8 @@
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "dev": "pnpm --filter @irori/web dev & pnpm --filter @irori/server dev"
+    "dev": "pnpm --filter @irori/web dev & pnpm --filter @irori/server dev",
+    "coverage": "pnpm -r --parallel test:coverage"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

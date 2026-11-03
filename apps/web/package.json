@@ -7,7 +7,8 @@
     "build": "vue-tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "vue-tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "dev": "vite"
+    "dev": "vite",
+    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=68"
   },
   "dependencies": {
     "@irori/core": "workspace:*",
