@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
+import { auditDomainHash } from "../audit-data";
 import { vScrimClose } from "../scrim";
 import { vDialog } from "../dialog";
 import { live } from "../live";
@@ -860,6 +861,7 @@ function fmtGiB(bytes: number | null): string {
         <p v-else>Setups: model + nodes + your scripts. Irori validates, transfers, supervises — never edits your scripts.</p>
       </div>
       <div class="row">
+        <a class="btn btn--ghost" :href="auditDomainHash('setup')" title="Audited setup actions">Audit</a>
         <button class="btn btn--primary" @click="openWizard()">New setup…</button>
       </div>
     </header>

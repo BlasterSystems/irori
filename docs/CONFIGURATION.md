@@ -17,6 +17,7 @@ whenever `DATABASE_URL` is set (ADR-0002):
 | `MINUTE_KEEP_DAYS` | `7` | Minute-bucket retention |
 | `HOUR_KEEP_DAYS` | `90` | Hour-bucket retention |
 | `DAY_KEEP_DAYS` | `365` | Day-bucket retention |
+| `AUDIT_KEEP_DAYS` | `365` | Durable audit-log retention (IRI-077); the event journal keeps a fixed 90 d |
 | `CADENCE_MS` | `2000` | Snapshot cadence handed to agents (bounded 1–60 s); the persisted hub setting (hub settings modal) overrides it and is live-pushed via config-update |
 | `IRORI_STATIC_DIR` | `apps/web/dist` | Served web assets |
 | `IRORI_AGENT_ARTIFACTS_DIR` | bundled | Served agent installer/unit/bundle (ADR-0007) |

@@ -9,6 +9,7 @@ import AnalyticsView from "./components/AnalyticsView.vue";
 import OverviewView from "./components/OverviewView.vue";
 import UsageView from "./components/UsageView.vue";
 import ChatsView from "./components/ChatsView.vue";
+import AuditView from "./components/AuditView.vue";
 import HubSettingsModal from "./components/HubSettingsModal.vue";
 import TelemetryDrawer from "./components/TelemetryDrawer.vue";
 import TransfersDock from "./components/TransfersDock.vue";
@@ -138,6 +139,7 @@ onUnmounted(() => {
         <a :href="usageHash()" :class="{ 'is-active': route.view === 'usage' }" :aria-current="route.view === 'usage' ? 'page' : undefined">Usage</a>
         <a :href="chatsHash()" :class="{ 'is-active': route.view === 'chats' }" :aria-current="route.view === 'chats' ? 'page' : undefined">Chats</a>
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
+        <a href="#/audit" :class="{ 'is-active': route.view === 'audit' }" :aria-current="route.view === 'audit' ? 'page' : undefined">Audit</a>
       </nav>
       <span v-if="!connected" class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span> Offline</span>
       <button class="iconbtn" aria-label="Toggle theme" @click="toggleTheme">
@@ -158,6 +160,7 @@ onUnmounted(() => {
         <a :href="usageHash()" :class="{ 'is-active': route.view === 'usage' }" :aria-current="route.view === 'usage' ? 'page' : undefined">Usage</a>
         <a :href="chatsHash()" :class="{ 'is-active': route.view === 'chats' }" :aria-current="route.view === 'chats' ? 'page' : undefined">Chats</a>
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
+        <a href="#/audit" :class="{ 'is-active': route.view === 'audit' }" :aria-current="route.view === 'audit' ? 'page' : undefined">Audit</a>
       </div>
     </div>
   </header>
@@ -169,6 +172,7 @@ onUnmounted(() => {
     <AnalyticsView v-else-if="route.view === 'analytics'" />
     <UsageView v-else-if="route.view === 'usage'" />
     <ChatsView v-else-if="route.view === 'chats'" />
+    <AuditView v-else-if="route.view === 'audit'" />
     <NodeDetail v-else-if="detailNodeId !== null" :node-id="detailNodeId" />
     <OverviewView v-else />
   </main>

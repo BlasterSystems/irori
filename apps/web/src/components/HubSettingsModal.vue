@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { fetchCadenceMs, fetchEnergyCost, fetchHfTokenStatus, fetchTokenCost, putCadenceMs, putEnergyCost, putHfToken, putTokenCost } from "../api";
 import { serverCadenceMs } from "../version";
+import { auditDomainHash } from "../audit-data";
 import { energyCost, tokenCost } from "../cost-settings";
 import { CURRENCIES, type Currency, type EnergyCost, type TokenCost } from "@irori/core";
 import { vScrimClose } from "../scrim";
@@ -172,7 +173,10 @@ onMounted(async () => {
     <div class="modal__panel" role="dialog" aria-modal="true" aria-label="Hub settings">
       <div class="card__head">
         <h3>Hub settings</h3>
-        <button class="iconbtn" aria-label="Close" @click="emit('close')">✕</button>
+        <span class="row" style="gap: 8px">
+          <a class="btn btn--ghost btn--sm" :href="auditDomainHash('settings')" title="Audited settings changes" @click="emit('close')">Audit</a>
+          <button class="iconbtn" aria-label="Close" @click="emit('close')">✕</button>
+        </span>
       </div>
 
       <div class="modal__grid">

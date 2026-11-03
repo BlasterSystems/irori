@@ -7,7 +7,9 @@ import { createDbHandle, createNodeStore, type Db, type DbHandle, type NodeStore
 import { loadConfig, type Config } from "./config.js";
 import { createRings } from "./rings.js";
 import { createSseHub } from "./sse.js";
-import { createEventFeed } from "./events-feed.js";
+import { createEventFeed, EVENT_FEED_CAP } from "./events-feed.js";
+import { createAuditService, type AuditService } from "./audit.js";
+import { createEventJournalService, EVENT_JOURNAL_KEEP_DAYS, type EventJournalService } from "./event-journal.js";
 import { createAgentHub, type AgentHub } from "./hub.js";
 import { createJobsService, type JobSettledEvent, type JobsService, type PushBlockedEvent } from "./jobs-service.js";
 import { createDownloadQueueService, type DownloadQueueService } from "./download-queue-service.js";
@@ -20,7 +22,7 @@ import { CADENCE_MAX_MS, CADENCE_MIN_MS } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
-import { runRetention, runLlmRetention, runUsageRetention } from "./retention.js";
+import { runRetention, runLlmRetention, runUsageRetention, runOpsRetention } from "./retention.js";
 import { createUsageStore, type UsageStore } from "./usage-store.js";
 import { createUsageClients, type UsageClients } from "./usage-clients.js";
 import { createUsageChats, type UsageChats } from "./usage-chats.js";
@@ -100,6 +102,9 @@ const state: {
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
   modelctlPin: ModelctlPinService | null;
+  /** IRI-077: durable audit log + restart-surviving event journal. */
+  audit: AuditService | null;
+  eventJournal: EventJournalService | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -121,6 +126,8 @@ const state: {
   usageChats: null,
   history: null,
   llmHistory: null,
+  audit: null,
+  eventJournal: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -134,7 +141,10 @@ const gitTag = process.env.IRORI_GIT_TAG?.trim() || null;
 initOtel({ serviceName: "irori-server", version, log: (m) => log.info(m) });
 const rings = createRings();
 // Recording feed (IRI-013): every non-snapshot/llm/heartbeat frame is kept for /events/recent.
-const sse = createEventFeed(createSseHub());
+// IRI-077: the same frames are journaled durably once the DB comes up; the sink
+// is late-bound because boot() is async and the app/router exist before it.
+let journalSink: ((event: Parameters<EventJournalService["journal"]>[0]) => void) | null = null;
+const sse = createEventFeed(createSseHub(), EVENT_FEED_CAP, (event) => journalSink?.(event));
 
 const app = createApp({
   getStore: () => state.store,
@@ -159,6 +169,8 @@ const app = createApp({
   getCadence: () => state.cadence,
   getCost: () => state.cost,
   getModelctlPin: () => state.modelctlPin,
+  getAudit: () => state.audit,
+  getEventJournal: () => state.eventJournal,
   getCadenceMs: () => activeCadenceMs,
   setCadenceMs: (ms) => {
     activeCadenceMs = ms;
@@ -197,6 +209,13 @@ async function boot(): Promise<void> {
 
   const llmStore = createLlmStore(dbHandle.db);
   state.llmStore = llmStore;
+
+  // IRI-077: durable audit log + event journal. Created after migrate so the
+  // first write can never race the schema; the journal sink is late-bound into
+  // the recording feed (which exists from boot start, degraded included).
+  state.audit = createAuditService(dbHandle.db, (m, err) => log.warn(`${m}: ${String(err ?? "")}`));
+  state.eventJournal = createEventJournalService(dbHandle.db, (m, err) => log.warn(`${m}: ${String(err ?? "")}`));
+  journalSink = (event) => state.eventJournal?.journal(event);
 
   // M8 (ADR-0008): durable usage ingest + read models. The SSE fan-out and
   // ack ride the hub frame chain; inserts are deduplicated by client UUID.
@@ -517,6 +536,14 @@ function startPruneLoop(store: NodeStore, llmStore: LlmStore, db: Db, config: Co
       }
       const pruned = await bench.prune();
       if (pruned > 0) log.info(`pruned ${pruned} bench runs (last 30 per type kept)`);
+      // IRI-077: audit is long-retention (365 d default) and the event journal
+      // bounded, so neither grows without a ceiling.
+      const ops = await runOpsRetention(
+        { audit: state.audit, eventJournal: state.eventJournal },
+        { auditKeepDays: config.auditKeepDays, journalKeepDays: EVENT_JOURNAL_KEEP_DAYS },
+      );
+      if (ops.audit > 0) log.info(`pruned ${ops.audit} audit rows (retention ${config.auditKeepDays} d)`);
+      if (ops.journal > 0) log.info(`pruned ${ops.journal} journaled events (retention ${EVENT_JOURNAL_KEEP_DAYS} d)`);
     } catch {
       // DB loss is handled by the hub buffer; prune just tries again next tick.
     }

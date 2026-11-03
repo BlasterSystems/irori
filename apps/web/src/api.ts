@@ -1,5 +1,11 @@
 import {
   type AnalyticsResponse,
+  auditPageSchema,
+  eventJournalPageSchema,
+  type AuditActor,
+  type AuditPage,
+  type AuditRange,
+  type EventJournalPageWire,
   clientIdentityCreatedSchema,
   chatDetailSchema,
   chatsResponseSchema,
@@ -902,4 +908,52 @@ export async function putHfToken(token: string | null): Promise<void> {
     body: JSON.stringify({ hfToken: token } satisfies HfTokenPut),
   });
   if (!res.ok) await throwApiError(res, "PUT /api/v1/settings/hf-token");
+}
+
+/* ── Audit log + event journal (IRI-077) ──────────────────────────────── */
+
+export interface AuditFilters {
+  range: AuditRange;
+  actor?: AuditActor;
+  domain?: string;
+  targetId?: string;
+  q?: string;
+  cursor?: string;
+}
+
+/** One page of the durable audit record; `nextCursor` null = last page. */
+export async function fetchAudit(filters: AuditFilters, signal?: AbortSignal): Promise<AuditPage> {
+  const params = new URLSearchParams({ range: filters.range });
+  if (filters.actor) params.set("actor", filters.actor);
+  if (filters.domain) params.set("domain", filters.domain);
+  if (filters.targetId) params.set("targetId", filters.targetId);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.cursor) params.set("cursor", filters.cursor);
+  const res = await fetch(`/api/v1/audit?${params.toString()}`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) await throwApiError(res, "GET /api/v1/audit");
+  const parsed = auditPageSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("GET /api/v1/audit: unexpected shape");
+  return parsed.data;
+}
+
+export interface JournalFilters {
+  range: "1h" | "24h" | "7d" | "30d";
+  type?: string;
+  nodeId?: string;
+  limit?: number;
+  cursor?: number;
+}
+
+/** Restart-surviving operational frames (the live feed ring has no history). */
+export async function fetchEventJournal(filters: JournalFilters, signal?: AbortSignal): Promise<EventJournalPageWire> {
+  const params = new URLSearchParams({ range: filters.range });
+  if (filters.type) params.set("type", filters.type);
+  if (filters.nodeId) params.set("nodeId", filters.nodeId);
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.cursor !== undefined) params.set("cursor", String(filters.cursor));
+  const res = await fetch(`/api/v1/events/journal?${params.toString()}`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) await throwApiError(res, "GET /api/v1/events/journal");
+  const parsed = eventJournalPageSchema.safeParse(await res.json());
+  if (!parsed.success) throw new Error("GET /api/v1/events/journal: unexpected shape");
+  return parsed.data;
 }

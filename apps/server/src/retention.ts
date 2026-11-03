@@ -98,3 +98,23 @@ export async function runUsageRetention(
   const day = await usage.pruneBuckets("day", bucketKeepDays);
   return { raw, hour, day };
 }
+
+export interface OpsRetentionResult {
+  audit: number;
+  journal: number;
+}
+
+/**
+ * IRI-077: one fleet-ops retention pass — audit rows (default 365 d) and the
+ * event journal (90 d). Kept beside the other passes so every durable table
+ * is bounded by the same loop; both services are optional because the hub may
+ * boot degraded (no DATABASE_URL) with the audit path absent.
+ */
+export async function runOpsRetention(
+  deps: { audit: { prune(keepDays: number): Promise<number> } | null; eventJournal: { prune(keepDays: number): Promise<number> } | null },
+  policy: { auditKeepDays: number; journalKeepDays: number },
+): Promise<OpsRetentionResult> {
+  const audit = deps.audit === null ? 0 : await deps.audit.prune(policy.auditKeepDays);
+  const journal = deps.eventJournal === null ? 0 : await deps.eventJournal.prune(policy.journalKeepDays);
+  return { audit, journal };
+}

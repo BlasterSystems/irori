@@ -20,18 +20,38 @@ export const EVENT_FEED_CAP = 500;
  *  itself (IR-102) and seeds job context from GET /api/v1/jobs.
  *  `setup-log` (IR-124) joins them for the same reason: live-only throttled
  *  engine output, backfill via GET /api/v1/setups/:id/log. */
-const FEED_EXCLUDED = new Set(["heartbeat", "snapshot", "llm", "job-progress", "setup-log"]);
+export const FEED_EXCLUDED: Readonly<Record<string, true>> = {
+  heartbeat: true,
+  snapshot: true,
+  llm: true,
+  "job-progress": true,
+  "setup-log": true,
+};
 
-export function createEventFeed(inner: SseHub, cap: number = EVENT_FEED_CAP): EventFeed {
+export function createEventFeed(
+  inner: SseHub,
+  cap: number = EVENT_FEED_CAP,
+  /**
+   * IRI-077: durable sink for the frames the ring keeps. Called after the
+   * exclusion filter, so the journal sees exactly what the ring does; the
+   * sink is best-effort and must never throw into the send path.
+   */
+  onRecord?: (event: SseEvent) => void,
+): EventFeed {
   const ring: SseEvent[] = [];
   return {
     subscribe: (res) => inner.subscribe(res),
     unsubscribe: (res) => inner.unsubscribe(res),
     stop: () => inner.stop(),
     send(event) {
-      if (!FEED_EXCLUDED.has(event.type)) {
+      if (!Object.hasOwn(FEED_EXCLUDED, event.type)) {
         ring.push(event);
         if (ring.length > cap) ring.splice(0, ring.length - cap);
+        try {
+          onRecord?.(event);
+        } catch {
+          /* journal failures never block live delivery */
+        }
       }
       inner.send(event);
     },
