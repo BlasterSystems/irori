@@ -210,3 +210,26 @@ export const tokenReconciliationSchema = z.object({
 });
 export type TokenReconciliation = z.infer<typeof tokenReconciliationSchema>;
 export type TokenReconciliationRow = z.infer<typeof tokenReconciliationRowSchema>;
+
+/** IRI-073: Wh-per-token efficiency (read-time join of power buckets × ledger). */
+export const efficiencyRowSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  kind: z.literal("node").or(z.literal("model")),
+  energyWh: z.number().nonnegative().nullable(),
+  tokens: z.number().nonnegative(),
+  whPerKToken: z.number().nonnegative().nullable(),
+  /** Estimated from the pricing snapshot × ledger tokens (capture costs differ). */
+  costPerMToken: z.number().nullable(),
+  /** 0-1 energy coverage over the range's buckets; null = no buckets at all. */
+  energyCoverage: z.number().min(0).max(1).nullable(),
+  hasTokens: z.boolean(),
+  reason: z.string().nullable(),
+});
+export const efficiencyResponseSchema = z.object({
+  range: analyticsRangeSchema,
+  groupBy: z.enum(["node", "model"]),
+  rows: z.array(efficiencyRowSchema),
+});
+export type EfficiencyResponse = z.infer<typeof efficiencyResponseSchema>;
+export type EfficiencyRow = z.infer<typeof efficiencyRowSchema>;

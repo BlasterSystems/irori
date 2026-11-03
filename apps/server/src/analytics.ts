@@ -18,6 +18,8 @@ import {
   type TokenTotals,
   type TokenReconciliation,
   type TokenReconciliationRow,
+  type EfficiencyResponse,
+  type EfficiencyRow,
 } from "@irori/core";
 
 /**
@@ -39,6 +41,8 @@ export interface AnalyticsService {
   build(query: AnalyticsQuery): Promise<AnalyticsResponse>;
   /** IRI-071: ledger vs capture reconciliation per node/port/model. */
   reconciliation(query: { range: AnalyticsRangeValue; nodeId?: string }): Promise<TokenReconciliation>;
+  /** IRI-073: Wh-per-token efficiency (energy × ledger join). */
+  efficiency(query: { range: AnalyticsRangeValue; groupBy: "node" | "model" }): Promise<EfficiencyResponse>;
 }
 
 interface Membership {
@@ -80,6 +84,10 @@ export function createAnalyticsService(
   return {
     async reconciliation(query) {
       return tokenReconciliation(db, query.range, query.nodeId);
+    },
+    async efficiency(query) {
+      const pricing = opts.pricing === undefined ? null : await opts.pricing().catch(() => null);
+      return tokenEfficiency(db, { ...query, pricing });
     },
     async build(query) {
       const granularity = analyticsGranularity(query.lens, query.range);
@@ -352,6 +360,108 @@ async function tokenModels(db: Db, since: Date, granularity: "minute" | "hour" |
     })
     .sort((a, b) => b.total - a.total)
     .slice(0, 100);
+}
+
+/** IRI-073: Wh-per-token efficiency — energy from power buckets (NAS excluded
+ *  per the fleet rule), tokens from the ledger; null + reason when either side
+ *  lacks coverage. Cost is an estimate from the pricing snapshot. */
+async function tokenEfficiency(
+  db: Db,
+  opts: { range: AnalyticsRangeValue; groupBy: "node" | "model"; pricing?: { currency: Currency | null; resolve(model: string): { input: number; cached: number; output: number; currency: Currency } | null } | null },
+): Promise<EfficiencyResponse> {
+  const granularity = analyticsGranularity("power", opts.range);
+  const since = new Date(Date.now() - analyticsRangeMs(opts.range));
+  const bucketHours = granularity === "day" ? 24 : granularity === "minute" ? 1 / 60 : 1;
+
+  const nodeRows = await db.select({ id: nodes.id, name: nodes.name, kind: nodes.kind }).from(nodes);
+  const kindOf = new Map(nodeRows.map((n) => [n.id, n.kind]));
+  const nameOf = new Map(nodeRows.map((n) => [n.id, n.name]));
+
+  // Energy per node: clamped watts × bucket duration, over buckets with a
+  // reading; coverage = with-reading buckets / all buckets in the window.
+  const energyRows = await db
+    .select({
+      nodeId: snapshotBuckets.nodeId,
+      buckets: sql<number>`count(*)::int`,
+      withReading: sql<number>`count(${snapshotBuckets.gpuPowerW})::int`,
+      // Idle buckets (no reading) contribute nothing — an absent reading is
+      // not 0 W + 40 W base; it is unknown (and drops coverage).
+      wh: sql<number>`sum(
+        case when ${snapshotBuckets.gpuPowerW} is null and ${snapshotBuckets.packagePowerW} is null then 0
+        else (least(
+          coalesce(${snapshotBuckets.gpuPowerW}, 0) + coalesce(${snapshotBuckets.packagePowerW}, 0) + ${DEFAULT_BASE_OVERHEAD_W},
+          ${GB10_SYSTEM_ENVELOPE_W}
+        )) * ${bucketHours} end
+      )::float8`,
+    })
+    .from(snapshotBuckets)
+    .where(and(eq(snapshotBuckets.granularity, granularity), gte(snapshotBuckets.bucketStart, since)))
+    .groupBy(snapshotBuckets.nodeId);
+  const energyOf = new Map(energyRows.map((r) => [r.nodeId, r]));
+
+  // Tokens per node (and per model with its node for the model grouping).
+  const ledgerNodeRows = await db
+    .select({ nodeId: tokenLedger.nodeId, tokens: sql<number>`sum(${tokenLedger.generatedTokens} + ${tokenLedger.promptTokens})::float8` })
+    .from(tokenLedger)
+    .where(and(eq(tokenLedger.granularity, granularity), gte(tokenLedger.bucketStart, since)))
+    .groupBy(tokenLedger.nodeId);
+  const tokensOf = new Map(ledgerNodeRows.map((r) => [r.nodeId, Math.round(r.tokens ?? 0)]));
+  const ledgerModelRows = await db
+    .select({ nodeId: tokenLedger.nodeId, model: tokenLedger.model, gen: sql<number>`sum(${tokenLedger.generatedTokens})::float8`, prompt: sql<number>`sum(${tokenLedger.promptTokens})::float8`, cached: sql<number>`sum(${tokenLedger.cachedTokens})::float8` })
+    .from(tokenLedger)
+    .where(and(eq(tokenLedger.granularity, granularity), gte(tokenLedger.bucketStart, since)))
+    .groupBy(tokenLedger.nodeId, tokenLedger.model);
+
+  const NAS = "nas";
+  const row = (key: string, label: string, kind: "node" | "model", nodeIds: string[], tokens: number, costMinor: number | null): EfficiencyRow => {
+    // Fleet rule: efficiency is never computed against idle box watts — the
+    // NAS (no GPU) is excluded from energy; serving nodes carry the join.
+    const servingNodes = nodeIds.filter((id) => kindOf.get(id) !== NAS);
+    const withEnergy = servingNodes.filter((id) => energyOf.has(id));
+    const energyWh = withEnergy.reduce((acc, id) => acc + (energyOf.get(id)!.wh ?? 0), 0);
+    const totalBuckets = withEnergy.reduce((acc, id) => acc + (energyOf.get(id)!.buckets ?? 0), 0);
+    const readBuckets = withEnergy.reduce((acc, id) => acc + (energyOf.get(id)!.withReading ?? 0), 0);
+    const energyCoverage = totalBuckets > 0 ? Math.round((readBuckets / totalBuckets) * 100) / 100 : null;
+    const hasTokens = tokens > 0;
+    let whPerKToken: number | null = null;
+    let reason: string | null = null;
+    if (servingNodes.length === 0) reason = "no serving nodes in this group (NAS excluded)";
+    else if (energyCoverage === null || energyCoverage === 0) reason = "no power readings in range";
+    else if (energyCoverage < 0.5) reason = `partial power coverage (${Math.round(energyCoverage * 100)}% of buckets)`;
+    else if (!hasTokens) reason = "no token counters in range";
+    else whPerKToken = Math.round((energyWh / (tokens / 1000)) * 100) / 100;
+    return {
+      key,
+      label,
+      kind,
+      energyWh: withEnergy.length === 0 ? null : Math.round(energyWh * 100) / 100,
+      tokens,
+      whPerKToken,
+      costPerMToken: costMinor === null ? null : Math.round((costMinor / 100 / (tokens / 1_000_000)) * 100) / 100,
+      energyCoverage,
+      hasTokens,
+      reason,
+    };
+  };
+
+  const rows: EfficiencyRow[] = [];
+  if (opts.groupBy === "node") {
+    for (const n of nodeRows) {
+      if (kindOf.get(n.id) === NAS) continue;
+      const tokens = tokensOf.get(n.id) ?? 0;
+      rows.push(row(n.id, nameOf.get(n.id) ?? n.id, "node", [n.id], tokens, null));
+    }
+  } else {
+    for (const m of ledgerModelRows) {
+      if (kindOf.get(m.nodeId) === NAS) continue;
+      const total = Math.round((m.gen ?? 0) + (m.prompt ?? 0));
+      const cached = Math.round(m.cached ?? 0);
+      const price = opts.pricing?.resolve(m.model) ?? null;
+      const costMinor = price === null ? null : tokenCostMinor({ promptTokens: m.prompt ?? 0, cachedTokens: cached, completionTokens: m.gen ?? 0 }, price);
+      rows.push(row(`${m.nodeId}:${m.model}`, `${nameOf.get(m.nodeId) ?? m.nodeId} · ${m.model}`, "model", [m.nodeId], total, costMinor));
+    }
+  }
+  return { range: opts.range, groupBy: opts.groupBy, rows: rows.sort((a, b) => (a.whPerKToken ?? Infinity) - (b.whPerKToken ?? Infinity)) };
 }
 
 function toWorkerIds(raw: unknown): string[] {
