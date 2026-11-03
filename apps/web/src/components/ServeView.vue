@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
+import { fetchCleanup, fetchNodes, fetchNodeLlm, fetchRecipeDraft, type LlmSnapshot } from "../api";
 import { auditDomainHash } from "../audit-data";
 import { logsSetupHash } from "../logs-data";
 import { vScrimClose } from "../scrim";
@@ -139,11 +139,35 @@ function probeNodeIds(): string[] {
   return [...ids];
 }
 
+const props = defineProps<{ route?: { recipeJob?: string | null } }>();
+
 onMounted(async () => {
   try {
     nodes.value = await fetchNodes();
   } catch {
     /* registry unavailable — cards still render */
+  }
+  // IRI-082: "#/serve?recipeJob=<id>" deep-links a settled recipe install —
+  // fetch the draft and open the wizard pre-filled (operator confirms).
+  if (props.route?.recipeJob) {
+    void fetchRecipeDraft(props.route.recipeJob)
+      .then((draft) => {
+        openWizard();
+        const w = wizard.value;
+        w.name = draft.name;
+        w.kind = draft.kind;
+        w.headNodeId = draft.headNodeId;
+        w.workerIds = draft.workerNodeIds;
+        w.model = draft.name;
+        w.recipeFolder = "/opt/irori/recipes";
+        w.startName = "start.sh";
+        w.stopName = "stop.sh";
+        w.envModelName = true;
+        w.envPort = true;
+        wizardPort.value = draft.port;
+        draftNotice.value = `Recipe draft ${draft.name} staged — confirm the node/worker choice, then create (nothing auto-starts).`;
+      })
+      .catch(() => {});
   }
   await load();
   await refreshLlm(probeNodeIds());
@@ -739,6 +763,8 @@ async function ensureFreshCreated(): Promise<SetupInfo> {
 
 /** Serving port — the script owns it; Irori needs it for probes and env. */
 const wizardPort = ref(8080);
+/** IRI-082: staged-recipe draft notice shown in the wizard. */
+const draftNotice = ref<string | null>(null);
 
 /**
  * IR-155: one head port hosts exactly one engine, so a second LIVE setup on the
@@ -1225,6 +1251,7 @@ function fmtGiB(bytes: number | null): string {
 
         <!-- IR-152: the error sits above the footer, next to the fields it
              refers to (it used to render below the sticky footer, far away). -->
+        <p v-if="draftNotice" class="banner banner--ok" style="margin: 0 16px 10px">{{ draftNotice }}</p>
         <p v-if="wizardError" class="banner banner--warn" style="margin: 0 16px 10px">{{ wizardError }}</p>
 
         <div class="card__head row--between wizard__foot" style="display: flex; border-top: 1px solid var(--border); border-bottom: 0">

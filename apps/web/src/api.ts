@@ -247,6 +247,68 @@ export async function fetchUpdates(): Promise<UpdatesResponse> {
   return (await res.json()) as UpdatesResponse;
 }
 
+/** IRI-082: curated recipe catalog + install drafts. */
+export interface RecipeRow {
+  id: string;
+  slug: string;
+  name: string;
+  author: string;
+  kind: string;
+  engine: string;
+  summary: string;
+  upstreamUrl: string;
+  commitSha: string;
+  license: string;
+  copyleft: boolean;
+  defaultPort: number;
+  modelRepo: string | null;
+  envKeys: Array<{ name: string; type: string; default?: string }>;
+  nodeCountMin: number;
+  nodeCountMax: number;
+  scriptStart: string;
+  scriptStop: string;
+  provenance: Record<string, unknown> | null;
+  startupTimeoutMs: number;
+  measured: Array<{ label: string; value: string; source: string }>;
+  catalogVersion: number;
+  behindCommits: number | null;
+  engineReleasesBehind: number | null;
+}
+
+export async function fetchRecipes(): Promise<{ recipes: RecipeRow[]; seedVersion: number }> {
+  const res = await fetch("/api/v1/recipes", { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`GET /api/v1/recipes failed: HTTP ${res.status}`);
+  return (await res.json()) as { recipes: RecipeRow[]; seedVersion: number };
+}
+
+export async function installRecipe(id: string, headNodeId: string): Promise<string> {
+  const res = await fetch(`/api/v1/recipes/${id}/install`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ headNodeId }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => null) as { error?: string } | null)?.error ?? `POST install failed: HTTP ${res.status}`);
+  return ((await res.json()) as { jobId: string }).jobId;
+}
+
+export interface RecipeDraft {
+  name: string;
+  port: number;
+  kind: "single" | "cluster";
+  headNodeId: string;
+  workerNodeIds: string[];
+  startupTimeoutMs: number;
+  scriptStart: string;
+  scriptStop: string;
+  recipeId: string;
+}
+
+export async function fetchRecipeDraft(jobId: string): Promise<RecipeDraft> {
+  const res = await fetch(`/api/v1/recipes/drafts/${jobId}`, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`GET draft failed: HTTP ${res.status}`);
+  return (await res.json()) as RecipeDraft;
+}
+
 /** IRI-080: per-node version provenance + drift. */
 export async function fetchNodeVersions(id: string, signal?: AbortSignal): Promise<NodeVersionsResponse> {
   const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/versions`, { headers: { accept: "application/json" }, signal });

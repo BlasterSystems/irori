@@ -127,6 +127,12 @@ export const recipeInstallResponseSchema = z.object({
   /** Checksum of each staged file, so the operator can verify what ran. */
   staged: z.object({ startSha256: z.string(), stopSha256: z.string() }),
 });
+
+/** POST /recipes/:id/install body: where to stage the draft. */
+export const recipeInstallRequestSchema = z.object({
+  headNodeId: z.string().uuid(),
+  port: z.number().int().positive().max(65535).nullable().optional(),
+});
 export type RecipeInstallResponse = z.infer<typeof recipeInstallResponseSchema>;
 
 /**

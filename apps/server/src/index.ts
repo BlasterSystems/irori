@@ -20,6 +20,7 @@ import { createCostService, type CostService } from "./cost.js";
 import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
 import { createHealthService, type HealthService } from "./health.js";
 import { getUpdateBaseline, BASELINE_TTL_MS, type UpdateBaseline } from "./updates-baseline.js";
+import { createRecipesService, seedRecipes, type RecipeService } from "./recipes.js";
 import { CADENCE_MAX_MS, CADENCE_MIN_MS, type Currency, type HardwareSnapshot } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
@@ -107,6 +108,7 @@ const state: {
   modelctlPin: ModelctlPinService | null;
   health: HealthService | null;
   baseline: (() => Promise<UpdateBaseline | null>) | null;
+  recipes: RecipeService | null;
   /** IRI-077: durable audit log + restart-surviving event journal. */
   audit: AuditService | null;
   eventJournal: EventJournalService | null;
@@ -122,6 +124,7 @@ const state: {
   modelctlPin: null,
   health: null,
   baseline: null,
+  recipes: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -177,6 +180,7 @@ const app = createApp({
   getHub: () => state.hub,
   getHealth: () => state.health,
   getBaseline: async () => (state.baseline === null ? null : state.baseline().catch(() => null)),
+  getRecipes: () => state.recipes,
   getNodesSnapshot: async () => {
     const rows = await state.store?.list() ?? [];
     const online = state.hub?.online() ?? new Set<string>();
@@ -367,6 +371,17 @@ async function boot(): Promise<void> {
     jobs: jobsService,
     log: (message) => log.info(message),
   });
+
+  // IRI-082: curated recipe catalog — seeds upsert on boot; installs stage
+  // scripts on-node (sha256-verified) and settle into a wizard draft.
+  const recipesService = createRecipesService(dbHandle.db, {
+    createJob: async (nodeId, kind, params) => {
+      const job = await jobsService.create(nodeId, kind as never, params as never);
+      return { id: job.id };
+    },
+  });
+  void seedRecipes(dbHandle.db).catch((err) => log.warn(`recipe seed: ${String(err)}`));
+  state.recipes = recipesService;
 
   // IRI-028: at most one job-output SSE frame per second per job. The full
   // ring stays in job_output; this keeps the Activity drawer live without
