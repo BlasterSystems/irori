@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { gunzipSync } from "node:zlib";
-import { chatDetailSchema, chatsResponseSchema, usageRangeMs, type ChatDetail, type ChatsResponse, type UsageFilters, type UsageRange } from "@irori/core";
+import { chatDetailSchema, chatsResponseSchema, tokenCostMinor, usageRangeMs, type ChatDetail, type ChatsResponse, type Currency, type UsageFilters, type UsageRange } from "@irori/core";
 import type { Db } from "@irori/db";
 
 /**
@@ -32,6 +32,8 @@ interface RequestRow {
   clientProject: string | null;
   clientAgentType: string | null;
   promptTokens: number | null;
+  completionTokens: number | null;
+  cachedTokens: number | null;
   totalTokens: number | null;
   /** True when any stored part was truncated at capture. */
   truncated: boolean;
@@ -48,6 +50,8 @@ interface Session {
   messages: number;
   promptTokens: number | null;
   totalTokens: number;
+  /** IRI-076: read-time priced cost of the session's requests (minor units). */
+  costMinor: number;
   models: Set<string>;
   clientName: string | null;
   clientProject: string | null;
@@ -79,7 +83,7 @@ async function loadRequestRows(db: Db, range: UsageRange, nodeId: string | undef
   const rows = await db.execute(sql`
     select r.id, r.received_at, r.ts, r.model, r.endpoint, r.source_addr,
            r.client_key_hash, r.client_name, r.client_project, r.client_agent_type,
-           r.prompt_tokens, r.total_tokens, bool_or(sp.truncated) as truncated,
+           r.prompt_tokens, r.completion_tokens, r.cached_tokens, r.total_tokens, bool_or(sp.truncated) as truncated,
            array_remove(array_agg(sp.hash order by sp.ordinal), null) as seq
     from llm_requests r
     join llm_request_parts sp on sp.request_id = r.id and sp.kind = 'message'
@@ -101,13 +105,15 @@ async function loadRequestRows(db: Db, range: UsageRange, nodeId: string | undef
     clientProject: str(r.client_project),
     clientAgentType: r.client_agent_type === "main" || r.client_agent_type === "subagent" ? r.client_agent_type : null,
     promptTokens: int(r.prompt_tokens),
+    completionTokens: int(r.completion_tokens),
+    cachedTokens: int(r.cached_tokens),
     totalTokens: int(r.total_tokens),
     truncated: r.truncated === true,
     seq: Array.isArray(r.seq) ? (r.seq as string[]).filter((h): h is string => typeof h === "string") : [],
   }));
 }
 
-function chainSessions(rows: RequestRow[]): Session[] {
+function chainSessions(rows: RequestRow[], costById = new Map<string, number>()): Session[] {
   const sessions: Session[] = [];
   let current: Session | null = null;
   const openNew = (row: RequestRow): Session => {
@@ -120,6 +126,7 @@ function chainSessions(rows: RequestRow[]): Session[] {
       messages: row.seq.length,
       promptTokens: row.promptTokens,
       totalTokens: row.totalTokens ?? 0,
+      costMinor: costById.get(row.id) ?? 0,
       models: new Set(row.model === null ? [] : [row.model]),
       clientName: row.clientName,
       clientProject: row.clientProject,
@@ -151,6 +158,7 @@ function chainSessions(rows: RequestRow[]): Session[] {
       current.messages = row.seq.length;
       current.promptTokens = row.promptTokens;
       current.totalTokens += row.totalTokens ?? 0;
+      current.costMinor += costById.get(row.id) ?? 0;
       if (row.model !== null) current.models.add(row.model);
       if (row.sourceAddr !== null) current.sourceAddrs.add(row.sourceAddr);
       current.truncated = current.truncated || row.truncated;
@@ -180,6 +188,7 @@ function chainSessions(rows: RequestRow[]): Session[] {
       current.messages = row.seq.length;
       current.promptTokens = row.promptTokens;
       current.totalTokens += row.totalTokens ?? 0;
+      current.costMinor += costById.get(row.id) ?? 0;
       if (row.model !== null) current.models.add(row.model);
       if (row.sourceAddr !== null) current.sourceAddrs.add(row.sourceAddr);
       current.truncated = current.truncated || row.truncated;
@@ -212,7 +221,7 @@ export interface UsageChats {
   detail(sessionId: string): Promise<ChatDetail | null>;
 }
 
-export function createUsageChats(db: Db): UsageChats {
+export function createUsageChats(db: Db, opts: { pricing?: () => Promise<{ currency: Currency | null; resolve(model: string): { input: number; cached: number; output: number; currency: Currency } | null } | null> } = {}): UsageChats {
   return {
     async list({ range, nodeId }) {
       const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
@@ -220,7 +229,19 @@ export function createUsageChats(db: Db): UsageChats {
         loadRequestRows(db, range, nodeId, sinceIso),
         countCapturedWithoutBodies(db, sinceIso, nodeId),
       ]);
-      const sessions = chainSessions(rows)
+      // IRI-076: price each request once (read-time), summed per session.
+      const pricing = opts.pricing === undefined ? null : await opts.pricing().catch(() => null);
+      const costById = new Map<string, number>();
+      if (pricing !== null) {
+        for (const row of rows) {
+          const minor = tokenCostMinor(
+            { promptTokens: row.promptTokens ?? 0, cachedTokens: row.cachedTokens ?? 0, completionTokens: row.completionTokens ?? 0 },
+            pricing.resolve(row.model ?? ""),
+          );
+          if (minor !== null) costById.set(row.id, minor);
+        }
+      }
+      const sessions = chainSessions(rows, costById)
         .sort((a, b) => b.lastMs - a.lastMs)
         .slice(0, MAX_SESSIONS)
         .map((s) => ({
@@ -238,8 +259,9 @@ export function createUsageChats(db: Db): UsageChats {
           sourceAddrs: [...s.sourceAddrs],
           compacted: s.compacted,
           truncated: s.truncated,
+          costMinor: s.costMinor,
         }));
-      return chatsResponseSchema.parse({ range, sessions, capturedWithoutBodies });
+      return chatsResponseSchema.parse({ range, sessions, capturedWithoutBodies, costCurrency: pricing?.currency ?? null });
     },
 
     async detail(sessionId) {

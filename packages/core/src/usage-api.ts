@@ -122,11 +122,16 @@ export const usageErrorGroupSchema = z.object({
   sample: z.string(),
   models: z.array(z.string()),
   status: nullableInt,
+  /** IRI-076: cost of the failed requests in this signature (read-time priced). */
+  costMinor: z.number().int().nonnegative().default(0),
 });
 
 export const usageErrorsResponseSchema = z.object({
   range: usageRangeSchema,
   groups: z.array(usageErrorGroupSchema),
+  /** IRI-076: total cost of failed requests in range + pricing currency. */
+  errorsCostMinor: z.number().int().nonnegative().default(0),
+  costCurrency: currencySchema.nullable().default(null),
 });
 
 export type UsageErrorsResponse = z.infer<typeof usageErrorsResponseSchema>;
@@ -257,6 +262,8 @@ export const chatSessionSchema = z.object({
   sourceAddrs: z.array(z.string()),
   compacted: z.boolean(),
   truncated: z.boolean(),
+  /** IRI-076: read-time priced cost of the session's requests (minor units). */
+  costMinor: z.number().int().nonnegative().default(0),
 });
 export type ChatSession = z.infer<typeof chatSessionSchema>;
 
@@ -265,6 +272,8 @@ export const chatsResponseSchema = z.object({
   sessions: z.array(chatSessionSchema),
   /** Requests captured WITHOUT stored bodies in range — hints retention off. */
   capturedWithoutBodies: z.number().int(),
+  /** IRI-076: pricing currency; null = unset (UI shows the CTA). */
+  costCurrency: currencySchema.nullable().default(null),
 });
 export type ChatsResponse = z.infer<typeof chatsResponseSchema>;
 
