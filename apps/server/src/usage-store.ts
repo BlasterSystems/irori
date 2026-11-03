@@ -967,10 +967,12 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
       }
       modelList.sort((a, b) => b.totalTokens - a.totalTokens);
 
+      const snap = opts.pricing === undefined ? null : await opts.pricing().catch(() => null);
       return {
         range,
         models: modelList,
         series: [...byModel.entries()].map(([model, points]) => ({ model, points })),
+        costCurrency: snap?.currency ?? null,
       };
     },
 
