@@ -229,6 +229,24 @@ export interface NodeVersionsResponse {
   updatedAt: string | null;
 }
 
+/** IRI-081: fleet update posture vs the upstream baseline (informational). */
+export interface UpdatesResponse {
+  baseline: { dgxOs: string | null; driver: string | null; kernel: string | null; uefi: string | null; ec: string | null; soc: string | null; source: string; fetchedAtMs: number | null } | null;
+  nodes: Array<{
+    nodeId: string;
+    name: string;
+    online: boolean;
+    posture: string;
+    updates: { osPrettyName: string | null; kernelVersion: string | null; dgxOsVersion: string | null; nvidiaDriverVersion: string | null; firmwareUpdates: Array<{ device: string; toVersion: string }>; otaPackages: Array<{ name: string; version: string }>; pendingReboot: boolean; unattendedUpgradesLastResult: string | null; upgradableCount: number | null; aptPresent: boolean } | null;
+  }>;
+}
+
+export async function fetchUpdates(): Promise<UpdatesResponse> {
+  const res = await fetch("/api/v1/updates", { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`GET /api/v1/updates failed: HTTP ${res.status}`);
+  return (await res.json()) as UpdatesResponse;
+}
+
 /** IRI-080: per-node version provenance + drift. */
 export async function fetchNodeVersions(id: string, signal?: AbortSignal): Promise<NodeVersionsResponse> {
   const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/versions`, { headers: { accept: "application/json" }, signal });
