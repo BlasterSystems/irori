@@ -8,7 +8,7 @@ import NodeCard from "./NodeCard.vue";
 import NodeModal from "./NodeModal.vue";
 import Tip from "./Tip.vue";
 import LensChartVue from "./LensChart.vue";
-import { fetchAnalytics, fetchLlmHistory, type LlmHistoryPoint } from "../api";
+import { fetchAnalytics, fetchLlmHistory, fetchUpdates, type LlmHistoryPoint, type UpdatesResponse } from "../api";
 import { downloadBytesLine, downloadEntryEta, downloadProgressPct, downloadSpeedView, fetchDownloadQueue, fetchModelsPage, formatEta, type DownloadQueueEntry } from "../models";
 import { fetchSetups } from "../serve";
 import { fmtTokens } from "../usage";
@@ -299,11 +299,24 @@ const addOpen = ref(false);
 let processTimer: ReturnType<typeof setInterval> | null = null;
 let cardsTimer: ReturnType<typeof setInterval> | null = null;
 let downloadTimer: ReturnType<typeof setInterval> | null = null;
+/** IRI-081: fleet update posture vs upstream baseline (informational). */
+const updateRows = ref<UpdatesResponse["nodes"]>([]);
+const updateBaseline = ref<UpdatesResponse["baseline"]>(null);
+const updatePostureChip = (p: string): string => (p === "up to date" ? "chip chip--ok" : p === "behind" || p === "pending reboot" ? "chip chip--warn" : "chip");
+const refreshUpdates = (): void => {
+  void fetchUpdates()
+    .then((r) => {
+      updateRows.value = r.nodes;
+      updateBaseline.value = r.baseline;
+    })
+    .catch(() => {});
+};
 onMounted(() => {
   void refreshCards();
   void refreshSetups().then(() => void refreshCharts());
   void refreshCharts();
   void refreshDownloads();
+  refreshUpdates();
   processTimer = setInterval(() => void refreshSetups(), 5_000);
   downloadTimer = setInterval(() => void refreshDownloads(), 10_000);
   cardsTimer = setInterval(() => {
@@ -598,6 +611,28 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
       </div>
     </article>
+  </section>
+
+  <!-- IRI-081: fleet update posture vs upstream baseline (informational only) -->
+  <section class="card section-gap">
+    <div class="card__head">
+      <h3>Updates</h3>
+      <span class="chip">baseline {{ updateBaseline === null ? "unknown" : updateBaseline.source === "live" ? "fresh" : "cached" }}</span>
+    </div>
+    <div class="card__body card__body--flush">
+      <table class="table">
+        <thead><tr><th>Node</th><th>Posture</th><th>DGX OS / driver</th><th>Reboot</th></tr></thead>
+        <tbody>
+          <tr v-for="u in updateRows" :key="u.nodeId">
+            <td><span class="dot" :class="u.online ? 'dot--ok' : 'dot--dim'" /> {{ u.name }}</td>
+            <td><span class="chip" :class="updatePostureChip(u.posture)">{{ u.posture }}</span></td>
+            <td class="mono">{{ u.updates?.dgxOsVersion ?? "—" }} / {{ u.updates?.nvidiaDriverVersion ?? "—" }}</td>
+            <td>{{ u.updates?.pendingReboot === true ? "yes" : "no" }}</td>
+          </tr>
+          <tr v-if="updateRows.length === 0"><td colspan="4" class="dim">no update reports yet</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <!-- All event classes in one feed (owner decision) -->
