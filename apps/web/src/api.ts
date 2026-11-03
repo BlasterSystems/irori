@@ -247,6 +247,20 @@ export async function fetchUpdates(): Promise<UpdatesResponse> {
   return (await res.json()) as UpdatesResponse;
 }
 
+/** IRI-083: community intelligence view. */
+export interface CommunityViewData {
+  sources: Array<{ source: string; ok: boolean; failures: number; lastFetchedAt: string | null; breakerOpen: boolean }>;
+  topics: Array<{ topic: string; count: number }>;
+  items: Array<{ id: string; source: string; title: string; summary: string | null; canonicalUrl: string; author: string | null; publishedAt: string | null; score: number | null; pinned: boolean; seen: boolean; embedOnly: boolean }>;
+  releases: Array<{ id: string; source: string; title: string; canonicalUrl: string; publishedAt: string | null }>;
+}
+
+export async function fetchCommunity(): Promise<CommunityViewData> {
+  const res = await fetch("/api/v1/community", { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`GET /api/v1/community failed: HTTP ${res.status}`);
+  return (await res.json()) as CommunityViewData;
+}
+
 /** IRI-082: curated recipe catalog + install drafts. */
 export interface RecipeRow {
   id: string;

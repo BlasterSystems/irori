@@ -4,6 +4,7 @@ import { live } from "./live";
 import NodeDetail from "./components/NodeDetail.vue";
 import ModelsView from "./components/ModelsView.vue";
 import ServeView from "./components/ServeView.vue";
+import CommunityView from "./components/CommunityView.vue";
 import BenchmarksView from "./components/BenchmarksView.vue";
 import AnalyticsView from "./components/AnalyticsView.vue";
 import OverviewView from "./components/OverviewView.vue";
@@ -142,6 +143,7 @@ onUnmounted(() => {
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
         <a href="#/audit" :class="{ 'is-active': route.view === 'audit' }" :aria-current="route.view === 'audit' ? 'page' : undefined">Audit</a>
         <a href="#/logs" :class="{ 'is-active': route.view === 'logs' }" :aria-current="route.view === 'logs' ? 'page' : undefined">Logs</a>
+        <a href="#/community" :class="{ 'is-active': route.view === 'community' }" :aria-current="route.view === 'community' ? 'page' : undefined">Community</a>
       </nav>
       <span v-if="!connected" class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span> Offline</span>
       <button class="iconbtn" aria-label="Toggle theme" @click="toggleTheme">
@@ -164,13 +166,15 @@ onUnmounted(() => {
         <a href="#/benchmarks" :class="{ 'is-active': route.view === 'benchmarks' }" :aria-current="route.view === 'benchmarks' ? 'page' : undefined">Benchmarks</a>
         <a href="#/audit" :class="{ 'is-active': route.view === 'audit' }" :aria-current="route.view === 'audit' ? 'page' : undefined">Audit</a>
         <a href="#/logs" :class="{ 'is-active': route.view === 'logs' }" :aria-current="route.view === 'logs' ? 'page' : undefined">Logs</a>
+        <a href="#/community" :class="{ 'is-active': route.view === 'community' }" :aria-current="route.view === 'community' ? 'page' : undefined">Community</a>
       </div>
     </div>
   </header>
 
   <main class="container page">
     <ModelsView v-if="route.view === 'models'" />
-    <ServeView v-else-if="route.view === 'serve'" />
+    <ServeView v-else-if="route.view === 'serve'" :route="route" />
+    <CommunityView v-else-if="route.view === 'community'" />
     <BenchmarksView v-else-if="route.view === 'benchmarks'" />
     <AnalyticsView v-else-if="route.view === 'analytics'" />
     <UsageView v-else-if="route.view === 'usage'" />

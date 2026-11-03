@@ -371,6 +371,18 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   script → the Serve stale-recipe chip). Contract additive: agents without
   the report `versions` block render unknowns.
 
+## Community intelligence (IRI-083)
+
+- `GET /api/v1/community` - top topics (keyword clustering over titles),
+  latest items, engine/recipe release watch, per-source poll health.
+  Conditional-GET (etag) pollers run hub-side on jittered intervals with a
+  shared UA and a circuit breaker (open after 5 consecutive failures; a dead
+  source shows a warn chip and never blocks the panel).
+- `POST /api/v1/community/:id` - owner curation `{hidden?, pinned?, seen?}`.
+- X posture: identity-only rows (post id + author handle + canonical URL +
+  first-seen); bodies hydrate at view time; the allowlist is owner config,
+  never scraped.
+
 ## Curated recipes (IRI-082)
 
 - `GET /api/v1/recipes` - the catalog (SparkRun v2 YAML entries transpiled at
