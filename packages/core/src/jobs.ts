@@ -43,7 +43,28 @@ export const JOB_KINDS = [
   // Agent self-update (IRI-012, ADR-0007) — the agent replaces its own bundle
   // and restarts; settlement is hello-driven, params carry `expectedVersion`.
   "agent-update",
+  // Curated-recipe install (IRI-082) — the hub stages start/stop scripts
+  // (sha256-verified) onto the node; settlement creates the setup draft.
+  "recipe-install",
 ] as const;
+
+export const recipeInstallParamsSchema = z.object({
+  /** Staging dir on the node (under the agent's writable root). */
+  dir: z.string().min(1).max(1024),
+  files: z
+    .array(
+      z.object({
+        rel: z.string().min(1).max(300),
+        content: z.string().max(262_144),
+        sha256: z.string().length(64),
+      }),
+    )
+    .min(1)
+    .max(8),
+  /** Hub-side draft metadata (slug, port, model, name) echoed back at settlement. */
+  meta: z.record(z.string(), z.unknown()).optional(),
+});
+export type RecipeInstallParams = z.infer<typeof recipeInstallParamsSchema>;
 
 export const jobKindSchema = z.enum(JOB_KINDS);
 export type JobKind = (typeof JOB_KINDS)[number];
