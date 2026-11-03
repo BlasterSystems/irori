@@ -16,6 +16,12 @@ export interface Config {
   dayKeepDays: number;
   /** Snapshot cadence handed to agents in hello-ok (CADENCE_MS env, bounded). */
   cadenceMs: number;
+  /**
+   * IRI-077: audit rows kept before the retention pass deletes them.
+   * Long by design — "who changed what, when" is the one table an operator
+   * asks about months later.
+   */
+  auditKeepDays: number;
 }
 
 const DEFAULT_PORT = 3947;
@@ -24,6 +30,7 @@ const DEFAULT_MINUTE_KEEP_DAYS = 7;
 const DEFAULT_HOUR_KEEP_DAYS = 90;
 const DEFAULT_DAY_KEEP_DAYS = 365;
 const DEFAULT_CADENCE_MS = 2000;
+const DEFAULT_AUDIT_KEEP_DAYS = 365;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const databaseUrl = env.DATABASE_URL?.trim() || null;
@@ -42,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     hourKeepDays: parsePositiveInt(env.HOUR_KEEP_DAYS, DEFAULT_HOUR_KEEP_DAYS),
     dayKeepDays: parsePositiveInt(env.DAY_KEEP_DAYS, DEFAULT_DAY_KEEP_DAYS),
     cadenceMs: parseCadenceMs(env.CADENCE_MS),
+    auditKeepDays: parsePositiveInt(env.AUDIT_KEEP_DAYS, DEFAULT_AUDIT_KEEP_DAYS),
   };
 }
 
