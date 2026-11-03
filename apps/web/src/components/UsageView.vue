@@ -267,6 +267,17 @@ const activity = computed(() => {
   return activityCharts(overview.value.series, W, H);
 });
 
+// IRI-074: cost surfaces — every value renders from API cost fields.
+const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
+const costCurrency = computed(() => overview.value?.costCurrency ?? null);
+const costText = (minor: number, currency: string | null): string =>
+  currency === null || CURRENCY_SYMBOLS[currency] === undefined ? "—" : `${CURRENCY_SYMBOLS[currency]}${(minor / 100).toFixed(2)}`;
+const costChart = computed(() => {
+  if (overview.value === null || overview.value.costCurrency === null) return null;
+  return usageChart(overview.value.series.map((p) => ({ t: p.t, value: p.costMinor / 100 })), W, H);
+});
+const modelsCostTotal = computed(() => (models.value?.models ?? []).reduce((acc, m) => acc + (m.costMinor ?? 0), 0));
+
 const tokenMixRows = computed(() => (overview.value === null ? [] : tokenMix(overview.value.tokenMix)));
 
 const modelOptions = computed(() => topModels(models.value?.models ?? [], 6));
@@ -328,10 +339,15 @@ const liveAgeText = computed(() => {
 
     <!-- Overview: KPIs + activity + token mix -->
     <template v-if="tab === 'overview'">
-      <div v-if="kpis !== null" class="statgrid statgrid--6" style="margin-top: var(--space-4)">
+      <div v-if="kpis !== null" class="statgrid statgrid--7" style="margin-top: var(--space-4)">
         <div><span class="stat__label">Requests</span><span class="stat__value">{{ fmtCount(kpis.requests) }}</span></div>
         <div><span class="stat__label">Errors</span><span class="stat__value">{{ fmtCount(kpis.errors) }}<template v-if="errorRate !== null"> · {{ fmtPct(errorRate) }}</template></span></div>
         <div><span class="stat__label">Total tokens</span><span class="stat__value">{{ fmtTokens(kpis.totalTokens) }}</span></div>
+        <div>
+          <span class="stat__label">Cost</span>
+          <span v-if="costCurrency !== null" class="stat__value">{{ costText(overview?.costMinor ?? 0, costCurrency) }}</span>
+          <a v-else class="stat__value stat__value--sm" href="#/settings" title="Set token prices in Hub settings to see costs">Configure pricing</a>
+        </div>
         <div><span class="stat__label">Prompt / cached</span><span class="stat__value stat__value--sm">{{ fmtTokens(kpis.promptTokens) }}<template v-if="cachedShare !== null"> · {{ fmtPct(cachedShare) }}</template></span></div>
         <div><span class="stat__label">TTFT p95</span><span class="stat__value stat__value--sm">{{ fmtDurationMs(kpis.ttftP95Ms) }}</span></div>
         <div><span class="stat__label">Decode tok/s</span><span class="stat__value stat__value--sm">{{ fmtTps(kpis.decodeTps) }}</span></div>
@@ -354,6 +370,13 @@ const liveAgeText = computed(() => {
       <section v-if="activity !== null" class="card" style="margin-top: var(--space-4)">
         <div class="card__head"><h3 style="font-size: 15px">Tokens</h3><span class="mono faint">total per {{ overview?.granularity ?? "hour" }}</span></div>
         <div class="card__body"><LensChart :chart="activity.tokens" unit="tok" aria-label="Tokens per bucket" :format="(v: number) => fmtTokens(v)" :time-format="fmtBucketShort" /></div>
+      </section>
+
+      <!-- IRI-074: range-scoped cost per bucket (errors costed too — a failed
+           300k-token request is real money). Hidden while pricing is unset. -->
+      <section v-if="costChart !== null" class="card" style="margin-top: var(--space-4)">
+        <div class="card__head"><h3 style="font-size: 15px">Cost</h3><span class="mono faint">per {{ overview?.granularity ?? "hour" }} · {{ costCurrency }}</span></div>
+        <div class="card__body"><LensChart :chart="costChart" unit="cost" aria-label="Cost per bucket" :format="(v: number) => costText(Math.round(v * 100), costCurrency)" :time-format="fmtBucketShort" /></div>
       </section>
 
       <section class="card" style="margin-top: var(--space-4)">
@@ -535,7 +558,7 @@ const liveAgeText = computed(() => {
         <div class="card__body card__body--flush">
           <table class="table">
             <thead>
-              <tr><th>Model</th><th>Requests</th><th>Errors</th><th>Total tokens</th><th>TTFT p50</th><th>TTFT p95</th><th>tok/s</th></tr>
+              <tr><th>Model</th><th>Requests</th><th>Errors</th><th>Total tokens</th><th>TTFT p50</th><th>TTFT p95</th><th>tok/s</th><th>Cost</th></tr>
             </thead>
             <tbody>
               <tr v-for="m in models?.models ?? []" :key="m.model">
@@ -546,8 +569,13 @@ const liveAgeText = computed(() => {
                 <td class="mono">{{ fmtDurationMs(m.ttftP50Ms) }}</td>
                 <td class="mono">{{ fmtDurationMs(m.ttftP95Ms) }}</td>
                 <td class="mono">{{ fmtTps(m.decodeTps) }}</td>
+                <!-- IRI-074: cost share of the range; unset pricing collapses all cells to one CTA. -->
+                <td class="mono">
+                  <template v-if="(models?.costCurrency ?? null) !== null">{{ costText(m.costMinor ?? 0, models?.costCurrency ?? null) }}<template v-if="modelsCostTotal > 0"> · {{ fmtPct((m.costMinor ?? 0) / modelsCostTotal) }}</template></template>
+                  <a v-else href="#/settings" title="Set token prices in Hub settings to see costs">Configure pricing</a>
+                </td>
               </tr>
-              <tr v-if="(models?.models.length ?? 0) === 0"><td colspan="7" class="faint">No captured traffic in this range.</td></tr>
+              <tr v-if="(models?.models.length ?? 0) === 0"><td colspan="8" class="faint">No captured traffic in this range.</td></tr>
             </tbody>
           </table>
         </div>

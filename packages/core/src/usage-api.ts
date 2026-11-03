@@ -150,6 +150,8 @@ export const usageModelsResponseSchema = z.object({
   range: usageRangeSchema,
   models: z.array(usageModelRowSchema),
   series: z.array(z.object({ model: z.string(), points: z.array(usageModelSeriesPointSchema) })),
+  /** IRI-074: pricing currency; null = unset (UI shows a Configure pricing CTA). */
+  costCurrency: currencySchema.nullable().default(null),
 });
 
 export type UsageModelsResponse = z.infer<typeof usageModelsResponseSchema>;
