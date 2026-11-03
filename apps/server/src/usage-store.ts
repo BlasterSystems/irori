@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, lt, sql, type SQL } from "drizzle-orm";
 import { llmParts, llmRequestParts, llmRequestTools, llmRequests, rejectedUsage, usageBuckets } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
@@ -822,7 +822,19 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
     async requestTrace(id) {
       const rows = await db.select().from(llmRequests).where(eq(llmRequests.id, id)).limit(1);
       if (rows[0] === undefined) return null;
-      return requestTraceOf(rows[0] as unknown as Record<string, unknown>);
+      const raw = rows[0] as unknown as Record<string, unknown>;
+      const trace = requestTraceOf(raw);
+      // IRI-079 p50 comparison: median duration of the same model's requests
+      // (last 24h, completed or not) — null when the model is unknown.
+      let modelP50Ms: number | null = null;
+      if (raw.model !== null && raw.model !== undefined) {
+        const p50 = await db
+          .select({ v: sql<number | null>`percentile_cont(0.5) within group (order by ${llmRequests.durationMs})::float8` })
+          .from(llmRequests)
+          .where(and(eq(llmRequests.model, String(raw.model)), gt(llmRequests.ts, new Date(Date.now() - 86_400_000))));
+        modelP50Ms = p50[0]?.v ?? null;
+      }
+      return { ...trace, modelP50Ms, error: typeof raw.error === "string" ? raw.error : null };
     },
 
     /**

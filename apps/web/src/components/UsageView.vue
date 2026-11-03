@@ -705,7 +705,11 @@ const liveAgeText = computed(() => {
           <div class="row" style="gap: 8px; align-items: center; margin-bottom: 8px">
             <span class="mono faint">{{ drawerTrace.traceId ?? "no trace id" }}</span>
             <button v-if="drawerTrace.traceId !== null" class="btn btn--ghost btn--sm" @click="copyTraceId">Copy trace id</button>
+            <!-- IRI-079: p50 comparison + audit cross-link -->
+            <span v-if="drawerTrace.modelP50Ms !== null" class="chip" :class="drawerTrace.durationMs > drawerTrace.modelP50Ms * 1.5 ? 'chip--warn' : 'chip--ok'" :title="`median of the same model over the last 24 h`">vs p50 {{ drawerTrace.durationMs > drawerTrace.modelP50Ms ? "+" : "" }}{{ Math.round(((drawerTrace.durationMs - drawerTrace.modelP50Ms) / Math.max(1, drawerTrace.modelP50Ms)) * 100) }}%</span>
+            <a v-if="drawerTrace.traceId !== null" class="btn btn--ghost btn--sm" :href="`#/audit?q=${encodeURIComponent(drawerTrace.traceId)}`" target="_blank" rel="noopener">Audit</a>
           </div>
+          <p v-if="drawerTrace.error !== null" class="banner banner--warn" style="margin: 0 0 8px">failed: {{ drawerTrace.error }}</p>
           <div v-for="s in drawerTrace.spans" :key="s.name" style="margin-bottom: 6px">
             <div class="row row--between" style="font-size: 11px">
               <span class="mono">{{ s.name }}</span>
