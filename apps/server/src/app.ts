@@ -9,8 +9,8 @@ import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./histo
 import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
 import { type InventoryService } from "./inventory-service.js";
-import { analyticsLensSchema, analyticsRangeSchema, usageRangeSchema, type UsageRange } from "@irori/core";
-import { energyCostPutSchema, tokenCostPutSchema, modelctlPinPutSchema, type EnergyCost, type TokenCost, type ModelctlPinResponse } from "@irori/core";
+import { analyticsLensSchema, analyticsRangeSchema, usageCostGroupBySchema, usageRangeSchema, type UsageRange } from "@irori/core";
+import { energyCostPutSchema, tokenCostPutSchema, modelPricePutSchema, modelctlPinPutSchema, type EnergyCost, type TokenCost, type ModelctlPinResponse, type ModelPricesResponse } from "@irori/core";
 import type { CostService } from "./cost.js";
 import type { ModelctlPinService } from "./modelctl-pin.js";
 import type { UsageStore } from "./usage-store.js";
@@ -404,8 +404,45 @@ export function createApp(deps: AppDeps): Express {
     const body = tokenCostPutSchema.safeParse(req.body);
     if (!body.success) return sendZodError(res, body.error);
     await cost.setToken(body.data);
+    // IRI-072: prices changed — drop the stamps, the backfill re-prices.
+    await cost.resetCostStamps();
     res.json({ tokenCost: body.data } satisfies { tokenCost: TokenCost });
   });
+
+  // ---- IRI-072: per-model price overrides ----
+  app.get("/api/v1/settings/model-prices", async (_req, res) => {
+    const cost = deps.getCost?.() ?? null;
+    if (cost === null) return res.status(503).json({ error: "database unavailable" });
+    res.json({ prices: await cost.listModelPrices() } satisfies ModelPricesResponse);
+  });
+
+  app.put(
+    "/api/v1/settings/model-prices",
+    audit({ action: "settings.model-price.put", targetType: "settings", targetId: () => "model-prices" }, getAudit),
+    async (req, res) => {
+      const cost = deps.getCost?.() ?? null;
+      if (cost === null) return res.status(503).json({ error: "database unavailable" });
+      const body = modelPricePutSchema.safeParse(req.body);
+      if (!body.success) return sendZodError(res, body.error);
+      await cost.setModelPrice(body.data);
+      await cost.resetCostStamps();
+      res.json({ prices: await cost.listModelPrices() } satisfies ModelPricesResponse);
+    },
+  );
+
+  app.delete(
+    "/api/v1/settings/model-prices/:pattern",
+    audit({ action: "settings.model-price.delete", targetType: "settings", targetId: (req) => (typeof req.params.pattern === "string" ? req.params.pattern : null) }, getAudit),
+    async (req, res) => {
+      const cost = deps.getCost?.() ?? null;
+      if (cost === null) return res.status(503).json({ error: "database unavailable" });
+      const pattern = req.params.pattern;
+      if (typeof pattern !== "string" || pattern.length === 0 || pattern.length > 200) return res.status(400).json({ error: "invalid pattern" });
+      await cost.deleteModelPrice(pattern);
+      await cost.resetCostStamps();
+      res.json({ prices: await cost.listModelPrices() } satisfies ModelPricesResponse);
+    },
+  );
 
   // ---- IRI-077: durable audit log + event journal reads ----
   app.get("/api/v1/audit", async (req, res) => {
@@ -711,6 +748,17 @@ export function createApp(deps: AppDeps): Express {
     const filters = usageFilters(req);
     if (filters === null) return res.status(400).json({ error: "unknown range" });
     res.json(await usage.overview(filters));
+  });
+
+  // IRI-072: per-group cost rows (model|client|setup|day|node).
+  app.get("/api/v1/usage/cost", async (req, res) => {
+    const usage = requireUsage(res);
+    if (usage === null) return;
+    const filters = usageFilters(req);
+    if (filters === null) return res.status(400).json({ error: "unknown range" });
+    const groupBy = usageCostGroupBySchema.safeParse(req.query.groupBy);
+    if (!groupBy.success) return res.status(400).json({ error: "unknown groupBy" });
+    res.json(await usage.cost({ range: filters.range, nodeId: filters.nodeId, groupBy: groupBy.data }));
   });
 
   app.get("/api/v1/usage/requests", async (req, res) => {

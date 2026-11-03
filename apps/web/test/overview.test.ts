@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { tierFromWidth } from "../src/tiers";
+import { tokenCostMinor } from "@irori/core";
 import type { AnalyticsPoint, AnalyticsSeries, HardwareSnapshot, LlmPortSnapshot, SseEvent } from "@irori/core";
 import type { LlmHistoryPoint } from "../src/api";
 import {
@@ -19,7 +20,6 @@ import {
   pickPrimaryPort,
   powerBarSlot,
   relativeTime,
-  tokenCostOf,
   tokenTotals,
 } from "../src/overview";
 
@@ -483,11 +483,12 @@ describe("overview range filter + fleet aggregation (IRI-025)", () => {
     expect(powerBarSlot(bar(dayBase, dayBase + 3 * 86_400_000), "day")).toBe("Nov 3 – Nov 5");
   });
 
-  it("totals tokens over spark nodes only and prices billable input minus cached", () => {
+  it("totals tokens over spark nodes only", () => {
     const tokens: AnalyticsSeries = { key: "a", label: "DGX-1", points: [point(0, { prompt: 1_000_000, cached: 200_000, generated: 100_000 })] };
     const totals = tokenTotals([tokens, nas], sparkIds);
     expect(totals).toEqual({ input: 1_000_000, cached: 200_000, generated: 100_000 });
-    // (1M − 200k) × 0.15 + 200k × 0.015 + 100k × 0.6 = 0.12 + 0.003 + 0.06
-    expect(tokenCostOf(totals, { input: 0.15, cached: 0.015, output: 0.6 })).toBeCloseTo(0.183, 6);
+    // IRI-072: pricing math moved server-side (core tokenCostMinor) — the web
+    // formats only. Same semantics asserted there.
+    expect(tokenCostMinor({ promptTokens: totals.input, cachedTokens: totals.cached, completionTokens: totals.generated }, { input: 0.15, cached: 0.015, output: 0.6, currency: "EUR" })).toBe(18);
   });
 });

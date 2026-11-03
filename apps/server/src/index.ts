@@ -18,7 +18,7 @@ import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
 import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
-import { CADENCE_MAX_MS, CADENCE_MIN_MS } from "@irori/core";
+import { CADENCE_MAX_MS, CADENCE_MIN_MS, type Currency } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
@@ -227,7 +227,17 @@ async function boot(): Promise<void> {
 
   // M8 (ADR-0008): durable usage ingest + read models. The SSE fan-out and
   // ack ride the hub frame chain; inserts are deduplicated by client UUID.
-  const usageStore = createUsageStore(dbHandle.db);
+  // IRI-072: the cost engine prices buckets at rollup time (CostService
+  // snapshot) and the usage store prices raw folds/groups per read. The
+  // closure is safe before state.cost exists — it reads it at call time.
+  const pricing = async (): Promise<{ currency: Currency | null; resolve(model: string): { input: number; cached: number; output: number; currency: Currency } | null } | null> => {
+    try {
+      return (await state.cost?.snapshot()) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const usageStore = createUsageStore(dbHandle.db, { pricing });
   state.usage = usageStore;
   // IR-55: client-identity registry (issued keys resolve at ingest).
   state.usageClients = createUsageClients(dbHandle.db);
@@ -284,10 +294,10 @@ async function boot(): Promise<void> {
   );
 
   // M7: analytics + token ledger + energy archive + hygiene reads.
-  state.analytics = createAnalyticsService(dbHandle.db);
+  state.analytics = createAnalyticsService(dbHandle.db, { pricing });
 
   // M7: analytics + hygiene reads (token ledger + energy engines below).
-  state.analytics = createAnalyticsService(dbHandle.db);
+  state.analytics = createAnalyticsService(dbHandle.db, { pricing });
   const cleanup = createCleanupService(dbHandle.db);
   state.cleanup = cleanup;
   // IRI-028: per-node model inventory cache (written by jobs-service on a
@@ -409,7 +419,7 @@ async function boot(): Promise<void> {
   // pipelines share the schedule but advance their watermarks separately.
   const engine = createRollupEngine(dbHandle.db);
   const llmEngine = createLlmRollupEngine(dbHandle.db);
-  const usageEngine = createUsageRollupEngine(dbHandle.db);
+  const usageEngine = createUsageRollupEngine(dbHandle.db, pricing);
   for (const [name, rollupEngine] of [
     ["rollup", engine],
     ["llm rollup", llmEngine],

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { usagePartMetaSchema, usageRequestSchema } from "./usage.js";
+import { currencySchema } from "./currency.js";
 
 /**
  * Usage API contracts (M8): server → browser response shapes for the four
@@ -46,7 +47,6 @@ export type UsageRequestRow = z.infer<typeof usageRequestRowSchema>;
 
 /** One bucket point of the activity/token series (model folded). */
 export const usageSeriesPointSchema = z.object({
-  /** ISO bucket start. */
   t: z.string(),
   requests: z.number().int(),
   errors: z.number().int(),
@@ -58,6 +58,9 @@ export const usageSeriesPointSchema = z.object({
   ttftP50Ms: nullableNumber,
   ttftP95Ms: nullableNumber,
   decodeTps: nullableNumber,
+  /** IRI-072: bucket cost in minor units; 0 when unpriced (kpis.costCurrency
+   *  null tells the two apart). Absent on pre-IRI-072 hubs. */
+  costMinor: z.number().int().nonnegative().default(0),
 });
 
 export const usageTokenMixRowSchema = z.object({
@@ -69,6 +72,7 @@ export const usageTokenMixRowSchema = z.object({
   cachedTokens: z.number(),
   reasoningTokens: z.number(),
   totalTokens: z.number(),
+  costMinor: z.number().int().nonnegative().default(0),
 });
 
 export const usageOverviewResponseSchema = z.object({
@@ -91,6 +95,10 @@ export const usageOverviewResponseSchema = z.object({
   /** IRI-070: quarantined (schema-rejected) captures in range — a warn chip,
    *  never silent loss. Absent on pre-IRI-070 hubs (old web defaults 0). */
   rejected: z.number().int().nonnegative().default(0),
+  /** IRI-072: fleet cost over the window (minor units of `costCurrency`);
+   *  `costCurrency` null = no pricing configured (cost 0 means unpriced). */
+  costMinor: z.number().int().nonnegative().default(0),
+  costCurrency: currencySchema.nullable().default(null),
 });
 
 export type UsageOverviewResponse = z.infer<typeof usageOverviewResponseSchema>;
@@ -127,6 +135,8 @@ export const usageModelRowSchema = z.object({
   ttftP50Ms: nullableNumber,
   ttftP95Ms: nullableNumber,
   decodeTps: nullableNumber,
+  /** IRI-072: bucket-cost sum (minor units of `costCurrency` on the response). */
+  costMinor: z.number().int().nonnegative().default(0),
 });
 
 export const usageModelSeriesPointSchema = z.object({
@@ -158,6 +168,8 @@ export const usageAgentGroupSchema = z.object({
   promptTokens: z.number(),
   completionTokens: z.number(),
   totalTokens: z.number(),
+  /** IRI-072: priced via the per-group (group × model) token sums. */
+  costMinor: z.number().int().nonnegative().default(0),
   lastSeenMs: z.number(),
 });
 
@@ -183,6 +195,8 @@ export const usageToolRowSchema = z.object({
   /** Attributed shares (largest-remainder of the owning requests' totals). */
   promptTokens: z.number().int(),
   completionTokens: z.number().int(),
+  /** IRI-072: priced from the row's own model at read time. */
+  costMinor: z.number().int().nonnegative().default(0),
   lastSeenMs: z.number(),
 });
 export type UsageToolRow = z.infer<typeof usageToolRowSchema>;
