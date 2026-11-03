@@ -19,6 +19,7 @@ import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
 import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
 import { createHealthService, type HealthService } from "./health.js";
+import { getUpdateBaseline, BASELINE_TTL_MS, type UpdateBaseline } from "./updates-baseline.js";
 import { CADENCE_MAX_MS, CADENCE_MIN_MS, type Currency, type HardwareSnapshot } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
@@ -105,6 +106,7 @@ const state: {
   llmHistory: LlmHistoryBuilder | null;
   modelctlPin: ModelctlPinService | null;
   health: HealthService | null;
+  baseline: (() => Promise<UpdateBaseline | null>) | null;
   /** IRI-077: durable audit log + restart-surviving event journal. */
   audit: AuditService | null;
   eventJournal: EventJournalService | null;
@@ -119,6 +121,7 @@ const state: {
   cost: null,
   modelctlPin: null,
   health: null,
+  baseline: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -173,6 +176,7 @@ const app = createApp({
   sse,
   getHub: () => state.hub,
   getHealth: () => state.health,
+  getBaseline: async () => (state.baseline === null ? null : state.baseline().catch(() => null)),
   getNodesSnapshot: async () => {
     const rows = await state.store?.list() ?? [];
     const online = state.hub?.online() ?? new Set<string>();
@@ -256,7 +260,7 @@ async function boot(): Promise<void> {
   // IR-55: client-identity registry (issued keys resolve at ingest).
   state.usageClients = createUsageClients(dbHandle.db);
   // IR-53: session chaining + reconstruction over stored bodies.
-  state.usageChats = createUsageChats(dbHandle.db);
+  state.usageChats = createUsageChats(dbHandle.db, { pricing });
   // IRI-019: global HF token (settings row), pushed to agents via config-update.
   state.hfToken = createHfTokenService(dbHandle.db);
   // IR-87: hub cadence (settings row) — the stored value becomes the active
@@ -287,6 +291,13 @@ async function boot(): Promise<void> {
     },
   };
   state.store = wrappedStore;
+  // IRI-081: upstream baseline — cached in settings, refreshed at most daily,
+  // degrading to last-known-good on scrape failure.
+  const baselineGetter = () => (dbHandle === null ? Promise.resolve(null) : getUpdateBaseline(dbHandle.db, fetch));
+  state.baseline = baselineGetter;
+  setInterval(() => {
+    void baselineGetter().catch(() => {});
+  }, BASELINE_TTL_MS);
   setInterval(() => {
     void (async () => {
       const nodes = await store.list();

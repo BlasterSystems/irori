@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { InventoryLeftover, InventoryLocalCache, InventoryModel, InventoryOrphanState, NodeInventory, OrphanState } from "@irori/core";
 import { dirBytes, readStore } from "./catalog-read.js";
+import { collectUpdateState } from "./updates.js";
 import { runuserWrap } from "./cache-user.js";
 
 /**
@@ -45,6 +46,8 @@ export interface InventoryCtx {
   agentUser: string;
   /** IRI-080: setup script paths to stat for the stale-recipe chip. */
   scriptPaths?: string[];
+  /** IRI-081: pre-captured tool outputs for tests (else the tools run). */
+  updateProbes?: { fwupdmgrOut?: string; aptGetSimOut?: string };
   /** Test seams. */
   passwdPath?: string;
   users?: PasswdUser[];
@@ -423,9 +426,16 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
     const line = s.trim().split("\n")[0]?.trim() ?? "";
     return line.length > 0 && line.length <= 200 ? line : null;
   };
-  const nodeRuntime = firstLine((await execBin(process.execPath, ["--version"], { timeout: 5000 })).stdout) ?? `node ${process.version}`;
-  const uvOut = await execBin("uv", ["--version"], { timeout: 5000 });
-  const uv = firstLine(uvOut.stdout) ?? (uvOut.stderr.includes("No such file") ? null : firstLine(uvOut.stderr));
+  const runSafe = async (file: string, args: string[]): Promise<string | null> => {
+    try {
+      const r = await execBin(file, args, { timeout: 5000 });
+      return firstLine(r.stdout);
+    } catch {
+      return null; // injected fakes may throw — versions are best-effort
+    }
+  };
+  const nodeRuntime = (await runSafe(process.execPath, ["--version"])) ?? `node ${process.version}`;
+  const uv = await runSafe("uv", ["--version"]);
   let catalog: { schema: number; generatedAt: string | null } | null = null;
   if (ctx.nasRoot !== null) {
     try {
@@ -451,5 +461,6 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
     store,
     local: await discoverLocalCaches(ctx),
     versions: { nodeRuntime, uv, catalog, scripts },
+    updates: await collectUpdateState(ctx.updateProbes),
   };
 }

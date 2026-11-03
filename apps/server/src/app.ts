@@ -16,6 +16,7 @@ import { energyCostPutSchema, tokenCostPutSchema, modelPricePutSchema, modelctlP
 import type { CostService } from "./cost.js";
 import type { HealthService } from "./health.js";
 import { renderPrometheus } from "./metrics.js";
+import type { UpdateBaseline } from "./updates-baseline.js";
 import type { ModelctlPinService } from "./modelctl-pin.js";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
@@ -208,6 +209,8 @@ export interface AppDeps {
   getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig" | "clocks" | "setClocks" | "shutdownNode"> | null;
   getHealth?: () => HealthService | null;
   getNodesSnapshot?: () => Promise<Array<{ id: string; name: string; online: boolean; snapshot: HardwareSnapshot | null }>>;
+  /** IRI-081: cached/release-notes baseline (created in index.ts with the db). */
+  getBaseline?: () => Promise<UpdateBaseline | null>;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -984,6 +987,35 @@ export function createApp(deps: AppDeps): Express {
       belowPin: c.modelctlVersion !== null && c.modelctlVersion !== pin,
     }));
     res.json({ agentVersion: (await store.get(id))?.agentVersion ?? null, pin, versions, drift, updatedAt: entry?.updatedAt ?? null });
+  });
+
+  // ---- IRI-081: OS/firmware/driver update posture (informational only) ----
+  app.get("/api/v1/updates", async (_req, res) => {
+    const store = requireStore(res);
+    if (!store) return;
+    const inventory = deps.getInventory?.() ?? null;
+    if (inventory === null) return res.status(503).json({ error: "database unavailable" });
+    const baseline = deps.getBaseline === undefined ? null : await deps.getBaseline().catch(() => null);
+    const nodeRows = await store.list();
+    const online = deps.getHub()?.online() ?? new Set<string>();
+    const matrix = await Promise.all(
+      nodeRows.map(async (n) => {
+        const entry = await inventory.get(n.id).catch(() => null);
+        const report = (entry?.report ?? null) as { updates?: { dgxOsVersion: string | null; nvidiaDriverVersion: string | null; pendingReboot: boolean; upgradableCount: number | null; aptPresent: boolean } } | null;
+        const u = report?.updates ?? null;
+        let posture: "unknown" | "up to date" | "behind" | "pending reboot" | "update tooling absent" = "unknown";
+        if (u !== null && !u.aptPresent) posture = "update tooling absent";
+        else if (u?.pendingReboot === true) posture = "pending reboot";
+        else if (u !== null && baseline !== null) {
+          const behindDriver = baseline.driver !== null && u.nvidiaDriverVersion !== null && u.nvidiaDriverVersion !== baseline.driver;
+          const behindOs = baseline.dgxOs !== null && u.dgxOsVersion !== null && u.dgxOsVersion !== baseline.dgxOs;
+          const behindCount = (u.upgradableCount ?? 0) > 0;
+          posture = behindDriver || behindOs || behindCount ? "behind" : "up to date";
+        }
+        return { nodeId: n.id, name: n.name, online: online.has(n.id), updates: u, posture };
+      }),
+    );
+    res.json({ baseline, nodes: matrix });
   });
 
   // ---- IRI-028: per-node model inventory (store + per-user local caches) ----

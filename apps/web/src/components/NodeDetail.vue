@@ -14,6 +14,8 @@ import {
   HISTORY_RANGES,
   type HealthFinding,
   type NodeVersionsResponse,
+  type UpdatesResponse,
+  fetchUpdates,
   type HistoryRange,
   type HistoryResponse,
   type LlmHistoryResponse,
@@ -327,6 +329,25 @@ watch(
   { immediate: true },
 );
 const staleScripts = computed(() => (versions.value?.versions?.scripts ?? []).filter((s) => !s.present));
+/** IRI-081: on-node update state (informational — Irori never installs). */
+const updateState = ref<UpdatesResponse["nodes"][number] | null>(null);
+watch(
+  () => props.nodeId,
+  () => {
+    void fetchUpdates()
+      .then((r) => {
+        updateState.value = r.nodes.find((n) => n.nodeId === props.nodeId) ?? null;
+      })
+      .catch(() => {});
+  },
+  { immediate: true },
+);
+const postureChip = computed(() => {
+  const p = updateState.value?.posture ?? "unknown";
+  if (p === "up to date") return "chip--ok";
+  if (p === "behind" || p === "pending reboot") return "chip--warn";
+  return "chip--muted";
+});
 watch(
   () => props.nodeId,
   () => {
@@ -1231,6 +1252,28 @@ onUnmounted(() => {
             </p>
           </template>
           <p v-else class="muted">no inventory report yet — run Models → Refresh</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card__head">
+          <h3>Updates</h3>
+          <span class="chip" :class="postureChip">{{ updateState?.posture ?? "unknown" }}</span>
+        </div>
+        <div class="card__body" style="padding-top: 12px;">
+          <template v-if="updateState?.updates">
+            <div class="barrow"><span>OS</span><span class="val">{{ updateState.updates.osPrettyName ?? "unknown" }}</span></div>
+            <div class="barrow"><span>Kernel</span><span class="val mono">{{ updateState.updates.kernelVersion ?? "unknown" }}</span></div>
+            <div class="barrow"><span>DGX OS</span><span class="val mono">{{ updateState.updates.dgxOsVersion ?? "unknown" }}</span></div>
+            <div class="barrow"><span>NVIDIA driver</span><span class="val mono">{{ updateState.updates.nvidiaDriverVersion ?? "unknown" }}</span></div>
+            <div class="barrow"><span>Pending reboot</span><span class="val">{{ updateState.updates.pendingReboot ? "yes — reboot required" : "no" }}</span></div>
+            <div class="barrow"><span>Upgradable packages</span><span class="val">{{ updateState.updates.upgradableCount ?? "tooling absent" }}</span></div>
+            <p v-if="updateState.updates.firmwareUpdates.length > 0" class="row">
+              <span class="chip chip--warn" :title="updateState.updates.firmwareUpdates.map((f) => f.device + ' → ' + f.toVersion).join('\n')">◇ {{ updateState.updates.firmwareUpdates.length }} firmware update{{ updateState.updates.firmwareUpdates.length === 1 ? "" : "s" }} pending</span>
+            </p>
+            <p v-if="updateState.updates.unattendedUpgradesLastResult" class="muted">unattended-upgrades: {{ updateState.updates.unattendedUpgradesLastResult }}</p>
+          </template>
+          <p v-else class="muted">no update report yet — run Models → Refresh (informational only: Irori never installs or reboots)</p>
         </div>
       </article>
 
