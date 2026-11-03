@@ -108,6 +108,8 @@ function fakeSnapshotAt(seq: number): HardwareSnapshot {
     unifiedMemory: null,
     storage: [],
     network: [],
+    memoryBandwidth: null,
+    kernel: null,
     gpus: [],
   };
 }

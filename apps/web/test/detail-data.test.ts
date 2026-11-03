@@ -63,6 +63,8 @@ const SNAPSHOT: HardwareSnapshot = {
   ],
   storage: [],
   network: [],
+  memoryBandwidth: null,
+  kernel: null,
 };
 
 const HISTORY: HistoryResponse = {

@@ -141,6 +141,13 @@
       "when": 1798243200000,
       "tag": "0019_job_canceling_progress",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793702987927,
+      "tag": "0020_fleet_ops_observability",
+      "breakpoints": true
     }
   ]
 }

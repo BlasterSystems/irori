@@ -72,6 +72,12 @@ export const hardwareSnapshotSchema = z.object({
         fs: z.string(),
         totalBytes: z.number().nonnegative(),
         usedBytes: z.number().nonnegative(),
+        /** IRI-067: block-device read rate over the sample window (null = first sample). */
+        readBps: z.number().nonnegative().nullable().default(null),
+        /** IRI-067: block-device write rate over the sample window. */
+        writeBps: z.number().nonnegative().nullable().default(null),
+        /** Device name the rates came from (/sys/block/<dev>), when known. */
+        device: z.string().nullable().default(null),
       }),
     )
     .default([]),
@@ -81,10 +87,45 @@ export const hardwareSnapshotSchema = z.object({
         iface: z.string(),
         rxBps: z.number().nonnegative().nullable(),
         txBps: z.number().nonnegative().nullable(),
+        /** IRI-067: negotiated link speed in Mb/s from /sys/class/net/<if>/speed. */
+        speedMbps: z.number().nonnegative().nullable().default(null),
+        /** IRI-067: /sys/class/net/<if>/operstate (up|down|lowerlayerdown|…). */
+        operState: z.string().nullable().default(null),
+        /** IRI-067: assigned addresses (v4 then v6), for the WOL/network panel. */
+        addrs: z.array(z.string()).default([]),
       }),
     )
     .default([]),
   gpus: z.array(gpuSnapshotSchema),
+  /**
+   * IRI-067: GB10 unified-memory bandwidth (nvidia-smi dmon -s B), sampled on
+   * a slower cadence than the snapshot ring because each read costs a driver
+   * call. Null when the tool is unavailable.
+   */
+  memoryBandwidth: z
+    .object({
+      readBps: z.number().nonnegative().nullable(),
+      writeBps: z.number().nonnegative().nullable(),
+      /** Agent clock of the dmon sample; older than timestampMs by design. */
+      sampledAtMs: z.number().nullable().default(null),
+    })
+    .nullable()
+    .default(null),
+  /**
+   * IRI-067: kernel-error counters from the journal (Xid = GPU fault lines,
+   * OOM = oom-killer events), counted since boot with a dedupe key so a
+   * repeating line does not inflate the count.
+   */
+  kernel: z
+    .object({
+      xidCount: z.number().int().nonnegative().default(0),
+      /** Distinct recent Xid messages, newest first (bounded by the collector). */
+      xidRecent: z.array(z.string().max(512)).max(20).default([]),
+      oomCount: z.number().int().nonnegative().default(0),
+      oomRecent: z.array(z.string().max(512)).max(20).default([]),
+    })
+    .nullable()
+    .default(null),
   load1: z.number().nonnegative().optional(),
   uptimeS: z.number().nonnegative().optional(),
 });

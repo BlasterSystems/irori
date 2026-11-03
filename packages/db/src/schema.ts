@@ -51,6 +51,12 @@ export const nodes = pgTable(
     /** IR-101: optional cache owner — transfers (sync-local, push source) run
      *  as this user so models land in that user's HF cache. */
     cacheUser: text("cache_user"),
+    /** IRI-068: MAC for Wake-on-LAN; discovered or operator-entered. */
+    wolMac: text("wol_mac"),
+    /** IRI-068: GPU clock cap in MHz (nvidia-smi -lgc 0,N); null = uncapped. */
+    gpuClockCapMHz: integer("gpu_clock_cap_mhz"),
+    /** IRI-068: re-apply the cap at boot (systemd oneshot installed). */
+    gpuClockCapPersistent: boolean("gpu_clock_cap_persistent").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -548,6 +554,24 @@ export const llmRequests = pgTable(
     retryKind: text("retry_kind"),
     retryStatus: text("retry_status"),
     retrySupersededBy: text("retry_superseded_by"),
+    /**
+     * IRI-070: W3C trace context carried by the capture proxy. The proxy
+     * already forwards `traceparent` verbatim and OTEL emits one GenAI span
+     * per request — without these columns the span and the row could never be
+     * joined, so a request was undiagnosable outside an external collector.
+     */
+    traceId: text("trace_id"),
+    spanId: text("span_id"),
+    /**
+     * IRI-079: typed timing/speculative columns parsed from engineMeta. The
+     * verbatim jsonb stays for power users; these make the trace waterfall
+     * and per-model comparisons queryable.
+     */
+    prefillMs: integer("prefill_ms"),
+    decodeMs: integer("decode_ms"),
+    specRounds: integer("spec_rounds"),
+    specDrafted: integer("spec_drafted"),
+    specAccepted: integer("spec_accepted"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -557,6 +581,7 @@ export const llmRequests = pgTable(
     index("llm_requests_client_idx").on(t.clientAgentType, t.receivedAt),
     index("llm_requests_project_idx").on(t.clientProject, t.receivedAt),
     index("llm_requests_key_idx").on(t.clientKeyHash, t.receivedAt),
+    index("llm_requests_trace_idx").on(t.traceId),
   ],
 );
 
@@ -686,6 +711,14 @@ export const usageBuckets = pgTable(
     decodeTps: real("decode_tps"),
     /** Sum of completion-token weights behind decodeTps (for re-weighting). */
     decodeTpsWeight: bigint("decode_tps_weight", { mode: "number" }).notNull().default(0),
+    /**
+     * IRI-072: cost of the bucket, in minor units (cents) of `costCurrency`.
+     * Null when pricing was unset at rollup time — a null cost means "no
+     * price", never "free", which is the same coverage-not-zero rule the
+     * token ledger already follows.
+     */
+    costMinor: bigint("cost_minor", { mode: "number" }),
+    costCurrency: text("cost_currency"),
   },
   (t) => [
     uniqueIndex("usage_buckets_uq").on(t.nodeId, t.model, t.granularity, t.bucketStart),
