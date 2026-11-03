@@ -5,6 +5,7 @@ import {
   sseEventSchema,
   type HardwareSnapshot,
   type LlmPortSnapshot,
+  type LogUpdateEvent,
   type NodeInfo,
   type SseEvent,
   type UsageEvent,
@@ -63,6 +64,8 @@ export interface LiveStore {
   events: Ref<SseEvent[]>;
   /** Latest captured usage requests (newest first, M8). */
   usageLatest: Ref<UsageEvent[]>;
+  /** IRI-078: last durable-log tail pulse (null until one arrives). */
+  logPulse: Ref<LogUpdateEvent | null>;
   /** Latest LLM entry for a node, null when no probe has arrived yet. */
   getLlm(nodeId: string): LlmEntry | null;
   /** ms since the last SSE frame arrived (refreshed by a tick), null before the first event. */
@@ -102,6 +105,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const jobs = reactive(new Map<string, JobLive>());
   const events = ref<SseEvent[]>([]);
   const usageLatest = ref<UsageEvent[]>([]);
+  /** IRI-078: last durable-log pulse — the Logs view tail watches this. */
+  const logPulse = ref<LogUpdateEvent | null>(null);
   const lastEventAtMs = ref<number | null>(null);
   const lastEventAgeMs = ref<number | null>(null);
   const connected = ref(false);
@@ -229,6 +234,11 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       // Engine output is capped inside the ring; other event types never are.
       case "setup-log":
         pushSetupLogBounded(event);
+        break;
+      // IRI-078: a durable batch landed — bump the pulse the Logs view's
+      // tail watches. Deliberately NOT a feed event: the record is REST.
+      case "log-update":
+        logPulse.value = event;
         break;
       case "usage": {
         // Newest-first ring; also rides the feed (bounded by pushEvent).
@@ -365,6 +375,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     jobs,
     events,
     usageLatest,
+    logPulse,
     getLlm,
     lastEventAgeMs,
     connected,

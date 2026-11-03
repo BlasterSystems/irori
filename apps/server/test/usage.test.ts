@@ -135,6 +135,116 @@ describe("agent hub usage batches", () => {
   });
 });
 
+// ---- Hub: log-batch routing (IRI-078, fake store, real frame chain) ----
+
+import { logEventSchema, type LogEvent } from "@irori/core";
+
+let logSeq = 0;
+function logEvent(overrides: Partial<LogEvent> = {}): LogEvent {
+  logSeq += 1;
+  return logEventSchema.parse({
+    eventId: `00000000-0000-4000-8000-${String(logSeq).padStart(12, "0")}`,
+    ts: 1_700_000_000_000 + logSeq,
+    scope: "setup",
+    setupId: null,
+    runId: null,
+    jobId: null,
+    level: "info",
+    source: "engine",
+    seq: logSeq,
+    line: `engine line ${logSeq}`,
+    ...overrides,
+  });
+}
+
+describe("agent hub log batches", () => {
+  async function setup(onBatch: (nodeId: string, events: LogEvent[], dropped: number) => Promise<{ inserted: number; latestId: string | null } | null>) {
+    const fake = makeFakeStore();
+    const created = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const { events, sse } = makeSseSpy();
+    const batches: Array<{ nodeId: string; events: LogEvent[]; dropped: number }> = [];
+    const deps: AgentHubDeps = {
+      store: fake.store,
+      llmStore: fake.llmStore,
+      rings: createRings(),
+      sse,
+      getCadenceMs: () => 2000,
+      serverVersion: "test-server",
+      jobEvents: {
+        onOutput: async () => null,
+        onDone: async () => {},
+        onCatalog: async () => {},
+      },
+      setupEvents: {
+        onAck: async () => {},
+        onEvent: async () => {},
+        onLog: async () => {},
+        onValidateResult: () => {},
+      },
+      benchEvents: { onProgress: () => {}, onDone: async () => {} },
+      usageEvents: { onBatch: async () => true },
+      logEvents: {
+        onBatch: async (nodeId, batch, dropped) => {
+          batches.push({ nodeId, events: batch, dropped });
+          return onBatch(nodeId, batch, dropped);
+        },
+      },
+    };
+    const hub = createAgentHub(deps);
+    const server = createServer();
+    hub.attach(server);
+    const port = await listen(server);
+    cleanups.push(() => {
+      hub.stop();
+      server.close();
+      server.closeAllConnections();
+    });
+    return { created, events, batches, url: `ws://127.0.0.1:${port}/agent-ws` };
+  }
+
+  function hello(token: string): string {
+    return JSON.stringify({ type: "hello", schemaVersion: SCHEMA_VERSION, agentVersion: "0.1.0", token, hostname: "spark1" });
+  }
+
+  it("acks log batches with the sender's node and pulses the Logs view", async () => {
+    const { created, events, batches, url } = await setup(async () => ({ inserted: 2, latestId: "42" }));
+    const ws = new WebSocket(url);
+    await opened(ws);
+    ws.send(hello(created.token));
+    await nextMessage(ws); // hello-ok
+    await nextMessage(ws); // config-update
+
+    const batch = [logEvent(), logEvent()];
+    ws.send(JSON.stringify({ type: "log-batch", schemaVersion: SCHEMA_VERSION, agentVersion: "0.1.0", events: batch, dropped: 7 }));
+    const ack = await nextMessage(ws);
+    expect(ack).toEqual({ type: "log-batch-ack", ids: batch.map((e) => e.eventId) });
+    expect(batches).toHaveLength(1);
+    expect(batches[0]!.nodeId).toBe(created.id);
+    expect(batches[0]!.dropped).toBe(7);
+    expect(batches[0]!.events).toHaveLength(2);
+
+    await new Promise((r) => setTimeout(r, 20));
+    const pulses = events.filter((e) => e.type === "log-update");
+    expect(pulses).toHaveLength(1);
+    expect(pulses[0]).toMatchObject({ nodeId: created.id, count: 2, latestId: "42" });
+    ws.close();
+  });
+
+  it("does not ack when the store is unavailable (agent redelivers)", async () => {
+    const { created, url } = await setup(async () => null);
+    const ws = new WebSocket(url);
+    await opened(ws);
+    ws.send(hello(created.token));
+    await nextMessage(ws);
+    await nextMessage(ws);
+
+    ws.send(JSON.stringify({ type: "log-batch", schemaVersion: SCHEMA_VERSION, agentVersion: "0.1.0", events: [logEvent()], dropped: 0 }));
+    await new Promise((r) => setTimeout(r, 50));
+    // No ack frame, no pulse — the agent's durable buffer keeps the rows.
+    ws.close();
+  });
+});
+
 // ---- API contract (fake UsageStore) ----
 
 function fakeUsageStore(): { store: UsageStore; calls: Array<{ method: string; args: unknown }> } {

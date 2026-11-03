@@ -102,6 +102,9 @@ export async function runUsageRetention(
 export interface OpsRetentionResult {
   audit: number;
   journal: number;
+  /** IRI-078: below-warn rows past 30 d / everything past 180 d. */
+  logsRaw: number;
+  logsHard: number;
 }
 
 /**
@@ -111,10 +114,22 @@ export interface OpsRetentionResult {
  * boot degraded (no DATABASE_URL) with the audit path absent.
  */
 export async function runOpsRetention(
-  deps: { audit: { prune(keepDays: number): Promise<number> } | null; eventJournal: { prune(keepDays: number): Promise<number> } | null },
-  policy: { auditKeepDays: number; journalKeepDays: number },
+  deps: {
+    audit: { prune(keepDays: number): Promise<number> } | null;
+    eventJournal: { prune(keepDays: number): Promise<number> } | null;
+    /** IRI-078: raw logs 30 d, warn+ 180 d (two cutoffs, one pass). */
+    logs: { pruneRaw(olderThan: Date): Promise<number>; pruneAll(olderThan: Date): Promise<number> } | null;
+  },
+  policy: { auditKeepDays: number; journalKeepDays: number; logKeepDays: number; logWarnKeepDays: number },
 ): Promise<OpsRetentionResult> {
   const audit = deps.audit === null ? 0 : await deps.audit.prune(policy.auditKeepDays);
   const journal = deps.eventJournal === null ? 0 : await deps.eventJournal.prune(policy.journalKeepDays);
-  return { audit, journal };
+  let logsRaw = 0;
+  let logsHard = 0;
+  if (deps.logs !== null) {
+    const DAY_MS = 24 * 3_600_000;
+    logsRaw = await deps.logs.pruneRaw(new Date(Date.now() - policy.logKeepDays * DAY_MS));
+    logsHard = await deps.logs.pruneAll(new Date(Date.now() - policy.logWarnKeepDays * DAY_MS));
+  }
+  return { audit, journal, logsRaw, logsHard };
 }

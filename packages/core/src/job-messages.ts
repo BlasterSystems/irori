@@ -2,6 +2,7 @@ import { z } from "zod";
 import { catalogModelSchema } from "./catalog.js";
 import { benchProgressMsgSchema, benchDoneMsgSchema } from "./bench.js";
 import { usageBatchMsgSchema, bodyRetentionSchema } from "./usage.js";
+import { logBatchMsgSchema } from "./logs.js";
 
 /** Server → agent: run one job (one active per node enforced by the server). */
 export const jobRequestMsgSchema = z.object({
@@ -153,6 +154,7 @@ export const agentServerMsgSchema = z.discriminatedUnion("type", [
   setupLogMsgSchema,
   setupValidateResultMsgSchema,
   usageBatchMsgSchema,
+  logBatchMsgSchema,
 ]);
 
 export type AgentServerMsg = z.infer<typeof agentServerMsgSchema>;
