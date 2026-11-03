@@ -23,7 +23,10 @@ import {
 import { analyticsRangeMs, GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import type { AnalyticsResponse, TokenTotals } from "@irori/core";
 import { fleetTiles, fmtHitPct, modelsCsv, seriesTotals, tokenInsight } from "../tokens-data";
+
+const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
 import { thresholds } from "../thresholds";
+import { usageChart } from "../usage";
 import { fetchTokenReconciliation, fetchEfficiency } from "../api";
 import type { TokenReconciliation, EfficiencyRow } from "@irori/core";
 import LensChart from "./LensChart.vue";
@@ -194,6 +197,21 @@ const tokenInsightLine = computed(() =>
 /** IRI-075: client-side CSV of the current per-model table. */
 const csvHref = computed(() => `data:text/csv;charset=utf-8,${encodeURIComponent(modelsCsv(data.value?.models ?? []))}`);
 
+/** IRI-075: hourly cost + token trend from the response costSeries/series. */
+const costTrend = computed(() => {
+  if (data.value?.lens !== "tokens" || data.value.costSeries.length === 0) return null;
+  const sym = data.value.costCurrency === null || CURRENCY_SYMBOLS[data.value.costCurrency] === undefined ? "" : CURRENCY_SYMBOLS[data.value.costCurrency];
+  return {
+    cost: usageChart(data.value.costSeries.map((p) => ({ t: new Date(p.t).toISOString(), value: p.costMinor / 100 })), W, H),
+    fmt: (v: number): string => `${sym}${v.toFixed(2)}`,
+    tokens: usageChart(
+      data.value.series.flatMap((s) => s.points.map((p) => ({ t: new Date(p.t).toISOString(), value: (p.generated ?? 0) + (p.prompt ?? 0) }))).sort((a, b) => a.t.localeCompare(b.t)),
+      W,
+      H,
+    ),
+  };
+});
+
 /** IRI-040: By-cluster/node macro totals, folded from the lens series. */
 const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesTotals(data.value.series) : []));
 </script>
@@ -338,6 +356,18 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
         <p v-else class="muted">no token counters yet — engines publish them per backend (vLLM, llama.cpp, q27, ds4, sglang)</p>
       </div>
     </section>
+
+      <!-- IRI-075: hourly cost + token trend next to the lens charts. -->
+      <div v-if="lens === 'tokens' && costTrend !== null" class="cols cols-2" style="margin-top: var(--space-4)">
+        <section class="card">
+          <div class="card__head"><h3>Cost trend</h3><span class="mono faint">per {{ data.granularity }} · estimated</span></div>
+          <div class="card__body"><LensChart :chart="costTrend.cost" unit="cost" aria-label="Cost per bucket" :format="costTrend.fmt" :time-format="bucketFmt" /></div>
+        </section>
+        <section class="card">
+          <div class="card__head"><h3>Token trend</h3><span class="mono faint">per {{ data.granularity }}</span></div>
+          <div class="card__body"><LensChart :chart="costTrend.tokens" unit="tok" aria-label="Tokens per bucket" :format="(v: number) => fmtCount(v)" :time-format="bucketFmt" /></div>
+        </section>
+      </div>
 
     <!-- IRI-073: Wh-per-1k-tokens statgrid; the NAS is excluded from fleet
          power so efficiency never divides by idle box watts. -->
