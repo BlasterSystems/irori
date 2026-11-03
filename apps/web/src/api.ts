@@ -215,6 +215,27 @@ export async function fetchUsageRetries(range: UsageRangeName, opts: { nodeId?: 
   return parsed.data;
 }
 
+/** IRI-080: per-node version provenance + drift (server response). */
+export interface NodeVersionsResponse {
+  agentVersion: string | null;
+  pin: string | null;
+  versions: {
+    nodeRuntime: string | null;
+    uv: string | null;
+    catalog: { schema: number; generatedAt: string | null } | null;
+    scripts: Array<{ path: string; present: boolean; executable: boolean; mtimeMs: number | null }>;
+  } | null;
+  drift: Array<{ user: string; modelctlVersion: string | null; belowPin: boolean }>;
+  updatedAt: string | null;
+}
+
+/** IRI-080: per-node version provenance + drift. */
+export async function fetchNodeVersions(id: string, signal?: AbortSignal): Promise<NodeVersionsResponse> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/versions`, { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/nodes/${id}/versions failed: HTTP ${res.status}`);
+  return (await res.json()) as NodeVersionsResponse;
+}
+
 /** IRI-079: normalized span tree for the drawer's Trace tab. */
 export async function fetchRequestTrace(id: string, signal?: AbortSignal): Promise<UsageTrace> {
   const res = await fetch(`/api/v1/usage/requests/${encodeURIComponent(id)}/trace`, { headers: { accept: "application/json" }, signal });

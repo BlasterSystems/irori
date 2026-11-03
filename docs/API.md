@@ -363,8 +363,15 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   tokens lens renders a per-node statgrid (reason in the tooltip) and a
   per-model `Wh/ktok` column.
 
-## Trace inspector (IRI-079)
+## Version provenance (IRI-080)
 
+- `GET /api/v1/nodes/:id/versions` — standing versions + drift: agent version,
+  node runtime, uv, catalog.json freshness, per-cache-user modelctl vs the
+  hub pin (`drift[].belowPin`), and the setups' recipe-script stats (missing
+  script → the Serve stale-recipe chip). Contract additive: agents without
+  the report `versions` block render unknowns.
+
+## Trace inspector (IRI-079)
 - `llm_requests` carries typed timing columns parsed from the TensorFold
   engineMeta at ingest (`prefill_ms`, `decode_ms`, `spec_rounds`,
   `spec_drafted`, `spec_accepted`; the verbatim jsonb stays). Reset-safe

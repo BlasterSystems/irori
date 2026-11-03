@@ -964,6 +964,28 @@ export function createApp(deps: AppDeps): Express {
     res.json(await service.prevention(id));
   });
 
+  // ---- IRI-080: per-node version provenance + drift ----
+  app.get("/api/v1/nodes/:id/versions", async (req, res) => {
+    const id = parseUuidParam(req);
+    if (id === null) return res.status(400).json({ error: "invalid node id" });
+    const store = requireStore(res);
+    if (!store) return;
+    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const inventory = deps.getInventory?.() ?? null;
+    const entry = inventory === null ? null : await inventory.get(id);
+    const report = (entry?.report ?? null) as { versions?: unknown; local?: Array<{ user: string; modelctlVersion: string | null }> } | null;
+    const versions = report?.versions ?? null;
+    // Drift: the hub pin vs each cache user's modelctl. Unknown versions are
+    // surfaced as unknown, never as a violation.
+    const pin = (await deps.getModelctlPin?.()?.get()) ?? null;
+    const drift = pin === null ? [] : (report?.local ?? []).map((c) => ({
+      user: c.user,
+      modelctlVersion: c.modelctlVersion,
+      belowPin: c.modelctlVersion !== null && c.modelctlVersion !== pin,
+    }));
+    res.json({ agentVersion: (await store.get(id))?.agentVersion ?? null, pin, versions, drift, updatedAt: entry?.updatedAt ?? null });
+  });
+
   // ---- IRI-028: per-node model inventory (store + per-user local caches) ----
   app.get("/api/v1/nodes/:id/models", async (req, res) => {
     const id = parseUuidParam(req);
@@ -998,7 +1020,20 @@ export function createApp(deps: AppDeps): Express {
     if (!store) return;
     if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
     try {
-      const job = await jobs.create(id, "models-inventory", {});
+      // IRI-080: the agent stats the setups' recipe scripts for the stale
+      // chip — collected here so the agent never learns db shape.
+      let scriptPaths: string[] = [];
+      try {
+        const setups = await deps.getSetups()?.list();
+        for (const s of setups ?? []) {
+          if (typeof s.scriptStart === "string") scriptPaths.push(s.scriptStart);
+          if (typeof s.scriptStop === "string") scriptPaths.push(s.scriptStop);
+        }
+        scriptPaths = [...new Set(scriptPaths)].slice(0, 50);
+      } catch {
+        scriptPaths = [];
+      }
+      const job = await jobs.create(id, "models-inventory", { scriptPaths });
       res.status(202).json({ job: serializeJob(job) });
     } catch (err) {
       if (err instanceof JobBusyError) return res.status(409).json({ error: err.message });
