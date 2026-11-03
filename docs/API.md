@@ -331,6 +331,26 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   per-model overrides; exact match beats the longest glob prefix beats the
   default. Writes re-price stamped buckets via the resumable backfill.
 
+## Power actions (IRI-068)
+
+- `POST /api/v1/nodes/:id/shutdown` — two-step armed confirm (node-delete
+  idiom). Step 1 (empty body) arms: `{armed, confirmToken, expiresAt}` (60 s).
+  Step 2 (`{confirmToken, origin?}`) validates the token — a stale, reused, or
+  unknown token is rejected `409` and audited — then dispatches
+  `node-shutdown` to the agent: it logs the origin, acks, and powers off after
+  a 10 s grace (`systemctl poweroff`). The audit row is written before
+  dispatch; the dispatch never rides an SSE-reconnect path.
+- `POST /api/v1/nodes/:id/wake` — Wake-on-LAN: magic packet to the node's
+  `/24` directed broadcast (derived from `host`) plus the global broadcast,
+  using the stored `wolMac` (or `{mac}` in the body). `400` when neither
+  exists.
+- `PUT /api/v1/nodes/:id/clock-cap` (`{capMHz: number|null, persistent?}`) —
+  applies the cap through the agent (IRI-067 clocks verb), stores
+  `gpuClockCapMHz`/`gpuClockCapPersistent` on the node, and (persistent)
+  installs/removes the `irori-gpu-clock-cap.service` oneshot. A foreign unit
+  with the same name is refused, never overwritten. `400` on
+  `persistent` without `capMHz` or a non-integer cap.
+
 ## Clocks (IRI-067)
 
 - `GET /api/v1/nodes/:id/clocks` — live per-GPU clocks + application clock

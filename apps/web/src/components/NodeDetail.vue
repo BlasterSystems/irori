@@ -6,6 +6,9 @@ import {
   fetchHistory,
   fetchLlmHistory,
   fetchNodeLlm,
+  setClockCap,
+  shutdownNode,
+  wakeNode,
   HISTORY_RANGES,
   type HistoryRange,
   type HistoryResponse,
@@ -173,6 +176,92 @@ const llmPanels = computed<LlmPanelVm[]>(() => {
     };
   });
 });
+
+/* ── IRI-068: power actions + clock cap ───────────────────────────────────── */
+
+const armedShutdown = ref(false);
+let shutdownToken: string | null = null;
+let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+const shutdownMsg = ref<string | null>(null);
+const shutdownError = ref<string | null>(null);
+
+async function onShutdown(): Promise<void> {
+  clearTimeout(shutdownTimer);
+  shutdownError.value = null;
+  if (!armedShutdown.value || shutdownToken === null) {
+    try {
+      const armed = await shutdownNode(props.nodeId);
+      if (!armed.armed || armed.confirmToken === undefined) throw new Error("arm failed");
+      shutdownToken = armed.confirmToken;
+      armedShutdown.value = true;
+      shutdownMsg.value = "armed — click again to confirm";
+      shutdownTimer = setTimeout(() => {
+        armedShutdown.value = false;
+        shutdownToken = null;
+      }, 4000);
+    } catch (err: unknown) {
+      shutdownError.value = err instanceof Error ? err.message : String(err);
+    }
+    return;
+  }
+  armedShutdown.value = false;
+  const token = shutdownToken;
+  shutdownToken = null;
+  try {
+    await shutdownNode(props.nodeId, token);
+    shutdownMsg.value = "powering off in 10 s — the agent logs the request origin";
+  } catch (err: unknown) {
+    shutdownError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+const wakeBusy = ref(false);
+const wakeMsg = ref<string | null>(null);
+const wakeError = ref<string | null>(null);
+
+async function onWake(): Promise<void> {
+  wakeBusy.value = true;
+  wakeError.value = null;
+  wakeMsg.value = null;
+  try {
+    await wakeNode(props.nodeId);
+    wakeMsg.value = "magic packet sent — boot may take ~30 s";
+  } catch (err: unknown) {
+    wakeError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    wakeBusy.value = false;
+  }
+}
+
+const capInput = ref<string>("");
+const capPersist = ref(false);
+const capBusy = ref(false);
+const capMsg = ref<string | null>(null);
+const capError = ref<string | null>(null);
+watch(
+  () => node.value?.gpuClockCapMHz,
+  (v) => {
+    capInput.value = v === null || v === undefined ? "" : String(v);
+    capPersist.value = node.value?.gpuClockCapPersistent === true;
+  },
+  { immediate: true },
+);
+
+async function applyCap(clear: boolean): Promise<void> {
+  capBusy.value = true;
+  capError.value = null;
+  capMsg.value = null;
+  try {
+    const capMHz = clear ? null : Number.parseInt(capInput.value, 10);
+    if (!clear && (!Number.isInteger(capMHz) || capMHz! <= 0)) throw new Error("cap must be a positive integer MHz");
+    await setClockCap(props.nodeId, clear ? null : (capMHz as number), capPersist.value);
+    capMsg.value = clear ? "cap cleared — driver defaults restored" : `cap ${capMHz as number} MHz applied${capPersist.value ? " (persists across reboots)" : ""}`;
+  } catch (err: unknown) {
+    capError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    capBusy.value = false;
+  }
+}
 
 const detail = computed(() =>
   computeDetailData(snapshot.value, history.value, range.value),
@@ -699,6 +788,17 @@ onUnmounted(() => {
             >kernel {{ kernelWarn.count }} err</span>
           </template>
           <template v-if="node">
+            <button
+              class="btn btn--ghost btn--sm"
+              :disabled="wakeBusy || node.online === true"
+              :title="node.online === true ? 'node is online' : 'send a Wake-on-LAN magic packet'"
+              @click="onWake"
+            >{{ wakeBusy ? "Waking…" : "Wake" }}</button>
+            <button
+              class="btn btn--ghost btn--sm"
+              :title="armedShutdown ? 'click again to confirm — 10 s grace, then poweroff' : 'arm a node shutdown'"
+              @click="onShutdown"
+            >{{ armedShutdown ? "Confirm shutdown" : "Shut down" }}</button>
             <button class="btn btn--ghost btn--sm" @click="editOpen = true">Edit</button>
             <button class="btn btn--ghost btn--sm" @click="rotateOpen = true">Rotate token</button>
             <a class="btn btn--ghost btn--sm" :href="auditTargetHash(nodeId)" title="Audited actions for this node">Audit</a>
@@ -719,6 +819,10 @@ onUnmounted(() => {
           <a class="chip detail-back" href="#/">← Overview</a>
         </div>
         <p v-if="updateMsg" class="stat__sub" style="margin-top: 8px;">{{ updateMsg }}</p>
+        <p v-if="shutdownMsg" class="stat__sub" style="margin-top: 8px;">{{ shutdownMsg }}</p>
+        <p v-if="shutdownError" class="banner banner--warn" style="margin-top: 8px;">{{ shutdownError }}</p>
+        <p v-if="wakeMsg" class="stat__sub" style="margin-top: 8px;">{{ wakeMsg }}</p>
+        <p v-if="wakeError" class="banner banner--warn" style="margin-top: 8px;">{{ wakeError }}</p>
         <p v-if="notFound" class="muted" style="margin-top: 8px;">
           Node not found in the registry — it may have been removed.
         </p>
@@ -1020,6 +1124,24 @@ onUnmounted(() => {
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.gpu.current">
             <Sparkline :points="detail.gpu.series" :domain="{ min: 0, max: 100 }" :format="tipPct" :aria-label="`GPU usage, ${range}`" />
+            <!-- IRI-068: GPU clock cap (community thermal/noise lever). -->
+            <div class="row" style="margin-top: 8px; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <input
+                v-model="capInput"
+                class="input"
+                inputmode="numeric"
+                placeholder="SM cap MHz"
+                style="max-width: 130px; padding: 4px 8px;"
+                aria-label="GPU SM clock cap in MHz"
+              />
+              <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
+                <input v-model="capPersist" type="checkbox" /> keep after reboot
+              </label>
+              <button class="btn btn--secondary btn--sm" :disabled="capBusy || node?.online !== true" @click="applyCap(false)">Apply</button>
+              <button class="btn btn--ghost btn--sm" :disabled="capBusy || node?.online !== true" @click="applyCap(true)">Clear</button>
+            </div>
+            <p v-if="capMsg" class="stat__sub">{{ capMsg }}</p>
+            <p v-if="capError" class="banner banner--warn">{{ capError }}</p>
             <p v-if="detail.gpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.gpu.sub }}</p>
             <p v-for="note in detail.gpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>

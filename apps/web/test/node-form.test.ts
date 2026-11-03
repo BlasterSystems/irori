@@ -65,6 +65,7 @@ describe("toCreatePayload / toPatchPayload", () => {
     ports: "8080, 8081, junk",
     nasRoot: " /mnt/nas ",
     cacheUser: " operator ",
+    wolMac: " AA:BB:CC:DD:EE:FF ",
   };
 
   it("trims fields, parses ports and nulls an empty nasRoot", () => {
@@ -76,6 +77,7 @@ describe("toCreatePayload / toPatchPayload", () => {
       llmPorts: [8080, 8081],
       nasRoot: "/mnt/nas",
       cacheUser: "operator",
+      wolMac: "aa:bb:cc:dd:ee:ff",
     });
   });
 
@@ -101,6 +103,7 @@ describe("formFromNode", () => {
       ports: "8080, 8081",
       nasRoot: "",
       cacheUser: "",
+      wolMac: "",
     });
     // Editing without touching fields must reproduce the stored ports.
     expect(toPatchPayload(state).llmPorts).toEqual([8080, 8081]);
