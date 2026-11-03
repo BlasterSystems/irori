@@ -360,6 +360,13 @@ node**, with time ranges backed by rollups:
 ## 10. Clock control (CPU & GPU underclocking)
 
 - GPU: `nvidia-smi -lgc MAX` / `-rgc`; locked when applications clock ≠ default.
+  Applied live via `POST /api/v1/nodes/:id/clock-cap` (IRI-068), which also
+  stores the cap on the node; a persistent cap re-applies at boot via the
+  `irori-gpu-clock-cap.service` oneshot (removed on clear; foreign units with
+  the same name are refused).
+- **Power (IRI-068):** armed two-step `POST /nodes/:id/shutdown` (10 s grace,
+  origin logged, audited before dispatch) and WoL `POST /nodes/:id/wake`
+  (magic packet to the stored `wolMac`, /24 directed + global broadcast).
 - CPU: per-core `cpufreq` `scaling_max_freq` cap (kHz) — **not** `max_perf` on
   GB10 (accepted but re-derived); reset from `cpuinfo_max_freq`.
 - Executed by the **privileged agent directly** (it runs as root — no helper

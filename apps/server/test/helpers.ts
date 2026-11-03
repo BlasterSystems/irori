@@ -101,6 +101,13 @@ export function makeFakeStore(): FakeStores {
       }
       seen.push({ nodeId, agentVersion });
     },
+    async setGpuClockCap(nodeId, capMHz, persistent) {
+      const row = rows.get(nodeId);
+      if (row !== undefined) {
+        row.gpuClockCapMHz = capMHz;
+        row.gpuClockCapPersistent = persistent;
+      }
+    },
     async insertSnapshot(nodeId, payload) {
       if (failInserts) throw new Error("db down");
       snapshots.push({ nodeId, payload });

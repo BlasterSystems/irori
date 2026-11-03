@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
+import { broadcastForLanIp, normalizeMac, sendWol } from "./wol.js";
 import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
@@ -201,7 +203,7 @@ export interface AppDeps {
   rings: Rings;
   /** SSE hub; when wrapped in the IRI-013 recording feed it also serves /events/recent history. */
   sse: SseHub & { recent?(limit?: number): SseEvent[] };
-  getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig" | "clocks" | "setClocks"> | null;
+  getHub: () => Pick<AgentHub, "online" | "sendToNode" | "refreshConfig" | "clocks" | "setClocks" | "shutdownNode"> | null;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -1086,6 +1088,112 @@ export function createApp(deps: AppDeps): Express {
       if (!result.ok) return res.status(502).json({ error: result.error ?? "clock cap failed" });
       const after = await hub.clocks(id);
       res.json({ applied: smMaxMHz, gpus: after?.ok ? after.gpus : [] });
+    },
+  );
+
+  // ---- IRI-068: power actions — armed shutdown, WoL wake, clock-cap registry ----
+
+  const shutdownArmed = new Map<string, { token: string; expiresAt: number }>();
+
+  app.post(
+    "/api/v1/nodes/:id/shutdown",
+    audit({ action: "node.shutdown.post", targetType: "node", summary: (req) => `shutdown armed for node ${req.params.id ?? "?"}` }, getAudit),
+    async (req, res) => {
+      const id = parseUuidParam(req);
+      if (id === null) return res.status(400).json({ error: "invalid node id" });
+      const store = requireStore(res);
+      if (!store) return;
+      const node = await store.get(id);
+      if (node === null) return res.status(404).json({ error: "node not found" });
+      const body = (req.body ?? {}) as { confirmToken?: unknown; origin?: unknown };
+      const armed = shutdownArmed.get(id);
+      if (typeof body.confirmToken !== "string" || body.confirmToken.length === 0) {
+        // Step 1: arm. A second call without the token re-arms (fresh token).
+        const token = randomUUID();
+        const expiresAt = Date.now() + 60_000;
+        shutdownArmed.set(id, { token, expiresAt });
+        return res.json({ armed: true, confirmToken: token, expiresAt: new Date(expiresAt).toISOString() });
+      }
+      // Step 2: confirm. A stale/unknown token is rejected and audited.
+      if (armed === undefined || armed.token !== body.confirmToken) {
+        return res.status(409).json({ error: "stale confirm token — arm again" });
+      }
+      if (Date.now() > armed.expiresAt) {
+        shutdownArmed.delete(id);
+        return res.status(409).json({ error: "stale confirm token — arm again" });
+      }
+      shutdownArmed.delete(id);
+      const hub = deps.getHub();
+      if (hub === null) return res.status(503).json({ error: "agent hub unavailable" });
+      const origin = typeof body.origin === "string" && body.origin.length > 0 ? body.origin.slice(0, 200) : "web";
+      // Audited by the route middleware above (records on finish, before the
+      // agent's poweroff lands — the ack only confirms scheduling).
+      const result = await hub.shutdownNode(id, 10, origin);
+      if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
+      if (!result.ok) return res.status(502).json({ error: result.error ?? "shutdown dispatch failed" });
+      res.json({ scheduled: true, graceS: 10 });
+    },
+  );
+
+  app.post(
+    "/api/v1/nodes/:id/wake",
+    audit({ action: "node.wake.post", targetType: "node", summary: (req) => `wake-on-lan sent for node ${req.params.id ?? "?"}` }, getAudit),
+    async (req, res) => {
+      const id = parseUuidParam(req);
+      if (id === null) return res.status(400).json({ error: "invalid node id" });
+      const store = requireStore(res);
+      if (!store) return;
+      const node = await store.get(id);
+      if (node === null) return res.status(404).json({ error: "node not found" });
+      const body = (req.body ?? {}) as { mac?: unknown };
+      const mac = normalizeMac(body.mac) ?? normalizeMac(node.wolMac);
+      if (mac === null) return res.status(400).json({ error: "no wolMac on node and no mac in body" });
+      const broadcast = broadcastForLanIp(node.host);
+      try {
+        // Directed /24 first (survives some switched fabrics), then global.
+        await sendWol(mac, broadcast);
+        if (broadcast !== "255.255.255.255") await sendWol(mac, "255.255.255.255");
+        res.json({ sent: true, mac, broadcast });
+      } catch (err: unknown) {
+        res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    },
+  );
+
+  app.put(
+    "/api/v1/nodes/:id/clock-cap",
+    audit({ action: "node.clock-cap.put", targetType: "node", summary: (req) => {
+      const body: unknown = req.body;
+      const cap = body && typeof body === "object" && "capMHz" in body ? String((body as { capMHz: unknown }).capMHz) : "?";
+      return `gpu clock cap set for node ${req.params.id ?? "?"} (capMHz=${cap})`;
+    } }, getAudit),
+    async (req, res) => {
+      const id = parseUuidParam(req);
+      if (id === null) return res.status(400).json({ error: "invalid node id" });
+      const store = requireStore(res);
+      if (!store) return;
+      const node = await store.get(id);
+      if (node === null) return res.status(404).json({ error: "node not found" });
+      const body = (req.body ?? null) as { capMHz?: unknown; persistent?: unknown } | null;
+      const capMHz =
+        body === null || body === undefined || body.capMHz === undefined || body.capMHz === null
+          ? null
+          : typeof body.capMHz === "number" && Number.isInteger(body.capMHz) && body.capMHz > 0
+            ? body.capMHz
+            : null;
+      if (capMHz === null && body !== null && body !== undefined && body.capMHz !== undefined && body.capMHz !== null) {
+        return res.status(400).json({ error: "capMHz must be a positive integer or null" });
+      }
+      const persistent = body?.persistent === true;
+      if (persistent && capMHz === null) return res.status(400).json({ error: "persistent requires capMHz" });
+      const hub = deps.getHub();
+      if (hub === null) return res.status(503).json({ error: "agent hub unavailable" });
+      const result = await hub.setClocks(id, capMHz, persistent);
+      if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
+      if (!result.ok) return res.status(502).json({ error: result.error ?? "clock cap failed" });
+      await store.setGpuClockCap(id, capMHz, persistent);
+      const after = await hub.clocks(id);
+      res.json({ capMHz, persistent, gpus: after?.ok ? after.gpus : [] });
     },
   );
 
