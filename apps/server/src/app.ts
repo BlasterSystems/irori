@@ -1201,6 +1201,16 @@ export function createApp(deps: AppDeps): Express {
     },
   );
 
+  // IRI-073: Wh-per-token efficiency (energy × ledger join, NAS excluded).
+  app.get("/api/v1/analytics/efficiency", async (req, res) => {
+    const analytics = deps.getAnalytics();
+    if (analytics === null) return res.status(503).json({ error: "database unavailable" });
+    const range = analyticsRangeSchema.safeParse(req.query.range ?? "24h");
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const groupBy = req.query.groupBy === "model" ? "model" : "node";
+    res.json(await analytics.efficiency({ range: range.data, groupBy }));
+  });
+
   // IRI-071: ledger (engine counters) vs capture (requests) reconciliation.
   app.get("/api/v1/analytics/token-reconciliation", async (req, res) => {
     const analytics = deps.getAnalytics();

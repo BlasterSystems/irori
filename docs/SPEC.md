@@ -520,6 +520,7 @@ reported in every snapshot; upgrade = re-run install.
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
 | Power | `POST /api/v1/nodes/:id/shutdown` (armed two-step), `POST /api/v1/nodes/:id/wake` (WoL), `PUT /api/v1/nodes/:id/clock-cap` (IRI-068) |
 | Health & metrics | `GET /api/v1/health/{rules,findings,thresholds}`, `PUT /api/v1/health/rules/:id`, `GET/PUT /api/v1/settings/metrics`, `GET /api/v1/metrics` (Prometheus, IRI-069) |
+| Efficiency | `GET /api/v1/analytics/efficiency?range=&groupBy=node\|model` (Wh/ktok read-time join, NAS excluded, IRI-073) |
 | Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), `GET/PUT /api/v1/settings/modelctl-pin` (modelctl pin + auto-provisioning, IR-105), WS `/agent-ws` |
 
 ## 14. Deviations & deferred
