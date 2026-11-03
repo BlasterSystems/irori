@@ -363,6 +363,22 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   tokens lens renders a per-node statgrid (reason in the tooltip) and a
   per-model `Wh/ktok` column.
 
+## Cost of errors, sessions & retries (IRI-076)
+
+- `GET /api/v1/usage/requests/:id` + the list rows carry a read-time priced
+  `costMinor` (pricing snapshot × row model/tokens; failed requests keep
+  prompt tokens); the responses carry `costCurrency` — the drawer shows the
+  Cost row, unset pricing renders nothing.
+- Errors tab: `usageErrorsResponseSchema.errorsCostMinor/costCurrency` +
+  per-signature `costMinor` (priced per sig × model) — the expensive failure
+  mode is a column + a COST OF ERRORS chip.
+- Chats: `chatSessionSchema.costMinor` summed over the session's requests
+  (usage-chats prices rows once via `opts.pricing`); the list row shows it.
+- `GET /api/v1/usage/retries?range=&nodeId=` — superseded attempts
+  (`retry_superseded_by` set) grouped per client key: `attempts`, priced
+  `costMinor`, plus `retriesCostMinor` (the money a retry storm burned).
+  Rendered as the Usage "Retries" tab.
+
 ## Token reconciliation (IRI-071)
 
 - `GET /api/v1/analytics/token-reconciliation?range=&nodeId=` — per

@@ -4,6 +4,8 @@ import {
   type EfficiencyResponse,
   type EfficiencyRow,
   type HealthFinding,
+  type UsageRetriesResponse,
+  usageRetriesResponseSchema,
   auditPageSchema,
   eventJournalPageSchema,
   logPageSchema,
@@ -196,6 +198,20 @@ export async function setClockCap(id: string, capMHz: number | null, persistent:
     const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
     throw new Error(msg);
   }
+}
+
+/** IRI-076: retry waste groups (superseded attempts per client key). */
+export type { UsageRetriesResponse } from "@irori/core";
+export async function fetchUsageRetries(range: UsageRangeName, opts: { nodeId?: string; signal?: AbortSignal } = {}): Promise<UsageRetriesResponse> {
+  const res = await fetch(`/api/v1/usage/retries?${rangeQuery(range, opts.nodeId !== undefined ? { nodeId: opts.nodeId } : {})}`, {
+    headers: { accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/usage/retries failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  const parsed = usageRetriesResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error("GET /api/v1/usage/retries: unexpected shape");
+  return parsed.data;
 }
 
 /** IRI-073: Wh-per-token efficiency (energy × ledger join). */
