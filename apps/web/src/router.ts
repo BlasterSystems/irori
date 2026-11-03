@@ -3,7 +3,7 @@
  * Models v2 page, "#/serve" for serving orchestration, everything else is the
  * fleet overview. vue-router is deliberately not used (M1 constraint).
  */
-export type Route = { view: "overview" } | { view: "node"; id: string } | { view: "models" } | { view: "serve"; recipeJob?: string | null } | { view: "benchmarks" } | { view: "analytics" } | { view: "usage" } | { view: "chats" } | { view: "audit" } | { view: "logs" };
+export type Route = { view: "overview" } | { view: "node"; id: string } | { view: "models" } | { view: "serve"; recipeJob?: string | null } | { view: "benchmarks" } | { view: "analytics" } | { view: "usage" } | { view: "chats" } | { view: "audit" } | { view: "logs" } | { view: "community" };
 
 export function parseHash(hash: string): Route {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
@@ -18,6 +18,7 @@ export function parseHash(hash: string): Route {
       return { view: "node", id };
     }
   }
+  if (h === "/community") return { view: "community" };
   if (h === "/models") return { view: "models" };
   if (h === "/serve") return { view: "serve" };
   // IRI-082: a settled recipe install deep-links into the wizard pre-filled.

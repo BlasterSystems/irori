@@ -19,6 +19,7 @@ import { renderPrometheus } from "./metrics.js";
 import type { UpdateBaseline } from "./updates-baseline.js";
 import { recipeInstallRequestSchema } from "@irori/core";
 import type { RecipeService } from "./recipes.js";
+import type { CommunityService } from "./community.js";
 import type { ModelctlPinService } from "./modelctl-pin.js";
 import type { UsageStore } from "./usage-store.js";
 import type { UsageClients } from "./usage-clients.js";
@@ -215,6 +216,8 @@ export interface AppDeps {
   getBaseline?: () => Promise<UpdateBaseline | null>;
   /** IRI-082: curated recipe catalog service. */
   getRecipes?: () => RecipeService | null;
+  /** IRI-083: community intelligence service. */
+  getCommunity?: () => CommunityService | null;
   version: string;
   /** Git tag the image was built from (IRORI_GIT_TAG); null for local builds. */
   tag: string | null;
@@ -1029,30 +1032,30 @@ export function createApp(deps: AppDeps): Express {
     res.json(await recipes.list());
   });
 
-  app.post("/api/v1/recipes/:id/hide", async (req, res) => {
+  app.post("/api/v1/recipes/:id/hide", audit({ action: "recipes.hide", targetType: "recipe", targetId: (req) => (typeof req.params.id === "string" ? req.params.id : null) }, getAudit), async (req, res) => {
     const recipes = deps.getRecipes?.();
     if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
-    await recipes.setHidden(req.params.id ?? "", req.body?.hidden !== false);
+    await recipes.setHidden((typeof req.params.id === "string" ? req.params.id : ""), req.body?.hidden !== false);
     res.json({ ok: true });
   });
 
-  app.post("/api/v1/recipes/:id/pin", async (req, res) => {
+  app.post("/api/v1/recipes/:id/pin", audit({ action: "recipes.pin", targetType: "recipe", targetId: (req) => (typeof req.params.id === "string" ? req.params.id : null) }, getAudit), async (req, res) => {
     const recipes = deps.getRecipes?.();
     if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
-    const sha = await recipes.pin(req.params.id ?? "");
+    const sha = await recipes.pin((typeof req.params.id === "string" ? req.params.id : ""));
     if (sha === null) return res.status(502).json({ error: "pin failed (upstream unreachable or not a GitHub repo)" });
     res.json({ pinnedSha: sha });
   });
 
   // Install = stage scripts on the target node (sha256-verified) via a job;
   // the settled job yields a DRAFT the operator confirms (nothing starts).
-  app.post("/api/v1/recipes/:id/install", async (req, res) => {
+  app.post("/api/v1/recipes/:id/install", audit({ action: "recipes.install", targetType: "recipe", targetId: (req) => (typeof req.params.id === "string" ? req.params.id : null) }, getAudit), async (req, res) => {
     const recipes = deps.getRecipes?.();
     if (recipes === undefined || recipes === null) return res.status(503).json({ error: "database unavailable" });
     const parsed = recipeInstallRequestSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "invalid install request", issues: parsed.error.issues });
     try {
-      const jobId = await recipes.install(req.params.id ?? "", parsed.data);
+      const jobId = await recipes.install((typeof req.params.id === "string" ? req.params.id : ""), parsed.data);
       res.status(202).json({ jobId });
     } catch (err) {
       res.status(409).json({ error: err instanceof Error ? err.message : "install failed" });
@@ -1065,6 +1068,24 @@ export function createApp(deps: AppDeps): Express {
     const draft = await recipes.draft(req.params.jobId ?? "");
     if (draft === null) return res.status(404).json({ error: "draft not ready (job not settled) or unknown" });
     res.json(draft);
+  });
+
+  // ---- IRI-083: community intelligence (pollers in index.ts; read-only here) ----
+  app.get("/api/v1/community", async (_req, res) => {
+    const community = deps.getCommunity?.();
+    if (community === undefined || community === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await community.view());
+  });
+
+  app.post("/api/v1/community/:id", audit({ action: "community.curate", targetType: "community-item", targetId: (req) => (typeof req.params.id === "string" ? req.params.id : null) }, getAudit), async (req, res) => {
+    const community = deps.getCommunity?.();
+    if (community === undefined || community === null) return res.status(503).json({ error: "database unavailable" });
+    const patch: { hidden?: boolean; pinned?: boolean; seen?: boolean } = {};
+    if (typeof req.body?.hidden === "boolean") patch.hidden = req.body.hidden;
+    if (typeof req.body?.pinned === "boolean") patch.pinned = req.body.pinned;
+    if (typeof req.body?.seen === "boolean") patch.seen = req.body.seen;
+    await community.curate((typeof req.params.id === "string" ? req.params.id : ""), patch);
+    res.json({ ok: true });
   });
 
   // ---- IRI-028: per-node model inventory (store + per-user local caches) ----

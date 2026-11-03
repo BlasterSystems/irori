@@ -21,6 +21,7 @@ import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pi
 import { createHealthService, type HealthService } from "./health.js";
 import { getUpdateBaseline, BASELINE_TTL_MS, type UpdateBaseline } from "./updates-baseline.js";
 import { createRecipesService, seedRecipes, type RecipeService } from "./recipes.js";
+import { createCommunityService, type CommunityService } from "./community.js";
 import { CADENCE_MAX_MS, CADENCE_MIN_MS, type Currency, type HardwareSnapshot } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
@@ -109,6 +110,7 @@ const state: {
   health: HealthService | null;
   baseline: (() => Promise<UpdateBaseline | null>) | null;
   recipes: RecipeService | null;
+  community: CommunityService | null;
   /** IRI-077: durable audit log + restart-surviving event journal. */
   audit: AuditService | null;
   eventJournal: EventJournalService | null;
@@ -125,6 +127,7 @@ const state: {
   health: null,
   baseline: null,
   recipes: null,
+  community: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -181,6 +184,7 @@ const app = createApp({
   getHealth: () => state.health,
   getBaseline: async () => (state.baseline === null ? null : state.baseline().catch(() => null)),
   getRecipes: () => state.recipes,
+  getCommunity: () => state.community,
   getNodesSnapshot: async () => {
     const rows = await state.store?.list() ?? [];
     const online = state.hub?.online() ?? new Set<string>();
@@ -382,6 +386,14 @@ async function boot(): Promise<void> {
   });
   void seedRecipes(dbHandle.db).catch((err) => log.warn(`recipe seed: ${String(err)}`));
   state.recipes = recipesService;
+
+  // IRI-083: community pollers — one shared UA, concurrency 1, jittered; a
+  // dead source degrades to a warn chip and never blocks anything.
+  const communityService = createCommunityService(dbHandle.db);
+  state.community = communityService;
+  const communityTimer = setInterval(() => void communityService.poll().catch(() => {}), 30 * 60_000);
+  communityTimer.unref?.();
+  setTimeout(() => void communityService.poll().catch(() => {}), 20_000).unref?.();
 
   // IRI-028: at most one job-output SSE frame per second per job. The full
   // ring stays in job_output; this keeps the Activity drawer live without
