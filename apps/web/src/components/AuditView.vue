@@ -15,6 +15,7 @@ import {
   parseAuditHash,
   type AuditFilterState,
 } from "../audit-data";
+import { logsSetupHash } from "../logs-data";
 
 /**
  * IRI-077 Audit: the durable record of who did what to what (audit_log) plus
@@ -213,6 +214,7 @@ watch(
               <div class="audit-meta faint mono">
                 {{ entry.actorDetail ?? "actor—" }} · {{ entry.requestId ?? `req—` }} · {{ entry.sourceAddr ?? "src—" }}
               </div>
+              <a v-if="entry.targetType === 'setup' && entry.targetId !== null" class="faint" style="display: inline-block; margin-top: 4px; font-size: 12px" :href="logsSetupHash(entry.targetId)">Open durable logs for this setup →</a>
               <p v-if="entry.error !== null" class="faint" role="alert" style="margin: 4px 0">error: {{ entry.error }}</p>
               <template v-if="diffSides(entry.before, entry.after) !== null">
                 <div v-if="diffSides(entry.before, entry.after)!.hasDiff" class="audit-diff">

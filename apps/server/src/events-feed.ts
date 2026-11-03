@@ -19,23 +19,25 @@ export const EVENT_FEED_CAP = 500;
  *  would evict real events from the cap; the web client streams those lines
  *  itself (IR-102) and seeds job context from GET /api/v1/jobs.
  *  `setup-log` (IR-124) joins them for the same reason: live-only throttled
- *  engine output, backfill via GET /api/v1/setups/:id/log. */
+ *  engine output, backfill via GET /api/v1/setups/:id/log.
+ *  `log-update` (IRI-078) is a durable-ingest tail pulse, not an operational
+ *  event: journaling/ringing it would let a flooding engine evict real feed
+ *  events; the durable record lives in the logs table. */
 export const FEED_EXCLUDED: Readonly<Record<string, true>> = {
   heartbeat: true,
   snapshot: true,
   llm: true,
   "job-progress": true,
   "setup-log": true,
+  "log-update": true,
 };
 
 export function createEventFeed(
   inner: SseHub,
   cap: number = EVENT_FEED_CAP,
-  /**
-   * IRI-077: durable sink for the frames the ring keeps. Called after the
-   * exclusion filter, so the journal sees exactly what the ring does; the
-   * sink is best-effort and must never throw into the send path.
-   */
+  /** IRI-077: durable sink for the frames the ring keeps. Called after the
+   *  exclusion filter, so the journal sees exactly what the ring does; the
+   *  sink is best-effort and must never throw into the send path. */
   onRecord?: (event: SseEvent) => void,
 ): EventFeed {
   const ring: SseEvent[] = [];

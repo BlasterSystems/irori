@@ -1,5 +1,5 @@
 {
-  "id": "7873b6a4-b4ba-4663-a29d-e5ae32eb6ee6",
+  "id": "1030de0c-ad31-4b9c-b8a2-6ce42d2802f5",
   "prevId": "a116cc59-9dfc-4294-b3f3-46cdea75e399",
   "version": "7",
   "dialect": "postgresql",
@@ -4214,6 +4214,12 @@
           "primaryKey": true,
           "notNull": true
         },
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "node_id": {
           "name": "node_id",
           "type": "uuid",
@@ -4348,8 +4354,23 @@
           "method": "btree",
           "with": {}
         },
-        "logs_run_seq_uq": {
-          "name": "logs_run_seq_uq",
+        "logs_event_id_uq": {
+          "name": "logs_event_id_uq",
+          "columns": [
+            {
+              "expression": "event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "logs_run_seq_idx": {
+          "name": "logs_run_seq_idx",
           "columns": [
             {
               "expression": "setup_id",
@@ -4370,8 +4391,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
-          "where": "seq is not null",
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

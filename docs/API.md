@@ -131,6 +131,32 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 - Both pass through the retention service (`AUDIT_KEEP_DAYS`, fixed 90 d for
   the journal).
 
+## Durable logs (IRI-078)
+
+- `GET /api/v1/logs?nodeId=&setupId=&runId=&jobId=&scope=&source=&level=&q=&range=&limit=&cursor=&after=`
+  — the durable record behind the rings (`logs`): every setup/engine line
+  (driver markers, engine stdout via the run-log tailer, capture-proxy lines),
+  job output, and agent/hub lifecycle lines, with `scope`
+  (`setup|job|agent|proxy|hub`), `source` (`driver|engine|proxy|system`),
+  `level` (`trace…error`, heuristic on raw lines), per-(setup, run) `seq` and
+  the agent's `eventTs` alongside the hub ingest `ts`. `q` is a
+  case-insensitive substring match on the line; `level` is an inclusive
+  minimum; `cursor` pages backward (newest first); `after` switches to
+  ascending tail mode (`id > after`) for the live view. `latestId` is the
+  newest stored id in range (the tail resume point); `truncated` is true when
+  a node's queue dropped lines in the window (`log_drop_counters`).
+  `503` while degraded.
+- `GET /api/v1/logs/summary` — the same filters without paging; per-level
+  `counts` + `total` + `truncated` for the filter-bar chips.
+- Agent → hub: `log-batch` WS frames (≤200 events, `dropped` cumulative
+  counter) acked with `log-batch-ack {ids}` only after a durable insert —
+  redelivery dedupes on `eventId`, so an agent restart replays without
+  doubling a line. The hub fans out one `log-update` SSE pulse per stored
+  batch (excluded from the feed ring and journal; the row itself is only in
+  the table).
+- Retention: raw rows below `warn` for `LOG_KEEP_DAYS` (30 d); `warn`+ for
+  `LOG_WARN_KEEP_DAYS` (180 d).
+
 ## Analytics (M7)
 
 - `GET /api/v1/analytics/:lens?range=&groupBy=` — five lenses

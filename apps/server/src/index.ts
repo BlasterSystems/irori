@@ -24,6 +24,7 @@ import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
 import { runRetention, runLlmRetention, runUsageRetention, runOpsRetention } from "./retention.js";
 import { createUsageStore, type UsageStore } from "./usage-store.js";
+import { createLogStore, type LogStore } from "./logs-store.js";
 import { createUsageClients, type UsageClients } from "./usage-clients.js";
 import { createUsageChats, type UsageChats } from "./usage-chats.js";
 import { createUsageRollupEngine } from "./usage-rollups.js";
@@ -105,6 +106,8 @@ const state: {
   /** IRI-077: durable audit log + restart-surviving event journal. */
   audit: AuditService | null;
   eventJournal: EventJournalService | null;
+  /** IRI-078: durable structured logs (agent ships + hub-scope lines). */
+  logs: LogStore | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -128,6 +131,7 @@ const state: {
   llmHistory: null,
   audit: null,
   eventJournal: null,
+  logs: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -171,6 +175,7 @@ const app = createApp({
   getModelctlPin: () => state.modelctlPin,
   getAudit: () => state.audit,
   getEventJournal: () => state.eventJournal,
+  getLogs: () => state.logs,
   getCadenceMs: () => activeCadenceMs,
   setCadenceMs: (ms) => {
     activeCadenceMs = ms;
@@ -216,6 +221,9 @@ async function boot(): Promise<void> {
   state.audit = createAuditService(dbHandle.db, (m, err) => log.warn(`${m}: ${String(err ?? "")}`));
   state.eventJournal = createEventJournalService(dbHandle.db, (m, err) => log.warn(`${m}: ${String(err ?? "")}`));
   journalSink = (event) => state.eventJournal?.journal(event);
+  // IRI-078: durable structured logs (agents ship batches; hub-scope lines
+  // — audit-adjacent operational events — could join later).
+  state.logs = createLogStore(dbHandle.db, (m) => log.warn(m));
 
   // M8 (ADR-0008): durable usage ingest + read models. The SSE fan-out and
   // ack ride the hub frame chain; inserts are deduplicated by client UUID.
@@ -349,6 +357,18 @@ async function boot(): Promise<void> {
         return true;
       } catch {
         return false; // no ack — the agent's durable buffer redelivers
+      }
+    },
+  }, logEvents: {
+    // IRI-078: durable log ingest. null on DB failure — no ack, the agent's
+    // buffer redelivers (the store dedupes on eventId, so redelivery is safe).
+    onBatch: async (nodeId, events, dropped) => {
+      const store = state.logs;
+      if (store === null) return null;
+      try {
+        return await store.ingestBatch(nodeId, events, dropped);
+      } catch {
+        return null;
       }
     },
   } });
@@ -539,11 +559,19 @@ function startPruneLoop(store: NodeStore, llmStore: LlmStore, db: Db, config: Co
       // IRI-077: audit is long-retention (365 d default) and the event journal
       // bounded, so neither grows without a ceiling.
       const ops = await runOpsRetention(
-        { audit: state.audit, eventJournal: state.eventJournal },
-        { auditKeepDays: config.auditKeepDays, journalKeepDays: EVENT_JOURNAL_KEEP_DAYS },
+        { audit: state.audit, eventJournal: state.eventJournal, logs: state.logs },
+        {
+          auditKeepDays: config.auditKeepDays,
+          journalKeepDays: EVENT_JOURNAL_KEEP_DAYS,
+          logKeepDays: config.logKeepDays,
+          logWarnKeepDays: config.logWarnKeepDays,
+        },
       );
       if (ops.audit > 0) log.info(`pruned ${ops.audit} audit rows (retention ${config.auditKeepDays} d)`);
       if (ops.journal > 0) log.info(`pruned ${ops.journal} journaled events (retention ${EVENT_JOURNAL_KEEP_DAYS} d)`);
+      if (ops.logsRaw + ops.logsHard > 0) {
+        log.info(`pruned ${ops.logsRaw} raw log rows (< warn, ${config.logKeepDays} d) + ${ops.logsHard} past ${config.logWarnKeepDays} d`);
+      }
     } catch {
       // DB loss is handled by the hub buffer; prune just tries again next tick.
     }

@@ -18,6 +18,8 @@ whenever `DATABASE_URL` is set (ADR-0002):
 | `HOUR_KEEP_DAYS` | `90` | Hour-bucket retention |
 | `DAY_KEEP_DAYS` | `365` | Day-bucket retention |
 | `AUDIT_KEEP_DAYS` | `365` | Durable audit-log retention (IRI-077); the event journal keeps a fixed 90 d |
+| `LOG_KEEP_DAYS` | `30` | Durable log retention for rows below `warn` (IRI-078) |
+| `LOG_WARN_KEEP_DAYS` | `180` | Durable log retention for `warn`+ rows (IRI-078) |
 | `CADENCE_MS` | `2000` | Snapshot cadence handed to agents (bounded 1–60 s); the persisted hub setting (hub settings modal) overrides it and is live-pushed via config-update |
 | `IRORI_STATIC_DIR` | `apps/web/dist` | Served web assets |
 | `IRORI_AGENT_ARTIFACTS_DIR` | bundled | Served agent installer/unit/bundle (ADR-0007) |
@@ -39,6 +41,8 @@ variables are optional unless noted:
 | `IRORI_MODELCTL_PATH` | `/root/.local/bin/modelctl` | Explicit modelctl binary |
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
 | `IRORI_USAGE_FLUSH_MS` | `30000` | Usage-buffer upload interval (ADR-0008) |
+| `IRORI_LOG_FLUSH_MS` | `2000` | Durable log-buffer ship interval (IRI-078) |
+| `IRORI_LOG_QUEUE_MAX` | `10000` | In-memory log queue cap before drop-oldest (IRI-078; buffer keeps 50k rows on disk) |
 | `IRORI_USAGE_MAX_ROWS` | `200000` | Usage-buffer hard cap (drop-oldest) |
 | `IRORI_HF_TOKEN` | none | Optional HF token handed to modelctl as `HF_TOKEN` (IRI-017) — enables gated/private repo downloads; never sent to the hub or stored in job params. Bootstrap fallback: a hub-set global token (IRI-019) wins over this env |
 

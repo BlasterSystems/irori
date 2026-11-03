@@ -466,6 +466,13 @@ reported in every snapshot; upgrade = re-run install.
   surface, with per-entity deep links and the restart-surviving event journal.
   Redaction of secret-bearing keys is enforced at insert, not by caller
   discipline.
+- **Durable logs (IRI-078):** every setup/engine/proxy, job, agent and hub
+  line persists in the `logs` table (level, source, per-run `seq`) behind a
+  bounded agent queue — an engine that dies keeps its log across an agent
+  restart, queue overflow is counted (`truncated` chip, never silent), and
+  the **Logs** view (`#/logs`) searches the fleet by level/scope/source/
+  substring with live tail; Serve's Log button deep-links a setup's run and
+  Audit rows link back to their target's logs.
 
 ## 13. API surface (v1)
 
@@ -481,6 +488,7 @@ reported in every snapshot; upgrade = re-run install.
 | Benchmarks | `POST /api/v1/bench/{decode,prefill,quality,tooleval}`, `GET /api/v1/bench/:type/runs` |
 | Usage | `GET /api/v1/usage/{overview,requests,errors,agents,tools,models}?range=`, `GET /api/v1/usage/requests/:id` (M8, ADR-0008), `GET /api/v1/usage/chats` + `GET /api/v1/usage/chats/:id` (IR-53, ADR-0010), `GET/POST /api/v1/usage/clients` + `DELETE /api/v1/usage/clients/:id` (IR-55) |
 | Audit & journal | `GET /api/v1/audit?range=&actor=&domain=&targetId=&q=&cursor=&limit=` (durable mutation record, IRI-077), `GET /api/v1/events/journal?range=&type=&nodeId=&limit=&cursor=` (restart-surviving SSE frames, IRI-077) |
+| Logs | `GET /api/v1/logs?nodeId=&setupId=&runId=&jobId=&scope=&source=&level=&q=&range=&limit=&cursor=&after=` + `GET /api/v1/logs/summary` (durable structured record behind the rings, IRI-078) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
 | Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), `GET/PUT /api/v1/settings/modelctl-pin` (modelctl pin + auto-provisioning, IR-105), WS `/agent-ws` |
 

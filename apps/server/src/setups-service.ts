@@ -123,7 +123,7 @@ function toStages(raw: unknown): TransferStage[] {
 }
 
 export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
-  const toInfo = (row: typeof setups.$inferSelect): SetupInfo =>
+  const toInfo = (row: typeof setups.$inferSelect, lastRunId: string | null = null): SetupInfo =>
     setupInfoSchema.parse({
       id: row.id,
       name: row.name,
@@ -142,9 +142,39 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       lastError: row.lastError,
       startupTimeoutMs: row.startupTimeoutMs,
       lastStartedAt: iso(row.lastStartedAt),
+      lastRunId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     });
+
+  /** IRI-078: newest run row for one setup (the Logs deep-link run key). */
+  const latestRunId = async (setupId: string): Promise<string | null> => {
+    const [run] = await deps.db
+      .select({ id: setupRuns.id })
+      .from(setupRuns)
+      .where(eq(setupRuns.setupId, setupId))
+      .orderBy(desc(setupRuns.startedAt))
+      .limit(1);
+    return run?.id ?? null;
+  };
+
+  const toInfoWithRun = async (row: typeof setups.$inferSelect): Promise<SetupInfo> => toInfo(row, await latestRunId(row.id));
+
+  /** Batched latest-run map for list() — one query, never N+1. */
+  const latestRunIds = async (setupIds: string[]): Promise<Map<string, string>> => {
+    const map = new Map<string, string>();
+    if (setupIds.length === 0) return map;
+    const rows = await deps.db
+      .select({ id: setupRuns.id, setupId: setupRuns.setupId })
+      .from(setupRuns)
+      .where(inArray(setupRuns.setupId, setupIds))
+      .orderBy(desc(setupRuns.startedAt));
+    for (const row of rows) {
+      // Rows are globally DESC by startedAt: the FIRST hit per setup is its newest run.
+      if (!map.has(row.setupId)) map.set(row.setupId, row.id);
+    }
+    return map;
+  };
 
   // Pending start/stop acks from the head agent.
   const pending = new Map<string, { resolve: (r: { ok: boolean; error: string | null }) => void; timer: NodeJS.Timeout }>();
@@ -536,12 +566,13 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
   return {
     async list() {
       const rows = await deps.db.select().from(setups).orderBy(setups.createdAt);
-      return rows.map(toInfo);
+      const runs = await latestRunIds(rows.map((r) => r.id));
+      return rows.map((row) => toInfo(row, runs.get(row.id) ?? null));
     },
 
     async get(id) {
       const [row] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
-      return row ? toInfo(row) : null;
+      return row ? toInfoWithRun(row) : null;
     },
 
     async create(input) {
@@ -602,7 +633,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         await ensurePortAssigned(row.headNodeId, patch.port);
       }
       const [updated] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
-      return toInfo(updated!);
+      return toInfoWithRun(updated!);
     },
 
     async remove(id) {
@@ -697,7 +728,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       await updateRow(row.id, { status: "starting", health: "starting", lastError: null, lastStartedAt: new Date() });
       announce(row.id, "starting", "starting", null);
       const [updated] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
-      return toInfo(updated!);
+      return toInfoWithRun(updated!);
     },
 
     async stop(id) {
@@ -714,7 +745,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
         // probe that would flag a ghost engine comes from that same agent) —
         // keep the pre-IR-151 no-op instead of a 409. A running row still
         // reports the offline head.
-        if (wasStopped) return toInfo(row);
+        if (wasStopped) return toInfoWithRun(row);
         throw new SetupOfflineError("head node agent is offline");
       }
       // Two concurrent stops (double click, two tabs, a retry) must not
@@ -761,7 +792,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       }
       announce(row.id, "stopped", null, stopError);
       const [updated] = await deps.db.select().from(setups).where(eq(setups.id, id)).limit(1);
-      return toInfo(updated!);
+      return toInfoWithRun(updated!);
     },
 
     async onDriverAck(msg, senderNodeId) {

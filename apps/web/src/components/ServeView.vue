@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { fetchCleanup, fetchNodes, fetchNodeLlm, type LlmSnapshot } from "../api";
 import { auditDomainHash } from "../audit-data";
+import { logsSetupHash } from "../logs-data";
 import { vScrimClose } from "../scrim";
 import { vDialog } from "../dialog";
 import { live } from "../live";
@@ -248,6 +249,12 @@ function onAdopt(row: RunningEngineRow): void {
 function openManaged(row: RunningEngineRow): void {
   const s = setups.value.find((x) => x.id === row.managedSetupId);
   if (s !== undefined) void openDetail(s);
+}
+
+/** IRI-078: the Logs button opens the durable view pre-filtered to that
+ *  setup and its latest run (acceptance: jump-to-context from Serve). */
+function openDurableLogs(setup: SetupInfo): void {
+  location.hash = logsSetupHash(setup.id, setup.lastRunId);
 }
 
 /* ── Detail drawer ────────────────────────────────────────────────────────── */
@@ -930,7 +937,8 @@ function fmtGiB(bytes: number | null): string {
             >
               {{ stoppingId === setup.id ? "Stopping…" : armedStop === setup.id ? "Confirm stop" : "Stop…" }}
             </button>
-            <button class="btn btn--ghost btn--sm" @click="openDetail(setup)">Logs</button>
+            <button class="btn btn--ghost btn--sm" @click="openDurableLogs(setup)">Logs</button>
+            <button class="btn btn--ghost btn--sm" @click="openDetail(setup)">Details</button>
           </div>
         </div>
         <div class="card__body" style="padding-top: 10px">

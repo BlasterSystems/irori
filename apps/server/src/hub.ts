@@ -10,6 +10,7 @@ import {
   type BenchProgressMsg,
   type GpuSnapshot,
   type HardwareSnapshot,
+  type LogEvent,
   type SetupAckMsg,
   type SetupEventMsg,
   type SetupLogMsg,
@@ -88,6 +89,11 @@ export interface AgentHubDeps {
   /** Usage batches (M8): durable insert; false when the DB is unavailable (no ack). */
   usageEvents: {
     onBatch(nodeId: string, events: UsageRequest[]): Promise<boolean>;
+  };
+  /** Durable log batches (IRI-078): insert + drop-counter fold; returns the
+   *  store outcome so the hub acks ids and pulses the Logs view. */
+  logEvents?: {
+    onBatch(nodeId: string, events: LogEvent[], dropped: number): Promise<{ inserted: number; latestId: string | null } | null>;
   };
   /**
    * IRI-019: global HF token read for config-update frames. string = set,
@@ -317,6 +323,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     // ack) is preserved despite the async DB work.
     let setupChain = Promise.resolve();
     let usageChain = Promise.resolve();
+    // IRI-078: log batches serialize per connection so acks reach the agent
+    // in send order (same contract as usage).
+    let logChain = Promise.resolve();
     // IR-106: job output and terminal frames ride their own chain — the
     // settle reads the output row it just wrote (models-inventory report),
     // so back-to-back frames must not race the insert.
@@ -386,6 +395,36 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
               deps.sse.send({ type: "usage", serverTimeMs, nodeId: currentId, request: live });
             }
             sendMsg({ type: "usage-batch-ack", ids: events.map((e) => e.id) });
+          })
+          .catch(() => {});
+      } else if (frame.type === "log-batch") {
+        // IRI-078: durable log ingest. Serialized like usage so acks arrive in
+        // send order. A null result (DB down) sends NO ack — the agent's
+        // buffer keeps the rows and redelivers (the store dedupes on eventId).
+        const events = frame.events;
+        const dropped = frame.dropped;
+        logChain = logChain
+          .then(async () => {
+            if (deps.logEvents === undefined) {
+              // No store wired (degraded hub): ack nothing, drop the frame —
+              // the agent's bounded buffer keeps trying until the DB is back.
+              return;
+            }
+            const result = await deps.logEvents.onBatch(currentId, events, dropped);
+            if (result === null) return;
+            sendMsg({ type: "log-batch-ack", ids: events.map((e) => e.eventId) });
+            // Wake-up for the Logs view (the rows themselves are REST). Only
+            // when something actually stored — a pure-redelivery batch that
+            // inserted nothing needs no pulse.
+            if (result.inserted > 0) {
+              deps.sse.send({
+                type: "log-update",
+                serverTimeMs: Date.now(),
+                nodeId: currentId,
+                count: result.inserted,
+                latestId: result.latestId,
+              });
+            }
           })
           .catch(() => {});
       }

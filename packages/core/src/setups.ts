@@ -63,6 +63,9 @@ export const setupInfoSchema = z.object({
   /** 15 min default per the wizard review step. */
   startupTimeoutMs: z.number().int().positive().default(15 * 60_000),
   lastStartedAt: z.string().datetime({ offset: true }).nullable().default(null),
+  /** IRI-078: newest setup_runs row for this setup — the run key the Logs
+   *  view deep-links by (Serve's Logs button). Null when never run. */
+  lastRunId: z.string().uuid().nullable().default(null),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });

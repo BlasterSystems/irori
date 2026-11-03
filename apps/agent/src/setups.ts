@@ -3,7 +3,7 @@ import { createServer, Socket } from "node:net";
 import { accessSync, appendFileSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, openSync, closeSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { BodyRetention } from "@irori/core";
+import type { BodyRetention, LogSource } from "@irori/core";
 import { asCacheUser, CommandBuildError, type CacheUserCtx } from "./modelctl.js";
 import { runuserWrap } from "./cache-user.js";
 
@@ -30,6 +30,13 @@ export interface SetupDriverEvent {
 export interface SetupDriverEvents {
   onEvent(setupId: string, event: SetupDriverEvent): void;
   onLog(setupId: string, seq: number, line: string, ts: number): void;
+  /**
+   * IRI-078: the durable side of the same line — routed to the agent log
+   * sink (bounded queue → node buffer → hub `logs` table). Optional so test
+   * drivers only implement the live path. `source` splits driver markers
+   * from engine stdout from proxy lifecycle, so the hub can filter by origin.
+   */
+  onDurableLog?(setupId: string, entry: { runId: string | null; source: LogSource; seq: number; line: string; ts: number }): void;
 }
 
 export interface SetupDriverDeps {
@@ -226,6 +233,9 @@ export class SetupDriver {
   /** IR-149/150 fix: run-log path per setup, registered in start() BEFORE the
    *  record exists so early driver markers are written durably. */
   private readonly logPaths = new Map<string, string>();
+  /** IRI-078: run id per setup, same lifecycle as logPaths (kept after
+   *  finish() so late stop/proxy markers carry the run they belong to). */
+  private readonly runIds = new Map<string, string>();
   private readonly stopping = new Set<string>();
 
   constructor(private readonly deps: SetupDriverDeps) {}
@@ -260,6 +270,7 @@ export class SetupDriver {
         // file kept growing while the agent was gone — resume capture by
         // tailing it from EOF and seed the seq counter monotonically.
         this.records.set(record.setupId, record);
+        this.runIds.set(record.setupId, record.runId);
         this.seqs.set(record.setupId, this.seedSeq(record));
         this.startTailer(record.setupId, record.logPath, "eof");
         kept.push(record);
@@ -299,9 +310,11 @@ export class SetupDriver {
     this.pruneRunLogs();
   }
 
-  /** Public log route for capture-proxy lifecycle lines (M8). */
+  /** Public log route for capture-proxy lifecycle lines (M8). IRI-078: the
+   *  existing `driver:` marker prefix classifies the source — everything
+   *  else routed here is proxy-internal output. */
   pushSetupLog(setupId: string, line: string): void {
-    this.pushLog(setupId, line);
+    this.pushLog(setupId, line, { source: line.startsWith("driver:") ? "driver" : "proxy" });
   }
 
   /** Per-run log files grow with engine stdout — keep the newest few per setup. */
@@ -371,6 +384,7 @@ export class SetupDriver {
     // file (review fix: the ring alone is not what an operator tails).
     this.mkLogDir();
     this.logPaths.set(setupId, join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`));
+    this.runIds.set(setupId, runId);
     this.pushLog(setupId, `driver: starting ${scriptStart}`);
     const startFailed = (error: string): { ok: false; error: string } => {
       this.pushLog(setupId, `driver: start failed: ${error}`);
@@ -490,7 +504,7 @@ export class SetupDriver {
 
     const onChunk = (buf: Buffer): void => {
       for (const line of buf.toString("utf8").split(/\r\n|\r|\n/)) {
-        if (line.length > 0) this.pushLog(setupId, line);
+        if (line.length > 0) this.pushLog(setupId, line, { source: "engine" });
       }
     };
     child.stdout?.on("data", onChunk);
@@ -764,7 +778,7 @@ export class SetupDriver {
     const handle = { pgid: stop.pid ?? null, code: null as number | null };
     const onChunk = (buf: Buffer): void => {
       for (const line of buf.toString("utf8").split(/\r\n|\r|\n/)) {
-        if (line.length > 0) this.pushLog(setupId, `stop: ${line}`);
+        if (line.length > 0) this.pushLog(setupId, `stop: ${line}`, { source: "system" });
       }
     };
     stop.stdout?.on("data", onChunk);
@@ -829,7 +843,11 @@ export class SetupDriver {
     return promise;
   }
 
-  private pushLog(setupId: string, line: string, opts?: { durable?: boolean }): void {
+  private pushLog(
+    setupId: string,
+    line: string,
+    opts?: { durable?: boolean; source?: LogSource },
+  ): void {
     const seq = this.seqs.get(setupId) ?? 0;
     const entry: RingEntry = { seq, line, ts: Date.now() };
     this.seqs.set(setupId, seq + 1);
@@ -878,6 +896,17 @@ export class SetupDriver {
       }
     }
     this.deps.events.onLog(setupId, entry.seq, entry.line, entry.ts);
+    // IRI-078: every ring line also goes durable (bounded queue, never
+    // blocks here — the sink's emit is O(1)). Note this is independent of
+    // the file-mirror `durable` flag above: tailer-sourced engine lines skip
+    // the file (the engine wrote them) but MUST reach the hub store.
+    this.deps.events.onDurableLog?.(setupId, {
+      runId: this.runIds.get(setupId) ?? null,
+      source: opts?.source ?? "driver",
+      seq: entry.seq,
+      line: entry.line,
+      ts: entry.ts,
+    });
   }
 
   private finish(setupId: string, exitCode: number | null, error: string | null): void {
@@ -956,8 +985,9 @@ export class SetupDriver {
         tailer.carry = parts.pop() ?? "";
         for (const line of parts) {
           if (line.length > 0) {
-            // Already in the durable file — don't mirror it back (durable:false).
-            this.pushLog(setupId, line, { durable: false });
+            // Already in the durable file — don't mirror it back (durable:false),
+            // but it still ships to the hub store as an engine line (IRI-078).
+            this.pushLog(setupId, line, { durable: false, source: "engine" });
             emitted = true;
           }
         }

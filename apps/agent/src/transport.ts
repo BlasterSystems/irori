@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, AgentServerMsg, BenchType, BodyRetention, HardwareSnapshot, LlmPortSnapshot, ServerMsg, UsageRequest } from "@irori/core";
+import type { AgentMsg, AgentServerMsg, BenchType, BodyRetention, HardwareSnapshot, LlmEvent, LlmPortSnapshot, LogEvent, ServerMsg, UsageRequest } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -72,6 +72,8 @@ export interface AgentTransportOptions {
   onSetupValidate?: (validateId: string, scripts: string[]) => void;
   /** Server acked a durable usage-batch insert (ids safe to delete locally). */
   onUsageAck?: (ids: string[]) => void;
+  /** IRI-078: server acked a durable log-batch insert (ids safe to delete). */
+  onLogAck?: (ids: string[]) => void;
   /** Called after hello-ok on every (re)connection — replay triggers. */
   onReconnect?: () => void;
   /** IR-131: job ids this agent process is running, reported in every hello. */
@@ -114,6 +116,7 @@ export class AgentTransport {
   private readonly onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   private readonly onSetupValidate?: (validateId: string, scripts: string[]) => void;
   private readonly onUsageAck?: (ids: string[]) => void;
+  private readonly onLogAck?: (ids: string[]) => void;
   private readonly onReconnect?: () => void;
   private readonly getActiveJobIds?: () => Array<{ jobId: string; kind: string }>;
   private readonly maxBufferedSnapshots: number;
@@ -170,6 +173,7 @@ export class AgentTransport {
     this.onSetupLogAttach = options.onSetupLogAttach;
     this.onSetupValidate = options.onSetupValidate;
     this.onUsageAck = options.onUsageAck;
+    this.onLogAck = options.onLogAck;
     this.onReconnect = options.onReconnect;
     this.getActiveJobIds = options.getActiveJobIds;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
@@ -234,6 +238,27 @@ export class AgentTransport {
     if (!this.ready) return false;
     try {
       this.sendRaw({ type: "usage-batch", schemaVersion: this.schemaVersion, agentVersion: this.agentVersion, events });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * IRI-078: sends one durable log batch with the agent's cumulative drop
+   * count; false when offline or the socket rejected it. Never WS-buffered —
+   * the durable log buffer owns retries (usage-batch contract).
+   */
+  sendLogBatch(events: LogEvent[], dropped: number): boolean {
+    if (!this.ready) return false;
+    try {
+      this.sendRaw({
+        type: "log-batch",
+        schemaVersion: this.schemaVersion,
+        agentVersion: this.agentVersion,
+        events,
+        dropped,
+      });
       return true;
     } catch {
       return false;
@@ -438,6 +463,9 @@ export class AgentTransport {
         break;
       case "usage-batch-ack":
         this.onUsageAck?.(parsed.data.ids);
+        break;
+      case "log-batch-ack":
+        this.onLogAck?.(parsed.data.ids);
         break;
       case "error":
         // Harmless frame-reject (e.g. our job frames on an older server) or a
