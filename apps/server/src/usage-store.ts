@@ -8,6 +8,7 @@ import {
   usageRequestSchema,
   type Currency,
   type UsageAgentsResponse,
+  type UsageRetriesResponse,
   type UsageCostGroupBy,
   type UsageCostResponse,
   type UsageErrorsResponse,
@@ -159,6 +160,8 @@ export interface UsageStore {
   models(filters: UsageFilters): Promise<UsageModelsResponse>;
   /** Client-identity groups over raw rows (IR-55 Agents view). */
   agents(filters: UsageFilters): Promise<UsageAgentsResponse>;
+  /** IRI-076: superseded retry attempts grouped per client key with waste cost. */
+  retries(filters: { range: UsageRange; nodeId?: string }): Promise<UsageRetriesResponse>;
   /** Tool attribution table + top-tool token series (IR-54 Tools view). */
   tools(filters: UsageFilters): Promise<UsageToolsResponse>;
   /** Deletes raw requests older than `olderThan`; returns the deleted count. */
@@ -1180,6 +1183,79 @@ export function createUsageStore(db: Db, opts: UsageStoreOptions = {}): UsageSto
           };
         }),
         series,
+        costCurrency: pricing?.currency ?? null,
+      };
+    },
+
+    /**
+     * IRI-076: retry waste — superseded attempts (retry_superseded_by set)
+     * grouped per client key, cost priced per (group × model) via the
+     * snapshot. This is the money a retry storm burned.
+     */
+    async retries({ range, nodeId }) {
+      const sinceIso = new Date(Date.now() - usageRangeMs(range)).toISOString();
+      const conds = [sql`r.received_at >= ${sinceIso}::timestamptz`, sql`r.retry_superseded_by is not null`];
+      if (nodeId !== undefined) conds.push(sql`r.node_id = ${nodeId}`);
+      const where = sql.join(conds, sql` and `);
+      const rows = await db.execute(sql`
+        select
+          r.client_name as name, r.client_project as project,
+          r.client_agent_type as agent_type,
+          case when r.client_key_hash is null and r.client_name is null
+                    and r.client_project is null and r.client_agent_type is null
+               then r.source_addr else null end as fallback_addr,
+          count(*)::int as attempts, max(r.received_at) as last_seen
+        from llm_requests r
+        where ${where}
+        group by 1, 2, 3, 4
+        order by count(*) desc, max(r.received_at) desc
+        limit 200
+      `);
+      const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+      const groupKey = (r: Record<string, unknown>): string =>
+        `${str(r.project) ?? ""}|${str(r.agent_type) ?? ""}|${str(r.name) ?? ""}|${str(r.fallback_addr) ?? ""}`;
+      const pricing = opts.pricing === undefined ? null : await opts.pricing();
+      const costByGroup = new Map<string, number>();
+      let retriesCostMinor = 0;
+      if (pricing !== null) {
+        const perModel = await db.execute(sql`
+          select
+            r.client_name as name, r.client_project as project,
+            r.client_agent_type as agent_type,
+            case when r.client_key_hash is null and r.client_name is null
+                      and r.client_project is null and r.client_agent_type is null
+                 then r.source_addr else null end as fallback_addr,
+            r.model,
+            coalesce(sum(r.prompt_tokens), 0)::float8 as prompt_tokens,
+            coalesce(sum(r.cached_tokens), 0)::float8 as cached_tokens,
+            coalesce(sum(r.completion_tokens), 0)::float8 as completion_tokens
+          from llm_requests r
+          where ${where}
+          group by 1, 2, 3, 4, r.model
+        `);
+        for (const r of perModel as unknown as Array<Record<string, unknown>>) {
+          const minor = tokenCostMinor(
+            { promptTokens: Number(r.prompt_tokens ?? 0), cachedTokens: Number(r.cached_tokens ?? 0), completionTokens: Number(r.completion_tokens ?? 0) },
+            pricing.resolve(str(r.model) ?? ""),
+          );
+          if (minor !== null) {
+            retriesCostMinor += minor;
+            costByGroup.set(groupKey(r), (costByGroup.get(groupKey(r)) ?? 0) + minor);
+          }
+        }
+      }
+      return {
+        range,
+        groups: (rows as unknown as Array<Record<string, unknown>>).map((r) => ({
+          clientName: str(r.name),
+          clientProject: str(r.project),
+          clientAgentType: r.agent_type === "main" || r.agent_type === "subagent" ? r.agent_type : null,
+          sourceAddr: str(r.fallback_addr),
+          attempts: Number(r.attempts),
+          costMinor: costByGroup.get(groupKey(r)) ?? 0,
+          lastSeenMs: new Date(String(r.last_seen)).getTime(),
+        })),
+        retriesCostMinor,
         costCurrency: pricing?.currency ?? null,
       };
     },
