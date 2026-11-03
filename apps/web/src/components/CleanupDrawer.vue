@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { createJob, fetchJob, type JobDetail } from "../models";
 import { fetchCleanup, setWeeklySafePass, type CleanupState } from "../api";
-import { DISK_WARN_PCT, fmtBytes } from "../analytics";
+import { fmtBytes } from "../analytics";
+import { thresholds } from "../thresholds";
 import { HYGIENE_CATEGORY_LABELS, HYGIENE_SAFE_CATEGORIES, type HygieneCategory } from "@irori/core";
 import { vScrimClose } from "../scrim";
 
@@ -181,7 +182,7 @@ const diskPct = computed(() => {
 });
 
 const diskChipCls = computed(() =>
-  diskPct.value !== null && diskPct.value >= DISK_WARN_PCT ? "chip--warn" : "chip",
+  diskPct.value !== null && diskPct.value >= thresholds.diskWarnPct ? "chip--warn" : "chip",
 );
 
 function catLabel(category: string): string {

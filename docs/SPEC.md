@@ -518,6 +518,8 @@ reported in every snapshot; upgrade = re-run install.
 | Audit & journal | `GET /api/v1/audit?range=&actor=&domain=&targetId=&q=&cursor=&limit=` (durable mutation record, IRI-077), `GET /api/v1/events/journal?range=&type=&nodeId=&limit=&cursor=` (restart-surviving SSE frames, IRI-077) |
 | Logs | `GET /api/v1/logs?nodeId=&setupId=&runId=&jobId=&scope=&source=&level=&q=&range=&limit=&cursor=&after=` + `GET /api/v1/logs/summary` (durable structured record behind the rings, IRI-078) |
 | Clocks | `GET /api/v1/nodes/:id/clocks`, `POST /api/v1/nodes/:id/clocks` |
+| Power | `POST /api/v1/nodes/:id/shutdown` (armed two-step), `POST /api/v1/nodes/:id/wake` (WoL), `PUT /api/v1/nodes/:id/clock-cap` (IRI-068) |
+| Health & metrics | `GET /api/v1/health/{rules,findings,thresholds}`, `PUT /api/v1/health/rules/:id`, `GET/PUT /api/v1/settings/metrics`, `GET /api/v1/metrics` (Prometheus, IRI-069) |
 | Meta | `GET /healthz`, `GET /api/v1/version`, `GET /api/v1/settings`, `PUT /api/v1/settings`, `GET/PUT /api/v1/settings/hf-token` (global HF token, ADR-0009), `GET/PUT /api/v1/settings/cadence-ms` (snapshot cadence, IR-87), `GET/PUT /api/v1/settings/energy-cost` + `/token-cost` (cost settings, IRI-025), `GET/PUT /api/v1/settings/modelctl-pin` (modelctl pin + auto-provisioning, IR-105), WS `/agent-ws` |
 
 ## 14. Deviations & deferred

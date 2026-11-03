@@ -9,7 +9,9 @@ import {
   setClockCap,
   shutdownNode,
   wakeNode,
+  fetchHealthFindings,
   HISTORY_RANGES,
+  type HealthFinding,
   type HistoryRange,
   type HistoryResponse,
   type LlmHistoryResponse,
@@ -300,6 +302,20 @@ const kernelWarn = computed(() => {
 
 const interfaces = computed(() => snapshot.value?.network ?? []);
 const storageRows = computed(() => snapshot.value?.storage ?? []);
+
+/** IRI-069: open health findings for this node (severity chips in the header). */
+const findings = ref<HealthFinding[]>([]);
+watch(
+  () => props.nodeId,
+  () => {
+    void fetchHealthFindings()
+      .then((rows) => {
+        findings.value = rows.filter((f) => f.nodeId === props.nodeId);
+      })
+      .catch(() => {});
+  },
+  { immediate: true },
+);
 
 const linkLabel = (speedMbps: number | null): string =>
   speedMbps === null ? "?" : speedMbps >= 1000 ? `${(speedMbps / 1000).toLocaleString("en-US")} Gb/s` : `${speedMbps.toLocaleString("en-US")} Mb/s`;
@@ -781,6 +797,12 @@ onUnmounted(() => {
             <span class="chip">{{ node?.host }}</span>
             <span v-if="card.agentVersion" class="chip">Agent {{ card.agentVersion }}</span>
             <span v-if="drift" class="chip chip--warn">update available</span>
+            <span
+              v-for="f in findings"
+              :key="f.ruleId"
+              class="chip chip--warn"
+              :title="`${f.severity.toUpperCase()} · ${f.summary} · since ${new Date(f.since).toLocaleTimeString()}`"
+            >{{ f.severity === "critical" ? "▪" : "◇" }} {{ f.summary }}</span>
             <span
               v-if="kernelWarn"
               class="chip chip--warn"

@@ -18,7 +18,8 @@ import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
 import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
-import { CADENCE_MAX_MS, CADENCE_MIN_MS, type Currency } from "@irori/core";
+import { createHealthService, type HealthService } from "./health.js";
+import { CADENCE_MAX_MS, CADENCE_MIN_MS, type Currency, type HardwareSnapshot } from "@irori/core";
 import { createRollupEngine, type RollupEngine } from "./rollups.js";
 import { createLlmRollupEngine } from "./llm-rollups.js";
 import { createLlmStore, type LlmStore } from "./llm-store.js";
@@ -103,6 +104,7 @@ const state: {
   history: HistoryBuilder | null;
   llmHistory: LlmHistoryBuilder | null;
   modelctlPin: ModelctlPinService | null;
+  health: HealthService | null;
   /** IRI-077: durable audit log + restart-surviving event journal. */
   audit: AuditService | null;
   eventJournal: EventJournalService | null;
@@ -116,6 +118,7 @@ const state: {
   cadence: null,
   cost: null,
   modelctlPin: null,
+  health: null,
   llmStore: null,
   jobs: null,
   downloads: null,
@@ -169,6 +172,17 @@ const app = createApp({
   rings,
   sse,
   getHub: () => state.hub,
+  getHealth: () => state.health,
+  getNodesSnapshot: async () => {
+    const rows = await state.store?.list() ?? [];
+    const online = state.hub?.online() ?? new Set<string>();
+    return rows.map((n) => ({
+      id: n.id,
+      name: n.name,
+      online: online.has(n.id),
+      snapshot: rings.latest(n.id) ?? null,
+    }));
+  },
   getHfToken: () => state.hfToken,
   getCadence: () => state.cadence,
   getCost: () => state.cost,
@@ -255,6 +269,32 @@ async function boot(): Promise<void> {
 
   // IR-105: hub-pinned modelctl version (config-update + auto-provisioning).
   state.modelctlPin = createModelctlPinService(dbHandle.db);
+
+  // IRI-069: health rules engine — seeded on boot, evaluated on snapshot
+  // ingest (via the wrapped store below) plus a 30 s offline/gap sweep.
+  state.health = createHealthService(dbHandle.db, config.encryptionKey!, {
+    sse: (e) => sse.send(e),
+    journal: (e) => state.eventJournal?.journal(e) ?? Promise.resolve(),
+    fetchImpl: fetch,
+  });
+  await state.health.ensureSeed().catch((err: unknown) => log.warn("health seed failed: " + String(err)));
+  const health = state.health;
+  const wrappedStore: NodeStore = {
+    ...store,
+    async insertSnapshot(nodeId, payload: HardwareSnapshot) {
+      await store.insertSnapshot(nodeId, payload);
+      void health.onSnapshot(nodeId, payload).catch(() => {});
+    },
+  };
+  state.store = wrappedStore;
+  setInterval(() => {
+    void (async () => {
+      const nodes = await store.list();
+      const online = hub?.online() ?? new Set<string>();
+      const lastSeen = new Map(nodes.map((n) => [n.id, n.lastSeenAt?.getTime() ?? Date.now()]));
+      await health.sweep(nodes, online, lastSeen);
+    })().catch(() => {});
+  }, 30_000);
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).

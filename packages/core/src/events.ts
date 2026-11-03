@@ -160,6 +160,20 @@ export const logUpdateEventSchema = z.object({
   latestId: z.string().regex(/^\d+$/).nullable(),
 });
 
+/** IRI-069: a health rule opened or cleared (durable journal + live feed). */
+export const healthEventSchema = z.object({
+  type: z.literal("health"),
+  serverTimeMs: z.number(),
+  /** null for fleet-scoped rules. */
+  nodeId: z.string().uuid().nullable(),
+  ruleId: z.string().uuid(),
+  ruleName: z.string(),
+  metric: z.string(),
+  severity: z.string(),
+  state: z.literal("open").or(z.literal("clear")),
+  summary: z.string(),
+});
+
 export const sseEventSchema = z.discriminatedUnion("type", [
   snapshotEventSchema,
   nodeStatusEventSchema,
@@ -174,6 +188,7 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   thermalEventSchema,
   usageEventSchema,
   logUpdateEventSchema,
+  healthEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;

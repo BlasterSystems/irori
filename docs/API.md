@@ -351,6 +351,24 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   with the same name is refused, never overwritten. `400` on
   `persistent` without `capMHz` or a non-integer cap.
 
+## Health rules, findings & metrics (IRI-069)
+
+- `GET /api/v1/health/rules` — the seeded rule set (GPU temp warn/critical,
+  disk warn, kernel Xid, throttle, power envelope, node offline, telemetry
+  gap) with live thresholds. `PUT /api/v1/health/rules/:id` (`{name?,
+  threshold?, severity?, cooldownSec?, enabled?, webhookUrl?}`) tunes a rule;
+  the webhook URL is stored encrypted (ADR-0002) and never returned
+  (`hasWebhook` only). Audited.
+- Evaluation runs on snapshot ingest + a 30 s offline/gap sweep; open/clear
+  transitions emit `health` SSE events (journaled) and one webhook POST per
+  cooldown window per rule. `GET /api/v1/health/findings` returns the open
+  findings (NodeDetail renders severity chips).
+- `GET /api/v1/health/thresholds` — the UI threshold values (temp warn /
+  critical, disk warn); the web has no second copy.
+- `GET /api/v1/metrics` — Prometheus text exposition (irori_up, per-node
+  gauges, irori_collector_last_success_timestamp_seconds). **404 while
+  disabled**; `GET/PUT /api/v1/settings/metrics` flips the flag (audited).
+
 ## Clocks (IRI-067)
 
 - `GET /api/v1/nodes/:id/clocks` — live per-GPU clocks + application clock

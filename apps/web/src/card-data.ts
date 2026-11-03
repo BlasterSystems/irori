@@ -1,6 +1,7 @@
 import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
 import { GB10_SOC_TDP_W } from "@irori/core";
-import { fmtBytes, fmtWatts, DISK_WARN_PCT, TEMPS_WARN_C } from "./analytics";
+import { fmtBytes, fmtWatts } from "./analytics";
+import { thresholds } from "./thresholds";
 import { llmSummaryLine, nodeLlmPorts } from "./llm-data";
 
 export interface CardRow {
@@ -58,7 +59,7 @@ export function formatMetricLine(...parts: Array<string | null>): string {
 
 /** Hot-temp accent at the app-wide warn tier (70 °C, analytics.ts). */
 export function isHotTemp(tempC: number | null): boolean {
-  return tempC !== null && tempC >= TEMPS_WARN_C;
+  return tempC !== null && tempC >= thresholds.tempWarnC;
 }
 
 /**
@@ -143,7 +144,7 @@ export function computeCardData(
       freePct: 100 - (bestMount.usedBytes / bestMount.totalBytes) * 100,
       line: `${fmtBytes(bestMount.usedBytes)} / ${fmtBytes(bestMount.totalBytes)}`,
       tempC: null,
-      warn: diskPctValue >= DISK_WARN_PCT,
+      warn: diskPctValue >= thresholds.diskWarnPct,
     };
   }
 
