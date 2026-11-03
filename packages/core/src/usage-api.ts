@@ -182,6 +182,8 @@ export const usageAgentsResponseSchema = z.object({
   groups: z.array(usageAgentGroupSchema),
   /** True when high cardinality exceeded the 200-group cap. */
   truncated: z.boolean().default(false),
+  /** IRI-074: pricing currency; null = unset (UI shows the CTA). */
+  costCurrency: currencySchema.nullable().default(null),
 });
 
 export type UsageAgentsResponse = z.infer<typeof usageAgentsResponseSchema>;
@@ -209,6 +211,8 @@ export const usageToolsResponseSchema = z.object({
   tools: z.array(usageToolRowSchema),
   /** Token series for the top tools (tokens = prompt + completion shares). */
   series: z.array(z.object({ tool: z.string(), points: z.array(usageToolSeriesPointSchema) })),
+  /** IRI-074: pricing currency; null = unset (UI shows the CTA). */
+  costCurrency: currencySchema.nullable().default(null),
 });
 export type UsageToolsResponse = z.infer<typeof usageToolsResponseSchema>;
 
