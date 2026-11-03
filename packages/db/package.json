@@ -17,7 +17,7 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
-    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=69"
+    "test:coverage": "vitest run --coverage --coverage.thresholds.lines=75"
   },
   "dependencies": {
     "@irori/core": "workspace:*",
