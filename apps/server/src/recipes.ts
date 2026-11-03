@@ -182,7 +182,8 @@ export interface RecipeService {
   draft(jobId: string): Promise<RecipeInstall | null>;
 }
 
-export function createRecipesService(db: Db, opts: { createJob: (nodeId: string, kind: string, params: unknown) => Promise<{ id: string }> }): RecipeService {
+export function createRecipesService(db: Db, opts: { createJob: (nodeId: string, kind: string, params: unknown) => Promise<{ id: string }>; fetchImpl?: typeof fetch }): RecipeService {
+  const fetchImpl = opts.fetchImpl ?? fetch;
   return {
     async list() {
       // Unpinned entries (offline boot) stay hidden until the pin pass lands.
@@ -195,7 +196,7 @@ export function createRecipesService(db: Db, opts: { createJob: (nodeId: string,
     async pin(id) {
       const entry = await getRecipe(db, id);
       if (entry === null) return null;
-      const sha = await pinLatestSha(entry.upstreamUrl, fetch);
+      const sha = await pinLatestSha(entry.upstreamUrl, fetchImpl);
       if (sha === null) return null;
       await db.update(recipeCatalog).set({ commitSha: sha, fetchedAt: new Date() }).where(eq(recipeCatalog.id, id));
       return sha;
@@ -204,12 +205,12 @@ export function createRecipesService(db: Db, opts: { createJob: (nodeId: string,
       const entry = await getRecipe(db, id);
       if (entry === null) throw new Error("recipe not found");
       if (entry.commitSha === "") {
-        const sha = await pinLatestSha(entry.upstreamUrl, fetch);
+        const sha = await pinLatestSha(entry.upstreamUrl, fetchImpl);
         if (sha === null) throw new Error("recipe is unpinned and the upstream pin failed");
         await db.update(recipeCatalog).set({ commitSha: sha, fetchedAt: new Date() }).where(eq(recipeCatalog.id, id));
         entry.commitSha = sha;
       }
-      const params = await buildStageParams(entry, fetch);
+      const params = await buildStageParams(entry, fetchImpl);
       if (params === null) throw new Error("recipe staging failed (upstream fetch)");
       const job = await opts.createJob(req.headNodeId, "recipe-install", {
         ...params,
