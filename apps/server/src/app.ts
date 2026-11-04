@@ -2079,9 +2079,14 @@ export function createApp(deps: AppDeps): Express {
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (res.headersSent) return;
-    const e = err as { status?: number; type?: string } | null;
+    const e = err as { status?: number; type?: string; message?: string } | null;
     const status = e?.type === "entity.parse.failed" ? 400 : (e?.status ?? 500);
-    res.status(status).json({ error: status >= 500 ? "internal server error" : "bad request" });
+    // LAN-trust hub (ADR-0010 §8): a 5xx body carries the message so a fleet
+    // operator can diagnose without shell access; stacks stay in the logs.
+    console.error(`[500] ${_req.method} ${_req.path}:`, err);
+    const body: Record<string, unknown> = { error: status >= 500 ? "internal server error" : "bad request" };
+    if (status >= 500 && e instanceof Error && e.message) body.detail = e.message.slice(0, 300);
+    res.status(status).json(body);
   });
 
   return app;
