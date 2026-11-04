@@ -6,6 +6,7 @@ import {
   CPU_CAP_UNIT,
   cpuCapScriptBody,
   cpuCapUnitBody,
+  mergeClocksReply,
   persistCpuCap,
   readCpuClocks,
   setCpuCap,
@@ -139,6 +140,28 @@ describe("setCpuCap", () => {
     const r = await setCpuCap(1400, root);
     expect(r.ok).toBe(false);
     expect(r.error).toContain("no cpufreq policies");
+  });
+});
+
+describe("mergeClocksReply", () => {
+  const cpuBlock = { capMHz: 2000, policies: [{ cpus: [0], minKHz: 338_000, maxKHz: 2_808_000, curMaxKHz: 2_000_000 }] };
+
+  it("is ok when the GPU half produced a reading", () => {
+    const r = mergeClocksReply({ ok: true, gpus: [], error: null }, { ok: true, cpu: cpuBlock, error: null });
+    expect(r.ok).toBe(true);
+    expect(r.cpu).toEqual(cpuBlock);
+    expect(r.error).toBeNull();
+  });
+
+  it("is still ok when nvidia-smi is missing but cpufreq is readable", () => {
+    const r = mergeClocksReply({ ok: false, gpus: [], error: "spawn nvidia-smi ENOENT" }, { ok: true, cpu: cpuBlock, error: null });
+    expect(r.ok).toBe(true);
+    expect(r.error).toBe("spawn nvidia-smi ENOENT"); // kept for context
+  });
+
+  it("is not ok when neither half is readable", () => {
+    const r = mergeClocksReply({ ok: false, gpus: [], error: "spawn nvidia-smi ENOENT" }, { ok: true, cpu: null, error: null });
+    expect(r.ok).toBe(false);
   });
 });
 

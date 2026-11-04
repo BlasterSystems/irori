@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { ClocksCpu, ClocksCpuPolicy } from "@irori/core";
+import type { ClocksCpu, ClocksCpuPolicy, ClocksGpu } from "@irori/core";
 
 /**
  * IRI-124: CPU clock ceiling via cpufreq.
@@ -138,6 +138,24 @@ export async function setCpuCap(
   }
   const after = await readCpuClocks(sysRoot);
   return { ok: after.ok, error: after.error, cpu: after.cpu };
+}
+
+/**
+ * IRI-124: composite clocks reply. The frame is ok when EITHER half produced a
+ * reading — a gpu-host or NAS without `nvidia-smi` must still report usable CPU
+ * clock state, and a box without cpufreq must still report its cards. The error
+ * string keeps whichever half failed (empty when both worked).
+ */
+export function mergeClocksReply(
+  gpu: { ok: boolean; gpus: ClocksGpu[]; error: string | null },
+  cpu: { ok: boolean; cpu: ClocksCpu | null; error: string | null },
+): { ok: boolean; gpus: ClocksGpu[]; cpu: ClocksCpu | null; error: string | null } {
+  return {
+    ok: gpu.ok || cpu.cpu !== null,
+    gpus: gpu.gpus,
+    cpu: cpu.cpu,
+    error: gpu.error ?? cpu.error,
+  };
 }
 
 /** Boot-time re-apply script; `capMHz` is an integer, never shell-interpolated input. */
