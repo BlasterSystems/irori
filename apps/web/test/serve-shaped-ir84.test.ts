@@ -111,3 +111,23 @@ describe("ServeView setup actions", () => {
     w.unmount();
   });
 });
+
+describe("ServeView recipe deep-link", () => {
+  it("stages a recipe draft into a pre-filled wizard", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/recipes/drafts/")) {
+        return new Response(JSON.stringify({ name: "MIA-GLM", port: 8083, kind: "single", headNodeId: UUID, workerNodeIds: [], startupTimeoutMs: 900000, scriptStart: "start.sh", scriptStop: "stop.sh", recipeId: "mia" }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      const body = url === "/api/v1/setups" ? { setups: [] } : { setup: null, transfers: [] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const { default: ServeView } = await import("../src/components/ServeView.vue");
+    const w = mount(ServeView as never, { props: { route: { recipeJob: "job-1" } } as never });
+    await new Promise((r) => setTimeout(r, 120));
+    const text = w.text();
+    expect(text).toContain("Recipe draft MIA-GLM staged");
+    expect(text).toContain("MIA-GLM"); // wizard name pre-filled
+    w.unmount();
+  });
+});

@@ -16,6 +16,8 @@ const chart: LensChart = {
   times: [1000, 2000, 3000],
   guides: [],
   markers: [],
+  guides: [{ y: 50, value: 50 }],
+  markers: [{ x: 100, tier: "warn" }],
   yMin: 0,
   yMax: 100,
   width: 300,
