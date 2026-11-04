@@ -3,15 +3,18 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { live } from "../live";
 import {
   deleteNode,
+  fetchClocks,
   fetchHistory,
   fetchNodeVersions,
   fetchLlmHistory,
   fetchNodeLlm,
   setClockCap,
+  setCpuClockCap,
   shutdownNode,
   wakeNode,
   fetchHealthFindings,
   HISTORY_RANGES,
+  type ClocksResponse,
   type HealthFinding,
   type NodeVersionsResponse,
   type UpdatesResponse,
@@ -22,7 +25,13 @@ import {
   type LlmSnapshot,
 } from "../api";
 import { computeCardData, formatGiB, formatPct, formatTemp, isHotTemp } from "../card-data";
-import { computeDetailData, formatRate } from "../detail-data";
+import {
+  capOptions,
+  computeDetailData,
+  CPU_CLOCK_CAP_PRESETS,
+  formatRate,
+  GPU_CLOCK_CAP_PRESETS,
+} from "../detail-data";
 import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import { cancelJob, createJob, fetchJob, jobStatusChip, startAgentUpdate, type JobDetail } from "../models";
@@ -67,6 +76,7 @@ const notFound = computed(() => node.value === null && live.nodes.size > 0);
  *  of the shared formatters' domains — series values are already non-null. */
 const tipPct = (v: number): string => formatPct(v) ?? "";
 const tipRate = (v: number): string => formatRate(v) ?? "";
+const tipTemp = (v: number): string => `${Math.round(v)} °C`;
 
 const range = ref<HistoryRange>("24h");
 const history = ref<HistoryResponse | null>(null);
@@ -98,6 +108,7 @@ watch(
   () => {
     void load();
     void loadLlm();
+    void loadClocks();
     // IRI-010 lesson: one component instance across :nodeId changes — the
     // next node must not inherit "updating…" state from the previous one.
     updateBusy.value = false;
@@ -111,6 +122,7 @@ watch(range, () => {
 onMounted(() => {
   void load();
   void loadLlm();
+  void loadClocks();
   void loadInventory();
 });
 onUnmounted(() => {
@@ -239,6 +251,10 @@ async function onWake(): Promise<void> {
   }
 }
 
+/* ── IRI-068 / IRI-124: GPU and CPU clock caps ───────────────────────────────
+   The GPU half lives on the node row; the CPU half reads its per-policy state
+   from GET /clocks, which also tells us whether the agent knows the feature. */
+
 const capInput = ref<string>("");
 const capPersist = ref(false);
 const capBusy = ref(false);
@@ -253,19 +269,81 @@ watch(
   { immediate: true },
 );
 
+const cpuCapInput = ref<string>("");
+const cpuCapPersist = ref(false);
+const cpuCapBusy = ref(false);
+const cpuCapMsg = ref<string | null>(null);
+const cpuCapError = ref<string | null>(null);
+watch(
+  () => node.value?.cpuClockCapMHz,
+  (v) => {
+    cpuCapInput.value = v === null || v === undefined ? "" : String(v);
+    cpuCapPersist.value = node.value?.cpuClockCapPersistent === true;
+  },
+  { immediate: true },
+);
+
+const clocks = ref<ClocksResponse | null>(null);
+const clocksLoaded = ref(false);
+/** Old agents answer GET /clocks without the cpu block — no CPU control there. */
+const cpuSupported = computed(() => clocks.value?.cpu != null);
+/** One line of applied-vs-maximum per CPU policy cluster. */
+const cpuEffective = computed(() => {
+  const policies = clocks.value?.cpu?.policies ?? [];
+  if (policies.length === 0) return null;
+  return policies
+    .map((p) => `${p.cpus.length} core${p.cpus.length === 1 ? "" : "s"} ${Math.round(p.curMaxKHz / 1000).toLocaleString("en-US")} MHz`)
+    .join(" · ");
+});
+
+const gpuCapOptions = computed(() => capOptions(GPU_CLOCK_CAP_PRESETS, node.value?.gpuClockCapMHz));
+const cpuCapOptions = computed(() => capOptions(CPU_CLOCK_CAP_PRESETS, node.value?.cpuClockCapMHz));
+
+async function loadClocks(): Promise<void> {
+  try {
+    clocks.value = await fetchClocks(props.nodeId);
+  } catch {
+    clocks.value = null;
+  } finally {
+    clocksLoaded.value = true;
+  }
+}
+
 async function applyCap(clear: boolean): Promise<void> {
   capBusy.value = true;
   capError.value = null;
   capMsg.value = null;
   try {
     const capMHz = clear ? null : Number.parseInt(capInput.value, 10);
-    if (!clear && (!Number.isInteger(capMHz) || capMHz! <= 0)) throw new Error("cap must be a positive integer MHz");
+    if (!clear && (!Number.isInteger(capMHz) || capMHz! <= 0)) throw new Error("pick a clock cap first");
     await setClockCap(props.nodeId, clear ? null : (capMHz as number), capPersist.value);
     capMsg.value = clear ? "cap cleared — driver defaults restored" : `cap ${capMHz as number} MHz applied${capPersist.value ? " (persists across reboots)" : ""}`;
+    void live.refreshNodes();
+    await loadClocks();
   } catch (err: unknown) {
     capError.value = err instanceof Error ? err.message : String(err);
   } finally {
     capBusy.value = false;
+  }
+}
+
+async function applyCpuCap(clear: boolean): Promise<void> {
+  cpuCapBusy.value = true;
+  cpuCapError.value = null;
+  cpuCapMsg.value = null;
+  try {
+    const capMHz = clear ? null : Number.parseInt(cpuCapInput.value, 10);
+    if (!clear && (!Number.isInteger(capMHz) || capMHz! <= 0)) throw new Error("pick a CPU cap first");
+    await setCpuClockCap(props.nodeId, clear ? null : (capMHz as number), cpuCapPersist.value);
+    cpuCapMsg.value = clear
+      ? "CPU cap cleared — every policy back to its maximum"
+      : `CPU cap ${capMHz as number} MHz applied${cpuCapPersist.value ? " (persists across reboots)" : ""}`;
+    void live.refreshNodes();
+    await loadClocks();
+  } catch (err: unknown) {
+    cpuCapError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    cpuCapBusy.value = false;
   }
 }
 
@@ -829,8 +907,8 @@ onUnmounted(() => {
     <div class="pagehead">
       <div>
         <p class="label" style="margin: 0 0 4px;">Nodes / {{ node?.name ?? "…" }}</p>
-        <div class="row">
-          <h1>{{ node?.name ?? nodeId }}</h1>
+        <div class="row row--wrap">
+          <h1 :title="node?.name ?? nodeId">{{ node?.name ?? nodeId }}</h1>
           <template v-if="card">
             <span v-if="card.role !== 'standalone'" class="chip chip--accent">{{ card.role }}</span>
             <span class="chip">{{ card.kind }}</span>
@@ -1158,7 +1236,42 @@ onUnmounted(() => {
         <div class="card__head"><h3>CPU</h3><span class="mono faint">{{ detail.cpu.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.cpu.current">
-            <Sparkline :points="detail.cpu.series" :domain="{ min: 0, max: 100 }" :format="tipPct" :aria-label="`CPU usage, ${range}`" />
+            <!-- IRI-124: usage line + temperature on its own dashed scale. -->
+            <Sparkline
+              :points="detail.cpu.series"
+              :points2="detail.cpu.tempSeries"
+              :domain="{ min: 0, max: 100 }"
+              :format="tipPct"
+              :format2="tipTemp"
+              label="usage"
+              label2="temp"
+              :aria-label="`CPU usage and temperature, ${range}`"
+            />
+            <p class="chart-legend">
+              <span><span class="chart-legend__line" aria-hidden="true"></span>usage</span>
+              <span><span class="chart-legend__line chart-legend__line--dashed" aria-hidden="true"></span>temp °C</span>
+            </p>
+            <!-- IRI-124: CPU clock cap (ceiling per cpufreq policy). -->
+            <div v-if="cpuSupported" class="row" style="margin-top: 8px; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <select
+                v-model="cpuCapInput"
+                class="select"
+                style="max-width: 165px;"
+                aria-label="CPU clock cap in MHz"
+              >
+                <option value="" disabled>pick a cap</option>
+                <option v-for="o in cpuCapOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+              <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
+                <input v-model="cpuCapPersist" type="checkbox" /> keep after reboot
+              </label>
+              <button class="btn btn--secondary btn--sm" :disabled="cpuCapBusy || node?.online !== true || cpuCapInput === ''" @click="applyCpuCap(false)">Apply</button>
+              <button class="btn btn--ghost btn--sm" :disabled="cpuCapBusy || node?.online !== true" @click="applyCpuCap(true)">Clear</button>
+            </div>
+            <p v-else-if="clocksLoaded && clocks !== null" class="stat__sub">agent too old for CPU caps — update the agent</p>
+            <p v-if="cpuEffective !== null" class="stat__sub">effective {{ cpuEffective }}</p>
+            <p v-if="cpuCapMsg" class="stat__sub">{{ cpuCapMsg }}</p>
+            <p v-if="cpuCapError" class="banner banner--warn">{{ cpuCapError }}</p>
             <p v-if="detail.cpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.cpu.sub }}</p>
             <p v-for="note in detail.cpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
@@ -1188,21 +1301,32 @@ onUnmounted(() => {
         <div class="card__head"><h3>GPU</h3><span class="mono faint">{{ detail.gpu.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.gpu.current">
-            <Sparkline :points="detail.gpu.series" :domain="{ min: 0, max: 100 }" :format="tipPct" :aria-label="`GPU usage, ${range}`" />
-            <!-- IRI-068: GPU clock cap (community thermal/noise lever). -->
+            <!-- IRI-124: usage line + temperature on its own dashed scale. -->
+            <Sparkline
+              :points="detail.gpu.series"
+              :points2="detail.gpu.tempSeries"
+              :domain="{ min: 0, max: 100 }"
+              :format="tipPct"
+              :format2="tipTemp"
+              label="usage"
+              label2="temp"
+              :aria-label="`GPU usage and temperature, ${range}`"
+            />
+            <p class="chart-legend">
+              <span><span class="chart-legend__line" aria-hidden="true"></span>usage</span>
+              <span><span class="chart-legend__line chart-legend__line--dashed" aria-hidden="true"></span>temp °C</span>
+            </p>
+            <!-- IRI-068: GPU clock cap (community thermal/noise lever).
+                 IRI-124: presets instead of free text. -->
             <div class="row" style="margin-top: 8px; align-items: center; gap: 6px; flex-wrap: wrap;">
-              <input
-                v-model="capInput"
-                class="input"
-                inputmode="numeric"
-                placeholder="SM cap MHz"
-                style="max-width: 130px; padding: 4px 8px;"
-                aria-label="GPU SM clock cap in MHz"
-              />
+              <select v-model="capInput" class="select" style="max-width: 165px;" aria-label="GPU SM clock cap in MHz">
+                <option value="" disabled>pick a cap</option>
+                <option v-for="o in gpuCapOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
               <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
                 <input v-model="capPersist" type="checkbox" /> keep after reboot
               </label>
-              <button class="btn btn--secondary btn--sm" :disabled="capBusy || node?.online !== true" @click="applyCap(false)">Apply</button>
+              <button class="btn btn--secondary btn--sm" :disabled="capBusy || node?.online !== true || capInput === ''" @click="applyCap(false)">Apply</button>
               <button class="btn btn--ghost btn--sm" :disabled="capBusy || node?.online !== true" @click="applyCap(true)">Clear</button>
             </div>
             <p v-if="capMsg" class="stat__sub">{{ capMsg }}</p>
@@ -1304,7 +1428,7 @@ onUnmounted(() => {
               <Sparkline :points="detail.network.series2" :height="36" :format="tipRate" :aria-label="`Network transmit, ${range}`" />
               <span class="val">{{ detail.network.sub }}</span>
             </div>
-            <div v-for="n in interfaces" :key="n.iface" class="barrow">
+            <div v-for="n in interfaces" :key="n.iface" class="barrow barrow--net">
               <span :title="n.operState ?? ''">{{ n.iface }}</span>
               <span class="val">{{ linkLabel(n.speedMbps) }} · {{ n.operState ?? "?" }}<template v-if="n.addrs.length > 0"> · {{ n.addrs.join(", ") }}</template></span>
             </div>
@@ -1389,10 +1513,17 @@ onUnmounted(() => {
   min-height: 34px;
 }
 
-/* The h1 falls back to the raw node id until the registry loads; keep the
-   36-char UUID from forcing horizontal overflow on 390px phones. */
+/* IRI-124: the header row wraps (row--wrap) instead of squeezing the title —
+   .chip/.btn are white-space nowrap, so the h1 used to absorb every pixel of
+   overflow and collapse to one glyph per line. flex:none keeps the title whole;
+   the raw-id fallback (before the registry loads) gets an ellipsis instead of
+   forcing horizontal overflow on 390px phones. */
 h1 {
-  overflow-wrap: anywhere;
+  flex: none;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* IRI-028: node model tables */
