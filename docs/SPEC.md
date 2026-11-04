@@ -367,11 +367,21 @@ node**, with time ranges backed by rollups:
 - **Power (IRI-068):** armed two-step `POST /nodes/:id/shutdown` (10 s grace,
   origin logged, audited before dispatch) and WoL `POST /nodes/:id/wake`
   (magic packet to the stored `wolMac`, /24 directed + global broadcast).
-- CPU: per-core `cpufreq` `scaling_max_freq` cap (kHz) — **not** `max_perf` on
-  GB10 (accepted but re-derived); reset from `cpuinfo_max_freq`.
+- CPU (IRI-124): per-policy `cpufreq` `scaling_max_freq` ceiling — **not**
+  `max_perf` on GB10 (accepted but re-derived). A cap is a **ceiling, not an
+  operating point**: each policy receives `min(cap, cpuinfo_max_freq)`
+  clamped up to `cpuinfo_min_freq`, so a cap above a cluster's maximum leaves
+  that cluster untouched. GB10 exposes one policy per CPU in two clusters
+  (2,808 MHz efficiency cores, 3,900 MHz performance cores); the UI offers
+  `1400 / 2000 / 2800 MHz` presets plus Clear, and Clear restores each
+  policy's `cpuinfo_max_freq`. Boot-time re-apply:
+  `irori-cpu-clock-cap.service` → `/etc/irori/cpu-clock-cap.sh` (removed on
+  clear, same marker/collision guard as the GPU unit).
 - Executed by the **privileged agent directly** (it runs as root — no helper
-  install, no sudoers dance). Desired state (`gpu`, `cpu`) stored server-side;
-  re-applied on every node online transition. Fleet-wide apply to all Sparks.
+  install, no sudoers dance). Desired state (`gpuClockCap*`, `cpuClockCap*`)
+  is stored server-side. **Not yet implemented:** SPEC previously promised
+  re-apply on every node online transition and fleet-wide apply — neither
+  exists (for GPUs either); the boot-time oneshots are the only persistence.
 
 ## 11. Agent (per node)
 
