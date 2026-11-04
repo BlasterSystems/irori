@@ -1,7 +1,7 @@
 {
   "name": "irori",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Irori — AI fleet platform for DGX Spark homelabs",
   "packageManager": "pnpm@10.33.2",
   "pnpm": {
