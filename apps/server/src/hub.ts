@@ -110,6 +110,13 @@ export interface AgentHubDeps {
   /** Injectables for tests. */
   writeFlushMs?: number;
   markSeenThrottleMs?: number;
+  /**
+   * IR-177: override the agent-frame cap (bytes). Unset, the hub reads
+   * IRORI_MAX_FRAME_BYTES (default MAX_USAGE_FRAME_BYTES) so an operator can
+   * widen the cap and let a poisoned backlog drain while the agent-side
+   * size-bounding (IR-178) rolls out.
+   */
+  maxFrameBytes?: number;
 }
 
 export interface AgentHub {
@@ -131,6 +138,17 @@ export interface AgentHub {
 }
 
 /**
+ * IR-177: the agent-frame cap is env-tunable (IRORI_MAX_FRAME_BYTES, bytes).
+ * Default stays MAX_USAGE_FRAME_BYTES — the agent-side size-bounding (IR-178)
+ * is the real fix; the env override exists so a poisoned backlog can drain
+ * through a temporarily wider cap without an agent restart.
+ */
+function resolveMaxFrameBytes(): number {
+  const raw = Number.parseInt(process.env.IRORI_MAX_FRAME_BYTES?.trim() ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : MAX_USAGE_FRAME_BYTES;
+}
+
+/**
  * Agent WebSocket hub. First frame must be a hello; the token is verified via
  * the store, unsupported agent versions are refused, and snapshots/llm probe
  * passes fan out to the rings + SSE while being persisted fire-and-forget.
@@ -139,7 +157,7 @@ export interface AgentHub {
  * node's probe assignments and role-derived llm cadence.
  */
 export function createAgentHub(deps: AgentHubDeps): AgentHub {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_USAGE_FRAME_BYTES });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: deps.maxFrameBytes ?? resolveMaxFrameBytes() });
   const onlineNodes = new Set<string>();
   const nodeSockets = new Map<string, WebSocket>();
   const lastMarkedAt = new Map<string, number>();
@@ -464,6 +482,23 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       deps.setupEvents.onValidateResult(frame, senderNodeId);
       return Promise.resolve();
     };
+
+    // IR-177: a protocol violation (e.g. a frame over maxPayload) makes the
+    // ws receiver emit 'error' on this socket. Without a listener, node turns
+    // it into an unhandled 'error' event and the whole hub process dies — the
+    // 2026-11-04 incident (482 restarts). Log once, close gracefully; the
+    // close path reaps the registration and the agent reconnects.
+    let socketErrored = false;
+    ws.on("error", (err: Error) => {
+      if (socketErrored) return;
+      socketErrored = true;
+      log.error(`agent socket error from ${nodeId ?? "unauthenticated"} (${err.message}) — closing socket`);
+      try {
+        ws.close(1009, "frame too large");
+      } catch {
+        // The socket is already dead; the close handler reaps it.
+      }
+    });
 
     ws.on("close", () => {
       if (nodeId === null) return;

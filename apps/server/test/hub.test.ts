@@ -300,3 +300,24 @@ describe("agent hub", () => {
     ws.close();
   });
 });
+
+it("survives an oversized agent frame: logs, closes 1009, keeps serving (IR-177)", async () => {
+  const { url, created } = await setup({ maxFrameBytes: 1024 });
+  const ws = new WebSocket(url);
+  await opened(ws);
+  ws.send(hello(created.token));
+  expect(await nextMessage(ws)).toMatchObject({ type: "hello-ok" });
+  await nextMessage(ws); // config-update
+  // A frame over maxPayload makes the ws receiver emit 'error' on the server
+  // socket; without the IR-177 handler this became an unhandled 'error'
+  // event and killed the whole hub process (2026-11-04 incident).
+  ws.send("x".repeat(4096));
+  const closeCode = await new Promise<number>((resolve) => ws.once("close", (code) => resolve(code)));
+  expect(closeCode).toBe(1009);
+  // The hub is still alive and accepting new agents.
+  const ws2 = new WebSocket(url);
+  await opened(ws2);
+  ws2.send(hello(created.token));
+  expect(await nextMessage(ws2)).toMatchObject({ type: "hello-ok" });
+  ws2.close();
+});
