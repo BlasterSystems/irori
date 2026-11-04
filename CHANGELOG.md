@@ -6,6 +6,73 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-04
+
+The observability epic (IR-157): fleet-wide costs, energy, health, logs and
+traces — plus transfer hardening and capture/token-coverage fixes. Nothing
+breaking; all new capability is additive to existing endpoints and the wire
+schema.
+
+### Added
+
+- **Cost engine** (IRI-072): per-model pricing snapshots with hour+day
+  bucket stamping and a resumable backfill; every usage surface gained cost
+  fields priced per model, with an unset-pricing CTA where no snapshot
+  exists (IRI-074).
+- **Tokens lens** (IRI-075/076): computed/cached token split with
+  delta-vs-previous tiles, cache-hit rates, setup grouping, insight line,
+  CSV export, and an hourly cost trend from per-bucket ledger pricing;
+  retry-waste view (superseded attempts priced per client key), cost of
+  errors by signature, and per-session chat cost.
+- **Trace inspector** (IRI-079): typed queue/prefill/decode timings parsed
+  from engine meta, a span-tree endpoint, request-drawer waterfall with p50
+  comparison, failing-segment highlight and audit cross-link.
+- **Energy per token** (IRI-073): Wh-per-token efficiency endpoint joining
+  power buckets with the token ledger.
+- **Health + alerts** (IRI-069): rules engine with webhook alerts and a
+  Prometheus `/metrics` export (flag-gated); web thresholds now come from
+  the API.
+- **Power actions** (IRI-068): armed shutdown, Wake-on-LAN and persistent
+  clock cap per node.
+- **Telemetry parity** (IRI-067): link detail, storage I/O, memory
+  bandwidth and kernel counters, plus clock endpoints.
+- **Token coverage** (IRI-071): sglang cumulative token counters on the
+  agent and ledger-vs-capture reconciliation with a divergence warn chip.
+- **Durable logs + audit** (IRI-077/078): ring-buffered log pipeline with
+  levels, search and typed retention that survives agent restarts
+  (engine-log capture included), plus an audit/event journal with a
+  cleanup drawer.
+- **Usage quarantine** (IRI-070): rejected usage events are quarantined
+  instead of dropped; requests store W3C trace ids.
+- **Version provenance** (IRI-080): per-node agent/uv/catalog versions with
+  a drift endpoint and a VERSIONS section in node detail.
+- **Fleet posture** (IRI-081): OS/firmware/driver update availability per
+  node.
+- **Curated recipes** (IRI-082): recipe catalog with staged installs into
+  the serve wizard.
+- **Community intelligence** (IRI-083): external pollers and a community
+  page.
+- **Transfers** (IR-133/134/148): orphaned transfers adopt with a Resume
+  CTA, relay-busy names the blocking job, and the setup-log feed relaxes to
+  ~10 fps while starting.
+- **Security**: forced body-parser ≥2.4.0 (high), glob ≥14.0.2 and
+  minimatch ≥11.0.1 (dependabot alerts).
+
+### Changed
+
+- Poll truth defers to the probe; stop is always forwarded (IR-151).
+
+### Fixed
+
+- Proxy captures OpenAI endpoints with or without the `/v1` prefix
+  (IR-154), and tensorfold/exl3 probes emit cumulative token counters
+  (IR-153).
+- Placement reconciles node presence from the models-inventory report
+  (IR-140).
+- Boot-time schema repair heals journals ahead of the schema (live-fleet
+  500 on `wol_mac`), and 5xx diagnostics surface the error message in the
+  response body.
+
 ## [0.4.0] — 2026-10-31
 
 Ten days of capability work since 0.3.0: usage phase 2 (retention, chats,
