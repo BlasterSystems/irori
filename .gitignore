@@ -23,3 +23,7 @@ deploy/.env
 
 # session scratch
 .tmp-m4/
+
+# Local artifacts (IR-178/179 cleanup)
+coverage/
+.omp/
