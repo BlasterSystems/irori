@@ -66,8 +66,10 @@ export async function readDgxOsVersion(): Promise<string | null> {
 }
 
 /** Installed NVIDIA OTA packages via dpkg -l (null when dpkg is absent). */
-export async function readOtaPackages(): Promise<{ otaPackages: Array<{ name: string; version: string }>; aptPresent: boolean } | null> {
-  const out = await run("dpkg-query", ["-W", "-f", "${Package}\t${Version}\n", "nvidia-spark-ota-check", "dgx-spark-ota-update-meta"]);
+export async function readOtaPackages(dpkgQueryOut?: string | null): Promise<{ otaPackages: Array<{ name: string; version: string }>; aptPresent: boolean } | null> {
+  // null = explicit "tool absent" (deterministic in tests); undefined = run.
+  if (dpkgQueryOut === null) return null;
+  const out = dpkgQueryOut ?? (await run("dpkg-query", ["-W", "-f", "${Package}\t${Version}\n", "nvidia-spark-ota-check", "dgx-spark-ota-update-meta"]));
   if (out === null) return null; // dpkg-query absent
   const otaPackages: Array<{ name: string; version: string }> = [];
   for (const line of out.split("\n")) {
@@ -81,7 +83,9 @@ export async function readOtaPackages(): Promise<{ otaPackages: Array<{ name: st
 }
 
 /** fwupdmgr get-updates --json (fallback: null when the tool is absent). */
-export async function readFirmwareUpdates(fwupdmgrOut?: string): Promise<Array<{ device: string; toVersion: string }>> {
+export async function readFirmwareUpdates(fwupdmgrOut?: string | null): Promise<Array<{ device: string; toVersion: string }>> {
+  // null = explicit "tool absent" (deterministic in tests); undefined = run.
+  if (fwupdmgrOut === null) return [];
   const raw = fwupdmgrOut ?? (await run("fwupdmgr", ["get-updates", "--json"], 15_000));
   if (raw === null) return [];
   try {
@@ -109,7 +113,9 @@ export async function readUnattendedUpgradesResult(logDir = "/var/log/unattended
 }
 
 /** Upgradable package count via `apt-get -s upgrade` (SIMULATE — read-only). */
-export async function readUpgradableCount(dryRunOut?: string): Promise<{ count: number | null; aptPresent: boolean }> {
+export async function readUpgradableCount(dryRunOut?: string | null): Promise<{ count: number | null; aptPresent: boolean }> {
+  // null = explicit "tool absent" (deterministic in tests); undefined = run.
+  if (dryRunOut === null) return { count: null, aptPresent: false };
   const raw = dryRunOut ?? (await run("apt-get", ["-s", "upgrade"], 20_000));
   if (raw === null) return { count: null, aptPresent: false };
   let count = 0;
@@ -122,18 +128,20 @@ export async function readUpgradableCount(dryRunOut?: string): Promise<{ count: 
 }
 
 /** Full on-node collection. Never throws — a probe failure degrades to null. */
-export async function collectUpdateState(opts: { fwupdmgrOut?: string; aptGetSimOut?: string } = {}): Promise<UpdateState> {
+export async function collectUpdateState(
+  opts: { fwupdmgrOut?: string | null; aptGetSimOut?: string | null; dpkgQueryOut?: string | null; unattendedDir?: string } = {},
+): Promise<UpdateState> {
   const [unameOut, driverOut, osPrettyName, dgxOsVersion, ota, pendingReboot, unattended, upgradable] = await Promise.all([
     run("uname", ["-r"]),
     run("nvidia-smi", ["--query-gpu=driver_version", "--format=csv,noheader"]),
     readOsPrettyName(),
     readDgxOsVersion(),
-    readOtaPackages(),
+    readOtaPackages(opts.dpkgQueryOut),
     fs
       .stat("/var/run/reboot-required")
       .then(() => true)
       .catch(() => false),
-    readUnattendedUpgradesResult(),
+    readUnattendedUpgradesResult(opts.unattendedDir),
     readUpgradableCount(opts.aptGetSimOut),
   ]);
   const firmwareUpdates = await readFirmwareUpdates(opts.fwupdmgrOut);
