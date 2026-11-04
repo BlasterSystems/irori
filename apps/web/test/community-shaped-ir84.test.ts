@@ -53,7 +53,7 @@ describe("CommunityView shaped tier", () => {
     const w = mount(CommunityView as never);
     await new Promise((r) => setTimeout(r, 120));
     expect(w.find(".chip--warn").exists()).toBe(true);
-    expect(w.text()).toContain("no pollers reported yet" === "" ? "" : "degraded");
+    expect(w.text()).toContain("degraded");
     w.unmount();
   });
 });
