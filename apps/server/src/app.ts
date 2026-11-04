@@ -2085,7 +2085,17 @@ export function createApp(deps: AppDeps): Express {
     // operator can diagnose without shell access; stacks stay in the logs.
     console.error(`[500] ${_req.method} ${_req.path}:`, err);
     const body: Record<string, unknown> = { error: status >= 500 ? "internal server error" : "bad request" };
-    if (status >= 500 && e instanceof Error && e.message) body.detail = e.message.slice(0, 300);
+    if (status >= 500 && e instanceof Error && e.message) {
+      // Drizzle wraps the driver error — walk to the deepest cause (the pg
+      // message names the real failure: missing column, enum, connection…).
+      let msg = e.message;
+      let cause: unknown = e.cause;
+      for (let depth = 0; depth < 5 && cause instanceof Error; depth++) {
+        msg = cause.message;
+        cause = cause.cause;
+      }
+      body.detail = `${e.message.slice(0, 160)} :: ${msg.slice(0, 200)}`;
+    }
     res.status(status).json(body);
   });
 
