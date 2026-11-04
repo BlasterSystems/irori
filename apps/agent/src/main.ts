@@ -3,7 +3,7 @@ import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
 import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown } from "./clocks.js";
-import { persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
+import { mergeClocksReply, persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
@@ -348,17 +348,11 @@ async function run(): Promise<void> {
     onClocksGet: (id) => {
       // IRI-124: GPU and CPU are read independently — a node with no cpufreq
       // policies still reports its cards (cpu: null), and a failed GPU query
-      // still reports the CPU state.
+      // (e.g. a NAS or gpu-host without nvidia-smi) must not hide usable CPU
+      // clock state, so the frame is ok when either half produced a reading.
       void Promise.all([readClocks(), readCpuClocks()])
         .then(([gpu, cpu]) =>
-          transport.sendAgentServer({
-            type: "clocks-get-result",
-            id,
-            ok: gpu.ok,
-            gpus: gpu.gpus,
-            cpu: cpu.cpu,
-            error: gpu.error ?? cpu.error,
-          }),
+          transport.sendAgentServer({ type: "clocks-get-result", id, ...mergeClocksReply(gpu, cpu) }),
         )
         .catch((err: unknown) =>
           transport.sendAgentServer({ type: "clocks-get-result", id, ok: false, gpus: [], cpu: null, error: err instanceof Error ? err.message : String(err) }),
