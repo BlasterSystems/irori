@@ -2,6 +2,35 @@ import type { HardwareSnapshot } from "@irori/core";
 import { formatGiB, formatMetricLine, formatPct } from "./card-data";
 import type { HistoryRange, HistoryResponse } from "./api";
 
+/* ── IRI-124: clock-cap presets ──────────────────────────────────────────── */
+
+/** Owner-selected GPU SM ceilings; 3000 sits just under the GB10 maximum (3003 MHz). */
+export const GPU_CLOCK_CAP_PRESETS = [1800, 2000, 2200, 3000] as const;
+/** CPU ceilings: 2800 rounds the 2,808 MHz efficiency cluster; the 3,900 MHz
+ *  cluster stays untouched at that step (a cap is a ceiling, not a target). */
+export const CPU_CLOCK_CAP_PRESETS = [1400, 2000, 2800] as const;
+
+export interface CapOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * `<select>` options for a clock cap: the presets, plus the stored value when
+ * it is not one of them — a cap set by an older UI (or the API) must never
+ * disappear from the control and read as "no cap".
+ */
+export function capOptions(
+  presets: readonly number[],
+  current: number | null | undefined,
+): CapOption[] {
+  const options: CapOption[] = presets.map((p) => ({ value: String(p), label: `${p} MHz` }));
+  if (current !== null && current !== undefined && !presets.includes(current)) {
+    options.push({ value: String(current), label: `${current} MHz (current)` });
+  }
+  return options;
+}
+
 /** Client-side fallback for the server's per-range bucket size (DB enum). */
 export const RANGE_GRANULARITY: Record<HistoryRange, string> = {
   "30m": "minute",
@@ -56,6 +85,8 @@ export interface DetailPanelData {
   series: Array<number | null>;
   /** Second series (network tx); null when the panel has a single line. */
   series2: Array<number | null> | null;
+  /** IRI-124: bucket-average temperature for the CPU/GPU overlay; null elsewhere. */
+  tempSeries: Array<number | null> | null;
 }
 
 export interface DetailData {
@@ -69,7 +100,7 @@ export interface DetailData {
 }
 
 function emptyPanel(): DetailPanelData {
-  return { current: "", sub: null, notes: [], series: [], series2: null };
+  return { current: "", sub: null, notes: [], series: [], series2: null, tempSeries: null };
 }
 
 function lastValue(series: Array<number | null>): number | null {
@@ -125,6 +156,7 @@ export function computeDetailData(
     notes: cpuNotes,
     series: points.map((p) => p.cpu),
     series2: null,
+    tempSeries: points.map((p) => p.cpuTemp.avg),
   };
 
   const memSrc = lastReadable(points, (p) => p.mem);
@@ -178,6 +210,7 @@ export function computeDetailData(
     notes: [],
     series: points.map((p) => p.netRx),
     series2: points.map((p) => p.netTx),
+    tempSeries: null,
   };
 
   return {
@@ -194,6 +227,7 @@ export function computeDetailData(
       notes: memoryNotes,
       series: points.map((p) => p.mem),
       series2: null,
+      tempSeries: null,
     },
     gpu: {
       current: gpuSrc ? (formatPct(gpuSrc.gpu) ?? "") : "",
@@ -201,9 +235,10 @@ export function computeDetailData(
       notes: gpuNotes,
       series: points.map((p) => p.gpu),
       series2: null,
+      tempSeries: points.map((p) => p.gpuTemp.avg),
     },
     network: hasHistory
       ? network
-      : { ...network, current: "", sub: null, series: [], series2: [] },
+      : { ...network, current: "", sub: null, series: [], series2: [], tempSeries: null },
   };
 }
