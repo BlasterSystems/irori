@@ -30,8 +30,8 @@ The browser console the operator captured is pure fallout: `/api/v1/events` SSE 
 | Agent batches by count only | `apps/agent/src/usage-sync.ts` `flush()` → `buffer.takeBatch(batchSize)`; `MAX_USAGE_BATCH = 500` (`packages/core/src/usage.ts:212`) — no serialized-size cap; one huge body or 500 big rows can exceed 64 MB |
 | Unacked batches persist | `usage-buffer.db` (node:sqlite, WAL) in agent state dir; `sendBatch` resolves `false` on ack timeout → rows retained → resend on reconnect + every flush tick |
 | 30 s cadence | `apps/agent/src/config.ts:88` `usageFlushMs` default `30_000`; post-crash all agents reconnect together and re-lock their flush grid to the crash period |
-| Poisoner = DGX-3 (`7a575210…`) | Journal `?type=usage`: 40 recent events, **all** from DGX-2 (`359896b6`, healthy flow); DGX-3 has **zero** → its buffer is stuck on the poison batch; DGX-3 runs the `GLM-Flash-TP2-MIIA :8081` cluster (worker) and its `setup-event` frames appear in the boot log seconds before each death |
-| Loop start 12:36:51Z | Journal depth: 489 `node-online` events in continuous ~30 s bursts back to 12:36:51; audit log empty (no config change preceded it) → a large-body request hit the DGX-3-side capture around then |
+| Poisoner = **DGX-1** (`9674a9fc…`, MIIA cluster head) | Post-fix buffer read: 859 pending rows, ~97 MB total, **no single giant row** → a count-batch overflow (500 rows × ~130 KB ≈ 65 MB JSON frame > 64 MB cap) under MIIA capture traffic; every full batch exceeds the cap, so nothing drains. DGX-2 (`359896b6`, Qwen3.8-Flash-Next :8082) streams usage events fine; DGX-3 (`7a575210`) is the TP2 worker and sees no client traffic (empty buffer). `[CORRECTED]` the earlier DGX-3 attribution was wrong — the worker never sees the client bodies |
+| Loop start 12:36:51Z | Journal depth: 489 `node-online` events in continuous ~30 s bursts back to 12:36:51; audit log empty (no config change preceded it) → MIIA capture volume on DGX-1 crossed the count-batch overflow threshold around then |
 | Not graceful | Browser `ERR_INCOMPLETE_CHUNKED_ENCODING` = truncated chunked stream → hard death, not SIGTERM (shutdown() would end SSE cleanly, `index.ts:692-700`) |
 | All other ingest paths guarded | Agent frame chains (`hub.ts:238,347` both `.catch`ed), health sweep (`index.ts:308-316`), usage/log `onBatch` (try/catch → false/null), journal sink (`event-journal.ts:76-89` never rejects), SSE write (try/catch, `sse.ts:42-47`) — the missing socket `'error'` handler is the **only** unguarded kill path found |
 
@@ -83,10 +83,10 @@ The browser console the operator captured is pure fallout: `/api/v1/events` SSE 
 
 ## Risks & open questions
 
-- **Data loss on quarantine**: the oversized event's body parts are dropped (metadata kept). The owner should confirm the poison request on DGX-3 is expendable telemetry. `[INFERENCE]` the triggering request is a large MIIA/RAG call.
+- **Data loss on quarantine**: the oversized event's body parts are dropped (metadata kept). `[CORRECTED]` there is no single poison request — DGX-1's backlog is 859 legitimate telemetry rows (~97 MB) that no under-cap batch can drain; the widened-cap hotfix preserved all of them (859 → 1 after deploy).
 - **Why a body is that large**: open question — worth pulling the quarantined event's metadata after the fix (model, prompt-token count) to see if capture should pre-truncate pathological bodies at a smaller bound.
 - **v0.5.0 exposure**: released GHCR images contain the bug; no fleet node runs them yet (agents self-host the bundle), but the next consumer will hit it under load.
-- **Immediate mitigation (no code)**: on DGX-3, as root: `sqlite3 /root/.local/state/irori-agent/usage-buffer.db "delete from pending where length(payload) > 8000000;"` — stops the loop instantly at the cost of the stuck events (they are buffered telemetry only). Owner's call; the code fix makes it unnecessary.
+- **Mitigation actually used (2026-11-04)**: hub-side hotfix `32b196f` (IR-177) — socket error handler + `IRORI_MAX_FRAME_BYTES=268435456` in the VM's deploy/.env — deployed as `dev-0.3.0-67`; DGX-1's 859-row backlog drained to 1, restarts frozen at 0, zero data loss. Row-deletion rejected once the buffer read showed a count-overflow backlog (deletion would have bought minutes and destroyed the cost data).
 
 ## Jira overlap findings
 
