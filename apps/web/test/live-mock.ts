@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 
 /**
  * IRI-084: complete live-store fake for view mounts — the shape mirrors
@@ -13,6 +13,7 @@ export const liveMock = {
   usageLatest: ref([]),
   lastEventAgeMs: ref(null),
   connected: ref(false),
+  sortedNodes: computed(() => [] as Array<{ id: string; name: string; online: boolean }>),
   getLlm: () => undefined,
   refreshNodes: async () => {},
   on: () => () => {},
