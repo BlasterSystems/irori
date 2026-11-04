@@ -23,7 +23,7 @@ vi.mock("../src/api", () => ({
   setWeeklySafePass: vi.fn(async () => ({ weeklySafePass: true, logRotationApplied: true })),
 }));
 
-import { CleanupDrawerProps } from "./cleanup-harness";
+import type { CleanupDrawerProps } from "./cleanup-harness";
 
 afterEach(() => {
   try { vi.useRealTimers(); } catch { /* not faked */ }
@@ -32,7 +32,7 @@ afterEach(() => {
 
 async function mountDrawer() {
   const { default: CleanupDrawer } = await import("../src/components/CleanupDrawer.vue");
-  const w = mount(CleanupDrawer as never, { props: { nodeId: UUID, nodeName: "dgx1" } as never as CleanupDrawerProps });
+  const w = mount(CleanupDrawer as never, { props: { nodeId: UUID, nodeName: "dgx1" } as never });
   await new Promise((r) => setTimeout(r, 30));
   return w;
 }
