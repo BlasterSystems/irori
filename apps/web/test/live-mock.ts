@@ -14,7 +14,11 @@ export const liveMock = {
   usageLatest: ref([]),
   lastEventAgeMs: ref(null),
   connected: ref(false),
-  sortedNodes: computed(() => [] as Array<{ id: string; name: string; online: boolean }>),
+  sortedNodes: computed(() =>
+    [...(liveMock.nodes as Map<string, { id: string; name: string; online: boolean; role?: string }>)]
+      .map(([, n]) => n)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  ),
   getLlm: (nodeId: string) => (liveMock as unknown as { llm: Map<string, unknown> }).llm.get(nodeId),
   refreshNodes: async () => {},
   on: () => () => {},
