@@ -32,7 +32,7 @@ const node = nodeInfoSchema.parse({
 
 async function mountModal(mode: "create" | "edit" | "rotate") {
   const { default: NodeModal } = await import("../src/components/NodeModal.vue");
-  const w = mount(NodeModal as never, { props: { mode, node: mode === "create" ? null : node } });
+  const w = mount(NodeModal as never, { props: { mode, node: mode === "create" ? null : node } as never });
   await new Promise((r) => setTimeout(r, 20));
   return w;
 }
