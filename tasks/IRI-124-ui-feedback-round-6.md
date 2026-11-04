@@ -66,14 +66,15 @@ Research brief with file:line evidence and live DGX-1 probes:
 
 ## Validation evidence
 
-- Configuration validation:
-- Tests:
-- Build:
-- Documentation check:
+- Configuration validation: `.agentic/bin/validate` → "Configuration validation passed" (needs python ≥3.11 for `tomllib`; the workstation's default `python3` is 3.9 — run via `python3.13`).
+- Tests: full `pnpm test` green — core 12 files, db 3, proxy 4, web 56, agent 21, server 46. DB-gated suites green against a disposable Postgres (`IRORI_TEST_DATABASE_URL`): server 368/368, db 13/13, including a drop-schema → re-migrate round trip. New tests: agent `cpu-clocks-ir124` (13), web `clocks-ir124` (8) + `node-detail-clocks-ir124` (3), core `clocks-ir124` (8), db `journal-ir124` (2), server `power-ir68` extended.
+- Build: `pnpm build` green (all six workspaces).
+- Documentation check: green after adding the clock-control section to `docs/ARCHITECTURE.md` — the heuristic fails CI when architecture-significant paths change without an architecture doc; SPEC/API alone did not satisfy it.
+- Browser smoke (local server + seeded DB + vite, 1440/1280/1080/820 px): h1 "DGX-1" on one line (31.2 px) with chips wrapping to a second row; no card paints outside `.container`; CPU/GPU cards show the dashed temp line + legend; GPU select lists 1800/2000/2200/3000 + `2400 MHz (current)`; the `enP7s7` IPv6 list wraps inside its card (3 lines at 1440, 5 at 1080). CPU select correctly hidden with no live agent.
 
 ## Review
 
-- Correctness:
-- Security: the agent writes root-owned sysfs only through integer values derived from validated input (`min/max` clamps, no shell interpolation); the boot script bakes an integer literal.
-- Compatibility: `clocks-get-result.cpu` and `clocks-set.cpuMaxMHz` are optional, so old agents/hubs still parse; an old agent simply has no CPU control and the UI says so.
-- Residual risks: a DGX OS component rewrites `scaling_max_freq` after boot (observed mtime drift) — the cap can be silently reverted until a re-assert path exists.
+- Correctness: ceiling semantics verified per policy (2800 caps the 2,808 cluster and the 3,900 cluster; 3000 caps 2,808 but not 3,900; below-min clamps to `cpuinfo_min_freq`); clear restores per-cluster maxima; a persistent clear now reaches the agent and removes the boot unit (previously a 400, leaving a stale oneshot); the node DTO projects cap fields (it did not — the UI could never re-seed a stored cap).
+- Security: the agent writes root-owned sysfs only through integer values derived from validated input (`min/max` clamps, no shell interpolation); the boot script bakes an integer literal; no new auth surface (same agent WS + audited REST route).
+- Compatibility: `clocks-get-result.cpu` and `clocks-set.cpuMaxMHz` are optional, so old agents/hubs still parse; an old agent simply has no CPU control and the UI says so. The migration-watermark heal is idempotent and no-ops on healthy databases.
+- Residual risks: a DGX OS component rewrites `scaling_max_freq` after boot (observed mtime drift) — the cap can be silently reverted until a re-assert path exists; SPEC §10's online-transition re-apply and fleet-wide apply remain unimplemented; CPU caps need the IRI-124 agent (per-node maintenance window).
