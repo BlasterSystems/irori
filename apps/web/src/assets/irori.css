@@ -217,6 +217,16 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .barrow { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
 .barrow + .barrow { margin-top: 8px; }
 .barrow .val { color: var(--fg); text-align: right; white-space: nowrap; }
+/* IRI-124: interface rows carry comma-joined address lists that must wrap
+ * inside the card — the auto column would otherwise grow past it and paint
+ * over the neighbouring grid cell (.cols > * min-width only stops page
+ * overflow). The value spans both columns under the interface name. */
+.barrow--net { grid-template-columns: 64px 1fr; }
+.barrow--net .val { white-space: normal; overflow-wrap: anywhere; text-align: right; }
+/* IRI-124: chart legend for two-series sparklines (usage + temperature). */
+.chart-legend { display: flex; align-items: center; gap: 12px; margin-top: 6px; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.chart-legend__line { display: inline-block; width: 14px; border-top: 1.5px solid var(--ink-2); margin-right: 5px; vertical-align: 3px; }
+.chart-legend__line--dashed { border-top-style: dashed; border-top-color: var(--thread); }
 .metric--hot { color: var(--thread-ink); }
 
 /* ── Tables ────────────────────────────────────────────────────────── */

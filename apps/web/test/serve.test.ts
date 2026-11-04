@@ -83,6 +83,8 @@ function node(id: string, name: string, online: boolean): NodeInfo {
     wolMac: null,
     gpuClockCapMHz: null,
     gpuClockCapPersistent: false,
+    cpuClockCapMHz: null,
+    cpuClockCapPersistent: false,
     createdAt: "2026-10-18T00:00:00.000Z",
     updatedAt: "2026-10-18T00:00:00.000Z",
   };

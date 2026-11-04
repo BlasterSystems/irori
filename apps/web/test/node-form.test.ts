@@ -27,6 +27,8 @@ const NODE: NodeInfo = {
   wolMac: null,
   gpuClockCapMHz: null,
   gpuClockCapPersistent: false,
+  cpuClockCapMHz: null,
+  cpuClockCapPersistent: false,
   createdAt: "2026-10-19T09:00:00.000Z",
   updatedAt: "2026-10-19T09:00:00.000Z",
 };
