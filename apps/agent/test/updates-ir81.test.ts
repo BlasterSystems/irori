@@ -53,7 +53,7 @@ describe("readUpgradableCount (apt-get -s upgrade)", () => {
   });
 
   it("absent tooling → null count and aptPresent false", async () => {
-    expect(await readUpgradableCount(undefined)).toEqual({ count: null, aptPresent: false });
+    expect(await readUpgradableCount(null)).toEqual({ count: null, aptPresent: false });
   });
 });
 
@@ -73,9 +73,10 @@ describe("readUnattendedUpgradesResult", () => {
 
 describe("collectUpdateState", () => {
   it("absent tooling degrades to the update-tooling-absent posture inputs", async () => {
-    // No probe outputs injected and no real tools on this host — every probe
-    // degrades; the shape stays complete (never throws, never blanks).
-    const state = await collectUpdateState({ aptGetSimOut: undefined, fwupdmgrOut: undefined });
+    // Explicit null probes = the tools are absent; the shape stays complete
+    // (never throws, never blanks) and the test is environment-independent
+    // (undefined would run the real probes — CI runners HAVE apt).
+    const state = await collectUpdateState({ dpkgQueryOut: null, aptGetSimOut: null, fwupdmgrOut: null });
     expect(state.aptPresent).toBe(false);
     expect(state.upgradableCount).toBeNull();
     expect(state.firmwareUpdates).toEqual([]);
