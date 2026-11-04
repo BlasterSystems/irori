@@ -44,6 +44,10 @@ export class UsageBuffer {
   private readonly stmtPartDeleteEmpty;
   private readonly stmtPartTotalBytes;
   private readonly stmtPartSweepCandidates;
+  private readonly stmtQuarantineInsert;
+  private readonly stmtQuarantineCount;
+  private readonly stmtQuarantineExpire;
+  private readonly stmtQuarantineTrim;
 
   constructor(stateDir: string, fileName = "usage-buffer.db") {
     mkdirSync(stateDir, { recursive: true });
@@ -72,6 +76,17 @@ export class UsageBuffer {
         refs INTEGER NOT NULL DEFAULT 0
       );
     `);
+    // IR-178: oversized events park here (metadata only, no bodies/parts) —
+    // visible loss, mirroring the hub's IRI-070 quarantine flow.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS quarantine (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        bytes INTEGER NOT NULL,
+        meta TEXT NOT NULL
+      );
+    `);
     this.stmtAdd = this.db.prepare("INSERT INTO pending (id, inserted_at, payload, part_hashes) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING");
     this.stmtCount = this.db.prepare("SELECT count(*) AS n FROM pending");
     this.stmtTake = this.db.prepare("SELECT id, payload, part_hashes FROM pending ORDER BY inserted_at, id LIMIT ?");
@@ -86,6 +101,14 @@ export class UsageBuffer {
     this.stmtPartTotalBytes = this.db.prepare("SELECT coalesce(sum(length(gz)), 0) AS n FROM pending_parts");
     this.stmtPartSweepCandidates = this.db.prepare(
       "SELECT hash, length(gz) AS gzBytes FROM pending_parts WHERE refs = 0 ORDER BY inserted_at, hash",
+    );
+    this.stmtQuarantineInsert = this.db.prepare(
+      "INSERT INTO quarantine (id, ts, reason, bytes, meta) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING",
+    );
+    this.stmtQuarantineCount = this.db.prepare("SELECT count(*) AS n FROM quarantine");
+    this.stmtQuarantineExpire = this.db.prepare("DELETE FROM quarantine WHERE ts < ?");
+    this.stmtQuarantineTrim = this.db.prepare(
+      "DELETE FROM quarantine WHERE id IN (SELECT id FROM quarantine ORDER BY ts, id LIMIT ?)",
     );
   }
 
@@ -117,15 +140,18 @@ export class UsageBuffer {
 
   /**
    * Oldest-first batch with gz re-attached from the parts store (rows stay
-   * until remove() — crash-safe redelivery). `partBudgetBytes` bounds the sum
-   * of ATTACHED base64 part sizes (the wire cost, not the original size); an
-   * event exceeding the whole budget still travels alone (progress
-   * guarantee) and is itself bounded by the capture caps.
+   * until remove() — crash-safe redelivery). `budgetBytes` bounds the sum of
+   * SERIALIZED row sizes (base64 parts + non-part fields — the unit the wire
+   * actually carries; the old math counted gz bytes, 4/3 under, and skipped
+   * the first event entirely, so a count-max batch of body-heavy rows could
+   * exceed the hub's frame limit). A single event over the whole budget
+   * still travels alone (progress guarantee); the sync layer quarantines
+   * singletons over USAGE_EVENT_HARD_CAP_BYTES (IR-178).
    */
-  takeBatch(limit: number, partBudgetBytes = USAGE_BATCH_PART_BUDGET_BYTES): PendingRow[] {
+  takeBatch(limit: number, budgetBytes = USAGE_BATCH_PART_BUDGET_BYTES): PendingRow[] {
     const rows = this.stmtTake.all(limit) as unknown as Array<PendingRow & { part_hashes: string | null }>;
     const out: PendingRow[] = [];
-    let budget = partBudgetBytes;
+    let budget = budgetBytes;
     for (const row of rows) {
       let parsed: UsageRequest;
       let metas: PartMeta[] = [];
@@ -137,7 +163,6 @@ export class UsageBuffer {
         continue;
       }
       const attached: UsagePartWire[] = [];
-      let eventBase64 = 0;
       let complete = true;
       for (const meta of metas) {
         const found = this.stmtPartGet.get(meta.hash) as { gz: Uint8Array } | undefined;
@@ -147,16 +172,17 @@ export class UsageBuffer {
         }
         const gz = Buffer.from(found.gz);
         attached.push({ ...meta, gz: gz.toString("base64") });
-        eventBase64 += gz.length;
       }
       if (!complete) {
         this.remove([row.id]);
         continue;
       }
-      if (out.length > 0 && budget - eventBase64 < 0) continue; // fits a later frame
-      budget -= eventBase64;
       parsed.parts = attached;
-      out.push({ id: row.id, payload: JSON.stringify(parsed) });
+      const serialized = JSON.stringify(parsed);
+      const rowBytes = Buffer.byteLength(serialized);
+      if (out.length > 0 && budget - rowBytes < 0) continue; // fits a later frame
+      budget -= rowBytes;
+      out.push({ id: row.id, payload: serialized });
     }
     return out;
   }
@@ -173,6 +199,36 @@ export class UsageBuffer {
         }
       }
     });
+  }
+
+  /** Cap on parked quarantine rows so an oversized-capture bug cannot fill
+   * the state dir; oldest rows expire first (with prune) and the table
+   * hard-trims beyond this. */
+  static readonly QUARANTINE_MAX_ROWS = 1000;
+
+  /**
+   * IR-178: parks an unsendable event with its metadata (no bodies/parts) so
+   * the loss is visible and inspectable, then drops the pending row and
+   * releases its part refs.
+   */
+  quarantine(id: string, reason: string, bytes: number, meta: Record<string, unknown>): void {
+    const hashes = this.partHashesFor(id);
+    this.transaction(() => {
+      this.stmtQuarantineInsert.run(id, Date.now(), reason, bytes, JSON.stringify(meta));
+      this.stmtRemove.run(id);
+      for (const hash of hashes) {
+        this.stmtPartDecrement.run(hash);
+        this.stmtPartDeleteEmpty.run(hash);
+      }
+      const n = (this.stmtQuarantineCount.get() as { n: number }).n;
+      if (n > UsageBuffer.QUARANTINE_MAX_ROWS) {
+        this.stmtQuarantineTrim.run(n - UsageBuffer.QUARANTINE_MAX_ROWS);
+      }
+    });
+  }
+
+  quarantinedCount(): number {
+    return (this.stmtQuarantineCount.get() as { n: number }).n;
   }
 
   private partHashesFor(id: string): string[] {
@@ -214,6 +270,8 @@ export class UsageBuffer {
         }
       }
       this.sweepParts();
+      // IR-178: quarantine rows age out with the same window as pending rows.
+      this.stmtQuarantineExpire.run(Date.now() - keepDays * 86_400_000);
     });
   }
 

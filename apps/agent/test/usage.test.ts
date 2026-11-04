@@ -295,3 +295,87 @@ describe("UsageSync", () => {
     buffer.close();
   });
 });
+
+describe("IR-178 size bounding", () => {
+  let ackHandler: ((ids: string[]) => void) | null = null;
+
+  function makeSync(buf: UsageBuffer, opts: { send: (events: UsageRequest[]) => boolean; lastCloseCode?: () => number | null; batchSize?: number }) {
+    return new UsageSync({
+      buffer: buf,
+      connected: () => true,
+      send: opts.send,
+      onAck: (h) => {
+        ackHandler = h;
+      },
+      flushMs: 10_000,
+      batchSize: opts.batchSize ?? 500,
+      keepDays: 90,
+      maxRows: 1000,
+      lastCloseCode: opts.lastCloseCode,
+      log: () => {},
+    });
+  }
+
+  it("quarantines a single over-cap event with metadata and drains the rest", async () => {
+    const dir = makeDir();
+    const buf = new UsageBuffer(dir);
+    const big = request({ engineMeta: { blob: "x".repeat(60 * 1024 * 1024) } });
+    buf.add(big);
+    buf.add(request());
+    buf.add(request());
+    const sent: UsageRequest[][] = [];
+    const sync = makeSync(buf, {
+      send: (events) => {
+        sent.push(events);
+        ackHandler?.(events.map((e) => e.id));
+        return true;
+      },
+    });
+    await sync.flush();
+    expect(buf.count()).toBe(0); // everything drained
+    expect(buf.quarantinedCount()).toBe(1);
+    expect(sent).toHaveLength(1); // one batch of the two smalls; the monster never traveled
+    for (const batch of sent) expect(batch.map((e) => e.id)).not.toContain(big.id);
+    const db = new DatabaseSync(join(dir, "usage-buffer.db"));
+    const row = db.prepare("SELECT reason, bytes, meta FROM quarantine").get() as { reason: string; bytes: number; meta: string };
+    expect(row.reason).toBe("oversized");
+    expect(row.bytes).toBeGreaterThan(56 * 1024 * 1024);
+    expect(JSON.parse(row.meta)).toMatchObject({ model: "GLM-5.3-Flash-EXL3", endpoint: "/v1/chat/completions" });
+    db.close();
+  });
+
+  it("splits a 30MB batch into under-budget frames", () => {
+    const buf = new UsageBuffer(makeDir());
+    for (let i = 0; i < 4; i++) buf.add(request({ engineMeta: { blob: "x".repeat(4 * 1024 * 1024) } }));
+    const first = buf.takeBatch(500, 10 * 1024 * 1024);
+    expect(first).toHaveLength(2); // ~4.2MB rows pack two per 10MB budget
+    const second = buf.takeBatch(500, 10 * 1024 * 1024);
+    expect(second).toHaveLength(2);
+  });
+
+  it("halves the take after a 1009 close until a batch acks", async () => {
+    const buf = new UsageBuffer(makeDir());
+    for (let i = 0; i < 8; i++) buf.add(request());
+    let closeCode: number | null = null;
+    const sizes: number[] = [];
+    let attempt = 0;
+    const sync = makeSync(buf, {
+      send: (events) => {
+        attempt += 1;
+        sizes.push(events.length);
+        if (attempt < 3) {
+          closeCode = 1009;
+          return false;
+        }
+        closeCode = null;
+        ackHandler?.(events.map((e) => e.id));
+        return true;
+      },
+      lastCloseCode: () => closeCode,
+      batchSize: 8,
+    });
+    await sync.flush();
+    expect(sizes).toEqual([8, 4, 2, 6]); // halve on 1009 until one acks; remainder drains at full width
+    expect(buf.count()).toBe(0);
+  });
+});

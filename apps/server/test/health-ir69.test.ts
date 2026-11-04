@@ -5,6 +5,7 @@ import { createDbHandle, nodes, type Db, type DbHandle } from "@irori/db";
 import { breaches, metricValue } from "../src/health.js";
 import { renderPrometheus, type MetricsNode } from "../src/metrics.js";
 import { createHealthService } from "../src/health.js";
+import { createEventJournalService } from "../src/event-journal.js";
 import { makeSnapshot } from "./helpers.js";
 
 /**
@@ -160,5 +161,68 @@ d("health service (db integration)", () => {
 
     await health.sweep([{ id: nodeId, name: "h2" }], new Set([nodeId]), new Map([[nodeId, Date.now()]]));
     expect((await health.findings()).filter((f) => f.nodeId === nodeId)).toHaveLength(0);
+  });
+});
+
+d("reconnect-storm rule (IR-179, db integration)", () => {
+  let handle: DbHandle;
+  let db: Db;
+
+  beforeAll(async () => {
+    handle = createDbHandle(url!);
+    await handle.migrate();
+    db = handle.db;
+  });
+
+  afterAll(async () => {
+    await handle.close();
+  });
+
+  it("countByNodeSince groups journal bursts per node", async () => {
+    const j = createEventJournalService(db);
+    const nodeId = randomUUID();
+    for (let i = 0; i < 12; i++) {
+      await j.journal({ type: "node-online", serverTimeMs: Date.now(), nodeId } as never);
+    }
+    const counts = await j.countByNodeSince("node-online", 5 * 60_000);
+    expect(counts.find((c) => c.nodeId === nodeId)?.n).toBeGreaterThanOrEqual(12);
+  });
+
+  it("trips the rule on a simulated burst, fires the webhook, then clears", async () => {
+    const nodeId = randomUUID();
+    await db.execute(sql`delete from nodes where id = ${nodeId}`);
+    await db.insert(nodes).values({ id: nodeId, name: "stormy", kind: "spark", role: "head", host: "stormy.local", agentTokenHash: "x".repeat(64), agentTokenEnc: "y".repeat(64) }).onConflictDoNothing();
+    const posts: Array<{ url: string; body: unknown }> = [];
+    const fetchSpy = (async (input: string, init?: { body?: string }) => {
+      posts.push({ url: input, body: JSON.parse(init?.body ?? "{}") });
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+    const health = createHealthService(db, "a".repeat(64), {
+      sse: () => {},
+      journal: async () => {},
+      journalCounts: async (type) => (type === "node-online" ? [{ nodeId, n: 12 }] : []),
+      fetchImpl: fetchSpy,
+      now: () => Date.now(),
+    });
+    await health.ensureSeed();
+    const stormRule = (await health.listRules()).find((r) => r.name === "Reconnect storm");
+    expect(stormRule).toBeDefined();
+    await health.setRule(stormRule!.id, { webhookUrl: "https://hooks.test/storm" });
+
+    await health.sweep([{ id: nodeId, name: "stormy" }], new Set([nodeId]), new Map([[nodeId, Date.now()]]));
+    const findings = await health.findings();
+    expect(findings.find((f) => f.metric === "reconnect_storm")?.nodeId).toBe(nodeId);
+    expect(posts.some((p) => p.url === "https://hooks.test/storm")).toBe(true);
+
+    // Quiet window: the finding clears.
+    const quiet = createHealthService(db, "a".repeat(64), {
+      sse: () => {},
+      journal: async () => {},
+      journalCounts: async () => [{ nodeId, n: 1 }],
+      fetchImpl: fetchSpy,
+      now: () => Date.now(),
+    });
+    await quiet.sweep([{ id: nodeId, name: "stormy" }], new Set([nodeId]), new Map([[nodeId, Date.now()]]));
+    expect((await quiet.findings()).find((f) => f.metric === "reconnect_storm")).toBeUndefined();
   });
 });

@@ -13,6 +13,8 @@ export const healthMetricSchema = z.enum([
   "power_w",
   "node_offline",
   "telemetry_gap_s",
+  /** IR-179: node-online journal events per 5 min window (reconnect storm). */
+  "reconnect_storm",
 ]);
 export type HealthMetric = z.infer<typeof healthMetricSchema>;
 
@@ -89,6 +91,10 @@ export const HEALTH_SEED_RULES: Array<{
   { name: "Power envelope breach", metric: "power_w", op: "gt", threshold: 240, severity: "warn", cooldownSec: 1800 },
   { name: "Node offline", metric: "node_offline", op: "eq", threshold: 1, severity: "critical", cooldownSec: 600 },
   { name: "Telemetry gap", metric: "telemetry_gap_s", op: "gte", threshold: 15, severity: "warn", cooldownSec: 1800 },
+  // IR-179: the 2026-11-04 incident produced ~10 node-online events per
+  // minute for 78 minutes; a 30 s crash loop lands at exactly 10 per 5 min,
+  // while deploy blips (1–2 reconnects) stay silent.
+  { name: "Reconnect storm", metric: "reconnect_storm", op: "gte", threshold: 10, severity: "warn", cooldownSec: 600 },
 ];
 
 /** Shared threshold values for the web (from the seed rules). */

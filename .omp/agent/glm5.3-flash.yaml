@@ -1,0 +1,11 @@
+modelRoles:
+  slow: DGX1/GLM-5.3-Flash-EXL3:max
+  vision: DGX1/GLM-5.3-Flash-EXL3:max
+  advisor: DGX1/GLM-5.3-Flash-EXL3:max
+  commit: DGX1/GLM-5.3-Flash-EXL3:max
+  tiny: DGX1/GLM-5.3-Flash-EXL3:max
+  plan: DGX1/GLM-5.3-Flash-EXL3:max
+  judge: DGX1/GLM-5.3-Flash-EXL3:max
+  smol: DGX1/GLM-5.3-Flash-EXL3:max
+  task: DGX1/GLM-5.3-Flash-EXL3:max
+  default: DGX1/GLM-5.3-Flash-EXL3:max

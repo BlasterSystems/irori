@@ -1,0 +1,687 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<coverage generated="1793748677286" clover="3.2.0">
+  <project timestamp="1793748677286" name="All files">
+    <metrics statements="588" coveredstatements="529" conditionals="464" coveredconditionals="325" methods="127" coveredmethods="69" elements="1179" coveredelements="923" complexity="0" loc="588" ncloc="588" packages="1" files="31" classes="31"/>
+    <file name="agent-messages.ts" path="/Users/operator/Developer/irori/packages/core/src/agent-messages.ts">
+      <metrics statements="9" coveredstatements="9" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="16" count="7" type="stmt"/>
+      <line num="29" count="7" type="stmt"/>
+      <line num="34" count="7" type="stmt"/>
+      <line num="36" count="7" type="stmt"/>
+      <line num="49" count="7" type="stmt"/>
+      <line num="56" count="7" type="stmt"/>
+      <line num="91" count="7" type="stmt"/>
+      <line num="96" count="7" type="stmt"/>
+      <line num="98" count="7" type="stmt"/>
+    </file>
+    <file name="analytics.ts" path="/Users/operator/Developer/irori/packages/core/src/analytics.ts">
+      <metrics statements="30" coveredstatements="17" conditionals="20" coveredconditionals="0" methods="4" coveredmethods="0"/>
+      <line num="16" count="6" type="stmt"/>
+      <line num="17" count="6" type="stmt"/>
+      <line num="20" count="6" type="stmt"/>
+      <line num="21" count="6" type="stmt"/>
+      <line num="25" count="6" type="stmt"/>
+      <line num="26" count="6" type="stmt"/>
+      <line num="37" count="6" type="stmt"/>
+      <line num="50" count="0" type="cond" truecount="0" falsecount="6"/>
+      <line num="51" count="0" type="cond" truecount="0" falsecount="7"/>
+      <line num="55" count="0" type="stmt"/>
+      <line num="58" count="0" type="stmt"/>
+      <line num="61" count="0" type="stmt"/>
+      <line num="66" count="0" type="cond" truecount="0" falsecount="7"/>
+      <line num="68" count="0" type="stmt"/>
+      <line num="70" count="0" type="stmt"/>
+      <line num="72" count="0" type="stmt"/>
+      <line num="74" count="0" type="stmt"/>
+      <line num="76" count="0" type="stmt"/>
+      <line num="78" count="0" type="stmt"/>
+      <line num="80" count="0" type="stmt"/>
+      <line num="87" count="6" type="stmt"/>
+      <line num="131" count="6" type="stmt"/>
+      <line num="172" count="6" type="stmt"/>
+      <line num="173" count="6" type="stmt"/>
+      <line num="174" count="6" type="stmt"/>
+      <line num="177" count="6" type="stmt"/>
+      <line num="194" count="6" type="stmt"/>
+      <line num="210" count="6" type="stmt"/>
+      <line num="218" count="6" type="stmt"/>
+      <line num="232" count="6" type="stmt"/>
+    </file>
+    <file name="audit.ts" path="/Users/operator/Developer/irori/packages/core/src/audit.ts">
+      <metrics statements="29" coveredstatements="15" conditionals="32" coveredconditionals="0" methods="9" coveredmethods="0"/>
+      <line num="16" count="6" type="stmt"/>
+      <line num="22" count="6" type="stmt"/>
+      <line num="23" count="6" type="stmt"/>
+      <line num="27" count="6" type="stmt"/>
+      <line num="28" count="6" type="stmt"/>
+      <line num="31" count="6" type="stmt"/>
+      <line num="55" count="6" type="stmt"/>
+      <line num="58" count="6" type="stmt"/>
+      <line num="71" count="6" type="stmt"/>
+      <line num="86" count="6" type="stmt"/>
+      <line num="107" count="6" type="stmt"/>
+      <line num="109" count="6" type="stmt"/>
+      <line num="110" count="6" type="stmt"/>
+      <line num="114" count="0" type="stmt"/>
+      <line num="123" count="0" type="stmt"/>
+      <line num="124" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="125" count="0" type="cond" truecount="0" falsecount="6"/>
+      <line num="126" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="127" count="0" type="stmt"/>
+      <line num="128" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="129" count="0" type="stmt"/>
+      <line num="131" count="0" type="cond" truecount="0" falsecount="6"/>
+      <line num="132" count="0" type="stmt"/>
+      <line num="133" count="0" type="stmt"/>
+      <line num="134" count="0" type="cond" truecount="0" falsecount="10"/>
+      <line num="136" count="0" type="stmt"/>
+      <line num="138" count="0" type="stmt"/>
+      <line num="146" count="6" type="stmt"/>
+      <line num="155" count="6" type="stmt"/>
+    </file>
+    <file name="bench.ts" path="/Users/operator/Developer/irori/packages/core/src/bench.ts">
+      <metrics statements="112" coveredstatements="107" conditionals="144" coveredconditionals="127" methods="31" coveredmethods="21"/>
+      <line num="11" count="7" type="stmt"/>
+      <line num="12" count="7" type="stmt"/>
+      <line num="16" count="7" type="stmt"/>
+      <line num="20" count="7" type="stmt"/>
+      <line num="21" count="7" type="stmt"/>
+      <line num="24" count="7" type="stmt"/>
+      <line num="25" count="7" type="stmt"/>
+      <line num="29" count="7" type="stmt"/>
+      <line num="35" count="7" type="stmt"/>
+      <line num="49" count="7" type="stmt"/>
+      <line num="50" count="7" type="stmt"/>
+      <line num="51" count="7" type="stmt"/>
+      <line num="52" count="7" type="stmt"/>
+      <line num="54" count="7" type="stmt"/>
+      <line num="66" count="7" type="stmt"/>
+      <line num="67" count="7" type="stmt"/>
+      <line num="69" count="7" type="stmt"/>
+      <line num="78" count="7" type="stmt"/>
+      <line num="87" count="7" type="stmt"/>
+      <line num="91" count="7" type="stmt"/>
+      <line num="99" count="7" type="stmt"/>
+      <line num="111" count="7" type="stmt"/>
+      <line num="119" count="7" type="stmt"/>
+      <line num="139" count="7" type="stmt"/>
+      <line num="142" count="7" type="stmt"/>
+      <line num="153" count="7" type="stmt"/>
+      <line num="162" count="7" type="stmt"/>
+      <line num="169" count="7" type="stmt"/>
+      <line num="177" count="7" type="stmt"/>
+      <line num="187" count="7" type="stmt"/>
+      <line num="188" count="7" type="stmt"/>
+      <line num="190" count="7" type="stmt"/>
+      <line num="198" count="7" type="stmt"/>
+      <line num="208" count="7" type="stmt"/>
+      <line num="221" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="223" count="0" type="stmt"/>
+      <line num="225" count="0" type="stmt"/>
+      <line num="227" count="0" type="stmt"/>
+      <line num="229" count="0" type="stmt"/>
+      <line num="235" count="8" type="cond" truecount="4" falsecount="0"/>
+      <line num="237" count="3" type="stmt"/>
+      <line num="239" count="2" type="stmt"/>
+      <line num="241" count="2" type="stmt"/>
+      <line num="243" count="1" type="stmt"/>
+      <line num="250" count="7" type="stmt"/>
+      <line num="258" count="7" type="stmt"/>
+      <line num="265" count="7" type="stmt"/>
+      <line num="273" count="7" type="stmt"/>
+      <line num="287" count="15" type="cond" truecount="4" falsecount="0"/>
+      <line num="288" count="15" type="cond" truecount="4" falsecount="0"/>
+      <line num="289" count="15" type="stmt"/>
+      <line num="290" count="15" type="cond" truecount="2" falsecount="0"/>
+      <line num="291" count="12" type="stmt"/>
+      <line num="292" count="12" type="stmt"/>
+      <line num="293" count="12" type="stmt"/>
+      <line num="294" count="12" type="stmt"/>
+      <line num="295" count="16" type="cond" truecount="2" falsecount="0"/>
+      <line num="296" count="16" type="stmt"/>
+      <line num="298" count="12" type="stmt"/>
+      <line num="299" count="12" type="stmt"/>
+      <line num="324" count="8" type="cond" truecount="4" falsecount="0"/>
+      <line num="333" count="5" type="cond" truecount="6" falsecount="0"/>
+      <line num="334" count="1" type="stmt"/>
+      <line num="343" count="24" type="stmt"/>
+      <line num="344" count="24" type="stmt"/>
+      <line num="345" count="24" type="stmt"/>
+      <line num="346" count="4" type="stmt"/>
+      <line num="347" count="4" type="stmt"/>
+      <line num="348" count="4" type="stmt"/>
+      <line num="349" count="4" type="stmt"/>
+      <line num="350" count="4" type="stmt"/>
+      <line num="351" count="4" type="stmt"/>
+      <line num="352" count="4" type="stmt"/>
+      <line num="353" count="4" type="stmt"/>
+      <line num="354" count="24" type="cond" truecount="1" falsecount="1"/>
+      <line num="355" count="24" type="stmt"/>
+      <line num="356" count="24" type="cond" truecount="8" falsecount="0"/>
+      <line num="357" count="1" type="stmt"/>
+      <line num="358" count="1" type="stmt"/>
+      <line num="360" count="23" type="cond" truecount="8" falsecount="0"/>
+      <line num="361" count="23" type="cond" truecount="6" falsecount="0"/>
+      <line num="363" count="4" type="stmt"/>
+      <line num="364" count="4" type="stmt"/>
+      <line num="365" count="4" type="stmt"/>
+      <line num="366" count="4" type="stmt"/>
+      <line num="375" count="4" type="cond" truecount="4" falsecount="0"/>
+      <line num="376" count="4" type="stmt"/>
+      <line num="377" count="4" type="stmt"/>
+      <line num="378" count="4" type="stmt"/>
+      <line num="380" count="4" type="stmt"/>
+      <line num="381" count="4" type="stmt"/>
+      <line num="382" count="4" type="stmt"/>
+      <line num="383" count="4" type="stmt"/>
+      <line num="384" count="4" type="stmt"/>
+      <line num="386" count="4" type="stmt"/>
+      <line num="387" count="4" type="cond" truecount="6" falsecount="2"/>
+      <line num="389" count="5" type="cond" truecount="2" falsecount="0"/>
+      <line num="394" count="5" type="cond" truecount="10" falsecount="2"/>
+      <line num="399" count="3" type="cond" truecount="4" falsecount="0"/>
+      <line num="400" count="1" type="cond" truecount="1" falsecount="1"/>
+      <line num="401" count="3" type="cond" truecount="4" falsecount="0"/>
+      <line num="405" count="3" type="stmt"/>
+      <line num="406" count="3" type="cond" truecount="6" falsecount="0"/>
+      <line num="407" count="2" type="cond" truecount="6" falsecount="0"/>
+      <line num="408" count="1" type="stmt"/>
+      <line num="413" count="2" type="cond" truecount="2" falsecount="0"/>
+      <line num="414" count="7" type="cond" truecount="8" falsecount="0"/>
+      <line num="415" count="4" type="stmt"/>
+      <line num="421" count="1" type="cond" truecount="1" falsecount="1"/>
+      <line num="422" count="1" type="stmt"/>
+      <line num="425" count="5" type="cond" truecount="8" falsecount="0"/>
+      <line num="428" count="1" type="stmt"/>
+    </file>
+    <file name="cadence.ts" path="/Users/operator/Developer/irori/packages/core/src/cadence.ts">
+      <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="8" count="6" type="stmt"/>
+      <line num="9" count="6" type="stmt"/>
+      <line num="11" count="6" type="stmt"/>
+    </file>
+    <file name="catalog.ts" path="/Users/operator/Developer/irori/packages/core/src/catalog.ts">
+      <metrics statements="31" coveredstatements="31" conditionals="36" coveredconditionals="33" methods="22" coveredmethods="19"/>
+      <line num="4" count="8" type="stmt"/>
+      <line num="11" count="8" type="stmt"/>
+      <line num="32" count="4" type="stmt"/>
+      <line num="33" count="4" type="stmt"/>
+      <line num="35" count="1" type="stmt"/>
+      <line num="37" count="3" type="stmt"/>
+      <line num="38" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="39" count="2" type="stmt"/>
+      <line num="55" count="1" type="stmt"/>
+      <line num="102" count="12" type="cond" truecount="4" falsecount="0"/>
+      <line num="103" count="12" type="stmt"/>
+      <line num="104" count="12" type="cond" truecount="2" falsecount="0"/>
+      <line num="105" count="14" type="stmt"/>
+      <line num="106" count="11" type="cond" truecount="2" falsecount="0"/>
+      <line num="108" count="10" type="stmt"/>
+      <line num="111" count="13" type="stmt"/>
+      <line num="112" count="13" type="cond" truecount="4" falsecount="0"/>
+      <line num="113" count="10" type="stmt"/>
+      <line num="114" count="10" type="stmt"/>
+      <line num="115" count="3" type="cond" truecount="2" falsecount="2"/>
+      <line num="116" count="10" type="cond" truecount="2" falsecount="0"/>
+      <line num="117" count="9" type="stmt"/>
+      <line num="118" count="9" type="cond" truecount="1" falsecount="1"/>
+      <line num="119" count="9" type="cond" truecount="2" falsecount="0"/>
+      <line num="120" count="1" type="stmt"/>
+      <line num="122" count="8" type="cond" truecount="2" falsecount="0"/>
+      <line num="128" count="7" type="cond" truecount="2" falsecount="0"/>
+      <line num="132" count="5" type="cond" truecount="6" falsecount="0"/>
+      <line num="134" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="135" count="1" type="stmt"/>
+      <line num="137" count="2" type="stmt"/>
+    </file>
+    <file name="community.ts" path="/Users/operator/Developer/irori/packages/core/src/community.ts">
+      <metrics statements="10" coveredstatements="10" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="20" count="6" type="stmt"/>
+      <line num="31" count="6" type="stmt"/>
+      <line num="34" count="6" type="stmt"/>
+      <line num="56" count="6" type="stmt"/>
+      <line num="67" count="6" type="stmt"/>
+      <line num="77" count="6" type="stmt"/>
+      <line num="98" count="6" type="stmt"/>
+      <line num="106" count="6" type="stmt"/>
+      <line num="109" count="6" type="stmt"/>
+      <line num="122" count="6" type="stmt"/>
+    </file>
+    <file name="cost.ts" path="/Users/operator/Developer/irori/packages/core/src/cost.ts">
+      <metrics statements="17" coveredstatements="9" conditionals="8" coveredconditionals="0" methods="4" coveredmethods="0"/>
+      <line num="15" count="7" type="stmt"/>
+      <line num="23" count="7" type="stmt"/>
+      <line num="35" count="7" type="stmt"/>
+      <line num="37" count="7" type="stmt"/>
+      <line num="57" count="0" type="cond" truecount="0" falsecount="6"/>
+      <line num="58" count="0" type="stmt"/>
+      <line num="59" count="0" type="stmt"/>
+      <line num="60" count="0" type="stmt"/>
+      <line num="61" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="62" count="0" type="stmt"/>
+      <line num="67" count="0" type="stmt"/>
+      <line num="68" count="0" type="stmt"/>
+      <line num="73" count="7" type="stmt"/>
+      <line num="83" count="7" type="stmt"/>
+      <line num="86" count="7" type="stmt"/>
+      <line num="89" count="7" type="stmt"/>
+      <line num="94" count="7" type="stmt"/>
+    </file>
+    <file name="currency.ts" path="/Users/operator/Developer/irori/packages/core/src/currency.ts">
+      <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="9" count="7" type="stmt"/>
+      <line num="10" count="7" type="stmt"/>
+      <line num="14" count="7" type="stmt"/>
+    </file>
+    <file name="downloads.ts" path="/Users/operator/Developer/irori/packages/core/src/downloads.ts">
+      <metrics statements="16" coveredstatements="16" conditionals="40" coveredconditionals="36" methods="8" coveredmethods="6"/>
+      <line num="11" count="7" type="stmt"/>
+      <line num="29" count="7" type="stmt"/>
+      <line num="32" count="7" type="stmt"/>
+      <line num="42" count="7" type="stmt"/>
+      <line num="43" count="7" type="stmt"/>
+      <line num="47" count="7" type="stmt"/>
+      <line num="75" count="7" type="stmt"/>
+      <line num="81" count="5" type="cond" truecount="2" falsecount="2"/>
+      <line num="82" count="5" type="cond" truecount="2" falsecount="2"/>
+      <line num="83" count="5" type="cond" truecount="4" falsecount="0"/>
+      <line num="84" count="5" type="cond" truecount="4" falsecount="0"/>
+      <line num="105" count="5" type="stmt"/>
+      <line num="106" count="8" type="cond" truecount="10" falsecount="0"/>
+      <line num="107" count="5" type="stmt"/>
+      <line num="108" count="9" type="cond" truecount="10" falsecount="0"/>
+      <line num="109" count="6" type="cond" truecount="4" falsecount="0"/>
+    </file>
+    <file name="events.ts" path="/Users/operator/Developer/irori/packages/core/src/events.ts">
+      <metrics statements="14" coveredstatements="14" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="12" count="6" type="stmt"/>
+      <line num="19" count="6" type="stmt"/>
+      <line num="26" count="6" type="stmt"/>
+      <line num="32" count="6" type="stmt"/>
+      <line num="44" count="6" type="stmt"/>
+      <line num="54" count="6" type="stmt"/>
+      <line num="76" count="6" type="stmt"/>
+      <line num="96" count="6" type="stmt"/>
+      <line num="112" count="6" type="stmt"/>
+      <line num="133" count="6" type="stmt"/>
+      <line num="143" count="6" type="stmt"/>
+      <line num="154" count="6" type="stmt"/>
+      <line num="164" count="6" type="stmt"/>
+      <line num="177" count="6" type="stmt"/>
+    </file>
+    <file name="health.ts" path="/Users/operator/Developer/irori/packages/core/src/health.ts">
+      <metrics statements="12" coveredstatements="8" conditionals="8" coveredconditionals="0" methods="5" coveredmethods="0"/>
+      <line num="8" count="6" type="stmt"/>
+      <line num="19" count="6" type="stmt"/>
+      <line num="22" count="6" type="stmt"/>
+      <line num="25" count="6" type="stmt"/>
+      <line num="39" count="6" type="stmt"/>
+      <line num="51" count="6" type="stmt"/>
+      <line num="62" count="6" type="stmt"/>
+      <line num="83" count="6" type="stmt"/>
+      <line num="96" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="97" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="98" count="0" type="stmt"/>
+      <line num="99" count="0" type="stmt"/>
+    </file>
+    <file name="hf-quants.ts" path="/Users/operator/Developer/irori/packages/core/src/hf-quants.ts">
+      <metrics statements="7" coveredstatements="5" conditionals="0" coveredconditionals="0" methods="2" coveredmethods="0"/>
+      <line num="11" count="6" type="stmt"/>
+      <line num="24" count="6" type="stmt"/>
+      <line num="30" count="6" type="stmt"/>
+      <line num="38" count="6" type="stmt"/>
+      <line num="53" count="6" type="stmt"/>
+      <line num="64" count="0" type="stmt"/>
+      <line num="66" count="0" type="stmt"/>
+    </file>
+    <file name="hf-token.ts" path="/Users/operator/Developer/irori/packages/core/src/hf-token.ts">
+      <metrics statements="3" coveredstatements="3" conditionals="4" coveredconditionals="4" methods="2" coveredmethods="2"/>
+      <line num="10" count="7" type="stmt"/>
+      <line num="20" count="7" type="stmt"/>
+      <line num="26" count="9" type="cond" truecount="4" falsecount="0"/>
+    </file>
+    <file name="hygiene.ts" path="/Users/operator/Developer/irori/packages/core/src/hygiene.ts">
+      <metrics statements="11" coveredstatements="10" conditionals="4" coveredconditionals="0" methods="2" coveredmethods="0"/>
+      <line num="9" count="6" type="stmt"/>
+      <line num="20" count="6" type="stmt"/>
+      <line num="23" count="6" type="stmt"/>
+      <line num="35" count="6" type="stmt"/>
+      <line num="49" count="6" type="stmt"/>
+      <line num="59" count="6" type="stmt"/>
+      <line num="73" count="6" type="stmt"/>
+      <line num="85" count="6" type="stmt"/>
+      <line num="95" count="6" type="stmt"/>
+      <line num="105" count="6" type="stmt"/>
+      <line num="115" count="0" type="cond" truecount="0" falsecount="4"/>
+    </file>
+    <file name="index.ts" path="/Users/operator/Developer/irori/packages/core/src/index.ts">
+      <metrics statements="0" coveredstatements="0" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+    </file>
+    <file name="inventory.ts" path="/Users/operator/Developer/irori/packages/core/src/inventory.ts">
+      <metrics statements="8" coveredstatements="8" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="12" count="6" type="stmt"/>
+      <line num="22" count="6" type="stmt"/>
+      <line num="37" count="6" type="stmt"/>
+      <line num="53" count="6" type="stmt"/>
+      <line num="57" count="6" type="stmt"/>
+      <line num="66" count="6" type="stmt"/>
+      <line num="86" count="6" type="stmt"/>
+      <line num="124" count="6" type="stmt"/>
+    </file>
+    <file name="job-messages.ts" path="/Users/operator/Developer/irori/packages/core/src/job-messages.ts">
+      <metrics statements="24" coveredstatements="24" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="8" count="7" type="stmt"/>
+      <line num="15" count="7" type="stmt"/>
+      <line num="21" count="7" type="stmt"/>
+      <line num="26" count="7" type="stmt"/>
+      <line num="34" count="7" type="stmt"/>
+      <line num="42" count="7" type="stmt"/>
+      <line num="53" count="7" type="stmt"/>
+      <line num="76" count="7" type="stmt"/>
+      <line num="83" count="7" type="stmt"/>
+      <line num="88" count="7" type="stmt"/>
+      <line num="95" count="7" type="stmt"/>
+      <line num="102" count="7" type="stmt"/>
+      <line num="113" count="7" type="stmt"/>
+      <line num="122" count="7" type="stmt"/>
+      <line num="129" count="7" type="stmt"/>
+      <line num="140" count="7" type="stmt"/>
+      <line num="146" count="7" type="stmt"/>
+      <line num="151" count="7" type="stmt"/>
+      <line num="163" count="7" type="stmt"/>
+      <line num="174" count="7" type="stmt"/>
+      <line num="183" count="7" type="stmt"/>
+      <line num="191" count="7" type="stmt"/>
+      <line num="199" count="7" type="stmt"/>
+      <line num="206" count="7" type="stmt"/>
+    </file>
+    <file name="jobs.ts" path="/Users/operator/Developer/irori/packages/core/src/jobs.ts">
+      <metrics statements="7" coveredstatements="7" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="8" count="6" type="stmt"/>
+      <line num="51" count="6" type="stmt"/>
+      <line num="69" count="6" type="stmt"/>
+      <line num="72" count="6" type="stmt"/>
+      <line num="73" count="6" type="stmt"/>
+      <line num="77" count="6" type="stmt"/>
+      <line num="105" count="6" type="stmt"/>
+    </file>
+    <file name="llm.ts" path="/Users/operator/Developer/irori/packages/core/src/llm.ts">
+      <metrics statements="6" coveredstatements="6" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="3" count="7" type="stmt"/>
+      <line num="16" count="7" type="stmt"/>
+      <line num="24" count="7" type="stmt"/>
+      <line num="59" count="7" type="stmt"/>
+      <line num="69" count="7" type="stmt"/>
+      <line num="79" count="7" type="stmt"/>
+    </file>
+    <file name="logs.ts" path="/Users/operator/Developer/irori/packages/core/src/logs.ts">
+      <metrics statements="21" coveredstatements="16" conditionals="6" coveredconditionals="0" methods="4" coveredmethods="0"/>
+      <line num="13" count="7" type="stmt"/>
+      <line num="14" count="7" type="stmt"/>
+      <line num="17" count="7" type="stmt"/>
+      <line num="18" count="7" type="stmt"/>
+      <line num="22" count="7" type="stmt"/>
+      <line num="32" count="0" type="stmt"/>
+      <line num="38" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="39" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="40" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="41" count="0" type="stmt"/>
+      <line num="45" count="7" type="stmt"/>
+      <line num="46" count="7" type="stmt"/>
+      <line num="50" count="7" type="stmt"/>
+      <line num="70" count="7" type="stmt"/>
+      <line num="75" count="7" type="stmt"/>
+      <line num="88" count="7" type="stmt"/>
+      <line num="96" count="7" type="stmt"/>
+      <line num="114" count="7" type="stmt"/>
+      <line num="115" count="7" type="stmt"/>
+      <line num="134" count="7" type="stmt"/>
+      <line num="145" count="7" type="stmt"/>
+    </file>
+    <file name="model-api.ts" path="/Users/operator/Developer/irori/packages/core/src/model-api.ts">
+      <metrics statements="5" coveredstatements="5" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="6" count="6" type="stmt"/>
+      <line num="16" count="6" type="stmt"/>
+      <line num="26" count="6" type="stmt"/>
+      <line num="28" count="6" type="stmt"/>
+      <line num="46" count="6" type="stmt"/>
+    </file>
+    <file name="modelctl-pin.ts" path="/Users/operator/Developer/irori/packages/core/src/modelctl-pin.ts">
+      <metrics statements="3" coveredstatements="3" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="11" count="7" type="stmt"/>
+      <line num="13" count="7" type="stmt"/>
+      <line num="19" count="7" type="stmt"/>
+    </file>
+    <file name="node.ts" path="/Users/operator/Developer/irori/packages/core/src/node.ts">
+      <metrics statements="22" coveredstatements="22" conditionals="14" coveredconditionals="13" methods="4" coveredmethods="2"/>
+      <line num="3" count="7" type="stmt"/>
+      <line num="4" count="7" type="stmt"/>
+      <line num="6" count="7" type="stmt"/>
+      <line num="7" count="7" type="stmt"/>
+      <line num="14" count="7" type="stmt"/>
+      <line num="17" count="7" type="stmt"/>
+      <line num="47" count="7" type="stmt"/>
+      <line num="52" count="7" type="stmt"/>
+      <line num="102" count="6" type="stmt"/>
+      <line num="103" count="19" type="stmt"/>
+      <line num="104" count="6" type="stmt"/>
+      <line num="105" count="12" type="cond" truecount="1" falsecount="1"/>
+      <line num="107" count="6" type="stmt"/>
+      <line num="108" count="12" type="stmt"/>
+      <line num="110" count="16" type="cond" truecount="2" falsecount="0"/>
+      <line num="111" count="15" type="cond" truecount="2" falsecount="0"/>
+      <line num="114" count="6" type="stmt"/>
+      <line num="129" count="3" type="stmt"/>
+      <line num="130" count="3" type="stmt"/>
+      <line num="131" count="9" type="cond" truecount="6" falsecount="0"/>
+      <line num="132" count="5" type="cond" truecount="2" falsecount="0"/>
+      <line num="134" count="3" type="stmt"/>
+    </file>
+    <file name="recipes.ts" path="/Users/operator/Developer/irori/packages/core/src/recipes.ts">
+      <metrics statements="11" coveredstatements="11" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="23" count="6" type="stmt"/>
+      <line num="24" count="6" type="stmt"/>
+      <line num="28" count="6" type="stmt"/>
+      <line num="29" count="6" type="stmt"/>
+      <line num="32" count="6" type="stmt"/>
+      <line num="44" count="6" type="stmt"/>
+      <line num="95" count="6" type="stmt"/>
+      <line num="107" count="6" type="stmt"/>
+      <line num="125" count="6" type="stmt"/>
+      <line num="132" count="6" type="stmt"/>
+      <line num="149" count="6" type="stmt"/>
+    </file>
+    <file name="setups.ts" path="/Users/operator/Developer/irori/packages/core/src/setups.ts">
+      <metrics statements="68" coveredstatements="68" conditionals="53" coveredconditionals="39" methods="10" coveredmethods="10"/>
+      <line num="9" count="6" type="stmt"/>
+      <line num="13" count="6" type="stmt"/>
+      <line num="17" count="6" type="stmt"/>
+      <line num="24" count="6" type="stmt"/>
+      <line num="33" count="6" type="stmt"/>
+      <line num="39" count="6" type="stmt"/>
+      <line num="42" count="6" type="stmt"/>
+      <line num="74" count="6" type="stmt"/>
+      <line num="91" count="6" type="stmt"/>
+      <line num="104" count="6" type="stmt"/>
+      <line num="128" count="6" type="stmt"/>
+      <line num="131" count="4" type="stmt"/>
+      <line num="132" count="4" type="cond" truecount="1" falsecount="1"/>
+      <line num="133" count="4" type="stmt"/>
+      <line num="134" count="4" type="cond" truecount="1" falsecount="1"/>
+      <line num="135" count="4" type="stmt"/>
+      <line num="136" count="4" type="stmt"/>
+      <line num="140" count="2" type="stmt"/>
+      <line num="141" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="142" count="2" type="stmt"/>
+      <line num="145" count="6" type="stmt"/>
+      <line num="153" count="6" type="stmt"/>
+      <line num="154" count="6" type="cond" truecount="6" falsecount="0"/>
+      <line num="155" count="5" type="stmt"/>
+      <line num="156" count="5" type="stmt"/>
+      <line num="157" count="5" type="stmt"/>
+      <line num="158" count="11" type="cond" truecount="2" falsecount="0"/>
+      <line num="159" count="3" type="stmt"/>
+      <line num="160" count="3" type="stmt"/>
+      <line num="161" count="3" type="stmt"/>
+      <line num="163" count="8" type="cond" truecount="2" falsecount="0"/>
+      <line num="164" count="8" type="stmt"/>
+      <line num="165" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="166" count="8" type="stmt"/>
+      <line num="167" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="168" count="2" type="stmt"/>
+      <line num="169" count="2" type="stmt"/>
+      <line num="170" count="2" type="stmt"/>
+      <line num="172" count="6" type="cond" truecount="2" falsecount="0"/>
+      <line num="173" count="6" type="stmt"/>
+      <line num="174" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="175" count="2" type="stmt"/>
+      <line num="176" count="2" type="stmt"/>
+      <line num="177" count="2" type="stmt"/>
+      <line num="179" count="4" type="cond" truecount="2" falsecount="0"/>
+      <line num="180" count="4" type="stmt"/>
+      <line num="181" count="2" type="cond" truecount="1" falsecount="1"/>
+      <line num="182" count="2" type="stmt"/>
+      <line num="183" count="2" type="stmt"/>
+      <line num="184" count="2" type="stmt"/>
+      <line num="186" count="2" type="stmt"/>
+      <line num="188" count="3" type="cond" truecount="1" falsecount="3"/>
+      <line num="193" count="4" type="cond" truecount="2" falsecount="0"/>
+      <line num="194" count="3" type="stmt"/>
+      <line num="195" count="3" type="stmt"/>
+      <line num="196" count="3" type="cond" truecount="4" falsecount="4"/>
+      <line num="207" count="8" type="cond" truecount="5" falsecount="0"/>
+      <line num="209" count="1" type="stmt"/>
+      <line num="211" count="1" type="stmt"/>
+      <line num="213" count="1" type="stmt"/>
+      <line num="215" count="1" type="stmt"/>
+      <line num="217" count="4" type="cond" truecount="2" falsecount="0"/>
+      <line num="218" count="3" type="cond" truecount="2" falsecount="0"/>
+      <line num="219" count="2" type="cond" truecount="2" falsecount="0"/>
+      <line num="220" count="1" type="stmt"/>
+      <line num="226" count="6" type="stmt"/>
+      <line num="237" count="6" type="stmt"/>
+      <line num="259" count="6" type="stmt"/>
+    </file>
+    <file name="snapshot.ts" path="/Users/operator/Developer/irori/packages/core/src/snapshot.ts">
+      <metrics statements="2" coveredstatements="2" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="4" count="7" type="stmt"/>
+      <line num="35" count="7" type="stmt"/>
+    </file>
+    <file name="updates.ts" path="/Users/operator/Developer/irori/packages/core/src/updates.ts">
+      <metrics statements="7" coveredstatements="7" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0"/>
+      <line num="15" count="6" type="stmt"/>
+      <line num="24" count="6" type="stmt"/>
+      <line num="28" count="6" type="stmt"/>
+      <line num="62" count="6" type="stmt"/>
+      <line num="72" count="6" type="stmt"/>
+      <line num="88" count="6" type="stmt"/>
+      <line num="106" count="6" type="stmt"/>
+    </file>
+    <file name="usage-api.ts" path="/Users/operator/Developer/irori/packages/core/src/usage-api.ts">
+      <metrics statements="37" coveredstatements="30" conditionals="13" coveredconditionals="0" methods="4" coveredmethods="0"/>
+      <line num="10" count="7" type="stmt"/>
+      <line num="11" count="7" type="stmt"/>
+      <line num="16" count="0" type="cond" truecount="0" falsecount="8"/>
+      <line num="20" count="0" type="cond" truecount="0" falsecount="5"/>
+      <line num="22" count="0" type="stmt"/>
+      <line num="24" count="0" type="stmt"/>
+      <line num="26" count="0" type="stmt"/>
+      <line num="28" count="0" type="stmt"/>
+      <line num="30" count="0" type="stmt"/>
+      <line num="34" count="7" type="stmt"/>
+      <line num="35" count="7" type="stmt"/>
+      <line num="38" count="7" type="stmt"/>
+      <line num="51" count="7" type="stmt"/>
+      <line num="68" count="7" type="stmt"/>
+      <line num="80" count="7" type="stmt"/>
+      <line num="108" count="7" type="stmt"/>
+      <line num="117" count="7" type="stmt"/>
+      <line num="129" count="7" type="stmt"/>
+      <line num="139" count="7" type="stmt"/>
+      <line num="151" count="7" type="stmt"/>
+      <line num="158" count="7" type="stmt"/>
+      <line num="169" count="7" type="stmt"/>
+      <line num="189" count="7" type="stmt"/>
+      <line num="201" count="7" type="stmt"/>
+      <line num="210" count="7" type="stmt"/>
+      <line num="221" count="7" type="stmt"/>
+      <line num="237" count="7" type="stmt"/>
+      <line num="238" count="7" type="stmt"/>
+      <line num="251" count="7" type="stmt"/>
+      <line num="268" count="7" type="stmt"/>
+      <line num="290" count="7" type="stmt"/>
+      <line num="304" count="7" type="stmt"/>
+      <line num="310" count="7" type="stmt"/>
+      <line num="325" count="7" type="stmt"/>
+      <line num="342" count="7" type="stmt"/>
+      <line num="353" count="7" type="stmt"/>
+      <line num="357" count="7" type="stmt"/>
+    </file>
+    <file name="usage.ts" path="/Users/operator/Developer/irori/packages/core/src/usage.ts">
+      <metrics statements="50" coveredstatements="50" conditionals="64" coveredconditionals="59" methods="10" coveredmethods="5"/>
+      <line num="4" count="9" type="stmt"/>
+      <line num="18" count="9" type="stmt"/>
+      <line num="34" count="9" type="stmt"/>
+      <line num="38" count="9" type="stmt"/>
+      <line num="44" count="9" type="stmt"/>
+      <line num="54" count="9" type="stmt"/>
+      <line num="70" count="9" type="stmt"/>
+      <line num="137" count="9" type="stmt"/>
+      <line num="138" count="9" type="stmt"/>
+      <line num="139" count="9" type="stmt"/>
+      <line num="141" count="9" type="stmt"/>
+      <line num="149" count="9" type="stmt"/>
+      <line num="152" count="12" type="stmt"/>
+      <line num="153" count="12" type="cond" truecount="4" falsecount="0"/>
+      <line num="154" count="12" type="cond" truecount="2" falsecount="0"/>
+      <line num="155" count="7" type="stmt"/>
+      <line num="156" count="7" type="cond" truecount="8" falsecount="0"/>
+      <line num="164" count="4" type="stmt"/>
+      <line num="165" count="4" type="stmt"/>
+      <line num="166" count="4" type="stmt"/>
+      <line num="167" count="4" type="stmt"/>
+      <line num="168" count="4" type="stmt"/>
+      <line num="184" count="5" type="cond" truecount="2" falsecount="2"/>
+      <line num="185" count="5" type="cond" truecount="8" falsecount="0"/>
+      <line num="186" count="2" type="stmt"/>
+      <line num="188" count="3" type="stmt"/>
+      <line num="189" count="3" type="stmt"/>
+      <line num="190" count="8" type="stmt"/>
+      <line num="191" count="8" type="cond" truecount="2" falsecount="0"/>
+      <line num="192" count="6" type="stmt"/>
+      <line num="193" count="6" type="stmt"/>
+      <line num="194" count="6" type="cond" truecount="1" falsecount="1"/>
+      <line num="195" count="6" type="cond" truecount="2" falsecount="0"/>
+      <line num="196" count="3" type="stmt"/>
+      <line num="199" count="3" type="cond" truecount="8" falsecount="0"/>
+      <line num="200" count="3" type="cond" truecount="4" falsecount="0"/>
+      <line num="201" count="1" type="stmt"/>
+      <line num="202" count="2" type="cond" truecount="4" falsecount="0"/>
+      <line num="203" count="1" type="stmt"/>
+      <line num="204" count="1" type="cond" truecount="2" falsecount="2"/>
+      <line num="205" count="1" type="stmt"/>
+      <line num="208" count="3" type="stmt"/>
+      <line num="212" count="9" type="stmt"/>
+      <line num="218" count="9" type="stmt"/>
+      <line num="227" count="9" type="stmt"/>
+      <line num="230" count="9" type="stmt"/>
+      <line num="240" count="9" type="stmt"/>
+      <line num="253" count="3" type="stmt"/>
+      <line num="270" count="9" type="stmt"/>
+      <line num="274" count="7" type="cond" truecount="8" falsecount="0"/>
+    </file>
+    <file name="version.ts" path="/Users/operator/Developer/irori/packages/core/src/version.ts">
+      <metrics statements="10" coveredstatements="10" conditionals="18" coveredconditionals="14" methods="6" coveredmethods="4"/>
+      <line num="2" count="6" type="stmt"/>
+      <line num="5" count="6" type="stmt"/>
+      <line num="9" count="6" type="stmt"/>
+      <line num="13" count="15" type="cond" truecount="4" falsecount="0"/>
+      <line num="14" count="15" type="cond" truecount="4" falsecount="0"/>
+      <line num="15" count="5" type="stmt"/>
+      <line num="16" count="11" type="cond" truecount="4" falsecount="4"/>
+      <line num="17" count="11" type="cond" truecount="2" falsecount="0"/>
+      <line num="19" count="2" type="stmt"/>
+      <line num="23" count="2" type="stmt"/>
+    </file>
+  </project>
+</coverage>

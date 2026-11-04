@@ -6,6 +6,29 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Hub survives oversized agent frames** (IR-176/IR-177): an agent
+  usage-batch frame over the WS cap no longer kills the hub with an
+  unhandled socket error — it is logged and closed 1009; the frame cap is
+  env-tunable (`IRORI_MAX_FRAME_BYTES`). Deployed as the 2026-11-04 incident
+  hotfix (`dev-0.3.0-67`).
+
+### Changed
+
+- **Agent usage size-bounding** (IR-178): batches are budgeted on serialized
+  row bytes (base64 parts + non-part payload — the wire unit) instead of gz
+  bytes with a first-event bypass; single events over
+  `USAGE_EVENT_HARD_CAP_BYTES` (56 MB) are quarantined with metadata kept,
+  and a 1009 close halves the next take until a batch acks.
+
+### Added
+
+- **Reconnect-storm detection + process guards** (IR-179): a per-node
+  `node-online` journal-rate health rule (seeded, webhook-capable) trips on
+  crash-loop reconnect patterns; `unhandledRejection`/`uncaughtException`
+  handlers log structured diagnostics and surface counters on `/metrics`.
+
 ## [0.5.0] — 2026-11-04
 
 The observability epic (IR-157): fleet-wide costs, energy, health, logs and

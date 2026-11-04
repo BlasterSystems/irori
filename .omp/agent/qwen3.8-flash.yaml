@@ -1,0 +1,11 @@
+modelRoles:
+  slow: DGX3/Qwen3.8-Flash-Next:max
+  vision: DGX3/Qwen3.8-Flash-Next:max
+  advisor: DGX3/Qwen3.8-Flash-Next:max
+  commit: DGX3/Qwen3.8-Flash-Next:max
+  tiny: DGX3/Qwen3.8-Flash-Next:max
+  plan: DGX3/Qwen3.8-Flash-Next:max
+  judge: DGX3/Qwen3.8-Flash-Next:max
+  smol: DGX3/Qwen3.8-Flash-Next:max
+  task: DGX3/Qwen3.8-Flash-Next:max
+  default: DGX3/Qwen3.8-Flash-Next:max
