@@ -155,6 +155,14 @@
       "when": 1793734022555,
       "tag": "0021_nasty_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7.3.0",
+      "when": 1793785021150,
+      "tag": "0027_schema_repair",
+      "breakpoints": true,
+      "hash": "15a83ab5bf4c56ce4336f9233691d594b4594a3a03c7590e38dcc7b71d6e4756"
     }
   ]
 }
