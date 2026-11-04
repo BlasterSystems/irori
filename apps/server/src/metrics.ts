@@ -17,8 +17,14 @@ export interface MetricsNode {
   snapshot: HardwareSnapshot | null;
 }
 
+/** IR-179: process-guard counters surfaced alongside the fleet gauges. */
+export interface ProcessGuardCounters {
+  unhandledRejection: number;
+  uncaughtException: number;
+}
+
 /** Renders the /metrics body; pure so promtool-style assertions are easy. */
-export function renderPrometheus(nodes: MetricsNode[]): string {
+export function renderPrometheus(nodes: MetricsNode[], guards?: ProcessGuardCounters): string {
   const lines: string[] = [];
   const emit = (name: string, help: string, type: string, samples: Array<{ labels: string; value: number | string }>): void => {
     if (samples.length === 0) return;
@@ -26,6 +32,21 @@ export function renderPrometheus(nodes: MetricsNode[]): string {
     for (const s of samples) lines.push(`${name}{${s.labels}} ${s.value}`);
   };
   lines.push("# HELP irori_up The Irori hub is serving.", "# TYPE irori_up gauge", "irori_up 1");
+
+  if (guards) {
+    emit(
+      "irori_process_unhandled_rejections_total",
+      "Unexpected promise rejections survived by the hub process (IR-179).",
+      "counter",
+      [{ labels: "", value: guards.unhandledRejection }],
+    );
+    emit(
+      "irori_process_uncaught_exceptions_total",
+      "Uncaught exceptions logged before the hub process exited (IR-179).",
+      "counter",
+      [{ labels: "", value: guards.uncaughtException }],
+    );
+  }
 
   emit("irori_node_online", "1 when the node agent is connected.", "gauge", nodes.map((n) => ({ labels: `node="${esc(n.name)}"`, value: n.online ? 1 : 0 })));
 

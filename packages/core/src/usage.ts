@@ -218,13 +218,21 @@ export const MAX_USAGE_BATCH = 500;
 export const MAX_USAGE_FRAME_BYTES = 64 * 1024 * 1024;
 
 /**
- * Per-frame budget on the SUM of attached part bytes (base64 gz, IR-52).
- * Worst single event (16 MiB body cap + 2×4 MiB response/error parts,
- * incompressible) ≈ 32 MiB base64 — fits under both the budget and the hub
- * frame limit, so a singleton always travels and no batch can poison the
- * connection with an oversized frame.
+ * Per-frame budget on the sum of SERIALIZED row sizes (IR-52/IR-178: counted
+ * on the base64 part bytes plus the row's non-part payload — the same unit
+ * the wire sees). A singleton over the budget still travels alone, but the
+ * sync layer quarantines any single event over USAGE_EVENT_HARD_CAP_BYTES so
+ * no frame can exceed the hub's receive limit.
  */
 export const USAGE_BATCH_PART_BUDGET_BYTES = 48 * 1024 * 1024;
+
+/**
+ * IR-178: hard cap on one serialized usage event. Over this the agent
+ * quarantines the event (metadata kept, body parts dropped) instead of
+ * retrying forever. 8 MB under MAX_USAGE_FRAME_BYTES leaves room for the
+ * batch envelope and metadata overhead.
+ */
+export const USAGE_EVENT_HARD_CAP_BYTES = 56 * 1024 * 1024;
 
 /** Agent → server: one batch of captured requests (≤ MAX_USAGE_BATCH). */
 export const usageBatchMsgSchema = z.object({

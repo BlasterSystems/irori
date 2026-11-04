@@ -201,9 +201,21 @@ export class AgentTransport {
     return this.cadenceMs;
   }
 
+  /** IR-178: last WS close code; null while a connection is live. */
+  private lastClose: number | null = null;
+
   /** True while a connection is authenticated and may carry snapshots. */
   isReady(): boolean {
     return this.ready;
+  }
+
+  /**
+   * IR-178: last WS close code (null while connected). The usage sync reads
+   * it after a failed send to detect a hub-side frame-too-large close (1009)
+   * and shrink the next batch instead of resending it forever.
+   */
+  lastCloseCode(): number | null {
+    return this.lastClose;
   }
 
   /** Effective LLM probe config (server values merged with env overrides). */
@@ -343,11 +355,15 @@ export class AgentTransport {
     ws.on("error", (err: Error) => {
       this.log(`connection error: ${err.message}`);
     });
-    ws.on("close", () => this.handleClose());
+    ws.on("close", (code) => {
+      this.lastClose = code;
+      this.handleClose();
+    });
   }
 
   private handleOpen(): void {
     this.log(`connected to ${this.serverUrl}`);
+    this.lastClose = null;
     this.lastPongAt = Date.now();
     try {
       this.sendRaw({

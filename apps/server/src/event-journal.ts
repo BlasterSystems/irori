@@ -43,6 +43,11 @@ export interface EventJournalService {
    */
   journal(event: SseEvent): Promise<void>;
   list(query: EventJournalQuery): Promise<{ events: EventJournalRow[]; nextCursor: number | null }>;
+  /**
+   * IR-179: per-node counts of one journal type inside the window. The
+   * reconnect-storm health rule reads node-online bursts from here.
+   */
+  countByNodeSince(type: string, sinceMs: number): Promise<Array<{ nodeId: string | null; n: number }>>;
   /** Delete journaled events older than `keepDays`; returns the deleted count. */
   prune(keepDays: number): Promise<number>;
 }
@@ -102,6 +107,16 @@ export function createEventJournalService(
         events: page.map((r) => ({ id: String(r.id), ts: r.ts.toISOString(), type: r.type, nodeId: r.nodeId, payload: r.payload })),
         nextCursor: rows.length > query.limit && page.length > 0 ? page[page.length - 1]!.id : null,
       };
+    },
+
+    async countByNodeSince(type, sinceMs) {
+      const cutoff = new Date(Date.now() - sinceMs);
+      const rows = await db
+        .select({ nodeId: eventJournal.nodeId, n: sql<number>`count(*)::int` })
+        .from(eventJournal)
+        .where(and(eq(eventJournal.type, type), gte(eventJournal.ts, cutoff)))
+        .groupBy(eventJournal.nodeId);
+      return rows;
     },
 
     async prune(keepDays) {

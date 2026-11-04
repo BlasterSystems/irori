@@ -16,6 +16,7 @@ import { energyCostPutSchema, tokenCostPutSchema, modelPricePutSchema, modelctlP
 import type { CostService } from "./cost.js";
 import type { HealthService } from "./health.js";
 import { renderPrometheus } from "./metrics.js";
+import { guardCounters } from "./process-guards.js";
 import type { UpdateBaseline } from "./updates-baseline.js";
 import { recipeInstallRequestSchema } from "@irori/core";
 import type { RecipeService } from "./recipes.js";
@@ -1445,7 +1446,7 @@ export function createApp(deps: AppDeps): Express {
       return res.status(404).json({ error: "metrics export disabled" });
     }
     const nodes = (await deps.getNodesSnapshot?.().catch(() => [])) ?? [];
-    res.type("text/plain; version=0.0.4").send(renderPrometheus(nodes));
+    res.type("text/plain; version=0.0.4").send(renderPrometheus(nodes, guardCounters()));
   });
 
   // Dedicated probe-assignment endpoint (M3); PATCH /nodes/:id covers the

@@ -47,6 +47,7 @@ import { JobBusyError, JobDispatchError } from "./jobs-service.js";
 import { createPushRemediation } from "./push-remediation.js";
 import { initOtel, shutdownOtel } from "./otel.js";
 import { log } from "./logger.js";
+import { installProcessGuards } from "./process-guards.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -287,6 +288,8 @@ async function boot(): Promise<void> {
   state.health = createHealthService(dbHandle.db, config.encryptionKey!, {
     sse: (e) => sse.send(e),
     journal: (e) => state.eventJournal?.journal(e) ?? Promise.resolve(),
+    // IR-179: the reconnect-storm rule reads node-online bursts per node.
+    journalCounts: (type, sinceMs) => state.eventJournal?.countByNodeSince(type, sinceMs) ?? Promise.resolve([]),
     fetchImpl: fetch,
   });
   await state.health.ensureSeed().catch((err: unknown) => log.warn("health seed failed: " + String(err)));
@@ -700,6 +703,11 @@ function shutdown(signal: string): void {
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+
+// IR-179: unexpected rejections surface (log + counter) instead of killing
+// the hub; an uncaught exception is logged with diagnostics, counted on
+// /metrics, and exits non-zero so the supervisor restarts a defined state.
+installProcessGuards({ log: (m) => log.warn(m) });
 
 function readVersion(): string {
   try {

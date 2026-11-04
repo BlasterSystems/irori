@@ -130,6 +130,7 @@ async function run(): Promise<void> {
     onAck: (handler) => {
       usageAckHandler = handler;
     },
+    lastCloseCode: () => transport.lastCloseCode(),
     flushMs: config.usageFlushMs,
     batchSize: MAX_USAGE_BATCH,
     keepDays: 90,
