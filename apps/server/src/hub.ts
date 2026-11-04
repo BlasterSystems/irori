@@ -119,6 +119,12 @@ export interface AgentHubDeps {
   maxFrameBytes?: number;
 }
 
+/** Clock caps for one clocks-set frame (IRI-124); absent = leave that side alone. */
+export interface ClockCaps {
+  smMaxMHz?: number | null;
+  cpuMaxMHz?: number | null;
+}
+
 export interface AgentHub {
   /** Registers the /agent-ws upgrade handler on the given HTTP server. */
   attach(server: Server): void;
@@ -130,8 +136,9 @@ export interface AgentHub {
   refreshConfig(nodeId: string): Promise<boolean>;
   /** IRI-067: per-GPU clocks + cap state; null = agent offline or no reply (8 s). */
   clocks(nodeId: string): Promise<ClocksGetResultMsg | null>;
-  /** IRI-067: apply (or null = reset) the SM application clock cap. */
-  setClocks(nodeId: string, smMaxMHz: number | null, persist?: boolean): Promise<ClocksSetResultMsg | null>;
+  /** IRI-067/IRI-124: apply (or null = reset) clock caps; an absent field
+   *  leaves that side untouched. */
+  setClocks(nodeId: string, caps: ClockCaps, persist?: boolean): Promise<ClocksSetResultMsg | null>;
   /** IRI-068: armed node shutdown; the agent acks, then powers off after graceS. */
   shutdownNode(nodeId: string, graceS: number, origin: string): Promise<NodeShutdownAckMsg | null>;
   stop(): void;
@@ -552,7 +559,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       });
       return reply;
     },
-    async setClocks(nodeId, smMaxMHz, persist = false) {
+    async setClocks(nodeId, caps, persist = false) {
       const id = randomUUID();
       const ws = nodeSockets.get(nodeId);
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) return null;
@@ -562,7 +569,15 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
           resolve(null);
         }, 8000);
         clocksPending.set(`${nodeId}:${id}`, { resolve: (f) => resolve(f as ClocksSetResultMsg), timer });
-        ws.send(JSON.stringify({ type: "clocks-set", id, smMaxMHz, ...(persist ? { persist: true } : {}) }));
+        ws.send(
+          JSON.stringify({
+            type: "clocks-set",
+            id,
+            ...(caps.smMaxMHz !== undefined ? { smMaxMHz: caps.smMaxMHz } : {}),
+            ...(caps.cpuMaxMHz !== undefined ? { cpuMaxMHz: caps.cpuMaxMHz } : {}),
+            ...(persist ? { persist: true } : {}),
+          }),
+        );
       });
       return reply;
     },
