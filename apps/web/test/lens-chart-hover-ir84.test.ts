@@ -14,8 +14,6 @@ const chart: LensChart = {
   paths: [],
   series: [{ label: "tok/s", color: "var(--accent)", points: [10, 50, 90] }],
   times: [1000, 2000, 3000],
-  guides: [],
-  markers: [],
   guides: [{ y: 50, value: 50 }],
   markers: [{ x: 100, tier: "warn" }],
   yMin: 0,
