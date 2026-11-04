@@ -8,9 +8,7 @@ import { mount } from "@vue/test-utils";
  * the load/parse/render paths that string-pin tests never touched.
  */
 
-vi.mock("../src/live", () => ({
-  live: { on: () => () => {}, off: () => {}, send: () => {}, connected: false },
-}));
+vi.mock("../src/live", async () => ({ live: (await import("./live-mock")).liveMock }));
 vi.mock("../src/scrim", () => ({ vScrimClose: {} }));
 
 const emptyOk = async () => new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });

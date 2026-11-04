@@ -8,9 +8,7 @@ import { mount } from "@vue/test-utils";
  * returns harmless empty envelopes so loaders settle instead of throwing.
  */
 
-vi.mock("../src/live", () => ({
-  live: { on: () => () => {}, off: () => {}, send: () => {}, connected: false },
-}));
+vi.mock("../src/live", async () => ({ live: (await import("./live-mock")).liveMock }));
 vi.mock("../src/scrim", () => ({ vScrimClose: {} }));
 
 afterEach(() => {
@@ -35,6 +33,21 @@ describe("big view mounts", () => {
     w.unmount();
   });
 
-  // ServeView + NodeDetail mounts need deeper prop/shape stubs — tracked as
-  // the remaining view-mount work in IR-175 comments.
+  it("mounts ServeView end to end", async () => {
+    vi.stubGlobal("fetch", emptyOk);
+    const { default: ServeView } = await import("../src/components/ServeView.vue");
+    const w = mount(ServeView as never, { props: { route: { recipeJob: null } } } as never);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(w.exists()).toBe(true);
+    w.unmount();
+  });
+
+  it("mounts NodeDetail end to end", async () => {
+    vi.stubGlobal("fetch", emptyOk);
+    const { default: NodeDetail } = await import("../src/components/NodeDetail.vue");
+    const w = mount(NodeDetail as never, { props: { nodeId: "11111111-1111-4111-8111-111111111111" } } as never);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(w.exists()).toBe(true);
+    w.unmount();
+  });
 });
