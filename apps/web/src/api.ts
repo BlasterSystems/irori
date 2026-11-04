@@ -201,6 +201,94 @@ export async function setClockCap(id: string, capMHz: number | null, persistent:
   }
 }
 
+/** IRI-124: apply (null = clear) the CPU clock cap; optionally persist via oneshot. */
+export async function setCpuClockCap(id: string, cpuCapMHz: number | null, persistent: boolean): Promise<void> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/clock-cap`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cpuCapMHz, persistent }),
+  });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => null);
+    const msg = body !== null && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+}
+
+/** IRI-124: CPU clock policies as the agent reads them from cpufreq. */
+export interface CpuClockCluster {
+  cpus: number[];
+  minKHz: number;
+  maxKHz: number;
+  curMaxKHz: number;
+}
+
+export interface CpuClocks {
+  /** Requested ceiling in MHz; null when the policies are not uniformly capped. */
+  capMHz: number | null;
+  policies: CpuClockCluster[];
+}
+
+export interface GpuClocks {
+  index: number;
+  name: string | null;
+  smMHz: number | null;
+  smMaxMHz: number | null;
+  memMHz: number | null;
+  memMaxMHz: number | null;
+  smCapMHz: number | null;
+}
+
+export interface ClocksResponse {
+  gpus: GpuClocks[];
+  /** Absent on agents that predate IRI-124 (CPU cap support). */
+  cpu?: CpuClocks;
+}
+
+function numOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * IRI-124: live clocks + cap state. The `cpu` block is optional — an agent too
+ * old to cap CPU clocks omits it, which is how the UI knows to hide the
+ * control instead of offering a dead one.
+ */
+export async function fetchClocks(id: string, signal?: AbortSignal): Promise<ClocksResponse> {
+  const res = await fetch(`/api/v1/nodes/${encodeURIComponent(id)}/clocks`, {
+    headers: { accept: "application/json" },
+    ...(signal !== undefined ? { signal } : {}),
+  });
+  if (!res.ok) throw new Error(`GET /api/v1/nodes/${id}/clocks failed: HTTP ${res.status}`);
+  const body = (await res.json()) as Record<string, unknown>;
+  const gpus = Array.isArray(body.gpus) ? (body.gpus as Array<Record<string, unknown>>) : [];
+  const out: ClocksResponse = {
+    gpus: gpus.map((g) => ({
+      index: typeof g.index === "number" ? g.index : 0,
+      name: typeof g.name === "string" ? g.name : null,
+      smMHz: numOrNull(g.smMHz),
+      smMaxMHz: numOrNull(g.smMaxMHz),
+      memMHz: numOrNull(g.memMHz),
+      memMaxMHz: numOrNull(g.memMaxMHz),
+      smCapMHz: numOrNull(g.smCapMHz),
+    })),
+  };
+  const cpu = body.cpu as Record<string, unknown> | null | undefined;
+  if (cpu !== null && typeof cpu === "object") {
+    const policies = Array.isArray(cpu.policies) ? (cpu.policies as Array<Record<string, unknown>>) : [];
+    out.cpu = {
+      capMHz: numOrNull(cpu.capMHz),
+      policies: policies.map((p) => ({
+        cpus: Array.isArray(p.cpus) ? (p.cpus as unknown[]).filter((c): c is number => typeof c === "number") : [],
+        minKHz: typeof p.minKHz === "number" ? p.minKHz : 0,
+        maxKHz: typeof p.maxKHz === "number" ? p.maxKHz : 0,
+        curMaxKHz: typeof p.curMaxKHz === "number" ? p.curMaxKHz : 0,
+      })),
+    };
+  }
+  return out;
+}
+
 /** IRI-076: retry waste groups (superseded attempts per client key). */
 export type { UsageRetriesResponse } from "@irori/core";
 export async function fetchUsageRetries(range: UsageRangeName, opts: { nodeId?: string; signal?: AbortSignal } = {}): Promise<UsageRetriesResponse> {
