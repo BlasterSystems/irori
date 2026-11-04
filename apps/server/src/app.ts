@@ -133,7 +133,20 @@ function summarizeNode(row: NodeRecord): Record<string, unknown> {
     cacheUser: row.cacheUser,
     wolMac: row.wolMac,
     gpuClockCapMHz: row.gpuClockCapMHz,
+    gpuClockCapPersistent: row.gpuClockCapPersistent,
+    cpuClockCapMHz: row.cpuClockCapMHz,
+    cpuClockCapPersistent: row.cpuClockCapPersistent,
   };
+}
+
+/** One clock-cap body field: absent = leave that side alone, null = clear. */
+type CapField = { ok: true; value: number | null | undefined } | { ok: false };
+
+function parseCapField(raw: unknown): CapField {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === null) return { ok: true, value: null };
+  if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return { ok: true, value: raw };
+  return { ok: false };
 }
 
 /** Builds a history response; null while degraded (no DB wired yet). */
@@ -1191,7 +1204,9 @@ export function createApp(deps: AppDeps): Express {
     const result = await hub.clocks(id);
     if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
     if (!result.ok) return res.status(502).json({ error: result.error ?? "clocks query failed" });
-    res.json({ gpus: result.gpus });
+    // IRI-124: cpu is null when the node has no cpufreq policies and absent when
+    // the agent predates CPU clock control — the UI degrades on both.
+    res.json({ gpus: result.gpus, cpu: result.cpu ?? null });
   });
 
   app.post(
@@ -1203,7 +1218,8 @@ export function createApp(deps: AppDeps): Express {
         summary: (req) => {
           const body: unknown = req.body;
           const smMax = body && typeof body === "object" && "smMaxMHz" in body ? String((body as { smMaxMHz: unknown }).smMaxMHz) : "?";
-          return `clock cap set for node ${req.params.id ?? "?"} (smMaxMHz=${smMax})`;
+          const cpuMax = body && typeof body === "object" && "cpuMaxMHz" in body ? String((body as { cpuMaxMHz: unknown }).cpuMaxMHz) : "?";
+          return `clock cap set for node ${req.params.id ?? "?"} (smMaxMHz=${smMax}, cpuMaxMHz=${cpuMax})`;
         },
       },
       getAudit,
@@ -1214,24 +1230,25 @@ export function createApp(deps: AppDeps): Express {
       const store = requireStore(res);
       if (!store) return;
       if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
-      const body = req.body as { smMaxMHz?: unknown } | null;
-      // null (or absent) resets to driver defaults; otherwise a positive int.
-      const smMaxMHz =
-        body === null || body === undefined || body.smMaxMHz === undefined || body.smMaxMHz === null
-          ? null
-          : typeof body.smMaxMHz === "number" && Number.isInteger(body.smMaxMHz) && body.smMaxMHz > 0
-            ? body.smMaxMHz
-            : null;
-      if (smMaxMHz === null && body !== null && body !== undefined && body.smMaxMHz !== undefined && body.smMaxMHz !== null) {
-        return res.status(400).json({ error: "smMaxMHz must be a positive integer or null" });
-      }
+      const body = (req.body ?? {}) as { smMaxMHz?: unknown; cpuMaxMHz?: unknown; persist?: unknown } | null;
+      // GPU: null (or absent) resets to driver defaults — the IRI-067 contract.
+      const gpu = parseCapField(body?.smMaxMHz);
+      if (!gpu.ok) return res.status(400).json({ error: "smMaxMHz must be a positive integer or null" });
+      // CPU: absent leaves the CPU cap alone (IRI-124); null clears it.
+      const cpu = parseCapField(body?.cpuMaxMHz);
+      if (!cpu.ok) return res.status(400).json({ error: "cpuMaxMHz must be a positive integer or null" });
+      const persist = body?.persist === true;
       const hub = deps.getHub();
       if (hub === null) return res.status(503).json({ error: "agent hub unavailable" });
-      const result = await hub.setClocks(id, smMaxMHz);
+      const result = await hub.setClocks(
+        id,
+        { smMaxMHz: gpu.value ?? null, ...(cpu.value !== undefined ? { cpuMaxMHz: cpu.value } : {}) },
+        persist,
+      );
       if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
       if (!result.ok) return res.status(502).json({ error: result.error ?? "clock cap failed" });
       const after = await hub.clocks(id);
-      res.json({ applied: smMaxMHz, gpus: after?.ok ? after.gpus : [] });
+      res.json({ applied: gpu.value ?? null, gpus: after?.ok ? after.gpus : [], cpu: after?.ok ? (after.cpu ?? null) : null });
     },
   );
 
@@ -1309,7 +1326,8 @@ export function createApp(deps: AppDeps): Express {
     audit({ action: "node.clock-cap.put", targetType: "node", summary: (req) => {
       const body: unknown = req.body;
       const cap = body && typeof body === "object" && "capMHz" in body ? String((body as { capMHz: unknown }).capMHz) : "?";
-      return `gpu clock cap set for node ${req.params.id ?? "?"} (capMHz=${cap})`;
+      const cpuCap = body && typeof body === "object" && "cpuCapMHz" in body ? String((body as { cpuCapMHz: unknown }).cpuCapMHz) : "?";
+      return `clock cap set for node ${req.params.id ?? "?"} (capMHz=${cap}, cpuCapMHz=${cpuCap})`;
     } }, getAudit),
     async (req, res) => {
       const id = parseUuidParam(req);
@@ -1318,26 +1336,47 @@ export function createApp(deps: AppDeps): Express {
       if (!store) return;
       const node = await store.get(id);
       if (node === null) return res.status(404).json({ error: "node not found" });
-      const body = (req.body ?? null) as { capMHz?: unknown; persistent?: unknown } | null;
-      const capMHz =
-        body === null || body === undefined || body.capMHz === undefined || body.capMHz === null
-          ? null
-          : typeof body.capMHz === "number" && Number.isInteger(body.capMHz) && body.capMHz > 0
-            ? body.capMHz
-            : null;
-      if (capMHz === null && body !== null && body !== undefined && body.capMHz !== undefined && body.capMHz !== null) {
-        return res.status(400).json({ error: "capMHz must be a positive integer or null" });
+      const body = (req.body ?? {}) as { capMHz?: unknown; cpuCapMHz?: unknown; persistent?: unknown } | null;
+      // IRI-124: the two halves move independently — an absent field leaves that
+      // side alone, null clears it. `persistent` with a null cap therefore means
+      // "drop the boot-time re-apply", which is how Clear actually sticks.
+      const gpu = parseCapField(body?.capMHz);
+      if (!gpu.ok) return res.status(400).json({ error: "capMHz must be a positive integer or null" });
+      const cpu = parseCapField(body?.cpuCapMHz);
+      if (!cpu.ok) return res.status(400).json({ error: "cpuCapMHz must be a positive integer or null" });
+      if (gpu.value === undefined && cpu.value === undefined) {
+        return res.status(400).json({ error: "capMHz or cpuCapMHz required" });
       }
       const persistent = body?.persistent === true;
-      if (persistent && capMHz === null) return res.status(400).json({ error: "persistent requires capMHz" });
       const hub = deps.getHub();
       if (hub === null) return res.status(503).json({ error: "agent hub unavailable" });
-      const result = await hub.setClocks(id, capMHz, persistent);
-      if (result === null) return res.status(504).json({ error: "node agent offline or no reply" });
+      const result = await hub.setClocks(
+        id,
+        {
+          ...(gpu.value !== undefined ? { smMaxMHz: gpu.value } : {}),
+          ...(cpu.value !== undefined ? { cpuMaxMHz: cpu.value } : {}),
+        },
+        persistent,
+      );
+      if (result === null) {
+        return res.status(504).json({
+          error:
+            cpu.value !== undefined
+              ? "node agent offline or no reply — CPU clock control needs the current agent build"
+              : "node agent offline or no reply",
+        });
+      }
       if (!result.ok) return res.status(502).json({ error: result.error ?? "clock cap failed" });
-      await store.setGpuClockCap(id, capMHz, persistent);
+      if (gpu.value !== undefined) await store.setGpuClockCap(id, gpu.value, persistent && gpu.value !== null);
+      if (cpu.value !== undefined) await store.setCpuClockCap(id, cpu.value, persistent && cpu.value !== null);
       const after = await hub.clocks(id);
-      res.json({ capMHz, persistent, gpus: after?.ok ? after.gpus : [] });
+      res.json({
+        capMHz: gpu.value === undefined ? node.gpuClockCapMHz : gpu.value,
+        cpuCapMHz: cpu.value === undefined ? node.cpuClockCapMHz : cpu.value,
+        persistent,
+        gpus: after?.ok ? after.gpus : [],
+        cpu: after?.ok ? (after.cpu ?? null) : null,
+      });
     },
   );
 
@@ -2118,6 +2157,12 @@ function toNodeDto(row: NodeRecord, online: boolean): NodeInfo {
     llmPorts: normalizeLlmPorts(row.llmPorts),
     nasRoot: row.nasRoot,
     cacheUser: row.cacheUser,
+    // IRI-068 / IRI-124: clock-cap state must reach the client, otherwise the
+    // controls re-seed as "no cap" after every navigation.
+    gpuClockCapMHz: row.gpuClockCapMHz,
+    gpuClockCapPersistent: row.gpuClockCapPersistent,
+    cpuClockCapMHz: row.cpuClockCapMHz,
+    cpuClockCapPersistent: row.cpuClockCapPersistent,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   });

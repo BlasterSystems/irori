@@ -3,6 +3,7 @@ import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
 import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown } from "./clocks.js";
+import { persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
@@ -345,27 +346,51 @@ async function run(): Promise<void> {
       transport.sendAgentServer({ type: "setup-validate-result", validateId, results: driver.validate(scripts) });
     },
     onClocksGet: (id) => {
-      void readClocks()
-        .then((r) => transport.sendAgentServer({ type: "clocks-get-result", id, ok: r.ok, gpus: r.gpus, error: r.error }))
+      // IRI-124: GPU and CPU are read independently — a node with no cpufreq
+      // policies still reports its cards (cpu: null), and a failed GPU query
+      // still reports the CPU state.
+      void Promise.all([readClocks(), readCpuClocks()])
+        .then(([gpu, cpu]) =>
+          transport.sendAgentServer({
+            type: "clocks-get-result",
+            id,
+            ok: gpu.ok,
+            gpus: gpu.gpus,
+            cpu: cpu.cpu,
+            error: gpu.error ?? cpu.error,
+          }),
+        )
         .catch((err: unknown) =>
-          transport.sendAgentServer({ type: "clocks-get-result", id, ok: false, gpus: [], error: err instanceof Error ? err.message : String(err) }),
+          transport.sendAgentServer({ type: "clocks-get-result", id, ok: false, gpus: [], cpu: null, error: err instanceof Error ? err.message : String(err) }),
         );
     },
-    onClocksSet: (id, smMaxMHz, persist) => {
+    onClocksSet: (id, caps, persist) => {
       void (async () => {
-        const apply = await setSmCap(smMaxMHz);
-        if (!apply.ok) {
-          transport.sendAgentServer({ type: "clocks-set-result", id, ok: false, error: apply.error });
-          return;
+        const errors: string[] = [];
+        if (caps.smMaxMHz !== undefined) {
+          const apply = await setSmCap(caps.smMaxMHz);
+          if (!apply.ok) errors.push(`gpu: ${apply.error ?? "unknown error"}`);
+          // IRI-068: persistence is best-effort after the live cap — a failed
+          // unit install must not roll back the applied cap.
+          if (persist) {
+            const persisted = await persistClockCap(caps.smMaxMHz);
+            if (!persisted.ok) errors.push(`gpu persist: ${persisted.error ?? "unknown error"}`);
+          }
         }
-        // IRI-068: persistence is best-effort after the live cap — a failed
-        // unit install must not roll back the applied cap.
-        let persistError: string | null = null;
-        if (persist) {
-          const persisted = await persistClockCap(smMaxMHz);
-          if (!persisted.ok) persistError = persisted.error;
+        if (caps.cpuMaxMHz !== undefined) {
+          const apply = await setCpuCap(caps.cpuMaxMHz);
+          if (!apply.ok) errors.push(`cpu: ${apply.error ?? "unknown error"}`);
+          if (persist) {
+            const persisted = await persistCpuCap(caps.cpuMaxMHz);
+            if (!persisted.ok) errors.push(`cpu persist: ${persisted.error ?? "unknown error"}`);
+          }
         }
-        transport.sendAgentServer({ type: "clocks-set-result", id, ok: persistError === null, error: persistError });
+        transport.sendAgentServer({
+          type: "clocks-set-result",
+          id,
+          ok: errors.length === 0,
+          error: errors.length === 0 ? null : errors.join("; "),
+        });
       })().catch((err: unknown) =>
         transport.sendAgentServer({ type: "clocks-set-result", id, ok: false, error: err instanceof Error ? err.message : String(err) }),
       );

@@ -159,22 +159,45 @@ export const clocksGpuSchema = z.object({
   smCapMHz: z.number().int().nonnegative().nullable(),
 });
 
+/** One cpufreq policy cluster (IRI-124). GB10 exposes one policy per CPU. */
+export const clocksCpuPolicySchema = z.object({
+  /** CPU indices sharing this policy. */
+  cpus: z.array(z.number().int().nonnegative()),
+  minKHz: z.number().int().nonnegative(),
+  /** cpuinfo_max_freq — what a cleared cap restores. */
+  maxKHz: z.number().int().nonnegative(),
+  /** Current scaling_max_freq — the ceiling in force right now. */
+  curMaxKHz: z.number().int().nonnegative(),
+});
+
+/** Applied CPU ceiling plus per-policy truth (IRI-124). */
+export const clocksCpuSchema = z.object({
+  /** Requested ceiling in MHz; null when the policies are not uniformly capped. */
+  capMHz: z.number().int().nonnegative().nullable(),
+  policies: z.array(clocksCpuPolicySchema).default([]),
+});
+
 /** Agent → server: clocks reading; ok=false carries the tool error. */
 export const clocksGetResultMsgSchema = z.object({
   type: z.literal("clocks-get-result"),
   id: z.string().uuid(),
   ok: z.boolean(),
   gpus: z.array(clocksGpuSchema).default([]),
+  /** Absent on agents that predate IRI-124 (no CPU clock control). */
+  cpu: clocksCpuSchema.nullable().optional(),
   error: z.string().nullable().default(null),
 });
 
-/** Server → agent: apply an SM clock cap (null resets to default via -rgc).
- *  `persist` (IRI-068) additionally installs/removes the systemd oneshot —
- *  absent on old agents (cap applies for the session only). */
+/** Server → agent: apply clock caps (null resets: -rgc for the GPU, every
+ *  policy's cpuinfo_max_freq for the CPU). A cap field that is absent means
+ *  "leave that side alone" — IRI-124 lets the two halves move independently.
+ *  `persist` (IRI-068/IRI-124) installs or removes the matching systemd
+ *  oneshot; with a null cap it removes it. */
 export const clocksSetMsgSchema = z.object({
   type: z.literal("clocks-set"),
   id: z.string().uuid(),
-  smMaxMHz: z.number().int().positive().nullable(),
+  smMaxMHz: z.number().int().positive().nullable().optional(),
+  cpuMaxMHz: z.number().int().positive().nullable().optional(),
   persist: z.boolean().optional(),
 });
 
@@ -223,6 +246,8 @@ export const agentServerMsgSchema = z.discriminatedUnion("type", [
 
 export type ClocksGetMsg = z.infer<typeof clocksGetMsgSchema>;
 export type ClocksGpu = z.infer<typeof clocksGpuSchema>;
+export type ClocksCpuPolicy = z.infer<typeof clocksCpuPolicySchema>;
+export type ClocksCpu = z.infer<typeof clocksCpuSchema>;
 export type ClocksGetResultMsg = z.infer<typeof clocksGetResultMsgSchema>;
 export type ClocksSetMsg = z.infer<typeof clocksSetMsgSchema>;
 export type ClocksSetResultMsg = z.infer<typeof clocksSetResultMsgSchema>;

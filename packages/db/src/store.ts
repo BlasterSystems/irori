@@ -26,6 +26,8 @@ export interface NodeStore {
    * agent's answer), not an operator-editable node field.
    */
   setGpuClockCap(nodeId: string, capMHz: number | null, persistent: boolean): Promise<void>;
+  /** IRI-124: same contract for the CPU ceiling (cpufreq scaling_max_freq). */
+  setCpuClockCap(nodeId: string, capMHz: number | null, persistent: boolean): Promise<void>;
   insertSnapshot(nodeId: string, payload: unknown): Promise<void>;
   pruneSnapshots(olderThan: Date): Promise<number>;
   countSnapshots(nodeId: string): Promise<number>;
@@ -51,6 +53,9 @@ const nodeRecordColumns = {
   wolMac: nodes.wolMac,
   gpuClockCapMHz: nodes.gpuClockCapMHz,
   gpuClockCapPersistent: nodes.gpuClockCapPersistent,
+  // IRI-124: CPU clock cap state.
+  cpuClockCapMHz: nodes.cpuClockCapMHz,
+  cpuClockCapPersistent: nodes.cpuClockCapPersistent,
   createdAt: nodes.createdAt,
   updatedAt: nodes.updatedAt,
 } satisfies Record<keyof NodeRecord, unknown>;
@@ -157,6 +162,13 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
       await db
         .update(nodes)
         .set({ gpuClockCapMHz: capMHz, gpuClockCapPersistent: persistent, updatedAt: new Date() })
+        .where(eq(nodes.id, nodeId));
+    },
+
+    async setCpuClockCap(nodeId, capMHz, persistent) {
+      await db
+        .update(nodes)
+        .set({ cpuClockCapMHz: capMHz, cpuClockCapPersistent: persistent, updatedAt: new Date() })
         .where(eq(nodes.id, nodeId));
     },
 
