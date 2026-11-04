@@ -77,3 +77,37 @@ describe("ServeView shaped-data tier", () => {
     w.unmount();
   });
 });
+
+describe("ServeView setup actions", () => {
+  it("starts a stopped setup and arms-then-confirms a stop", async () => {
+    const stopped = setupInfoSchema.parse({ ...setupRow, status: "stopped", lastError: null });
+    const running = setupInfoSchema.parse({ ...setupRow, status: "running" });
+    const postUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST") {
+        postUrls.push(url);
+        const setup = url.endsWith("/start") ? running : stopped;
+        return new Response(JSON.stringify({ setup }), { status: 202, headers: { "content-type": "application/json" } });
+      }
+      const body = url === "/api/v1/setups" ? { setups: [stopped, running] } : { setup: running, transfers: [] };
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const { default: ServeView } = await import("../src/components/ServeView.vue");
+    const w = mount(ServeView as never);
+    await new Promise((r) => setTimeout(r, 120));
+    const start = w.findAll("button").find((b) => b.text() === "Start");
+    expect(start).toBeDefined();
+    await start!.trigger("click");
+    await new Promise((r) => setTimeout(r, 80));
+    expect(postUrls.some((u) => u.endsWith("/start"))).toBe(true);
+    const stop = w.findAll("button").find((b) => b.text() === "Stop…");
+    expect(stop).toBeDefined();
+    await stop!.trigger("click"); // arms
+    expect(w.findAll("button").some((b) => b.text() === "Confirm stop")).toBe(true);
+    await w.findAll("button").find((b) => b.text() === "Confirm stop")!.trigger("click");
+    await new Promise((r) => setTimeout(r, 80));
+    expect(postUrls.some((u) => u.endsWith("/stop"))).toBe(true);
+    w.unmount();
+  });
+});
