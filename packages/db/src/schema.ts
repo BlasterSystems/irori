@@ -57,6 +57,10 @@ export const nodes = pgTable(
     gpuClockCapMHz: integer("gpu_clock_cap_mhz"),
     /** IRI-068: re-apply the cap at boot (systemd oneshot installed). */
     gpuClockCapPersistent: boolean("gpu_clock_cap_persistent").notNull().default(false),
+    /** IRI-124: CPU clock ceiling in MHz (cpufreq scaling_max_freq); null = no cap. */
+    cpuClockCapMHz: integer("cpu_clock_cap_mhz"),
+    /** IRI-124: re-apply the CPU cap at boot (systemd oneshot installed). */
+    cpuClockCapPersistent: boolean("cpu_clock_cap_persistent").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

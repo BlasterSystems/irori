@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { readMigrationFiles } from "drizzle-orm/migrator";
 import postgres from "postgres";
 import { repairSchema } from "./repair.js";
 import * as baseSchema from "./schema.js";
@@ -24,6 +25,35 @@ export interface DbHandle {
 }
 
 const MIGRATE_LOCK_KEY = 732_914_117; // hashtext('irori-migrate')
+
+/**
+ * IRI-124: drizzle decides what is pending by comparing the journal's
+ * `when` with MAX(created_at) in `drizzle.__drizzle_migrations`. A journal
+ * entry whose timestamp was hand-edited into the future (0019 shipped with
+ * `when` ≈ 2026-12-26) poisons that watermark: every later migration is
+ * silently skipped, so new columns never reach a database that applied it.
+ * This restores the intended invariant — created_at equals the journal's
+ * `when` for every recognised hash — before the migrator runs. Idempotent and
+ * never fatal (missing table, fresh DB, or a read-only role just no-ops).
+ */
+async function normalizeMigrationWatermark(sql: postgres.Sql, migrationsFolder: string): Promise<void> {
+  try {
+    const migrations = readMigrationFiles({ migrationsFolder });
+    const byHash = new Map(migrations.map((m) => [m.hash, m.folderMillis]));
+    const skewLimit = Date.now() + 60_000;
+    const rows = await sql<{ id: number; hash: string; created_at: number }[]>`
+      select id, hash, created_at from drizzle.__drizzle_migrations
+    `;
+    for (const row of rows) {
+      const folderMillis = byHash.get(row.hash);
+      // Only heal impossible values for entries we can identify.
+      if (folderMillis === undefined || row.created_at <= skewLimit) continue;
+      await sql`update drizzle.__drizzle_migrations set created_at = ${folderMillis} where id = ${row.id}`;
+    }
+  } catch {
+    // Boot must never depend on the repair path.
+  }
+}
 
 /**
  * Opens the connection (postgres.js — pure JS per ADR-0002). Connection is
@@ -66,6 +96,7 @@ export function createDbHandle(databaseUrl: string): DbHandle {
       const reserved = await sql.reserve();
       try {
         await reserved`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
+        await normalizeMigrationWatermark(sql, migrationsFolder);
         await migrate(db, { migrationsFolder });
         // IRI-084 hotfix: heal journals that are AHEAD of the schema (the
         // live hub recorded 0020+ while its objects were absent). Idempotent.

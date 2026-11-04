@@ -37,6 +37,11 @@ export const nodeInfoSchema = z.object({
   gpuClockCapMHz: z.number().int().min(300).max(4000).nullable().default(null),
   /** IRI-068: cap is re-applied at boot by a transient systemd unit. */
   gpuClockCapPersistent: z.boolean().default(false),
+  /** IRI-124: CPU clock ceiling in MHz (cpufreq scaling_max_freq per policy);
+   *  null = every policy at its own maximum. */
+  cpuClockCapMHz: z.number().int().min(300).max(4000).nullable().default(null),
+  /** IRI-124: CPU cap is re-applied at boot by a transient systemd unit. */
+  cpuClockCapPersistent: z.boolean().default(false),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });

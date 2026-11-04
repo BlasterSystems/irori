@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createApp, type AppDeps } from "../src/app.js";
+import type { ClockCaps } from "../src/hub.js";
 import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { broadcastForLanIp, buildMagicPacket, normalizeMac } from "../src/wol.js";
@@ -39,7 +40,7 @@ function makeApp() {
   const fake = makeFakeStore();
   const online = new Set<string>();
   const shutdowns: Array<{ nodeId: string; graceS: number; origin: string }> = [];
-  const clockCaps: Array<{ nodeId: string; capMHz: number | null; persist: boolean }> = [];
+  const clockCaps: Array<{ nodeId: string; caps: ClockCaps; persist: boolean }> = [];
   const deps: AppDeps = {
     getStore: () => fake.store,
     getLlmStore: () => null,
@@ -52,9 +53,16 @@ function makeApp() {
       online: () => online,
       sendToNode: () => true,
       refreshConfig: async () => true,
-      clocks: async () => ({ type: "clocks-get-result", id: "x", ok: true, gpus: [], error: null }),
-      setClocks: async (nodeId, capMHz, persist = false) => {
-        clockCaps.push({ nodeId, capMHz, persist });
+      clocks: async () => ({
+        type: "clocks-get-result",
+        id: "x",
+        ok: true,
+        gpus: [],
+        cpu: { capMHz: 2000, policies: [{ cpus: [0, 1], minKHz: 338_000, maxKHz: 2_808_000, curMaxKHz: 2_000_000 }] },
+        error: null,
+      }),
+      setClocks: async (nodeId, caps, persist = false) => {
+        clockCaps.push({ nodeId, caps, persist });
         return { type: "clocks-set-result", id: "x", ok: true, error: null };
       },
       shutdownNode: async (nodeId, graceS, origin) => {
@@ -124,25 +132,65 @@ describe("clock-cap registry round-trip", () => {
 
     const res = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 1500, persistent: true });
     expect(res.status).toBe(200);
-    expect(clockCaps).toEqual([{ nodeId: id, capMHz: 1500, persist: true }]);
+    expect(clockCaps).toEqual([{ nodeId: id, caps: { smMaxMHz: 1500 }, persist: true }]);
     const row = await fake.store.get(id);
     expect(row?.gpuClockCapMHz).toBe(1500);
     expect(row?.gpuClockCapPersistent).toBe(true);
+    // The response carries the CPU half too (IRI-124).
+    expect(res.body.cpu).toMatchObject({ capMHz: 2000 });
   });
 
-  it("clears the cap and refuses a persistent clear", async () => {
-    const { app, fake } = makeApp();
+  it("clears the cap, and a persistent clear drops the boot-time unit", async () => {
+    const { app, fake, clockCaps } = makeApp();
     const created = await request(app).post("/api/v1/nodes").send({ name: "dgx5", kind: "spark", role: "standalone", host: "10.0.10.5" });
     const id = created.body.node.id as string;
 
-    const bad = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: null, persistent: true });
-    expect(bad.status).toBe(400);
-
     await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 1500, persistent: false });
-    const clear = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: null });
+    // IRI-124: clearing with persistent=true must reach the agent so it removes
+    // the oneshot — otherwise the cap returns at the next boot.
+    const clear = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: null, persistent: true });
     expect(clear.status).toBe(200);
+    expect(clockCaps.at(-1)).toEqual({ nodeId: id, caps: { smMaxMHz: null }, persist: true });
     const row = await fake.store.get(id);
     expect(row?.gpuClockCapMHz).toBeNull();
+    expect(row?.gpuClockCapPersistent).toBe(false);
+  });
+
+  it("sets and clears the CPU cap independently of the GPU cap", async () => {
+    const { app, fake, clockCaps } = makeApp();
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx3", kind: "spark", role: "standalone", host: "10.0.10.3" });
+    const id = created.body.node.id as string;
+
+    const set = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: 1400, persistent: true });
+    expect(set.status).toBe(200);
+    expect(clockCaps.at(-1)).toEqual({ nodeId: id, caps: { cpuMaxMHz: 1400 }, persist: true });
+    let row = await fake.store.get(id);
+    expect(row?.cpuClockCapMHz).toBe(1400);
+    expect(row?.cpuClockCapPersistent).toBe(true);
+    expect(row?.gpuClockCapMHz).toBeNull(); // untouched
+
+    const both = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 2200, cpuCapMHz: 2800 });
+    expect(both.status).toBe(200);
+    expect(clockCaps.at(-1)).toEqual({ nodeId: id, caps: { smMaxMHz: 2200, cpuMaxMHz: 2800 }, persist: false });
+    row = await fake.store.get(id);
+    expect(row?.gpuClockCapMHz).toBe(2200);
+    expect(row?.cpuClockCapMHz).toBe(2800);
+    expect(row?.cpuClockCapPersistent).toBe(false);
+
+    const clear = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: null });
+    expect(clear.status).toBe(200);
+    row = await fake.store.get(id);
+    expect(row?.cpuClockCapMHz).toBeNull();
+    expect(row?.gpuClockCapMHz).toBe(2200); // still untouched
+  });
+
+  it("rejects a body with neither cap and a non-integer CPU cap", async () => {
+    const { app } = makeApp();
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx2", kind: "spark", role: "standalone", host: "10.0.10.2" });
+    const id = created.body.node.id as string;
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ persistent: true })).status).toBe(400);
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: 1.5 })).status).toBe(400);
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: "fast" })).status).toBe(400);
   });
 
   it("rejects non-integer caps", async () => {

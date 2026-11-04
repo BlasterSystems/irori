@@ -27,6 +27,12 @@ export interface LlmRuntimeConfig {
   llmDetectOnly: boolean;
 }
 
+/** Clock caps carried by one clocks-set frame; an absent field leaves that side alone. */
+export interface ClocksSetCaps {
+  smMaxMHz?: number | null;
+  cpuMaxMHz?: number | null;
+}
+
 export interface AgentTransportOptions {
   /** Shared node token sent in the hello frame. */
   token: string;
@@ -71,7 +77,7 @@ export interface AgentTransportOptions {
   onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   onSetupValidate?: (validateId: string, scripts: string[]) => void;
   onClocksGet?: (id: string) => void;
-  onClocksSet?: (id: string, smMaxMHz: number | null, persist: boolean) => void;
+  onClocksSet?: (id: string, caps: ClocksSetCaps, persist: boolean) => void;
   onNodeShutdown?: (id: string, graceS: number, origin: string) => void;
   /** Server acked a durable usage-batch insert (ids safe to delete locally). */
   onUsageAck?: (ids: string[]) => void;
@@ -119,7 +125,7 @@ export class AgentTransport {
   private readonly onSetupLogAttach?: (setupId: string, lastSeq: number) => void;
   private readonly onSetupValidate?: (validateId: string, scripts: string[]) => void;
   private readonly onClocksGet?: (id: string) => void;
-  private readonly onClocksSet?: (id: string, smMaxMHz: number | null, persist: boolean) => void;
+  private readonly onClocksSet?: (id: string, caps: ClocksSetCaps, persist: boolean) => void;
   private readonly onNodeShutdown?: (id: string, graceS: number, origin: string) => void;
   private readonly onUsageAck?: (ids: string[]) => void;
   private readonly onLogAck?: (ids: string[]) => void;
@@ -490,7 +496,11 @@ export class AgentTransport {
         this.onClocksGet?.(parsed.data.id);
         break;
       case "clocks-set":
-        this.onClocksSet?.(parsed.data.id, parsed.data.smMaxMHz, parsed.data.persist ?? false);
+        this.onClocksSet?.(
+          parsed.data.id,
+          { ...(parsed.data.smMaxMHz !== undefined ? { smMaxMHz: parsed.data.smMaxMHz } : {}), ...(parsed.data.cpuMaxMHz !== undefined ? { cpuMaxMHz: parsed.data.cpuMaxMHz } : {}) },
+          parsed.data.persist ?? false,
+        );
         break;
       case "node-shutdown":
         this.onNodeShutdown?.(parsed.data.id, parsed.data.graceS, parsed.data.origin);

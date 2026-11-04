@@ -61,6 +61,11 @@ export function makeFakeStore(): FakeStores {
         lastSeenAt: null,
         sortOrder: 0,
         llmPorts: [],
+        // Column defaults the real schema applies on insert.
+        gpuClockCapMHz: null,
+        gpuClockCapPersistent: false,
+        cpuClockCapMHz: null,
+        cpuClockCapPersistent: false,
         createdAt: ts,
         updatedAt: ts,
       });
@@ -106,6 +111,13 @@ export function makeFakeStore(): FakeStores {
       if (row !== undefined) {
         row.gpuClockCapMHz = capMHz;
         row.gpuClockCapPersistent = persistent;
+      }
+    },
+    async setCpuClockCap(nodeId, capMHz, persistent) {
+      const row = rows.get(nodeId);
+      if (row !== undefined) {
+        row.cpuClockCapMHz = capMHz;
+        row.cpuClockCapPersistent = persistent;
       }
     },
     async insertSnapshot(nodeId, payload) {
