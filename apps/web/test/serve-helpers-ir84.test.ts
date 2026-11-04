@@ -24,7 +24,8 @@ describe("sanitizeWorkerIds", () => {
 });
 
 describe("setupChipView (IR-152)", () => {
-  const base = { status: "running", health: "healthy", lastStartedAt: "t", port: 8080 } as never;
+  type ChipInput = Parameters<typeof setupChipView>[0];
+  const base: ChipInput = { status: "running", health: "healthy", lastStartedAt: "t", port: 8080 };
   it("maps health variants for a running row", () => {
     expect(setupChipView(base, { probeSees: false })).toMatchObject({ label: "healthy", cls: "chip--ok" });
     expect(setupChipView({ ...base, health: "foreign" }, { probeSees: false })).toMatchObject({ label: "wrong engine", cls: "chip--warn" });
