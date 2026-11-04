@@ -142,13 +142,15 @@ d("cost engine (db integration)", () => {
     const store = createUsageStore(db, { pricing: price });
     await store.insertBatch(nodeId, [event("priced-model", 1_000_000, 200_000, 100_000), event("unpriced-model", 500_000, 0, 0)]);
     const engine = createUsageRollupEngine(db, price);
-    // Rollup windows bucket on received_at — backdate the rows 3 h so the
-    // stamped buckets fall before the backfill's `current hour` cutoff.
+    // Rollup windows bucket on received_at — backdate the rows a full day so
+    // the DAY window of the rows is always CLOSED at the runOnce cutoff
+    // (a 3 h backdate was time-of-day dependent: the day bucket only formed
+    // when now-3h and now+9h straddled a UTC midnight).
     await engine.runOnce(new Date(Date.now() + 3_600_000));
-    await db.execute(sql`update llm_requests set received_at = received_at - interval '3 hours' where node_id = ${nodeId}`);
+    await db.execute(sql`update llm_requests set received_at = received_at - interval '24 hours' where node_id = ${nodeId}`);
     await db.execute(sql`delete from settings where key = 'usage_rollup_watermark'`);
     await db.delete(usageBuckets); // drop buckets keyed on the pre-backdate windows
-    await engine.runOnce(new Date(Date.now() + 3_600_000 * 3));
+    await engine.runOnce(new Date(Date.now() + 3_600_000 * 48));
     await db.execute(sql`update usage_buckets set cost_minor = null, cost_currency = null`);
     const first = await backfillUsageCost(db, (model) => (model.startsWith("priced") ? { input: 1, cached: 0.1, output: 2, currency: "EUR" } : null), 500);
     expect(first.stamped).toBe(2); // hour + day buckets for the priced model
