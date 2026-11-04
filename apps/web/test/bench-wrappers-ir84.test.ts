@@ -100,5 +100,6 @@ describe("bench shaping helpers", () => {
     expect(benchStatusLabel("running")).toBe("running");
     expect(benchStatusLabel("completed")).toBe("completed");
     expect(fmtWhen(iso)).toMatch(/today|^\w{3} \d{1,2}/);
+    expect(fmtWhen("2020-06-15T12:00:00Z")).toMatch(/^\w{3} 15/); // non-today branch
   });
 });
