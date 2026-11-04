@@ -100,7 +100,9 @@ describe("SetupDriver capture lifecycle", () => {
 
     const result = await h.driver.start(ID, RUN, start, stop, { PORT: "8081" }, null, { proxyPort: 9099, retention: null });
     expect(result.ok).toBe(true);
-    await waitFor(() => existsSync(portFile));
+    // The shell creates the file before writing it — wait for CONTENT, not
+    // existence (an empty file raced the write on slow CI disks).
+    await waitFor(() => existsSync(portFile) && readFileSync(portFile, "utf8").trim().length > 0);
     const enginePort = Number.parseInt(readFileSync(portFile, "utf8").trim(), 10);
     expect(enginePort).toBeGreaterThan(0);
     expect(enginePort).not.toBe(8081); // overridden — loopback engine port
