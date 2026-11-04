@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { repairSchema } from "./repair.js";
 import * as baseSchema from "./schema.js";
 import * as opsSchema from "./schema-ops.js";
 
@@ -66,6 +67,9 @@ export function createDbHandle(databaseUrl: string): DbHandle {
       try {
         await reserved`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
         await migrate(db, { migrationsFolder });
+        // IRI-084 hotfix: heal journals that are AHEAD of the schema (the
+        // live hub recorded 0020+ while its objects were absent). Idempotent.
+        await repairSchema(sql);
       } finally {
         await reserved`SELECT pg_advisory_unlock(${MIGRATE_LOCK_KEY})`.catch(() => {});
         reserved.release();
