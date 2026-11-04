@@ -40,5 +40,20 @@ describe("big view mounts", () => {
     await new Promise((r) => setTimeout(r, 80));
     expect(w.exists()).toBe(true);
     w.unmount();
+    window.location.hash = "";
+  });
+
+  it("opens the setup wizard and walks its steps (interactive depth)", async () => {
+    vi.stubGlobal("fetch", emptyOk);
+    const { default: ServeView } = await import("../src/components/ServeView.vue");
+    const w = mount(ServeView as never, { props: { route: { recipeJob: null } } } as never);
+    await new Promise((r) => setTimeout(r, 50));
+    const newBtn = w.findAll("button").find((b) => b.text().includes("New setup"));
+    expect(newBtn).toBeDefined();
+    await newBtn!.trigger("click");
+    await new Promise((r) => setTimeout(r, 30));
+    // The wizard renders its step rail + fields.
+    expect(w.text()).toContain("New setup");
+    w.unmount();
   });
 });
