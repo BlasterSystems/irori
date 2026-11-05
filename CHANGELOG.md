@@ -6,28 +6,73 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
-### Fixed
+## [0.5.1] — 2026-11-05
 
-- **Hub survives oversized agent frames** (IR-176/IR-177): an agent
-  usage-batch frame over the WS cap no longer kills the hub with an
-  unhandled socket error — it is logged and closed 1009; the frame cap is
-  env-tunable (`IRORI_MAX_FRAME_BYTES`). Deployed as the 2026-11-04 incident
-  hotfix (`dev-0.3.0-67`).
+Node-page feedback round 6 and CPU underclocking (IR-180). The node page gets
+a readable header, preset clock caps for GPU **and** CPU, temperature overlays
+on the history charts, and network rows that stay inside their card. Wire
+changes are additive; the CPU half needs the 0.5.1 agent.
+
+### Added
+
+- **CPU underclock** (IR-185/IR-186): a per-policy `cpufreq`
+  `scaling_max_freq` ceiling (`min(cap, cpuinfo_max_freq)`, clamped to the
+  policy minimum) applied by the root agent, with presets 1400/2000/2800 MHz,
+  a per-cluster effective read-back, and a boot-time re-apply oneshot
+  (`irori-cpu-clock-cap.service`). A cap is a uniform ceiling: 2800 limits
+  both GB10 clusters. `clocks-set` gains `cpuMaxMHz`, `clocks-get-result`
+  gains an optional `cpu` block (absent = older agent, `null` = no cpufreq),
+  and `nodes` gains `cpu_clock_cap_mhz`/`cpu_clock_cap_persistent`
+  (migration 0023).
+- **GPU clock cap presets** (IR-182): the SM cap is a select
+  (1800/2000/2200/3000 MHz) that keeps a stored non-preset value visible as
+  `(current)`.
+- **Temperature overlay** (IR-183): the CPU and GPU history charts draw the
+  bucket-average temperature as a dashed second series on its own scale, with
+  a two-row tooltip and a legend.
+- **Node header and network rows** (IR-181/IR-184): the header action row
+  wraps instead of squeezing the title to one glyph per line, and interface
+  address lists wrap inside the card.
+- **Reconnect-storm detection + process guards** (IR-179): a per-node
+  `node-online` journal-rate health rule (seeded, webhook-capable) trips on
+  crash-loop reconnect patterns; `unhandledRejection`/`uncaughtException`
+  handlers log structured diagnostics and surface counters on `/metrics`.
 
 ### Changed
 
+- **Clock-cap API** (IR-185): `PUT /api/v1/nodes/:id/clock-cap` moves the GPU
+  and CPU caps independently (absent = untouched, `null` = clear), bounds
+  values to 300–4000 MHz, applies one agent frame per side and reports
+  per-side results, so a landed half is stored even when the other fails.
+  `POST /clocks` is a one-shot apply that never touches persistence.
 - **Agent usage size-bounding** (IR-178): batches are budgeted on serialized
   row bytes (base64 parts + non-part payload — the wire unit) instead of gz
   bytes with a first-event bypass; single events over
   `USAGE_EVENT_HARD_CAP_BYTES` (56 MB) are quarantined with metadata kept,
   and a 1009 close halves the next take until a batch acks.
 
-### Added
+### Fixed
 
-- **Reconnect-storm detection + process guards** (IR-179): a per-node
-  `node-online` journal-rate health rule (seeded, webhook-capable) trips on
-  crash-loop reconnect patterns; `unhandledRejection`/`uncaughtException`
-  handlers log structured diagnostics and surface counters on `/metrics`.
+- **GB10 clocks query** (IR-187): `clocks.applications.sm` is not a valid
+  `--query-gpu` field on the GB10 driver and one bad field failed the whole
+  call, so `GET /api/v1/nodes/:id/clocks` answered 502 on every Spark. The
+  base query now carries the six valid fields; the application clock is a
+  separate best-effort probe.
+- **Migration watermark** (IR-124): a future-dated journal `when` (0019)
+  made drizzle skip every later migration on any database that applied it.
+  `migrate()` now restores impossible `created_at` values from the journal
+  before running the migrator, and logs what it rewrote.
+- **Node DTO clock caps** (IR-124): the node payload now projects
+  `gpuClockCap*`/`cpuClockCap*`, so the controls re-seed from the registry
+  instead of reading as "no cap" after every navigation.
+- **Persistent clear** (IR-124): clearing a cap with `persistent` now reaches
+  the agent and removes the boot-time unit (it used to be a 400, leaving a
+  stale oneshot that resurrected the cap at the next boot).
+- **Hub survives oversized agent frames** (IR-176/IR-177): an agent
+  usage-batch frame over the WS cap no longer kills the hub with an
+  unhandled socket error — it is logged and closed 1009; the frame cap is
+  env-tunable (`IRORI_MAX_FRAME_BYTES`). Deployed as the 2026-11-04 incident
+  hotfix (`dev-0.3.0-67`).
 
 ## [0.5.0] — 2026-11-04
 
