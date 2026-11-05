@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CLOCK_CAP_UNIT, clockCapUnitBody, persistClockCap } from "../src/clocks.js";
+import { CLOCK_CAP_UNIT, clockCapUnitBody, persistClockCap, shouldPersist } from "../src/clocks.js";
 
 /**
  * IRI-068 (IR-159): clock-cap persistence unit. The unit body is a pure
@@ -21,6 +21,26 @@ describe("clockCapUnitBody", () => {
   it("never interpolates shell metacharacters (input is an int)", () => {
     const body = clockCapUnitBody(2100);
     expect(body).not.toMatch(/[;&|`$]/);
+  });
+});
+
+describe("shouldPersist (IRI-068/IRI-124)", () => {
+  it("installs a cap only when the caller asked for persistence", () => {
+    expect(shouldPersist(2000, true, true)).toBe(true);
+    expect(shouldPersist(2000, false, true)).toBe(false);
+  });
+
+  it("always removes the unit on a clear, even without the persist flag", () => {
+    // "cleared live, re-applied at boot" has no coherent meaning — a stale
+    // oneshot is how a cleared cap used to resurrect itself.
+    expect(shouldPersist(null, false, true)).toBe(true);
+    expect(shouldPersist(null, true, true)).toBe(true);
+  });
+
+  it("never touches the unit when the live apply failed", () => {
+    // The cap is still in force; removing the unit would lose it at reboot.
+    expect(shouldPersist(2000, true, false)).toBe(false);
+    expect(shouldPersist(null, true, false)).toBe(false);
   });
 });
 

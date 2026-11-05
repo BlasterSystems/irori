@@ -82,6 +82,20 @@ export const CLOCK_CAP_UNIT = "irori-gpu-clock-cap.service";
 /** Marker proving the unit file is ours (collision guard for foreign units). */
 const UNIT_MARKER = "# irori-managed — do not edit";
 
+/**
+ * Whether a clocks-set side touches its boot-time unit (IRI-068/IRI-124).
+ * - a failed live apply never does: removing the unit would leave a live cap
+ *   that nothing re-applies after a reboot;
+ * - a CLEAR always removes it, even without `persist` — "cleared live but
+ *   re-applied at boot" has no coherent meaning, and the stale unit was how a
+ *   cleared cap resurrected itself;
+ * - a cap is installed only when the caller asked for persistence.
+ */
+export function shouldPersist(value: number | null, persist: boolean, applied: boolean): boolean {
+  if (!applied) return false;
+  return persist || value === null;
+}
+
 /** The oneshot body; `capMHz` is an integer (never shell-interpolated input). */
 export function clockCapUnitBody(capMHz: number): string {
   return [
@@ -116,8 +130,10 @@ export async function persistClockCap(capMHz: number | null, unitDir = SYSTEMD_U
   const unitPath = `${unitDir}/${CLOCK_CAP_UNIT}`;
   try {
     if (capMHz === null) {
-      await fs.rm(unitPath, { force: true });
+      // Disable first: once the unit file is gone `systemctl disable` cannot
+      // find the name and the multi-user.target.wants symlink lingers.
       await runSystemctl(["disable", CLOCK_CAP_UNIT]).catch(() => {});
+      await fs.rm(unitPath, { force: true });
     } else {
       try {
         const existing = await fs.readFile(unitPath, "utf8");

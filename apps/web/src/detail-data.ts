@@ -6,8 +6,12 @@ import type { HistoryRange, HistoryResponse } from "./api";
 
 /** Owner-selected GPU SM ceilings; 3000 sits just under the GB10 maximum (3003 MHz). */
 export const GPU_CLOCK_CAP_PRESETS = [1800, 2000, 2200, 3000] as const;
-/** CPU ceilings: 2800 rounds the 2,808 MHz efficiency cluster; the 3,900 MHz
- *  cluster stays untouched at that step (a cap is a ceiling, not a target). */
+/**
+ * CPU ceilings (owner decision 2026-11-04). A cap is a UNIFORM ceiling applied
+ * to every cpufreq policy as `min(cap, cpuinfo_max_freq)`, so on GB10's two
+ * clusters (2,808 and 3,900 MHz) every preset caps BOTH: 2800 → 2,800 / 2,800.
+ * Only a cap above a cluster's own maximum leaves that cluster alone.
+ */
 export const CPU_CLOCK_CAP_PRESETS = [1400, 2000, 2800] as const;
 
 export interface CapOption {
