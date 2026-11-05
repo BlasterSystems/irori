@@ -68,6 +68,11 @@ changes are additive; the CPU half needs the 0.5.1 agent.
 - **Persistent clear** (IR-124): clearing a cap with `persistent` now reaches
   the agent and removes the boot-time unit (it used to be a 400, leaving a
   stale oneshot that resurrected the cap at the next boot).
+- **Agent-update settlement** (IR-124 rollout): the agent's own restart kills
+  the `systemd-run` child, so the dying agent reported `job-done failed` with
+  a null exit code while the update had actually landed. That frame is now
+  ignored — the version check (or the grace reaper) owns the row — so a
+  successful rollout no longer shows as failed.
 - **Hub survives oversized agent frames** (IR-176/IR-177): an agent
   usage-batch frame over the WS cap no longer kills the hub with an
   unhandled socket error — it is logged and closed 1009; the frame cap is
