@@ -8,8 +8,21 @@ const execFileAsync = promisify(execFile);
 /** Hard timeout for nvidia-smi; a hung query must not wedge the agent. */
 const GPU_QUERY_TIMEOUT_MS = 3000;
 
+/**
+ * Base clock fields. `clocks.applications.sm` is deliberately NOT in this
+ * query: GB10's driver rejects it outright ("not a valid field to query"), and
+ * one bad field fails the whole call — which is how GET /clocks answered 502 on
+ * every Spark in the fleet (found while deploying IRI-124). It is queried
+ * separately and best-effort instead.
+ */
 const CLOCKS_QUERY_ARGS = [
-  "--query-gpu=index,name,clocks.current.sm,clocks.max.sm,clocks.current.memory,clocks.max.memory,clocks.applications.sm",
+  "--query-gpu=index,name,clocks.current.sm,clocks.max.sm,clocks.current.memory,clocks.max.memory",
+  "--format=csv,noheader,nounits",
+];
+
+/** Best-effort applied-clock probe; unsupported drivers simply yield null. */
+const APP_CLOCK_QUERY_ARGS = [
+  "--query-gpu=clocks.applications.sm",
   "--format=csv,noheader,nounits",
 ];
 
@@ -23,7 +36,8 @@ function intOrNull(raw: string): number | null {
 }
 
 /**
- * Parse the 7-field clocks CSV row set (IRI-067). `[N/A]` cells (common on
+ * Parse the clocks CSV row set (IRI-067): 6 base fields, with an optional 7th
+ * application-clock column when the caller had one. `[N/A]` cells (common on
  * GB10 where memory clocks are unified) become null, never zero.
  */
 export function parseClocksCsv(stdout: string): ClocksGpu[] {
@@ -32,7 +46,7 @@ export function parseClocksCsv(stdout: string): ClocksGpu[] {
     const line = lineRaw.trim();
     if (line.length === 0) continue;
     const fields = line.split(",").map(cleanField);
-    if (fields.length < 7) continue;
+    if (fields.length < 6) continue;
     const index = intOrNull(fields[0] ?? "");
     if (index === null) continue;
     gpus.push({
@@ -48,14 +62,34 @@ export function parseClocksCsv(stdout: string): ClocksGpu[] {
   return gpus;
 }
 
+/** Per-GPU application-clock ceilings, in `index` order; [] when unsupported. */
+export function parseAppClocksCsv(stdout: string): Array<number | null> {
+  return stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => intOrNull(cleanField(l)));
+}
+
 /** Read per-GPU clocks + cap state. ok=false carries the tool error. */
 export async function readClocks(): Promise<{ ok: boolean; gpus: ClocksGpu[]; error: string | null }> {
+  let gpus: ClocksGpu[];
   try {
     const { stdout } = await execFileAsync("nvidia-smi", CLOCKS_QUERY_ARGS, { timeout: GPU_QUERY_TIMEOUT_MS });
-    return { ok: true, gpus: parseClocksCsv(stdout), error: null };
+    gpus = parseClocksCsv(stdout);
   } catch (err: unknown) {
     return { ok: false, gpus: [], error: err instanceof Error ? err.message : String(err) };
   }
+  // Best-effort: a driver that does not expose application clocks (GB10) is
+  // not an error — the cap stays null and the registry keeps the desired value.
+  try {
+    const { stdout } = await execFileAsync("nvidia-smi", APP_CLOCK_QUERY_ARGS, { timeout: GPU_QUERY_TIMEOUT_MS });
+    const caps = parseAppClocksCsv(stdout);
+    gpus = gpus.map((g, i) => ({ ...g, smCapMHz: caps[i] ?? null }));
+  } catch {
+    // Unsupported field or driver — leave every cap null.
+  }
+  return { ok: true, gpus, error: null };
 }
 
 /**

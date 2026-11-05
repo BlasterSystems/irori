@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseClocksCsv } from "../src/clocks.js";
+import { parseAppClocksCsv, parseClocksCsv } from "../src/clocks.js";
 import {
   blockRatesOf,
   networkRates,
@@ -135,5 +135,19 @@ describe("parseClocksCsv (agent clocks verb)", () => {
       { index: 0, name: "GB10", smMHz: 1201, smMaxMHz: 2100, memMHz: 2130, memMaxMHz: 9250, smCapMHz: null },
       { index: 1, name: "GB10", smMHz: 999, smMaxMHz: 2100, memMHz: null, memMaxMHz: null, smCapMHz: 1500 },
     ]);
+  });
+
+  it("parses the 6-field GB10 row set (no application-clock column)", () => {
+    // The real DGX-1 answer: `clocks.applications.sm` is not a valid field on
+    // this driver, so the base query carries six columns and the cap is null.
+    const gpus = parseClocksCsv("0, NVIDIA GB10, 2190, 3003, [N/A], [N/A]");
+    expect(gpus).toEqual([
+      { index: 0, name: "NVIDIA GB10", smMHz: 2190, smMaxMHz: 3003, memMHz: null, memMaxMHz: null, smCapMHz: null },
+    ]);
+  });
+
+  it("reads the best-effort application-clock column, [N/A] as null", () => {
+    expect(parseAppClocksCsv("[N/A]\n1500\n")).toEqual([null, 1500]);
+    expect(parseAppClocksCsv("")).toEqual([]);
   });
 });
