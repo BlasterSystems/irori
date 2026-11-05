@@ -36,7 +36,7 @@ describe("wake-on-lan framing", () => {
   });
 });
 
-function makeApp() {
+function makeApp(opts: { failCpu?: boolean; offlineCpu?: boolean } = {}) {
   const fake = makeFakeStore();
   const online = new Set<string>();
   const shutdowns: Array<{ nodeId: string; graceS: number; origin: string }> = [];
@@ -63,6 +63,11 @@ function makeApp() {
       }),
       setClocks: async (nodeId, caps, persist = false) => {
         clockCaps.push({ nodeId, caps, persist });
+        // A CPU-only frame is what an old agent cannot parse → no reply at all.
+        if (caps.cpuMaxMHz !== undefined && opts.offlineCpu === true) return null;
+        if (caps.cpuMaxMHz !== undefined && opts.failCpu === true) {
+          return { type: "clocks-set-result", id: "x", ok: false, error: "cpu: no cpufreq policies" };
+        }
         return { type: "clocks-set-result", id: "x", ok: true, error: null };
       },
       shutdownNode: async (nodeId, graceS, origin) => {
@@ -171,7 +176,15 @@ describe("clock-cap registry round-trip", () => {
 
     const both = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 2200, cpuCapMHz: 2800 });
     expect(both.status).toBe(200);
-    expect(clockCaps.at(-1)).toEqual({ nodeId: id, caps: { smMaxMHz: 2200, cpuMaxMHz: 2800 }, persist: false });
+    // One frame per side: an aggregated frame could not tell which half landed.
+    expect(clockCaps.slice(-2)).toEqual([
+      { nodeId: id, caps: { smMaxMHz: 2200 }, persist: false },
+      { nodeId: id, caps: { cpuMaxMHz: 2800 }, persist: false },
+    ]);
+    expect(both.body.results).toEqual([
+      { side: "gpu", ok: true, offline: false, error: null },
+      { side: "cpu", ok: true, offline: false, error: null },
+    ]);
     row = await fake.store.get(id);
     expect(row?.gpuClockCapMHz).toBe(2200);
     expect(row?.cpuClockCapMHz).toBe(2800);
@@ -191,6 +204,70 @@ describe("clock-cap registry round-trip", () => {
     expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ persistent: true })).status).toBe(400);
     expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: 1.5 })).status).toBe(400);
     expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: "fast" })).status).toBe(400);
+  });
+
+  it("bounds the cap to the node schema range (out-of-range would 500 the node list)", async () => {
+    const { app, fake } = makeApp();
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx1", kind: "spark", role: "standalone", host: "10.20.30.1" });
+    const id = created.body.node.id as string;
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 5000 })).status).toBe(400);
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: 200 })).status).toBe(400);
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: 100_000 })).status).toBe(400);
+    // Bounds themselves are legal, and the DTO still parses every node.
+    expect((await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ cpuCapMHz: 300 })).status).toBe(200);
+    expect((await fake.store.get(id))?.cpuClockCapMHz).toBe(300);
+    const list = await request(app).get("/api/v1/nodes");
+    expect(list.status).toBe(200);
+    expect(list.body[0].cpuClockCapMHz).toBe(300);
+  });
+
+  it("POST /clocks never installs or removes a boot unit", async () => {
+    const { app, clockCaps } = makeApp();
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx0", kind: "spark", role: "standalone", host: "10.20.30.1" });
+    const id = created.body.node.id as string;
+    const res = await request(app).post(`/api/v1/nodes/${id}/clocks`).send({ cpuMaxMHz: 1400, persist: true });
+    expect(res.status).toBe(200);
+    // The route does not record persistence, so it must not claim it.
+    expect(clockCaps.at(-1)).toEqual({ nodeId: id, caps: { cpuMaxMHz: 1400 }, persist: false });
+  });
+
+  it("POST /clocks leaves an absent side untouched (a CPU-only call cannot clear the GPU cap)", async () => {
+    const { app, clockCaps } = makeApp();
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx9", kind: "spark", role: "standalone", host: "10.20.30.9" });
+    const id = created.body.node.id as string;
+    expect((await request(app).post(`/api/v1/nodes/${id}/clocks`).send({ cpuMaxMHz: 1400 })).status).toBe(200);
+    expect(clockCaps.at(-1)).toEqual({ nodeId: id, caps: { cpuMaxMHz: 1400 }, persist: false });
+    expect((await request(app).post(`/api/v1/nodes/${id}/clocks`).send({})).status).toBe(400);
+  });
+
+  it("stores the half that landed when the other half is refused", async () => {
+    const { app, fake } = makeApp({ failCpu: true });
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx4b", kind: "spark", role: "standalone", host: "10.20.30.4" });
+    const id = created.body.node.id as string;
+    const res = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 1500, cpuCapMHz: 1400, persistent: true });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("cpu: no cpufreq policies");
+    const row = await fake.store.get(id);
+    // The GPU cap is live and persisted → the registry must say so.
+    expect(row?.gpuClockCapMHz).toBe(1500);
+    expect(row?.gpuClockCapPersistent).toBe(true);
+    expect(row?.cpuClockCapMHz).toBeNull();
+    expect(res.body.results).toEqual([
+      { side: "gpu", ok: true, offline: false, error: null },
+      { side: "cpu", ok: false, offline: false, error: "cpu: no cpufreq policies" },
+    ]);
+  });
+
+  it("a mixed request against an old agent keeps the GPU cap and drops the CPU half", async () => {
+    const { app, fake } = makeApp({ offlineCpu: true });
+    const created = await request(app).post("/api/v1/nodes").send({ name: "dgx4c", kind: "spark", role: "standalone", host: "10.20.30.4" });
+    const id = created.body.node.id as string;
+    const res = await request(app).put(`/api/v1/nodes/${id}/clock-cap`).send({ capMHz: 1800, cpuCapMHz: 2000 });
+    expect(res.status).toBe(504);
+    expect(res.body.error).toContain("CPU clock control needs the current agent build");
+    const row = await fake.store.get(id);
+    expect(row?.gpuClockCapMHz).toBe(1800);
+    expect(row?.cpuClockCapMHz).toBeNull(); // never applied → never stored
   });
 
   it("rejects non-integer caps", async () => {

@@ -2,7 +2,7 @@ import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect } from "./collector.js";
-import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown } from "./clocks.js";
+import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown, shouldPersist } from "./clocks.js";
 import { mergeClocksReply, persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
@@ -361,12 +361,17 @@ async function run(): Promise<void> {
     onClocksSet: (id, caps, persist) => {
       void (async () => {
         const errors: string[] = [];
+        // IRI-068/IRI-124 persistence rules, per side:
+        //  - a FAILED live apply never touches the boot unit (removing it would
+        //    leave a live cap nothing re-applies after a reboot);
+        //  - a CLEAR always removes the unit, even without `persist` — "cleared
+        //    live, re-applied at boot" has no coherent meaning and was how a
+        //    cleared cap resurrected itself;
+        //  - a successful cap is installed only when `persist` is set.
         if (caps.smMaxMHz !== undefined) {
           const apply = await setSmCap(caps.smMaxMHz);
           if (!apply.ok) errors.push(`gpu: ${apply.error ?? "unknown error"}`);
-          // IRI-068: persistence is best-effort after the live cap — a failed
-          // unit install must not roll back the applied cap.
-          if (persist) {
+          else if (shouldPersist(caps.smMaxMHz, persist, apply.ok)) {
             const persisted = await persistClockCap(caps.smMaxMHz);
             if (!persisted.ok) errors.push(`gpu persist: ${persisted.error ?? "unknown error"}`);
           }
@@ -374,7 +379,7 @@ async function run(): Promise<void> {
         if (caps.cpuMaxMHz !== undefined) {
           const apply = await setCpuCap(caps.cpuMaxMHz);
           if (!apply.ok) errors.push(`cpu: ${apply.error ?? "unknown error"}`);
-          if (persist) {
+          else if (shouldPersist(caps.cpuMaxMHz, persist, apply.ok)) {
             const persisted = await persistCpuCap(caps.cpuMaxMHz);
             if (!persisted.ok) errors.push(`cpu persist: ${persisted.error ?? "unknown error"}`);
           }

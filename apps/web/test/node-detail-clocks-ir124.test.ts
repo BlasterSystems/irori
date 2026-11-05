@@ -160,6 +160,35 @@ describe("NodeDetail clock caps + temperature overlay (IRI-124)", () => {
     w.unmount();
   });
 
+  it("distinguishes a cpufreq-less platform from an old agent", async () => {
+    const { liveMock } = await import("./live-mock");
+    (liveMock.nodes as Map<string, unknown>).set(UUID, node);
+    (liveMock.snapshots as Map<string, unknown>).set(UUID, snapshot);
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      let body: unknown = {};
+      // cpu: null = the agent CAN cap clocks, this box just has no cpufreq.
+      if (url.endsWith("/clocks")) body = { gpus: [], cpu: null };
+      else if (url.includes("/history")) body = history;
+      else if (url.includes("/inventory")) body = { report: null, updatedAt: new Date().toISOString() };
+      else if (url.includes("/versions")) body = { agentVersion: "0.6.0", pin: null, versions: null, drift: [], updatedAt: new Date().toISOString() };
+      else if (url.includes("/api/v1/updates")) body = { baseline: null, nodes: [] };
+      else if (url.includes("/health/findings")) body = { findings: [] };
+      else if (url.includes("/cleanup")) body = { categories: [], running: false, prevention: null };
+      else if (url.includes("/api/v1/llm")) body = {};
+      else if (["/setups", "/nodes", "/jobs", "/quants", "/api/v1/bench"].some((e) => url.includes(e))) body = [];
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const { default: NodeDetail } = await import("../src/components/NodeDetail.vue");
+    const w = mount(NodeDetail as never, { props: { nodeId: UUID } } as never);
+    await new Promise((r) => setTimeout(r, 150));
+
+    const text = w.text();
+    expect(text).toContain("no cpufreq on this node — CPU caps unavailable");
+    expect(text).not.toContain("agent too old");
+    w.unmount();
+  });
+
   it("hides the CPU control and explains when the agent predates IRI-124", async () => {
     const { liveMock } = await import("./live-mock");
     (liveMock.nodes as Map<string, unknown>).set(UUID, node);

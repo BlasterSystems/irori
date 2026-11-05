@@ -231,9 +231,10 @@ export async function persistCpuCap(
     if (!script.owned) return { ok: false, error: `${scriptPath} already exists and is not irori-managed` };
 
     if (capMHz === null) {
+      // Disable before the files go away, or the wants symlink lingers.
+      await run(["disable", CPU_CAP_UNIT]).catch(() => {});
       await fs.rm(unitPath, { force: true });
       await fs.rm(scriptPath, { force: true });
-      await run(["disable", CPU_CAP_UNIT]).catch(() => {});
     } else {
       await fs.mkdir(scriptPath.slice(0, scriptPath.lastIndexOf("/")), { recursive: true });
       await fs.writeFile(scriptPath, cpuCapScriptBody(capMHz), { mode: 0o755 });

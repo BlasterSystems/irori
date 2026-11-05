@@ -79,3 +79,19 @@ Research brief with file:line evidence and live DGX-1 probes:
 - Security: the agent writes root-owned sysfs only through integer values derived from validated input (`min/max` clamps, no shell interpolation); the boot script bakes an integer literal; no new auth surface (same agent WS + audited REST route).
 - Compatibility: `clocks-get-result.cpu` and `clocks-set.cpuMaxMHz` are optional, so old agents/hubs still parse; an old agent simply has no CPU control and the UI says so. The migration-watermark heal is idempotent and no-ops on healthy databases.
 - Residual risks: a DGX OS component rewrites `scaling_max_freq` after boot (observed mtime drift) — the cap can be silently reverted until a re-assert path exists; SPEC §10's online-transition re-apply and fleet-wide apply remain unimplemented; CPU caps need the IRI-124 agent (per-node maintenance window).
+
+## Independent review round (PR #94)
+
+An independent adversarial review of the diff produced 2 blocking + 6 should-fix findings; all were addressed in the same PR:
+
+1. **Blocking — the 2800 preset claim was false.** A cap is a uniform ceiling, so 2800 limits the 3,900 MHz cluster too (the agent test already asserted it). Fixed every shipped claim (detail-data comment, brief, SPEC, task file, PR body) and added a `title` on the select stating the semantics; per-cluster caps would be a separate design change.
+2. **Blocking — an out-of-range cap 500'd `GET /api/v1/nodes`.** `parseCapField` had no bounds while the node DTO re-parses 300–4000 MHz. Now bounded at the route (same range as `nodeInfoSchema`), with a regression test that stores the boundary value and then lists nodes.
+3. **Persistence ran after a failed live apply** — now gated per side via `shouldPersist(value, persist, applied)` (3 unit tests): a failed apply never touches the unit, a clear always removes it.
+4. **`POST /clocks` forwarded `persist` without recording it** — no longer forwarded (matches the doc sentence); regression test asserts the agent never sees persistence from that route.
+5. **A mixed GPU+CPU frame against an old agent stored a CPU cap that was never applied** — the routes now apply one frame per side, so the CPU half reports offline and is not stored.
+6. **Partial failure was reported as total failure and the landed half was not stored** — each side stores independently; `502`/`504` responses carry a per-side `results` array and the registry values read back.
+7. **`loadClocks` had no node-switch guard** — epoch counter like the sibling loaders.
+8. **`GET /clocks` collapsed "no cpufreq" (null) into "old agent" (absent)** — absence now survives server + client parsing, with distinct copy: "no cpufreq on this node — CPU caps unavailable" vs "agent too old for CPU caps".
+9. Nits fixed: journal test bound tightened to the heal's own ±60 s; the watermark heal now logs what it rewrote and why it failed; unit removal disables the unit before deleting its files.
+
+Verification after the review pass: `pnpm test` green (core 12, db 3, proxy 4, web 56, agent 21, server 27 files), DB-gated server 373/373, db 13/13, `pnpm build` ✓, `validate` ✓, `docs-check --base main --strict` ✓.

@@ -285,8 +285,14 @@ watch(
 
 const clocks = ref<ClocksResponse | null>(null);
 const clocksLoaded = ref(false);
+/** Node-switch epoch: a slow reply for the previous node must not paint here. */
+let clocksSeq = 0;
 /** Old agents answer GET /clocks without the cpu block — no CPU control there. */
 const cpuSupported = computed(() => clocks.value?.cpu != null);
+/** `cpu: null` means the platform exposes no cpufreq — a different fix than "update". */
+const noCpufreq = computed(
+  () => clocks.value !== null && clocks.value.cpu === null,
+);
 /** One line of applied-vs-maximum per CPU policy cluster. */
 const cpuEffective = computed(() => {
   const policies = clocks.value?.cpu?.policies ?? [];
@@ -300,12 +306,14 @@ const gpuCapOptions = computed(() => capOptions(GPU_CLOCK_CAP_PRESETS, node.valu
 const cpuCapOptions = computed(() => capOptions(CPU_CLOCK_CAP_PRESETS, node.value?.cpuClockCapMHz));
 
 async function loadClocks(): Promise<void> {
+  const seq = ++clocksSeq;
   try {
-    clocks.value = await fetchClocks(props.nodeId);
+    const next = await fetchClocks(props.nodeId);
+    if (seq === clocksSeq) clocks.value = next;
   } catch {
-    clocks.value = null;
+    if (seq === clocksSeq) clocks.value = null;
   } finally {
-    clocksLoaded.value = true;
+    if (seq === clocksSeq) clocksLoaded.value = true;
   }
 }
 
@@ -1258,6 +1266,7 @@ onUnmounted(() => {
                 class="select"
                 style="max-width: 165px;"
                 aria-label="CPU clock cap in MHz"
+                title="A cap is a ceiling for every CPU policy — 2800 limits both the 2,808 MHz and the 3,900 MHz cores"
               >
                 <option value="" disabled>pick a cap</option>
                 <option v-for="o in cpuCapOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
@@ -1268,7 +1277,8 @@ onUnmounted(() => {
               <button class="btn btn--secondary btn--sm" :disabled="cpuCapBusy || node?.online !== true || cpuCapInput === ''" @click="applyCpuCap(false)">Apply</button>
               <button class="btn btn--ghost btn--sm" :disabled="cpuCapBusy || node?.online !== true" @click="applyCpuCap(true)">Clear</button>
             </div>
-            <p v-else-if="clocksLoaded && clocks !== null" class="stat__sub">agent too old for CPU caps — update the agent</p>
+            <p v-else-if="clocksLoaded && clocks !== null && !noCpufreq" class="stat__sub">agent too old for CPU caps — update the agent</p>
+            <p v-else-if="noCpufreq" class="stat__sub">no cpufreq on this node — CPU caps unavailable</p>
             <p v-if="cpuEffective !== null" class="stat__sub">effective {{ cpuEffective }}</p>
             <p v-if="cpuCapMsg" class="stat__sub">{{ cpuCapMsg }}</p>
             <p v-if="cpuCapError" class="banner banner--warn">{{ cpuCapError }}</p>

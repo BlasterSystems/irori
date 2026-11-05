@@ -34,8 +34,9 @@ describe("migration journal", () => {
   });
 
   it("never dates an entry in the future", () => {
-    // One day of slack for clock skew between the generating machine and CI.
-    const limit = Date.now() + 86_400_000;
+    // Same 60 s tolerance client.migrate() heals at — a looser bound here
+    // would let a small future date pass CI and still poison the watermark.
+    const limit = Date.now() + 60_000;
     for (const entry of journal.entries) {
       expect(entry.when, `${entry.tag} is future-dated and poisons the watermark`).toBeLessThan(limit);
     }
