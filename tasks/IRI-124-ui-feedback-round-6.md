@@ -95,3 +95,10 @@ An independent adversarial review of the diff produced 2 blocking + 6 should-fix
 9. Nits fixed: journal test bound tightened to the heal's own ±60 s; the watermark heal now logs what it rewrote and why it failed; unit removal disables the unit before deleting its files.
 
 Verification after the review pass: `pnpm test` green (core 12, db 3, proxy 4, web 56, agent 21, server 27 files), DB-gated server 373/373, db 13/13, `pnpm build` ✓, `validate` ✓, `docs-check --base main --strict` ✓.
+
+## Deploy notes (DEV, dev-0.5.0-1 / dev-0.5.0-2)
+
+Merged as PR #94 and deployed by pushing `dev-0.5.0-1` (hub tag) then `dev-0.5.0-2` (clocks-query fix). Two deployment facts worth keeping:
+
+1. **DEV database bookkeeping repair.** The DEV database's `drizzle.__drizzle_migrations` stopped recording at 0019 while the schema itself was complete (the IRI-084 repair had created the 0020–0027 objects without recording them). Once the watermark heal restored 0019's real timestamp, drizzle saw 0020+ as pending and aborted on `CREATE TABLE "alert_channels"` (already exists) → the hub booted degraded (`db:false`). Fixed by inserting the three missing rows (0020, 0021, 0027) with their journal `when` and the sha256 of their SQL, so only 0023 remained pending; the hub then applied 0023 and reported healthy. **Durable follow-up needed:** migrations must tolerate "object already exists" for out-of-band-created schemas, or the repair path must record what it creates.
+2. **GB10 does not accept `clocks.applications.sm` as a `--query-gpu` field** ("not a valid field to query"), and one bad field fails the entire `nvidia-smi` call — `GET /api/v1/nodes/:id/clocks` answered 502 on every Spark since IRI-067 and the GPU cap could never read back. Fixed in `dev-0.5.0-2`: the base query carries the six valid fields, the application clock is a separate best-effort probe (null when the driver refuses). Takes effect on nodes only after `agent-update` (the running fleet is still on the old bundle); the hub already serves the fixed artifact.
