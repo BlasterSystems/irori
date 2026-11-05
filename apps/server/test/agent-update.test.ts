@@ -86,4 +86,20 @@ d("agent-update jobs (db integration)", () => {
     expect(malformedDone!.status).toBe("failed");
     expect(malformedDone!.output.at(-1)!.line).toContain("expectedVersion");
   });
+
+  it("ignores the restart-killed job-done frame but settles a real failure", async () => {
+    // The agent's own restart kills the systemd-run child, so the dying agent
+    // reports failed with a NULL exit code while the update actually landed
+    // (observed on DGX-2/DGX-3 during the 0.5.1 rollout). The version check
+    // owns that row; a non-zero exit is a real failure and settles at once.
+    const killed = await service.create(nodeId, "agent-update", { expectedVersion: "0.5.1" });
+    await service.onDone(nodeId, killed.id, "failed", null);
+    expect((await service.get(killed.id))!.status).toBe("running");
+    await expect(service.settleAgentUpdate(nodeId, "0.5.1")).resolves.toBe("succeeded");
+    expect((await service.get(killed.id))!.status).toBe("succeeded");
+
+    const real = await service.create(nodeId, "agent-update", { expectedVersion: "0.5.1" });
+    await service.onDone(nodeId, real.id, "failed", 1);
+    expect((await service.get(real.id))!.status).toBe("failed");
+  });
 });

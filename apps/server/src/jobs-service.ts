@@ -526,8 +526,15 @@ export function createJobsService(
     },
 
     async onDone(nodeId, jobId, status, exitCode) {
-      const [owner] = await db.select({ nodeId: jobs.nodeId }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
+      const [owner] = await db.select({ nodeId: jobs.nodeId, kind: jobs.kind }).from(jobs).where(eq(jobs.id, jobId)).limit(1);
       if (!owner || owner.nodeId !== nodeId) return;
+      // IRI-124 deploy finding: an agent-update restarts the agent, which kills
+      // the systemd-run child, so the dying agent reports job-done failed with
+      // a NULL exit code — while the update itself succeeded (the bundle was
+      // replaced and the new agent is booting). That frame is not a verdict:
+      // settleAgentUpdate (version match) or the grace reaper owns these rows.
+      // A real script failure exits non-zero and still settles here.
+      if (owner.kind === "agent-update" && status === "failed" && exitCode === null) return;
       // .returning() doubles as the terminal-transition guard: a repeated
       // done frame (or reap-after-done) must not re-run the settle effects
       // or re-emit the feed event.
