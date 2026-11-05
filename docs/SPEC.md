@@ -374,7 +374,9 @@ node**, with time ranges backed by rollups:
   that cluster untouched. GB10 exposes one policy per CPU in two clusters
   (2,808 MHz efficiency cores, 3,900 MHz performance cores); the UI offers
   `1400 / 2000 / 2800 MHz` presets plus Clear, and Clear restores each
-  policy's `cpuinfo_max_freq`. Boot-time re-apply:
+  policy's `cpuinfo_max_freq`. Every preset caps **both** clusters (2800 →
+  2,800 MHz on the fast cores too) — a single ceiling per policy cannot cap
+  one cluster only. Boot-time re-apply:
   `irori-cpu-clock-cap.service` → `/etc/irori/cpu-clock-cap.sh` (removed on
   clear, same marker/collision guard as the GPU unit).
 - Executed by the **privileged agent directly** (it runs as root — no helper

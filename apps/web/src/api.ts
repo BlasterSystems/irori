@@ -274,7 +274,10 @@ export async function fetchClocks(id: string, signal?: AbortSignal): Promise<Clo
     })),
   };
   const cpu = body.cpu as Record<string, unknown> | null | undefined;
-  if (cpu !== null && typeof cpu === "object") {
+  // null (no cpufreq on this platform) and absent (agent predates IRI-124) are
+  // different operator problems — keep the distinction instead of collapsing.
+  if (cpu === null) out.cpu = null;
+  else if (typeof cpu === "object") {
     const policies = Array.isArray(cpu.policies) ? (cpu.policies as Array<Record<string, unknown>>) : [];
     out.cpu = {
       capMHz: numOrNull(cpu.capMHz),

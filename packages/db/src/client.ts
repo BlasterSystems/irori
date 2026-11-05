@@ -49,9 +49,16 @@ async function normalizeMigrationWatermark(sql: postgres.Sql, migrationsFolder: 
       // Only heal impossible values for entries we can identify.
       if (folderMillis === undefined || row.created_at <= skewLimit) continue;
       await sql`update drizzle.__drizzle_migrations set created_at = ${folderMillis} where id = ${row.id}`;
+      console.warn(
+        `[irori-db] migration watermark healed: row ${row.id} recorded ${row.created_at} (future-dated); restored ${folderMillis} from the journal`,
+      );
     }
-  } catch {
-    // Boot must never depend on the repair path.
+  } catch (err: unknown) {
+    // Boot must never depend on the repair path — but a silent failure here
+    // means later migrations keep being skipped with no clue why.
+    console.warn(
+      `[irori-db] migration watermark check failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 

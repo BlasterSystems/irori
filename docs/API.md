@@ -355,8 +355,13 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `irori-cpu-clock-cap.service`) is installed — or removed when the cap is
   null, which is how a Clear survives the next boot. A foreign unit or script
   with the same path is refused, never overwritten. `400` when neither cap is
-  present or a value is not a positive integer; `504` when the agent does not
-  answer (CPU caps need an agent with IRI-124).
+  present, a value is not an integer in 300–4000 MHz, or `persistent` is
+  truthy with no cap field at all. Each side is applied in its own agent
+  frame, so a landed half is stored (`gpuClockCap*` / `cpuClockCap*`) even
+  when the other fails: a partial failure answers `502` with a per-side
+  `results` array and the registry values read back; `504` means the agent did
+  not answer (a CPU-only frame on an agent older than IRI-124 is dropped
+  outright, so that path also lands here with the update hint).
 
 ## Efficiency — Wh per token (IRI-073)
 
@@ -471,17 +476,20 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   cap via the agent (`nvidia-smi` query) plus the CPU policy state:
   `{gpus: [{index, name, smMHz, smMaxMHz, memMHz, memMaxMHz, smCapMHz}],
   cpu: {capMHz, policies: [{cpus, minKHz, maxKHz, curMaxKHz}]} | null}`.
-  `cpu` is **null** when the platform exposes no cpufreq policies and
-  **absent** when the agent predates IRI-124 — the UI hides the control in
-  both cases instead of offering a dead one. `504` when the agent is offline
-  or does not answer within 8 s; `502` carries the tool error.
+  `cpu: null` means the platform exposes no cpufreq policies; the key being
+  **absent** means the agent predates IRI-124. The UI says "update the agent"
+  for the latter and "no cpufreq on this node" for the former. `504` when the
+  agent is offline or does not answer within 8 s; `502` carries the tool error.
 - `POST /api/v1/nodes/:id/clocks`
-  (`{smMaxMHz?: number | null, cpuMaxMHz?: number | null, persist?}`) —
-  applies `nvidia-smi -lgc 0,<max>` on every GPU (null/absent = `-rgc`
-  reset) and, when `cpuMaxMHz` is present, `min(cap, cpuinfo_max_freq)` per
-  cpufreq policy. Returns `{applied, gpus, cpu}` with a fresh reading.
-  Audited (`node.clocks.post`). Requires the root agent; persistence is the
-  `clock-cap` route's job.
+  (`{smMaxMHz?: number | null, cpuMaxMHz?: number | null}`) —
+  one-shot apply: `nvidia-smi -lgc 0,<max>` for the GPU and
+  `min(cap, cpuinfo_max_freq)` per cpufreq policy for the CPU. An **absent**
+  field leaves that side alone (a CPU-only call never resets the GPU cap);
+  `null` resets it; at least one field is required. `persist` is ignored here —
+  boot-time state belongs to `PUT …/clock-cap`, which records it on the node.
+  Answers `{gpus, cpu, results}` with a fresh reading, `200` only when every
+  requested side applied. Audited (`node.clocks.post`). Requires the root
+  agent.
 
 ## Agent onboarding & updates (IRI-011/012, ADR-0007)
 
