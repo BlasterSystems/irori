@@ -241,8 +241,9 @@ export interface GpuClocks {
 
 export interface ClocksResponse {
   gpus: GpuClocks[];
-  /** Absent on agents that predate IRI-124 (CPU cap support). */
-  cpu?: CpuClocks;
+  /** Absent on agents that predate IRI-124 (CPU cap support); null when the
+   *  platform exposes no cpufreq policies. */
+  cpu?: CpuClocks | null;
 }
 
 function numOrNull(v: unknown): number | null {
