@@ -478,8 +478,11 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   cpu: {capMHz, policies: [{cpus, minKHz, maxKHz, curMaxKHz}]} | null}`.
   `cpu: null` means the platform exposes no cpufreq policies; the key being
   **absent** means the agent predates IRI-124. The UI says "update the agent"
-  for the latter and "no cpufreq on this node" for the former. `504` when the
-  agent is offline or does not answer within 8 s; `502` carries the tool error.
+  for the latter and "no cpufreq on this node" for the former. `smCapMHz` is
+  null on GB10: the driver does not accept `clocks.applications.sm` as a query
+  field, so the desired cap lives on the node row (`gpuClockCapMHz`) and the
+  live read is best-effort. `504` when the agent is offline or does not answer
+  within 8 s; `502` carries the tool error.
 - `POST /api/v1/nodes/:id/clocks`
   (`{smMaxMHz?: number | null, cpuMaxMHz?: number | null}`) —
   one-shot apply: `nvidia-smi -lgc 0,<max>` for the GPU and
