@@ -436,7 +436,10 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
    * the live engine as its own (running/healthy) and its Stop ran the shared
    * script pair, killing the real engine. Two rules:
    *  - a row that never started owns nothing;
-   *  - among live rows, the one started most recently owns the port.
+   *  - the row started most recently owns the port, whatever its current
+   *    status. A stopped owner still owns it while its engine winds down (the
+   *    probe snapshot can predate the stop), so a sibling poll must not
+   *    resurrect a stopped row from that snapshot (IR-191).
    * Returns the sibling that outranks `row`, or null when the row owns it.
    */
   const portRival = async (row: typeof setups.$inferSelect): Promise<typeof setups.$inferSelect | null> => {
@@ -447,7 +450,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
     if (others.length === 0) return null;
     if (row.lastStartedAt === null) return others.find((o) => o.lastStartedAt !== null) ?? null;
     const mine = row.lastStartedAt.getTime();
-    return others.find((o) => isLiveStatus(o.status) && o.lastStartedAt !== null && o.lastStartedAt.getTime() > mine) ?? null;
+    return others.find((o) => o.lastStartedAt !== null && o.lastStartedAt.getTime() > mine) ?? null;
   };
 
   /** Live sibling on the same head port — what refuses a second create/patch/start. */

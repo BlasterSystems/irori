@@ -587,10 +587,11 @@ type PortRow = Pick<SetupInfo, "id" | "name" | "headNodeId" | "port" | "status" 
 /**
  * IR-155: the sibling that outranks `setup` for its head port, mirroring the
  * server's rule in `setups-service.ts` — a row that never started owns nothing,
- * and among live rows the one started most recently owns it. The node probe can
- * only say that AN engine answers the port, so without this a second row sharing
- * the port reads "serving :PORT" beside the real one and offers a Stop whose
- * script pair can kill the sibling's engine.
+ * and the row started most recently owns the port whatever its current status
+ * (a stopped owner still owns it while its engine winds down, IR-191). The node
+ * probe can only say that AN engine answers the port, so without this a second
+ * row sharing the port reads "serving :PORT" beside the real one and offers a
+ * Stop whose script pair can kill the sibling's engine.
  */
 export function portRival(setup: PortRow, setups: readonly PortRow[]): PortRow | null {
   const others = setups.filter(
@@ -599,7 +600,7 @@ export function portRival(setup: PortRow, setups: readonly PortRow[]): PortRow |
   if (others.length === 0) return null;
   if (setup.lastStartedAt === null) return others.find((o) => o.lastStartedAt !== null) ?? null;
   const mine = Date.parse(setup.lastStartedAt);
-  return others.find((o) => isLiveSetup(o) && o.lastStartedAt !== null && Date.parse(o.lastStartedAt) > mine) ?? null;
+  return others.find((o) => o.lastStartedAt !== null && Date.parse(o.lastStartedAt) > mine) ?? null;
 }
 
 /** True when this row may claim the engine answering its head port. */
