@@ -201,6 +201,27 @@ export function sanitizeWorkerIds(workerIds: string[], headNodeId: string, nodes
 }
 
 /**
+ * IR-192: nodes worth polling for LLM probes. A NAS has no LLM surface (its
+ * agent never probes ports, so GET /llm is a permanent 404) and an offline
+ * agent cannot answer — polling either only fills the console. A setup head
+ * the registry does not know yet (registry fetch failed) is still probed: a
+ * setup head is a serving node by construction.
+ */
+export function probeableNodeIds(
+  nodes: ReadonlyArray<Pick<NodeInfo, "id" | "kind" | "online">>,
+  setups: ReadonlyArray<Pick<SetupInfo, "headNodeId">>,
+): string[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const ids = new Set<string>();
+  for (const n of nodes) if (n.kind !== "nas" && n.online) ids.add(n.id);
+  for (const s of setups) {
+    const n = byId.get(s.headNodeId);
+    if (n === undefined || (n.kind !== "nas" && n.online)) ids.add(s.headNodeId);
+  }
+  return [...ids];
+}
+
+/**
  * IR-151: true when the head node's LLM probe currently reports the setup's
  * declared engine answering the declared port — the escape hatch for a falsely
  * stopped row (a daemonizing recipe keeps the engine outside the recorded

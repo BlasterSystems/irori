@@ -254,6 +254,14 @@ describe("llm routes (fake store)", () => {
     expect((await request(app).get("/api/v1/nodes/nope/llm")).status).toBe(400);
   });
 
+  it("answers the empty set for a NAS — no LLM surface, not a transient 404 (IR-192)", async () => {
+    const { app, fake } = makeApi();
+    const { id } = await fake.store.create({ name: `nas-${randomUUID()}`, kind: "nas", role: "standalone", host: "nas" });
+    const res = await request(app).get(`/api/v1/nodes/${id}/llm`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ports: [], updatedAt: null });
+  });
+
   it("answers 503 while degraded", async () => {
     const { app } = makeApi({ store: null });
     const res = await request(app).get(`/api/v1/nodes/${randomUUID()}/llm`);

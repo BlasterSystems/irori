@@ -22,6 +22,7 @@ import {
   runningEnginesFromProbes,
   sanitizeWorkerIds,
   ownsProbePort,
+  probeableNodeIds,
   probeSeesEngine,
   portClashMessage,
   scriptPathError,
@@ -133,10 +134,9 @@ function decodeTps(setup: SetupInfo): number | null {
   return port?.decodeTps ?? null;
 }
 
+/** IR-192: only nodes that can answer a probe (no NAS, no offline agent). */
 function probeNodeIds(): string[] {
-  const ids = new Set<string>(nodes.value.map((n) => n.id));
-  for (const s of setups.value) ids.add(s.headNodeId);
-  return [...ids];
+  return probeableNodeIds(nodes.value, setups.value);
 }
 
 const props = defineProps<{ route?: { recipeJob?: string | null } }>();
