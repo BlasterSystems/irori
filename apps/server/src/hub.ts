@@ -399,7 +399,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         log.error(`agentServerFrame parse failed: ${text.slice(0, 120)}`);
         return;
       }
-      log.error(`agentServerFrame ${parsed.data.type} from ${nodeId}`);
+      // Trace only: this fires for every routine frame (usage-batch, log-batch,
+      // setup-event). At error level it buried real failures in the live log.
+      log.debug(`agentServerFrame ${parsed.data.type} from ${nodeId}`);
       const currentId: string = nodeId;
       const frame = parsed.data;
       if (frame.type === "clocks-get-result" || frame.type === "clocks-set-result" || frame.type === "node-shutdown-ack") {
