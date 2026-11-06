@@ -316,6 +316,10 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 - `PUT /api/v1/nodes/:id/llm-ports` (`{ports: number[]}`) remains the
   dedicated probe-assignment endpoint and hardcodes the probe host to
   `127.0.0.1`.
+- `GET /api/v1/nodes/:id/llm` — the live probe view: the in-memory ring first,
+  then the latest persisted pass; `{ports, updatedAt}`. `404` when nothing is
+  known yet — except for a `kind: nas` node, which has no LLM surface at all
+  and answers `200 {ports: [], updatedAt: null}` (IR-192).
 
 ## Cost (IRI-072)
 
