@@ -196,13 +196,15 @@ describe("audit row content (IRI-077)", () => {
     expect(row!.input.actorDetail).toBe("ci-bot");
   });
 
-  it("records a rejected attempt as an error row", async () => {
+  it("records a rejected attempt as an error row with the guard message (IR-193)", async () => {
     const { app, recorded } = makeApp();
     const res = await request(app).delete("/api/v1/nodes/00000000-0000-4000-8000-000000000000").send();
     expect(res.status).toBe(404);
     const row = recorded.find((r) => r.input.action === "node.delete");
     expect(row!.outcome).toBe("error");
-    expect(row!.error).toBe("HTTP 404");
+    // The response body's message, not just the status: the durable record
+    // must say WHY the mutation was refused.
+    expect(row!.error).toBe("node not found");
   });
 
   it("stores before/after entity state for a patched node", async () => {
