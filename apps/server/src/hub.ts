@@ -107,6 +107,13 @@ export interface AgentHubDeps {
   getHfToken?: () => Promise<string | null | undefined>;
   /** IR-105: hub-pinned modelctl version; null = unset (agents keep env), absent = getter unavailable. */
   getModelctlPin?: () => Promise<string | null>;
+  /**
+   * IR-189: fired once per authenticated hello, after the socket is registered
+   * and the config-update is sent. The clock-cap service re-applies any stored
+   * cap the node lost while it was down (SPEC §10). Fire-and-forget: a slow
+   * re-assert must never delay the hello path.
+   */
+  onNodeOnline?: (nodeId: string) => void;
   /** Injectables for tests. */
   writeFlushMs?: number;
   markSeenThrottleMs?: number;
@@ -316,6 +323,9 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         // Probe assignments + role-derived cadence. A worker's role may change
         // without a reconnect only via a later config-update; hello covers boot.
         await sendConfigUpdate(id, sendMsg);
+        // IR-189: SPEC §10 — re-apply stored clock caps the node lost while it
+        // was down. Fire-and-forget so a slow nvidia-smi never delays hello.
+        deps.onNodeOnline?.(id);
         return;
       }
 

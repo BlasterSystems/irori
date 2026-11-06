@@ -15,6 +15,13 @@ export const healthMetricSchema = z.enum([
   "telemetry_gap_s",
   /** IR-179: node-online journal events per 5 min window (reconnect storm). */
   "reconnect_storm",
+  /**
+   * IR-189: consecutive health sweeps in which the node's live clock ceiling
+   * differs from the cap stored on the node (0 = matching, absent = not
+   * measurable). The sweep cadence is 30 s, so the seed threshold of 4 means
+   * "drifted for two minutes".
+   */
+  "clock_cap_drift",
 ]);
 export type HealthMetric = z.infer<typeof healthMetricSchema>;
 
@@ -95,6 +102,11 @@ export const HEALTH_SEED_RULES: Array<{
   // minute for 78 minutes; a 30 s crash loop lands at exactly 10 per 5 min,
   // while deploy blips (1–2 reconnects) stay silent.
   { name: "Reconnect storm", metric: "reconnect_storm", op: "gte", threshold: 10, severity: "warn", cooldownSec: 600 },
+  // IR-189: a DGX OS component rewrites scaling_max_freq after boot and the
+  // governor every ~2 min, so a cap can be silently reverted while the
+  // registry still claims it. The value is a count of consecutive 30 s sweeps
+  // that observed a mismatch — 4 = two minutes of sustained drift.
+  { name: "Clock cap drift", metric: "clock_cap_drift", op: "gte", threshold: 4, severity: "warn", cooldownSec: 1800 },
 ];
 
 /** Shared threshold values for the web (from the seed rules). */

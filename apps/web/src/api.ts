@@ -215,6 +215,44 @@ export async function setCpuClockCap(id: string, cpuCapMHz: number | null, persi
   }
 }
 
+/** IR-189: one node's outcome in a fleet-wide clock-cap apply. */
+export interface FleetClockCapNode {
+  nodeId: string;
+  name: string;
+  /** 200 applied, 504 agent offline, 502 agent refused. */
+  status: number;
+  results: Array<{ side: "gpu" | "cpu"; ok: boolean; offline: boolean; error: string | null }>;
+}
+
+export interface FleetClockCapResponse {
+  results: FleetClockCapNode[];
+  applied: number;
+  failed: number;
+  persistent: boolean;
+}
+
+/**
+ * IR-189: apply (null = clear) a clock cap across every enabled spark node.
+ * Absent fields leave that side alone, exactly like the per-node route.
+ */
+export async function setFleetClockCap(body: {
+  capMHz?: number | null;
+  cpuCapMHz?: number | null;
+  persistent: boolean;
+}): Promise<FleetClockCapResponse> {
+  const res = await fetch("/api/v1/clock-cap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const payload: unknown = await res.json().catch(() => null);
+    const msg = payload !== null && typeof payload === "object" && "error" in payload ? String((payload as { error: unknown }).error) : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return (await res.json()) as FleetClockCapResponse;
+}
+
 /** IRI-124: CPU clock policies as the agent reads them from cpufreq. */
 export interface CpuClockCluster {
   cpus: number[];

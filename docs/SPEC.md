@@ -381,9 +381,23 @@ node**, with time ranges backed by rollups:
   clear, same marker/collision guard as the GPU unit).
 - Executed by the **privileged agent directly** (it runs as root — no helper
   install, no sudoers dance). Desired state (`gpuClockCap*`, `cpuClockCap*`)
-  is stored server-side. **Not yet implemented:** SPEC previously promised
-  re-apply on every node online transition and fleet-wide apply — neither
-  exists (for GPUs either); the boot-time oneshots are the only persistence.
+  is stored server-side.
+- **Re-apply on node online (IR-189):** every authenticated agent hello
+  triggers a re-assert — the hub reads the live clocks, compares each stored
+  cap with the applied ceiling (`gpus[].smCapMHz`, `cpu.capMHz`), and
+  re-applies only the sides that drifted, without touching persistence (the
+  registry already holds the desired state and the boot oneshot is already
+  installed or not per `*ClockCapPersistent`). This is what makes a cap
+  survive a DGX OS component rewriting `scaling_max_freq` after boot.
+- **Drift detection (IR-189):** the health sweep (30 s) evaluates a
+  `clock_cap_drift` rule whose value is the number of consecutive sweeps that
+  observed a mismatch; the seed threshold of 4 means "drifted for two
+  minutes". Offline nodes and unreadable readings are not measurable and never
+  breach.
+- **Fleet-wide apply (IR-189):** `POST /api/v1/clock-cap` fans the same
+  per-side contract out to every enabled spark node (NAS hosts are skipped)
+  and returns per-node results — 200 all applied, 207 partial, 502 none. The
+  Overview page carries the matching control.
 
 ## 11. Agent (per node)
 

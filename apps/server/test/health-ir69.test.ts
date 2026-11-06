@@ -226,3 +226,70 @@ d("reconnect-storm rule (IR-179, db integration)", () => {
     expect((await quiet.findings()).find((f) => f.metric === "reconnect_storm")).toBeUndefined();
   });
 });
+
+d("clock-cap drift rule (IR-189, db integration)", () => {
+  let handle: DbHandle;
+  let db: Db;
+
+  beforeAll(async () => {
+    handle = createDbHandle(url!);
+    await handle.migrate();
+    db = handle.db;
+  });
+
+  afterAll(async () => {
+    await handle.close();
+  });
+
+  it("opens only after the streak threshold and clears when the cap is back", async () => {
+    const nodeId = randomUUID();
+    await db.insert(nodes).values({ id: nodeId, name: "drifty", kind: "spark", role: "head", host: "drifty.local", agentTokenHash: "x".repeat(64), agentTokenEnc: "y".repeat(64) }).onConflictDoNothing();
+    let streak = 1;
+    const health = createHealthService(db, "a".repeat(64), {
+      sse: () => {},
+      journal: async () => {},
+      clockDrift: async () => streak,
+      now: () => Date.now(),
+    });
+    await health.ensureSeed();
+    const rule = (await health.listRules()).find((r) => r.name === "Clock cap drift");
+    expect(rule?.threshold).toBe(4);
+
+    const nodesArg = [{ id: nodeId, name: "drifty" }];
+    const online = new Set([nodeId]);
+    const seen = new Map([[nodeId, Date.now()]]);
+
+    // One drifting sweep is below the threshold — no finding yet.
+    await health.sweep(nodesArg, online, seen);
+    expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(0);
+
+    streak = 4;
+    await health.sweep(nodesArg, online, seen);
+    expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(1);
+
+    streak = 0;
+    await health.sweep(nodesArg, online, seen);
+    expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(0);
+  });
+
+  it("skips offline nodes and unmeasurable readings", async () => {
+    const nodeId = randomUUID();
+    await db.insert(nodes).values({ id: nodeId, name: "quiet", kind: "spark", role: "head", host: "quiet.local", agentTokenHash: "x".repeat(64), agentTokenEnc: "y".repeat(64) }).onConflictDoNothing();
+    let calls = 0;
+    const health = createHealthService(db, "a".repeat(64), {
+      sse: () => {},
+      journal: async () => {},
+      clockDrift: async () => {
+        calls += 1;
+        return null;
+      },
+      now: () => Date.now(),
+    });
+    await health.ensureSeed();
+    await health.sweep([{ id: nodeId, name: "quiet" }], new Set(), new Map([[nodeId, Date.now()]]));
+    expect(calls).toBe(0); // offline: never asked
+    await health.sweep([{ id: nodeId, name: "quiet" }], new Set([nodeId]), new Map([[nodeId, Date.now()]]));
+    expect(calls).toBe(1); // asked, answered "not measurable" — no finding
+    expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(0);
+  });
+});

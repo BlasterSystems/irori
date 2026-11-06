@@ -6,6 +6,22 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Clock caps re-apply on node online** (IR-189): every authenticated agent
+  hello now re-asserts the stored GPU/CPU caps — the hub reads the live
+  clocks, compares each side with the applied ceiling, and re-applies only
+  what drifted, without touching persistence. This is the SPEC §10 promise
+  that was never implemented; a DGX OS component rewriting
+  `scaling_max_freq` after boot no longer silently reverts a cap.
+- **Clock-cap drift health rule** (IR-189): a `clock_cap_drift` rule trips
+  after 4 consecutive 30 s sweeps (two minutes) of a live ceiling differing
+  from the stored cap. Offline nodes and unreadable readings never breach.
+- **Fleet-wide clock caps** (IR-189): `POST /api/v1/clock-cap` applies the
+  per-side cap contract to every enabled spark node and returns per-node
+  results (200 all, 207 partial, 502 none); the Overview page gains the
+  matching control.
+
 ### Fixed
 
 - **Boot migrations converge an out-of-band schema** (IR-188): the hub no
