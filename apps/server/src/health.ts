@@ -17,6 +17,12 @@ export interface HealthSinks {
   journal: (event: SseEvent) => Promise<void>;
   /** IR-179: per-node journal counts for the reconnect-storm rule. */
   journalCounts?: (type: string, sinceMs: number) => Promise<Array<{ nodeId: string | null; n: number }>>;
+  /**
+   * IR-189: consecutive sweeps in which the node's live clock ceiling differs
+   * from the stored cap (0 = matching, null = not measurable). Absence skips
+   * the rule (tests, no clock-cap service wired).
+   */
+  clockDrift?: (nodeId: string) => Promise<number | null>;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }
@@ -191,6 +197,60 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
     }
   }
 
+  interface RuleRow {
+    id: string;
+    name: string;
+    metric: string;
+    op: string;
+    threshold: number | null;
+    severity: string;
+    cooldownSec: number;
+  }
+
+  /**
+   * Applies one rule to one node: open a finding on the first breach, re-notify
+   * inside an open finding once the cooldown elapses, clear when the value
+   * recovers. The webhook URL is read only on a transition — this runs on every
+   * snapshot for every node-scoped rule, so a per-evaluation secret read would
+   * be a hot-path query.
+   */
+  async function evaluate(rule: RuleRow, nodeId: string, value: number): Promise<void> {
+    const breach = breaches(rule.op, value, rule.threshold ?? 0);
+    const open = await db
+      .select()
+      .from(healthFindings)
+      .where(and(eq(healthFindings.ruleId, rule.id), eq(healthFindings.nodeId, nodeId), isNull(healthFindings.clearedAt)))
+      .limit(1);
+    const ref = {
+      id: rule.id,
+      name: rule.name,
+      metric: rule.metric,
+      op: rule.op,
+      threshold: rule.threshold ?? 0,
+      severity: rule.severity,
+      cooldownSec: rule.cooldownSec,
+      url: null as string | null,
+    };
+    if (breach && open.length === 0) {
+      await db.insert(healthFindings).values({ ruleId: rule.id, nodeId, observedValue: value, lastNotifiedAt: new Date(now()) });
+      ref.url = await webhookUrlFor(rule.id);
+      await transition(ref, nodeId, "appear", value);
+    } else if (breach && open.length > 0) {
+      const last = open[0]!.lastNotifiedAt?.getTime() ?? 0;
+      if (now() - last > rule.cooldownSec * 1000) {
+        ref.url = await webhookUrlFor(rule.id);
+        if (ref.url !== null) {
+          await db.update(healthFindings).set({ lastNotifiedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
+          await notify(ref, nodeId, "appear", summaryFor(ref, value), value);
+        }
+      }
+    } else if (!breach && open.length > 0) {
+      await db.update(healthFindings).set({ clearedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
+      ref.url = await webhookUrlFor(rule.id);
+      await transition(ref, nodeId, "clear", value);
+    }
+  }
+
   const service: HealthService = {
     latest,
     async ensureSeed() {
@@ -265,29 +325,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       for (const row of rules) {
         const value = metricValue(row.metric, snapshot);
         if (value === null) continue;
-        const breach = breaches(row.op, value, row.threshold ?? 0);
-        const open = await db
-          .select()
-          .from(healthFindings)
-          .where(and(eq(healthFindings.ruleId, row.id), eq(healthFindings.nodeId, nodeId), isNull(healthFindings.clearedAt)))
-          .limit(1);
-        if (breach && open.length === 0) {
-          await db.insert(healthFindings).values({ ruleId: row.id, nodeId, observedValue: value, lastNotifiedAt: new Date(now()) });
-          const url = await webhookUrlFor(row.id);
-          await transition({ id: row.id, name: row.name, metric: row.metric, op: row.op, threshold: row.threshold ?? 0, severity: row.severity, cooldownSec: row.cooldownSec, url }, nodeId, "appear", value);
-        } else if (breach && open.length > 0) {
-          // Cooldown re-notify (only rules with a channel).
-          const last = open[0]!.lastNotifiedAt?.getTime() ?? 0;
-          const url = await webhookUrlFor(row.id);
-          if (url !== null && now() - last > row.cooldownSec * 1000) {
-            await db.update(healthFindings).set({ lastNotifiedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
-            await notify({ id: row.id, name: row.name, metric: row.metric, severity: row.severity, url }, nodeId, "appear", summaryFor({ name: row.name, metric: row.metric, op: row.op, threshold: row.threshold ?? 0 }, value), value);
-          }
-        } else if (!breach && open.length > 0) {
-          await db.update(healthFindings).set({ clearedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
-          const url = await webhookUrlFor(row.id);
-          await transition({ id: row.id, name: row.name, metric: row.metric, op: row.op, threshold: row.threshold ?? 0, severity: row.severity, cooldownSec: row.cooldownSec, url }, nodeId, "clear", value);
-        }
+        await evaluate(row, nodeId, value);
       }
     },
     async sweep(nodes, onlineIds, lastSeen) {
@@ -299,22 +337,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         const gapS = Math.round(((now() - (lastSeen.get(node.id) ?? now())) / 1000) * 10) / 10;
         for (const rule of [offlineRule, gapRule]) {
           if (rule === undefined) continue;
-          const value = rule.metric === "node_offline" ? (online ? 0 : 1) : gapS;
-          const breach = breaches(rule.op, value, rule.threshold ?? 0);
-          const open = await db
-            .select()
-            .from(healthFindings)
-            .where(and(eq(healthFindings.ruleId, rule.id), eq(healthFindings.nodeId, node.id), isNull(healthFindings.clearedAt)))
-            .limit(1);
-          if (breach && open.length === 0) {
-            await db.insert(healthFindings).values({ ruleId: rule.id, nodeId: node.id, observedValue: value, lastNotifiedAt: new Date(now()) });
-            const url = await webhookUrlFor(rule.id);
-            await transition({ id: rule.id, name: rule.name, metric: rule.metric, op: rule.op, threshold: rule.threshold ?? 0, severity: rule.severity, cooldownSec: rule.cooldownSec, url }, node.id, "appear", value);
-          } else if (!breach && open.length > 0) {
-            await db.update(healthFindings).set({ clearedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
-            const url = await webhookUrlFor(rule.id);
-            await transition({ id: rule.id, name: rule.name, metric: rule.metric, op: rule.op, threshold: rule.threshold ?? 0, severity: rule.severity, cooldownSec: rule.cooldownSec, url }, node.id, "clear", value);
-          }
+          await evaluate(rule, node.id, rule.metric === "node_offline" ? (online ? 0 : 1) : gapS);
         }
       }
       // IR-179: reconnect-storm rule — node-online journal events per node in
@@ -324,23 +347,18 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       if (stormRule !== undefined && opts.journalCounts !== undefined) {
         const counts = await opts.journalCounts("node-online", 5 * 60_000).catch(() => []);
         const byNode = new Map(counts.map((c) => [c.nodeId, c.n]));
+        for (const node of nodes) await evaluate(stormRule, node.id, byNode.get(node.id) ?? 0);
+      }
+      // IR-189: clock-cap drift — consecutive sweeps whose live ceiling differs
+      // from the cap stored on the node. Only online nodes are measurable: the
+      // reading is a request/response over the agent socket.
+      const driftRule = rules.find((r) => r.metric === "clock_cap_drift");
+      if (driftRule !== undefined && opts.clockDrift !== undefined) {
         for (const node of nodes) {
-          const value = byNode.get(node.id) ?? 0;
-          const breach = breaches(stormRule.op, value, stormRule.threshold ?? 0);
-          const open = await db
-            .select()
-            .from(healthFindings)
-            .where(and(eq(healthFindings.ruleId, stormRule.id), eq(healthFindings.nodeId, node.id), isNull(healthFindings.clearedAt)))
-            .limit(1);
-          if (breach && open.length === 0) {
-            await db.insert(healthFindings).values({ ruleId: stormRule.id, nodeId: node.id, observedValue: value, lastNotifiedAt: new Date(now()) });
-            const url = await webhookUrlFor(stormRule.id);
-            await transition({ id: stormRule.id, name: stormRule.name, metric: stormRule.metric, op: stormRule.op, threshold: stormRule.threshold ?? 0, severity: stormRule.severity, cooldownSec: stormRule.cooldownSec, url }, node.id, "appear", value);
-          } else if (!breach && open.length > 0) {
-            await db.update(healthFindings).set({ clearedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
-            const url = await webhookUrlFor(stormRule.id);
-            await transition({ id: stormRule.id, name: stormRule.name, metric: stormRule.metric, op: stormRule.op, threshold: stormRule.threshold ?? 0, severity: stormRule.severity, cooldownSec: stormRule.cooldownSec, url }, node.id, "clear", value);
-          }
+          if (!onlineIds.has(node.id)) continue;
+          const value = await opts.clockDrift(node.id).catch(() => null);
+          if (value === null) continue;
+          await evaluate(driftRule, node.id, value);
         }
       }
     },

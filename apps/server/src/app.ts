@@ -1455,6 +1455,53 @@ export function createApp(deps: AppDeps): Express {
     },
   );
 
+  /**
+   * IR-189: fleet-wide clock caps — one action fans out to every enabled spark
+   * node. Each node is applied independently (same per-side contract as the
+   * per-node route), so a partial fleet is reported per node rather than
+   * collapsed into one status: 200 all applied, 207 partial, 502 none.
+   */
+  app.post(
+    "/api/v1/clock-cap",
+    audit(
+      {
+        action: "fleet.clock-cap.post",
+        targetType: "fleet",
+        summary: (req) => {
+          const body: unknown = req.body;
+          const cap = body && typeof body === "object" && "capMHz" in body ? String((body as { capMHz: unknown }).capMHz) : "?";
+          const cpuCap = body && typeof body === "object" && "cpuCapMHz" in body ? String((body as { cpuCapMHz: unknown }).cpuCapMHz) : "?";
+          return `fleet clock cap (capMHz=${cap}, cpuCapMHz=${cpuCap})`;
+        },
+      },
+      getAudit,
+    ),
+    async (req, res) => {
+      const store = requireStore(res);
+      if (!store) return;
+      const body = (req.body ?? {}) as { capMHz?: unknown; cpuCapMHz?: unknown; persistent?: unknown } | null;
+      const gpu = parseCapField(body?.capMHz);
+      if (!gpu.ok) return res.status(400).json({ error: `capMHz must be ${CAP_FIELD_HINT}` });
+      const cpu = parseCapField(body?.cpuCapMHz);
+      if (!cpu.ok) return res.status(400).json({ error: `cpuCapMHz must be ${CAP_FIELD_HINT}` });
+      if (gpu.value === undefined && cpu.value === undefined) {
+        return res.status(400).json({ error: "capMHz or cpuCapMHz required" });
+      }
+      if (deps.getHub() === null) return res.status(503).json({ error: "agent hub unavailable" });
+      const persistent = body?.persistent === true;
+      // NAS hosts have no GPU and no cpufreq policy to cap.
+      const targets = (await store.list()).filter((n) => n.kind === "spark" && n.enabled);
+      const results: Array<{ nodeId: string; name: string; status: number; results: unknown[] }> = [];
+      for (const node of targets) {
+        const outcome = await applyClockCaps(node.id, store, { gpu: gpu.value, cpu: cpu.value }, persistent);
+        results.push({ nodeId: node.id, name: node.name, status: outcome.status, results: outcome.results });
+      }
+      const failed = results.filter((r) => r.status !== 200).length;
+      const status = failed === 0 ? 200 : failed === results.length ? 502 : 207;
+      res.status(status).json({ results, applied: results.length - failed, failed, persistent });
+    },
+  );
+
   // IRI-073: Wh-per-token efficiency (energy × ledger join, NAS excluded).
   app.get("/api/v1/analytics/efficiency", async (req, res) => {
     const analytics = deps.getAnalytics();

@@ -8,7 +8,8 @@ import NodeCard from "./NodeCard.vue";
 import NodeModal from "./NodeModal.vue";
 import Tip from "./Tip.vue";
 import LensChartVue from "./LensChart.vue";
-import { fetchAnalytics, fetchLlmHistory, fetchUpdates, type LlmHistoryPoint, type UpdatesResponse } from "../api";
+import { fetchAnalytics, fetchLlmHistory, fetchUpdates, setFleetClockCap, type FleetClockCapNode, type LlmHistoryPoint, type UpdatesResponse } from "../api";
+import { capOptions, CPU_CLOCK_CAP_PRESETS, GPU_CLOCK_CAP_PRESETS } from "../detail-data";
 import { downloadBytesLine, downloadEntryEta, downloadProgressPct, downloadSpeedView, fetchDownloadQueue, fetchModelsPage, formatEta, type DownloadQueueEntry } from "../models";
 import { fetchSetups } from "../serve";
 import { fmtTokens } from "../usage";
@@ -54,6 +55,36 @@ const fleetTempData = computed(() =>
     sparkNodes.value.map((n) => ({ id: n.id, name: n.name, online: n.online, snapshot: live.snapshots.get(n.id) })),
   ),
 );
+
+// ─── IR-189: fleet-wide clock caps — one action, per-node results ────────────
+const fleetGpuCap = ref<string>("");
+const fleetCpuCap = ref<string>("");
+const fleetPersist = ref(false);
+const fleetBusy = ref(false);
+const fleetMsg = ref<string | null>(null);
+const fleetError = ref<string | null>(null);
+const fleetResults = ref<FleetClockCapNode[] | null>(null);
+const fleetGpuOptions = capOptions(GPU_CLOCK_CAP_PRESETS, null);
+const fleetCpuOptions = capOptions(CPU_CLOCK_CAP_PRESETS, null);
+
+async function applyFleetCaps(clear: boolean): Promise<void> {
+  fleetBusy.value = true;
+  fleetError.value = null;
+  fleetMsg.value = null;
+  try {
+    const gpu = clear ? null : fleetGpuCap.value === "" ? undefined : Number.parseInt(fleetGpuCap.value, 10);
+    const cpu = clear ? null : fleetCpuCap.value === "" ? undefined : Number.parseInt(fleetCpuCap.value, 10);
+    if (!clear && gpu === undefined && cpu === undefined) throw new Error("pick a GPU or CPU cap first");
+    const out = await setFleetClockCap({ capMHz: gpu, cpuCapMHz: cpu, persistent: fleetPersist.value });
+    fleetResults.value = out.results;
+    fleetMsg.value = `${clear ? "cleared" : "applied"} on ${out.applied}/${out.results.length} nodes${out.failed > 0 ? ` · ${out.failed} failed` : ""}`;
+    void live.refreshNodes();
+  } catch (err: unknown) {
+    fleetError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    fleetBusy.value = false;
+  }
+}
 
 // ─── range filter (IRI-025): drives the hero charts and the power/token cards
 const range = ref<OverviewRange>("30m");
@@ -501,6 +532,46 @@ function heroStateView(p: HeroProcess): HeroStateView {
           </template>
           <span v-else class="tempitem__v hot">— OFFLINE</span>
         </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── IR-189: fleet-wide clock caps — one action fans out to every enabled
+       spark node; per-node outcomes stay visible instead of collapsing into a
+       single status. ── -->
+  <section class="card section-gap" aria-label="Fleet clock caps">
+    <div class="card__head">
+      <div class="row"><h3>Fleet clock caps</h3><Tip text="applies to every enabled spark node · a cap is a ceiling, not an operating point · 'keep after reboot' installs the boot-time oneshot on each node · a stored cap is re-applied whenever a node comes back online" /></div>
+      <span class="mono faint">{{ sparkNodes.length }} spark nodes</span>
+    </div>
+    <div class="card__body">
+      <div class="row" style="align-items: center; gap: 6px; flex-wrap: wrap;">
+        <label class="visually-hidden" for="fleetGpuCap">GPU SM clock cap</label>
+        <select id="fleetGpuCap" v-model="fleetGpuCap" class="select" style="max-width: 165px;">
+          <option value="">GPU: leave alone</option>
+          <option v-for="o in fleetGpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label class="visually-hidden" for="fleetCpuCap">CPU clock cap</label>
+        <select id="fleetCpuCap" v-model="fleetCpuCap" class="select" style="max-width: 165px;">
+          <option value="">CPU: leave alone</option>
+          <option v-for="o in fleetCpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
+          <input v-model="fleetPersist" type="checkbox" /> keep after reboot
+        </label>
+        <button class="btn btn--secondary btn--sm" :disabled="fleetBusy || (fleetGpuCap === '' && fleetCpuCap === '')" @click="applyFleetCaps(false)">Apply to fleet</button>
+        <button class="btn btn--ghost btn--sm" :disabled="fleetBusy" @click="applyFleetCaps(true)">Clear fleet</button>
+      </div>
+      <p v-if="fleetMsg" class="stat__sub">{{ fleetMsg }}</p>
+      <p v-if="fleetError" class="banner banner--warn">{{ fleetError }}</p>
+      <div v-if="fleetResults !== null" class="row" style="margin-top: 8px; gap: 6px; flex-wrap: wrap;">
+        <span
+          v-for="r in fleetResults"
+          :key="r.nodeId"
+          class="chip"
+          :class="r.status === 200 ? 'chip--ok' : 'chip--warn'"
+          :title="r.results.map((x) => `${x.side}: ${x.ok ? 'ok' : (x.error ?? 'failed')}`).join(' · ')"
+        >{{ r.name }} {{ r.status === 200 ? "✓" : "✕" }}</span>
       </div>
     </div>
   </section>
