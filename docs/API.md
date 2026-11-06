@@ -130,7 +130,9 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   to `***` at insert time. Ranges `1h|24h|7d|30d|90d|1y`; cursor is the
   descending decimal-string `id` of the last row shown; `total` is the bounded
   count for the filter ignoring the cursor. `503` while degraded. Mutating
-  routes opt in via the `audit()` middleware; reads never record.
+  routes opt in via the `audit()` middleware; reads never record. A refused
+  mutation is recorded too (`outcome: error`) with the guard's message from
+  the response body, not just the status (IR-193).
 - `GET /api/v1/events/journal?range=&type=&nodeId=&limit=&cursor=` — outgoing
   SSE frames persisted at emit time (`event_journal`, 90 d), so operational
   history survives hub restarts (the `/api/v1/events/recent` ring is

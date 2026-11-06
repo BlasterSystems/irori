@@ -129,6 +129,22 @@ export function audit(options: AuditRouteOptions, service: () => AuditService | 
         }
       };
       input.before = await read();
+      // IR-193: the durable record must carry the guard's message, not just
+      // the status — a 409 "port 8081 is already served by setup X" is the
+      // actionable part. Capture the handler's JSON error body; non-JSON
+      // failures fall back to the status line.
+      let errorBody: string | null = null;
+      const json = res.json.bind(res);
+      res.json = ((body: unknown) => {
+        if (res.statusCode >= 400 && errorBody === null) {
+          const message =
+            typeof body === "object" && body !== null && "error" in body && typeof (body as { error: unknown }).error === "string"
+              ? (body as { error: string }).error
+              : null;
+          if (message !== null) errorBody = message;
+        }
+        return json(body);
+      }) as typeof res.json;
       res.once("finish", () => {
         if (options.skip?.(req, res)) return;
         const failed = res.statusCode >= 400;
@@ -144,9 +160,10 @@ export function audit(options: AuditRouteOptions, service: () => AuditService | 
             { ...input, targetId: enrichedId ?? targetId, summary: enrichedSummary ?? input.summary },
             {
               // A rejected attempt belongs in the record too: who tried what,
-              // and the fact that it changed nothing.
+              // and the fact that it changed nothing. The guard's message is
+              // the actionable part (IR-193).
               outcome: failed ? "error" : "ok",
-              error: failed ? `HTTP ${res.statusCode}` : null,
+              error: failed ? (errorBody ?? `HTTP ${res.statusCode}`) : null,
               after,
             },
           );
