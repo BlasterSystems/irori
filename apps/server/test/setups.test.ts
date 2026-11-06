@@ -579,6 +579,47 @@ d("setups service", () => {
     await cleanup;
   });
 
+  it("a stopped owner still owns the port — a sibling poll must not resurrect it (IR-191)", async () => {
+    const base = {
+      kind: "single" as const,
+      headNodeId: ids.head,
+      nodes: [],
+      scriptStart: "/s/start.sh",
+      scriptStop: "/s/stop.sh",
+      env: { modelName: false, port: false, extraArgs: "", modelPath: false },
+    };
+    const sibling = await ctx.service.create({ ...base, name: "sib-earlier", model: "Own-Port", port: 9162 });
+    const owner = await ctx.service.create({ ...base, name: "owner-later", model: "Own-Port", port: 9162 });
+    // The sibling ran earlier and its stop settled long ago (no stop grace).
+    await h.db.update(setups).set({ lastStartedAt: new Date(Date.now() - 60_000) }).where(eq(setups.id, sibling.id));
+
+    // The owner starts later, then stops; its engine's probe snapshot is still
+    // fresh when the sibling's driver-truth poll arrives.
+    const starting = ctx.service.start(owner.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-start" && (s.msg as { setupId?: string }).setupId === owner.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: owner.id, ok: true, error: null }, ids.head);
+    await starting;
+    rings.pushLlm(ids.head, {
+      serverTimeMs: Date.now(),
+      ports: [makeLlmPort({ port: 9162, host: "127.0.0.1", detected: true, model: "own-port" })],
+    });
+    const stopping = ctx.service.stop(owner.id);
+    await waitFor(() => ctx.sent.some((s) => (s.msg as { type?: string }).type === "setup-stop" && (s.msg as { setupId?: string }).setupId === owner.id));
+    ctx.service.onDriverAck({ type: "setup-ack", setupId: owner.id, ok: true, error: null }, ids.head);
+    await stopping;
+    expect((await ctx.service.get(owner.id))!.status).toBe("stopped");
+
+    // The poll sees the still-fresh snapshot, but the owner started later: the
+    // engine on the port is the owner's (winding down), not the sibling's.
+    await ctx.service.onDriverEvent(
+      { type: "setup-event", setupId: sibling.id, runId: null, state: "stopped", exitCode: null, pid: null, pgid: null, error: null },
+      ids.head,
+    );
+    const after = await ctx.service.get(sibling.id);
+    expect(after!.status).toBe("stopped");
+    expect(after!.health).toBeNull();
+  });
+
   it("refuses a second concurrent stop instead of overwriting its ack slot (review fix)", async () => {
     const setup = await ctx.service.create({
       name: "double-stop",

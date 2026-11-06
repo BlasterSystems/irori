@@ -387,19 +387,23 @@ describe("ownsProbePort (IR-155)", () => {
     expect(ownsProbePort(ran, [never, ran])).toBe(true);
   });
 
-  it("among live rows the most recent start owns the port", () => {
+  it("the most recent start owns the port", () => {
     const first = row(A, { lastStartedAt: "2026-11-02T01:00:00.000Z", status: "running" });
     const later = row(B, { lastStartedAt: "2026-11-02T03:00:00.000Z", status: "running" });
     expect(ownsProbePort(first, [first, later])).toBe(false);
     expect(ownsProbePort(later, [first, later])).toBe(true);
   });
 
-  it("a dead sibling never outranks, and other heads/ports are irrelevant", () => {
-    const mine = row(A, { lastStartedAt: "2026-11-02T01:00:00.000Z", status: "running" });
-    const deadLater = row(B, { lastStartedAt: "2026-11-02T05:00:00.000Z", status: "stopped" });
+  it("a stopped sibling that started later still owns the port (IR-191)", () => {
+    const mine = row(A, { lastStartedAt: "2026-11-02T01:00:00.000Z", status: "stopped" });
+    const stoppedLater = row(B, { lastStartedAt: "2026-11-02T05:00:00.000Z", status: "stopped" });
     const otherHead = row(C, { headNodeId: OTHER, lastStartedAt: "2026-11-02T05:00:00.000Z", status: "running" });
     const otherPort = row("dddddddd-dddd-4ddd-8ddd-dddddddddddd", { port: 8082, lastStartedAt: "2026-11-02T05:00:00.000Z", status: "running" });
-    expect(ownsProbePort(mine, [mine, deadLater, otherHead, otherPort])).toBe(true);
+    // The later start owns the port even after its row is stopped: its engine
+    // may still be winding down and the probe snapshot can predate the stop.
+    // Other heads/ports never outrank.
+    expect(ownsProbePort(mine, [mine, stoppedLater, otherHead, otherPort])).toBe(false);
+    expect(ownsProbePort(stoppedLater, [mine, stoppedLater, otherHead, otherPort])).toBe(true);
   });
 
   it("a lone row always owns its port, including with two never-started rows", () => {
