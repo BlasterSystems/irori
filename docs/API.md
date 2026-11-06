@@ -362,6 +362,22 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `results` array and the registry values read back; `504` means the agent did
   not answer (a CPU-only frame on an agent older than IRI-124 is dropped
   outright, so that path also lands here with the update hint).
+- `POST /api/v1/clock-cap` (IR-189) — the same body and per-side contract as
+  `PUT …/clock-cap`, fanned out to **every enabled spark node** (NAS hosts are
+  skipped: no GPU, no cpufreq policy). Each node is applied independently and
+  reported: `{results: [{nodeId, name, status, results}], applied, failed,
+  persistent}`. `200` when every node applied, `207` when some did, `502` when
+  none did, `503` when the agent hub is unavailable. Audited
+  (`fleet.clock-cap.post`).
+- **Re-apply on node online (IR-189):** every authenticated agent hello
+  re-asserts the stored caps — the hub reads the live clocks, compares each
+  side with the applied ceiling (`gpus[].smCapMHz`, `cpu.capMHz`), and
+  re-applies only the drifted sides. Persistence is never touched. A side is
+  compared only when a cap is stored and the reading can express it (an agent
+  without the `cpu` block, or an empty `gpus` array, is not measurable). The
+  health sweep evaluates a `clock_cap_drift` rule whose value is the number of
+  consecutive 30 s sweeps that observed a mismatch (seed threshold 4 = two
+  minutes).
 
 ## Efficiency — Wh per token (IRI-073)
 
