@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import postgres from "postgres";
+import { applyMigrations } from "./migrator.js";
 import { repairSchema } from "./repair.js";
 import * as baseSchema from "./schema.js";
 import * as opsSchema from "./schema-ops.js";
@@ -35,6 +35,11 @@ const MIGRATE_LOCK_KEY = 732_914_117; // hashtext('irori-migrate')
  * This restores the intended invariant — created_at equals the journal's
  * `when` for every recognised hash — before the migrator runs. Idempotent and
  * never fatal (missing table, fresh DB, or a read-only role just no-ops).
+ *
+ * IR-188: pending detection is now hash membership (`applyMigrations`), so a
+ * poisoned watermark can no longer skip migrations. The heal stays because
+ * `drizzle.__drizzle_migrations` is the audit record operators read, and
+ * `drizzle-kit` still interprets it as a watermark.
  */
 async function normalizeMigrationWatermark(sql: postgres.Sql, migrationsFolder: string): Promise<void> {
   try {
@@ -104,7 +109,13 @@ export function createDbHandle(databaseUrl: string): DbHandle {
       try {
         await reserved`SELECT pg_advisory_lock(${MIGRATE_LOCK_KEY})`;
         await normalizeMigrationWatermark(sql, migrationsFolder);
-        await migrate(db, { migrationsFolder });
+        // IR-188: hash-membership migrator that tolerates objects created out
+        // of band, so a schema without bookkeeping converges instead of
+        // aborting the boot on "already exists".
+        const report = await applyMigrations(sql, migrationsFolder);
+        if (report.applied.length > 0) {
+          console.info(`[irori-db] migrations applied: ${report.applied.join(", ")}`);
+        }
         // IRI-084 hotfix: heal journals that are AHEAD of the schema (the
         // live hub recorded 0020+ while its objects were absent). Idempotent.
         await repairSchema(sql);
