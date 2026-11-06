@@ -6,6 +6,16 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Boot migrations converge an out-of-band schema** (IR-188): the hub no
+  longer boots `db:false` when its schema exists without matching
+  `drizzle.__drizzle_migrations` rows. Pending is decided by hash membership
+  instead of a `MAX(created_at)` watermark, and duplicate-object SQLSTATEs
+  (42P07/42701/42P06/42710/42723) are tolerated per statement and logged with
+  the journal tag, so the migration is recorded and the boot proceeds. Any
+  other error still rolls that migration back and fails the boot.
+
 ## [0.5.1] — 2026-11-05
 
 Node-page feedback round 6 and CPU underclocking (IR-180). The node page gets
