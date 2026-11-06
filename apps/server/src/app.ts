@@ -1177,21 +1177,28 @@ export function createApp(deps: AppDeps): Express {
   });
 
   // Live llm probe view: in-memory ring first, latest persisted pass as
-  // fallback (fresh boot, agent still to reconnect). 404 when nothing is known.
+  // fallback (fresh boot, agent still to reconnect). 404 when nothing is known
+  // — except for a NAS, which has no LLM surface at all (IR-192): its agent
+  // never probes ports, so "nothing known" is the permanent truth and the
+  // empty set is the honest answer.
   app.get("/api/v1/nodes/:id/llm", async (req, res) => {
     const id = parseUuidParam(req);
     if (id === null) return res.status(400).json({ error: "invalid node id" });
     const store = requireStore(res);
     if (!store) return;
-    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const node = await store.get(id);
+    if (node === null) return res.status(404).json({ error: "node not found" });
     const entry = deps.rings.latestLlm(id);
     if (entry !== undefined) {
       return res.json({ ports: entry.ports, updatedAt: new Date(entry.serverTimeMs).toISOString() });
     }
     const llmStore = deps.getLlmStore();
     const fallback = llmStore === null ? null : await llmStore.latestLlmSnapshot(id);
-    if (fallback === null) return res.status(404).json({ error: "no llm data available" });
-    res.json({ ports: fallback.ports, updatedAt: new Date(fallback.serverTimeMs).toISOString() });
+    if (fallback !== null) {
+      return res.json({ ports: fallback.ports, updatedAt: new Date(fallback.serverTimeMs).toISOString() });
+    }
+    if (node.kind === "nas") return res.json({ ports: [], updatedAt: null });
+    res.status(404).json({ error: "no llm data available" });
   });
 
   app.get("/api/v1/nodes/:id/llm/history", async (req, res) => {

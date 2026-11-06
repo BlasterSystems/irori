@@ -7,6 +7,7 @@ import {
   fmtRate,
   probeSeesEngine,
   ownsProbePort,
+  probeableNodeIds,
   portClashMessage,
   runningEnginesFromProbes,
   sanitizeWorkerIds,
@@ -413,6 +414,28 @@ describe("ownsProbePort (IR-155)", () => {
     const p2 = row(B, { lastStartedAt: null });
     expect(ownsProbePort(p1, [p1, p2])).toBe(true);
     expect(ownsProbePort(p2, [p1, p2])).toBe(true);
+  });
+});
+
+describe("probeableNodeIds (IR-192)", () => {
+  const HEAD = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+  const NAS = "44444444-4444-4444-8444-444444444444";
+  const OFFLINE = "55555555-5555-4555-8555-555555555555";
+
+  it("skips the NAS and offline agents, keeps serving nodes", () => {
+    const nodes = [
+      node(HEAD, "DGX-1", true),
+      { ...node(NAS, "NAS", true), kind: "nas" as const },
+      node(OFFLINE, "DGX-2", false),
+    ];
+    expect(probeableNodeIds(nodes, [])).toEqual([HEAD]);
+  });
+
+  it("adds a setup head the registry does not know yet, but never a NAS head", () => {
+    const unknownHead = "66666666-6666-4666-8666-666666666666";
+    const nodes = [{ ...node(NAS, "NAS", true), kind: "nas" as const }];
+    expect(probeableNodeIds(nodes, [{ headNodeId: unknownHead }])).toEqual([unknownHead]);
+    expect(probeableNodeIds(nodes, [{ headNodeId: NAS }])).toEqual([]);
   });
 });
 

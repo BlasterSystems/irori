@@ -147,6 +147,12 @@ async function loadLlm(): Promise<void> {
   // template falls back to llmRest when SSE has no entry for this node yet.
   llmRest.value = null;
   llmHistory.value = null;
+  // IR-192: a NAS has no LLM surface — nothing to ask for (the server answers
+  // the empty set, but the request is pure noise).
+  if (node.value?.kind === "nas") {
+    llmState.value = "ready";
+    return;
+  }
   // Older servers may not ship either endpoint yet; degrade independently.
   const [snapRes, histRes] = await Promise.allSettled([
     fetchNodeLlm(props.nodeId, signal),
