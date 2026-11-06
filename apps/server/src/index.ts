@@ -19,6 +19,7 @@ import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
 import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
 import { createHealthService, type HealthService } from "./health.js";
+import { createClockCapService, type ClockCapService } from "./clock-caps.js";
 import { getUpdateBaseline, BASELINE_TTL_MS, type UpdateBaseline } from "./updates-baseline.js";
 import { createRecipesService, seedRecipes, type RecipeService } from "./recipes.js";
 import { createCommunityService, type CommunityService } from "./community.js";
@@ -283,6 +284,14 @@ async function boot(): Promise<void> {
   // IR-105: hub-pinned modelctl version (config-update + auto-provisioning).
   state.modelctlPin = createModelctlPinService(dbHandle.db);
 
+  // IR-189: SPEC §10 — re-apply stored clock caps on node online and report
+  // sustained drift. The hub is created further down, so it is read lazily.
+  const clockCaps: ClockCapService = createClockCapService({
+    store,
+    hub: () => state.hub,
+    log: (message) => log.info(message),
+  });
+
   // IRI-069: health rules engine — seeded on boot, evaluated on snapshot
   // ingest (via the wrapped store below) plus a 30 s offline/gap sweep.
   state.health = createHealthService(dbHandle.db, config.encryptionKey!, {
@@ -290,6 +299,8 @@ async function boot(): Promise<void> {
     journal: (e) => state.eventJournal?.journal(e) ?? Promise.resolve(),
     // IR-179: the reconnect-storm rule reads node-online bursts per node.
     journalCounts: (type, sinceMs) => state.eventJournal?.countByNodeSince(type, sinceMs) ?? Promise.resolve([]),
+    // IR-189: the clock-cap drift rule reads the live ceiling vs the stored cap.
+    clockDrift: (nodeId) => clockCaps.driftStreak(nodeId),
     fetchImpl: fetch,
   });
   await state.health.ensureSeed().catch((err: unknown) => log.warn("health seed failed: " + String(err)));
@@ -433,7 +444,7 @@ async function boot(): Promise<void> {
     onOrphans: (nodeId: string, activeJobs: Array<{ jobId: string }> | undefined) => jobsService.settleOrphansOnHello(nodeId, activeJobs),
   };
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, setupEvents: {
+  const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); }, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),
