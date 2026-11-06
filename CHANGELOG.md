@@ -6,6 +6,8 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-06
+
 ### Added
 
 - **Clock caps re-apply on node online** (IR-189): every authenticated agent
@@ -31,6 +33,11 @@ All notable changes to Irori are recorded here. Format follows
   (42P07/42701/42P06/42710/42723) are tolerated per statement and logged with
   the journal tag, so the migration is recorded and the boot proceeds. Any
   other error still rolls that migration back and fails the boot.
+- **Agent frame trace no longer logs at error level** (IR-190): every routine
+  agent frame (usage-batch, log-batch, setup-event, job-output) was written
+  with `log.error`, so the hub log was a wall of level-50 lines and real
+  failures were invisible. The trace is now `log.debug`; the parse-failure
+  line above it stays at error.
 
 ## [0.5.1] — 2026-11-05
 
