@@ -48,6 +48,8 @@ Two structural defects made that state fatal:
   no longer load-bearing for pending detection).
 - `packages/db/src/index.ts`: export the migrator.
 - `packages/db/test/db.test.ts`: the two regression tests.
+- `docs/adr/0016-boot-migration-convergence.md` (Proposed) + index row;
+  `docs/ARCHITECTURE.md` data-and-state bullet.
 
 Not in scope: `repairSchema` (the journal-ahead-of-schema direction) is
 unchanged; it still runs after the migrator on every boot.
