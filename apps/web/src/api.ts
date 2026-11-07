@@ -221,7 +221,8 @@ export interface FleetClockCapNode {
   name: string;
   /** 200 applied, 504 agent offline, 502 agent refused. */
   status: number;
-  results: Array<{ side: "gpu" | "cpu"; ok: boolean; offline: boolean; error: string | null }>;
+  /** IR-199: appliedMHz is the cap the node now runs — null for a clear or a failure; sides left alone get no entry. */
+  results: Array<{ side: "gpu" | "cpu"; ok: boolean; offline: boolean; error: string | null; appliedMHz: number | null }>;
 }
 
 export interface FleetClockCapResponse {

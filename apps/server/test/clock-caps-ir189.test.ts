@@ -202,6 +202,10 @@ describe("POST /api/v1/clock-cap (fleet)", () => {
     expect(res.body.applied).toBe(2);
     expect(res.body.failed).toBe(0);
     expect(res.body.results.map((r: { name: string }) => r.name).sort()).toEqual(["dgx1", "dgx2"]);
+    // IR-199: each ok side carries the applied cap; a side left alone gets no entry.
+    for (const node of res.body.results) {
+      expect(node.results).toEqual([{ side: "gpu", ok: true, offline: false, error: null, appliedMHz: 2000 }]);
+    }
     expect(calls.map((c) => c.nodeId).sort()).toEqual([a.id, b.id].sort());
     expect(calls.every((c) => c.persist === true)).toBe(true);
     expect(calls.some((c) => c.nodeId === nas.id || c.nodeId === off.id)).toBe(false);
@@ -218,7 +222,9 @@ describe("POST /api/v1/clock-cap (fleet)", () => {
     expect(res.body.applied).toBe(1);
     const failed = res.body.results.find((r: { status: number }) => r.status !== 200);
     expect(failed.name).toBe("dgx2");
-    expect(failed.results[0]).toMatchObject({ side: "gpu", ok: false, error: "nvidia-smi failed" });
+    expect(failed.results[0]).toMatchObject({ side: "gpu", ok: false, error: "nvidia-smi failed", appliedMHz: null });
+    const applied = res.body.results.find((r: { status: number }) => r.status === 200);
+    expect(applied.results[0]).toMatchObject({ side: "gpu", ok: true, appliedMHz: 2000 });
   });
 
   it("reports an all-failed fleet as 502", async () => {
@@ -231,6 +237,24 @@ describe("POST /api/v1/clock-cap (fleet)", () => {
     expect(res.status).toBe(502);
     expect(res.body.applied).toBe(0);
     expect(res.body.failed).toBe(2);
+    // IR-199: a refused side applied nothing.
+    for (const node of res.body.results) {
+      expect(node.results[0]).toMatchObject({ side: "cpu", ok: false, appliedMHz: null });
+    }
+  });
+
+  it("carries the applied cap per side: set value for ok, null for a clear", async () => {
+    const { app, fake } = makeApp();
+    await seed(fake.store);
+
+    const res = await request(app).post("/api/v1/clock-cap").send({ capMHz: 2000, cpuCapMHz: null });
+    expect(res.status).toBe(200);
+    for (const node of res.body.results) {
+      expect(node.results).toEqual([
+        { side: "gpu", ok: true, offline: false, error: null, appliedMHz: 2000 },
+        { side: "cpu", ok: true, offline: false, error: null, appliedMHz: null },
+      ]);
+    }
   });
 
   it("rejects a body with neither side", async () => {
