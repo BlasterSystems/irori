@@ -1138,7 +1138,8 @@ onUnmounted(() => {
         <div class="card__body" style="padding-top: 12px;">
           <p v-if="cache.error" class="banner banner--warn">{{ cache.error }}</p>
           <p v-else-if="cache.models.length === 0" class="muted">no local registrations</p>
-          <table v-else class="table">
+          <div v-else class="model-scroll">
+          <table class="table">
             <thead><tr><th>Model</th><th>Repository</th><th>Runtime</th><th>Size</th><th></th></tr></thead>
             <tbody>
               <tr v-for="m in cache.models" :key="m.name">
@@ -1157,6 +1158,7 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
+          </div>
           <template v-if="cache.error === null && cache.orphans.length > 0">
             <p class="stat__sub" style="margin: 12px 0 6px;">unregistered cache entries</p>
             <table class="table">
@@ -1382,7 +1384,7 @@ onUnmounted(() => {
               </span>
             </div>
             <div v-for="s in versions.versions?.scripts ?? []" :key="s.path" class="barrow">
-              <span class="mono" style="max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="s.path">{{ s.path.split("/").pop() }}</span>
+              <span class="mono" style="max-width: min(320px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="s.path">{{ s.path.split("/").pop() }}</span>
               <span class="val" :class="{ 'metric--hot': !s.present }">
                 {{ s.present ? `executable ${s.executable ? "yes" : "no"} · mtime ${new Date(s.mtimeMs ?? 0).toLocaleDateString()}` : "MISSING — stale recipe" }}
               </span>
@@ -1569,6 +1571,12 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* IR-196: a nowrap cell's min-content is the full text — max-width cannot
+ * shrink the column, so the table pushed pages sideways ≤480. Wrap there
+ * (model-name cells already do); desktop keeps the one-line ellipsis. */
+@media (max-width: 720px) {
+  .model-repo { max-width: none; white-space: normal; overflow-wrap: anywhere; }
 }
 .model-root,
 .model-object {

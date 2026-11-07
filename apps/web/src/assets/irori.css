@@ -72,7 +72,11 @@ button { font: inherit; color: inherit; }
 ::selection { background: var(--thread-wash); }
 .mono { font-family: var(--font-mono); font-size: 12.5px; }
 .muted { color: var(--muted); } .faint { color: var(--faint); }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* top/left 0: without them the box sits at its static position, which can be
+ * deep inside a clipped wide table — an absolutely positioned box with no
+ * positioned ancestor is laid out against the ICB and extends the DOCUMENT
+ * scrollable overflow (IR-196: benchmarks compare labels pushed pages to 610px). */
+.visually-hidden { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 .page { flex: 1 0 auto; width: 100%; min-width: 0; padding-top: var(--space-5); padding-bottom: var(--space-7); }
 /* width:100% is load-bearing: .page is a cross-axis flex item of #app and
@@ -106,11 +110,14 @@ button { font: inherit; color: inherit; }
 .tip { position: relative; display: inline-flex; align-items: center; margin-left: 5px; color: var(--faint); cursor: help; vertical-align: -1px; }
 .tip svg { width: 10px; height: 10px; display: block; }
 .tip:hover { color: var(--fg); }
+/* display:none at rest (not opacity:0): a hidden-opacity tooltip still
+ * generates a box, and its absolute 300px box extends the DOCUMENT scrollable
+ * overflow whenever the tip sits right of the viewport edge (IR-196 sweep:
+ * hiding the 8 tips on Overview alone collapsed 588px -> 367px). */
 .tip::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); width: 300px; max-width: 80vw;
   background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
-  padding: 8px 10px; border-radius: var(--radius-sm); opacity: 0; pointer-events: none; transition: opacity .12s ease; z-index: 30; text-transform: none; letter-spacing: 0; }
-.tip:hover::after { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .tip::after { transition: none; } }
+  padding: 8px 10px; border-radius: var(--radius-sm); display: none; pointer-events: none; z-index: 30; text-transform: none; letter-spacing: 0; }
+.tip:hover::after { display: block; }
 .mock-note { position: fixed; right: 12px; bottom: 10px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); opacity: .8; }
 
 /* ── Topbar / brand ────────────────────────────────────────────────── */
@@ -201,6 +208,11 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .statgrid--7 { grid-template-columns: repeat(7, 1fr); }
 .stat__label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); display: block; }
 .stat__value { font-family: var(--font-mono); font-size: 20px; font-weight: 500; line-height: 1.2; margin-top: 2px; white-space: nowrap; }
+/* IR-196: a statgrid item's default min-width:auto lets a nowrap value push
+ * the item box (and the page) past the viewport; shrink the item and
+ * ellipsize the value instead — same contract .stat__sub already has ≤720. */
+.statgrid .stat { min-width: 0; }
+.statgrid .stat__value { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stat__value--sm { font-size: 15px; }
 .stat__sub { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin-top: 2px; }
 .stat__value .stat__sub { display: inline; margin-left: 3px; }
@@ -214,9 +226,12 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .bar__fill--free { inset: 0 0 0 auto; background: var(--thread); }
 @media (prefers-reduced-motion: reduce) { .bar__fill { transition: none; } }
 .bar--lg { height: 10px; }
-.barrow { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+.barrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
 .barrow + .barrow { margin-top: 8px; }
-.barrow .val { color: var(--fg); text-align: right; white-space: nowrap; }
+/* min-width 0 + ellipsis: the auto column's nowrap value otherwise sets the
+ * barrow's min-content and pushed cards (and the page) past the viewport
+ * (IR-196: the node-link barrows pushed Overview to 327px at 320). */
+.barrow .val { color: var(--fg); text-align: right; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* IRI-124: interface rows carry comma-joined address lists that must wrap
  * inside the card — the auto column would otherwise grow past it and paint
  * over the neighbouring grid cell (.cols > * min-width only stops page
@@ -233,7 +248,11 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .table th { text-align: left; font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
   color: var(--faint); padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
-.table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+/* overflow-wrap anywhere: unbreakable tokens (model names, repo ids) set the
+ * column min-content and pushed pages sideways (IR-196 node cache/models
+ * tables). Wrapping suffices here — scroll wrappers are only for tables too
+ * wide to wrap legibly (card__body--flush). */
+.table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow-wrap: anywhere; }
 .table tr:last-child td { border-bottom: 0; }
 .table .mono { font-size: 12px; }
 
@@ -373,7 +392,7 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   body .hyrow > input[type="checkbox"] { grid-area: box; }
   body .hyrow__name { grid-area: name; } body .hyrow__bar { grid-area: bar; }
   body .hyrow__items { grid-area: items; } body .hyrow__size { grid-area: size; }
-  body .stage { grid-template-columns: 1fr auto; }
+  body .stage { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
   body .stage > :first-child { grid-column: 1 / -1; }
   body .setup__head { flex-wrap: wrap; row-gap: 6px; }
   body .hyhist { grid-template-columns: 1fr auto; }
