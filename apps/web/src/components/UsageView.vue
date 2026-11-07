@@ -537,7 +537,7 @@ const liveAgeText = computed(() => {
               <tr v-for="g in errorGroupRows(errors?.groups ?? [])" :key="g.sig">
                 <td class="mono">{{ fmtCount(g.count) }}</td>
                 <td class="mono">{{ g.status ?? "—" }}</td>
-                <td class="mono" style="max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="g.sample">{{ g.sig }}</td>
+                <td class="mono" style="max-width: min(420px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap" :title="g.sample">{{ g.sig }}</td>
                 <td class="mono">{{ g.models.length === 0 ? "—" : g.models.join(", ") }}</td>
                 <td class="mono">{{ errorsCostShown ? costText(g.costMinor, errors?.costCurrency ?? null) : "—" }}</td>
                 <td class="mono">{{ fmtTimeIso(g.lastSeenMs) }}</td>
