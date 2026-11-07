@@ -7,7 +7,8 @@ import { liveMock } from "./live-mock";
  * IR-198: the fleet clock caps section is demoted below Nodes/Power on the
  * Overview, hidden entirely on a NAS-only fleet, and per-node apply outcomes
  * render as touch-legible rows (not title-only chips). 200/207/502 semantics
- * and the fleetError banner are preserved.
+ * and the fleetError banner are preserved. IR-199: ok sides name the applied
+ * cap per side (GPU 2000 · CPU cleared), failures keep the API error text.
  */
 
 vi.mock("../src/live", async () => ({ live: (await import("./live-mock")).liveMock }));
@@ -19,8 +20,9 @@ const NAS = "44444444-4444-4444-8444-444444444444";
 
 const clockCapBody = {
   results: [
-    { nodeId: DGX1, name: "dgx1", status: 200, results: [{ side: "gpu", ok: true, offline: false, error: null }, { side: "cpu", ok: true, offline: false, error: null }] },
-    { nodeId: DGX2, name: "dgx2", status: 502, results: [{ side: "gpu", ok: true, offline: false, error: null }, { side: "cpu", ok: false, offline: false, error: "agent busy, retry" }] },
+    // IR-199: per-side applied cap (2000 applied; null = cleared or failed side).
+    { nodeId: DGX1, name: "dgx1", status: 200, results: [{ side: "gpu", ok: true, offline: false, error: null, appliedMHz: 2000 }, { side: "cpu", ok: true, offline: false, error: null, appliedMHz: null }] },
+    { nodeId: DGX2, name: "dgx2", status: 502, results: [{ side: "gpu", ok: true, offline: false, error: null, appliedMHz: 2000 }, { side: "cpu", ok: false, offline: false, error: "agent busy, retry", appliedMHz: null }] },
   ],
   applied: 1,
   failed: 1,
@@ -96,9 +98,11 @@ describe("OverviewView fleet clock caps (IR-198)", () => {
     const rows = section.findAll(".orow");
     expect(rows).toHaveLength(2);
     expect(rows[0]!.text()).toContain("dgx1");
-    expect(rows[0]!.text()).toContain("gpu: ok");
+    expect(rows[0]!.text()).toContain("GPU 2000"); // IR-199: applied cap per side (mockup S7/S8)
+    expect(rows[0]!.text()).toContain("CPU cleared");
     expect(rows[1]!.text()).toContain("dgx2");
-    expect(rows[1]!.text()).toContain("agent busy, retry"); // visible text, not a title attribute
+    expect(rows[1]!.text()).toContain("GPU 2000");
+    expect(rows[1]!.text()).toContain("CPU failed — agent busy, retry"); // visible text, not a title attribute
     expect(section.findAll(".chip")).toHaveLength(0); // title-only chips are gone
     expect(section.text()).toContain("cleared on 1/2 nodes · 1 failed"); // 200/207/502 status line intact
     w.unmount();

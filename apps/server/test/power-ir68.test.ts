@@ -182,8 +182,8 @@ describe("clock-cap registry round-trip", () => {
       { nodeId: id, caps: { cpuMaxMHz: 2800 }, persist: false },
     ]);
     expect(both.body.results).toEqual([
-      { side: "gpu", ok: true, offline: false, error: null },
-      { side: "cpu", ok: true, offline: false, error: null },
+      { side: "gpu", ok: true, offline: false, error: null, appliedMHz: 2200 },
+      { side: "cpu", ok: true, offline: false, error: null, appliedMHz: 2800 },
     ]);
     row = await fake.store.get(id);
     expect(row?.gpuClockCapMHz).toBe(2200);
@@ -253,8 +253,8 @@ describe("clock-cap registry round-trip", () => {
     expect(row?.gpuClockCapPersistent).toBe(true);
     expect(row?.cpuClockCapMHz).toBeNull();
     expect(res.body.results).toEqual([
-      { side: "gpu", ok: true, offline: false, error: null },
-      { side: "cpu", ok: false, offline: false, error: "cpu: no cpufreq policies" },
+      { side: "gpu", ok: true, offline: false, error: null, appliedMHz: 1500 },
+      { side: "cpu", ok: false, offline: false, error: "cpu: no cpufreq policies", appliedMHz: null },
     ]);
   });
 

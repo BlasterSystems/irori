@@ -1216,6 +1216,9 @@ export function createApp(deps: AppDeps): Express {
     res.json(await build(id, range));
   });
 
+  /** One per-side clock-cap outcome (IR-199): appliedMHz is the cap the node now runs — the requested value for an applied side, null for a clear or a failure. Sides left alone get no entry. */
+  type ClockCapOutcome = { side: "gpu" | "cpu"; ok: boolean; offline: boolean; error: string | null; appliedMHz: number | null };
+
   /**
    * IRI-124: apply each requested clock side in its OWN agent frame. One frame
    * per side keeps the outcome unambiguous, so a GPU cap that landed is stored
@@ -1232,10 +1235,10 @@ export function createApp(deps: AppDeps): Express {
   ): Promise<{
     status: number;
     body: Record<string, unknown>;
-    results: Array<{ side: "gpu" | "cpu"; ok: boolean; offline: boolean; error: string | null }>;
+    results: ClockCapOutcome[];
   }> {
     const hub = deps.getHub();
-    const results: Array<{ side: "gpu" | "cpu"; ok: boolean; offline: boolean; error: string | null }> = [];
+    const results: ClockCapOutcome[] = [];
     if (hub === null) {
       return { status: 503, body: { error: "agent hub unavailable" }, results };
     }
@@ -1245,16 +1248,18 @@ export function createApp(deps: AppDeps): Express {
           ? await hub.setClocks(id, { smMaxMHz: value }, persistent)
           : await hub.setClocks(id, { cpuMaxMHz: value }, persistent);
       if (reply === null) {
-        results.push({ side, ok: false, offline: true, error: "node agent offline or no reply" });
+        results.push({ side, ok: false, offline: true, error: "node agent offline or no reply", appliedMHz: null });
         return;
       }
       if (!reply.ok) {
-        results.push({ side, ok: false, offline: false, error: reply.error ?? "clock cap failed" });
+        results.push({ side, ok: false, offline: false, error: reply.error ?? "clock cap failed", appliedMHz: null });
         return;
       }
       if (side === "gpu") await store.setGpuClockCap(id, value, persistent && value !== null);
       else await store.setCpuClockCap(id, value, persistent && value !== null);
-      results.push({ side, ok: true, offline: false, error: null });
+      // IR-199: the agent applied exactly the requested value (or refused the
+      // frame), so the applied cap is the value this frame carried — null on a clear.
+      results.push({ side, ok: true, offline: false, error: null, appliedMHz: value });
     };
     if (caps.gpu !== undefined) await apply("gpu", caps.gpu);
     if (caps.cpu !== undefined) await apply("cpu", caps.cpu);
@@ -1498,7 +1503,7 @@ export function createApp(deps: AppDeps): Express {
       const persistent = body?.persistent === true;
       // NAS hosts have no GPU and no cpufreq policy to cap.
       const targets = (await store.list()).filter((n) => n.kind === "spark" && n.enabled);
-      const results: Array<{ nodeId: string; name: string; status: number; results: unknown[] }> = [];
+      const results: Array<{ nodeId: string; name: string; status: number; results: ClockCapOutcome[] }> = [];
       for (const node of targets) {
         const outcome = await applyClockCaps(node.id, store, { gpu: gpu.value, cpu: cpu.value }, persistent);
         results.push({ nodeId: node.id, name: node.name, status: outcome.status, results: outcome.results });
