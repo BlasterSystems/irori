@@ -86,9 +86,9 @@ async function applyFleetCaps(clear: boolean): Promise<void> {
   }
 }
 
-/** IR-198: per-side outcome as visible row text (was title-only on chips). */
+/** IR-198: per-side outcome as visible row text (was title-only chips). IR-199: ok sides name the applied cap (mockup S7/S8); failures keep the API error text. */
 function fleetOutcomeText(r: FleetClockCapNode): string {
-  return r.results.map((x) => `${x.side}: ${x.ok ? "ok" : (x.error ?? "failed")}`).join(" · ");
+  return r.results.map((x) => (x.ok ? `${x.side.toUpperCase()} ${x.appliedMHz ?? "cleared"}` : `${x.side.toUpperCase()} failed — ${x.error ?? "unknown"}`)).join(" · ");
 }
 
 // ─── range filter (IRI-025): drives the hero charts and the power/token cards
