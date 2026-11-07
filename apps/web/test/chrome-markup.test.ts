@@ -164,6 +164,24 @@ it("nav collapses to a 44px hamburger disclosure below full width (IR-128)", () 
   expect(cssSource).toContain('html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }');
 });
 
+it("topbar controls get the 44px touch floor and the footer runs B1 (IR-197)", () => {
+  // S1 (approved): every topbar control ≥44px on tiers under full — theme and
+  // gear join the hamburger; ≤720 is covered by the shared .iconbtn rule.
+  expect(appSource).toContain('html[data-tier="medium"] .topbar .iconbtn,');
+  expect(appSource).toContain('html[data-tier="small"] .topbar .iconbtn { width: 44px; height: 44px; }');
+  // S2/B1 (approved): the small-tier footer is ONE row — version · watts only
+  // (wordmark, deploy tag, cadence dropped); below 390 only watts stay.
+  expect(appSource).toContain(`v-if="tier === 'small'" class="mono faint foot__ver"`);
+  expect(appSource).toContain('class="pv-ver"');
+  expect(appSource).toContain('@media (max-width: 389px) { html[data-tier="small"] .pv-ver { display: none; } }');
+  // The deploy tag's committed home is the hamburger menu footer line.
+  expect(appSource).toContain('class="menudeploy">deploy {{ serverTag ?? "unknown" }}</span>');
+  expect(cssSource).toContain(".menudeploy { grid-column: 1 / -1;");
+  // Approved scene: bordered secondary CTAs with the 44px floor.
+  expect(appSource).toContain('class="btn btn--secondary btn--sm"');
+  expect(appSource).toContain('html[data-tier="small"] .foot .btn--sm { min-height: 44px; }');
+});
+
 it("transfers stay reachable after every close: dock + op bar + honest cancel (IR-131)", () => {
   // Shape B: the global dock re-seeds from GET /api/v1/jobs and never shows a
   // fake percent for multi-stream transfers.

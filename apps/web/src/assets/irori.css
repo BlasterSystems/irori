@@ -160,6 +160,9 @@ button { font: inherit; color: inherit; }
 .navmenu a { padding: 10px 12px; font-size: 14px; font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
 .navmenu a:hover { color: var(--fg); background: var(--surface-2); }
 .navmenu a.is-active { color: var(--fg); box-shadow: inset 2px 0 0 var(--ink); }
+/* IR-197 B1: the deploy tag's committed home — the hamburger menu footer,
+   after the mobile footer line drops the tag (approved S2/B1 scene). */
+.menudeploy { grid-column: 1 / -1; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }
 /* Phones get 12px page gutters (the mockup's small-tier density). */
 html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 

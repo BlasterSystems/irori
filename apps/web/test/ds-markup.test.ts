@@ -73,6 +73,9 @@ it("App pins the version/build footer to the viewport-bottom shell", () => {
   ]) {
     expect(cssSource).toContain(rule);
   }
+  // IR-197 B1: the deploy tag's committed home is the hamburger menu footer
+  // line, so the mobile footer can drop the tag (approved S2/B1 scene).
+  expect(cssSource).toContain(".menudeploy { grid-column: 1 / -1; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }");
 });
 
 it("NodeDetail keeps the DS drill-down vocabulary", () => {
