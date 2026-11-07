@@ -236,3 +236,71 @@ mockup decides the SURFACE shape.
   open/close, dock toggle, disabled Output on the canceling row.
 - Open owner decision: shape A / B / C (recommendation A+B now, C as B's
   history target later).
+
+## IRI-130 — mobile shell & clock placement options round (2026-11-07)
+
+Status: **built + browser-verified 2026-11-07** — `IRI-130-mobile-shell-clock-options.html`,
+designer+PM review round in flight, awaiting owner pick. Stories: IR-195
+(this mockup), IR-196/197/198 (implementation), epic IR-194. Brief:
+`docs/research/IRI-130-ui-feedback-round-7-research-brief.md`.
+
+Inputs: owner captures (390 px phone with the page scrolled sideways; footer
+stacked 3 rows; clock caps card 2nd on Overview at ~784 px), brief §5.1–5.3.
+
+- Scenes: S0 today-baseline (callouts ① 34 px topbar controls ② footer 3 rows
+  of 28 px CTAs ③ clock caps above the hero), S1 44 px floors (390+320),
+  S2 footer B1 one-row 60 px (drops wordmark/cadence/tag; watts hidden <390),
+  S3 footer B2 two-row 84 px (keeps the tag, drops cadence), S4 footer B3
+  status-only (CTAs move into the menu), S5 band keep-vs-consolidate (frames +
+  table), S6 empty-fleet hide rule, S7 clock A demote below Power, S8 clock B
+  pagehead affordance + bottom sheet (interactive; per-node outcome ROWS),
+  S9 clock C fold into Updates (collapsed/expanded).
+- New page-scoped vocabulary: `.phone/.ptop/.pbody/.pfoot/.psafe` frames,
+  `.call` annotations, `.afford` pagehead chip, `.sheet`/`.scrim` drawer,
+  `.orow` outcome rows, `.uprow`/`.upbody` fold, `.clockrow(--end)`/`.btngroup`,
+  `.pv-watts`, `.countbub` copy. Promote to apps/web only after the owner pick
+  (stories IR-197/IR-198).
+- Fixed during verification: 721–900 topbar overflow (endorsement hidden + nav
+  tightened ≤900 — the known page-scoped fix), missing `#cBody` in the
+  collapsed fold (nextElementSibling null), B1's false one-row claim (the
+  version wrapped at 320 → honest content set: drops wordmark/cadence/tag,
+  watts hidden <390), footer CTAs now 44 px in option frames (the S0 baseline
+  keeps 28 px), Apply/Clear grouped right on their own row (44 px CTAs overflow
+  the checkbox row at 390), sheet scrollbar hidden (mobile overlay idiom).
+- Verified: light+dark full-page shots; scrollWidth sweep clean at
+  320/390/480/720/721/900/1024/1568 in both themes; 0 console errors;
+  interactions green (sheet open/close/scrim, fold aria-expanded, theme).
+- Open owner decision: footer B1/B2/B3 + band keep/consolidate + clock A/B/C
+  (recommendations B1 / keep / B).
+- **Review outcomes (applied 2026-11-07, designer + PM static rounds):** P1 —
+  the 320 px frames' "endorsement hidden" claim never fired (data-tier was on
+  `.ptop`, not `html`) → `.ptop--compact`; the recommended option's own
+  controls had no 44 px floor → `.phone .afford`, `.sheet .btn/.select/.iconbtn`.
+  P2 — S7 now carries the persistence checkbox + ceiling tip (was misstating
+  option A); drawer/fold gained the fleet status line (`role=status`,
+  200/207/502 semantics) and the persistence checkbox defaults UNCHECKED
+  (app truth: `fleetPersist` starts false); S7/S8/S9 footers now depict the
+  recommended B1 (they showed a nonexistent fourth footer); B1's deploy-tag
+  home is committed AND depicted (hamburger-menu footer line
+  "deploy dev-0.6.0-2"); S5's revisit trigger no longer conflates the clock
+  complaint with the band decision; topbar inventory identical
+  (theme+gear+burger) in every option frame; recommendation chips upgraded to
+  `.chip--pick` (`chip--accent` was identical to `chip--ok`); S8 gained a
+  320 px open-sheet frame; "per-node caps untouched" stated; `.psafe` to
+  muted (AA 4.5:1); `.phone--378` defined; inline-style rhythm moved to
+  classes (`.pfoot__ver`, `.pfoot__in--end`, `.pt-sm`, `.clockrow--end`);
+  sheet scrollbar hidden (mobile overlay idiom); focus moves into the dialog
+  on open.
+- Re-verified after fixes: scrollWidth sweep clean 320→1568 in light AND
+  dark; 0 console errors; drawer open/close/scrim/fold asserted; focus lands
+  on the dialog close; status line + unchecked persistence asserted; 16
+  frames.
+- **Owner decision (2026-11-07): footer B1, band keep, clock A.** IR-197
+  implements the B1 footer (44 px floors included, plus the hamburger-menu
+  deploy line "deploy <tag>"); IR-198 demotes the EXISTING fleet clock caps
+  card below Nodes/Power — hidden when there are no spark nodes, per-node
+  outcome chips made touch-legible, fleet status line and error banner kept,
+  200/207/502 semantics preserved, node-level History cards untouched; the
+  IR-175 mount test still lands with it. S8/S9 remain as
+  considered-and-rejected depictions; the drawer vocabulary (.sheet/.afford/
+  .orow) stays page-scoped unless a later round promotes it.
