@@ -312,8 +312,8 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
     <!-- IRI-040: By-cluster/node macro totals, folded from the series. -->
     <section v-if="lens === 'tokens' && tokenGroupTotals.length > 0" class="card" style="margin-bottom: 12px">
       <div class="card__head"><h3>Token totals — by {{ groupBy }}</h3><span class="mono faint">{{ tokenGroupTotals.length }} row{{ tokenGroupTotals.length === 1 ? "" : "s" }}</span></div>
-      <div class="card__body">
-        <table class="tbl">
+      <div class="card__body card__body--flush">
+        <table class="table">
           <thead>
             <tr><th>{{ groupBy }}</th><th>total</th><th>generated</th><th>input computed</th><th>cached</th><th>cache hit</th></tr>
           </thead>
@@ -333,8 +333,8 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
 
     <section v-if="lens === 'tokens'" class="card" style="margin-bottom: 12px">
       <div class="card__head"><h3>Token ledger — per model</h3><span class="mono faint">{{ range }} · total / generated / input / cache / hit</span></div>
-      <div class="card__body">
-        <table v-if="data.models.length > 0" class="tbl">
+      <div v-if="data.models.length > 0" class="card__body card__body--flush">
+        <table class="table">
           <thead>
             <tr><th>model</th><th>total</th><th>generated</th><th>input (prompt)</th><th>cache</th><th>cache hit</th><th title="Wh per 1,000 tokens — energy join, NAS excluded">Wh/ktok</th></tr>
           </thead>
@@ -353,8 +353,8 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
             </tr>
           </tbody>
         </table>
-        <p v-else class="muted">no token counters yet — engines publish them per backend (vLLM, llama.cpp, q27, ds4, sglang)</p>
       </div>
+      <p v-else class="muted" style="padding: 0 var(--space-4) var(--space-4)">no token counters yet — engines publish them per backend (vLLM, llama.cpp, q27, ds4, sglang)</p>
     </section>
 
       <!-- IRI-075: hourly cost + token trend next to the lens charts. -->
@@ -377,7 +377,7 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
         <div class="statgrid">
           <div v-for="e in efficiencyNodes" :key="e.key" class="stat" :title="e.reason ?? `coverage ${e.energyCoverage === null ? '—' : Math.round(e.energyCoverage * 100) + '%'}`">
             <p class="stat__label">{{ e.label }}</p>
-            <p class="stat__val" :class="{ 'metric--hot': e.reason !== null }">
+            <p class="stat__value stat__value--sm" :class="{ 'metric--hot': e.reason !== null }">
               {{ e.whPerKToken === null ? "—" : `${e.whPerKToken} Wh/ktok` }}
             </p>
             <p class="stat__sub">{{ e.reason ?? `${e.tokens.toLocaleString("en-US")} tok` }}</p>
@@ -393,8 +393,8 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
         <h3>Token reconciliation — engine counters vs captured requests</h3>
         <span class="chip chip--warn" v-if="recon.rows.some((r) => r.warn)">◇ divergence &gt; 20%</span>
       </div>
-      <div class="card__body">
-        <table class="tbl">
+      <div class="card__body card__body--flush">
+        <table class="table">
           <thead>
             <tr><th>node</th><th>port</th><th>model</th><th>engine counters</th><th>captured</th><th>Δ</th><th>divergence</th></tr>
           </thead>
@@ -410,8 +410,8 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
             </tr>
           </tbody>
         </table>
-        <p class="stat__sub">costs are priced from the captured requests (llm_requests); engine counters come from the probes</p>
       </div>
+      <p class="stat__sub" style="padding: 8px 12px 0">costs are priced from the captured requests (llm_requests); engine counters come from the probes</p>
     </section>
   </template>
 </template>
