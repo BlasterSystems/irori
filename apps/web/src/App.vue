@@ -167,6 +167,7 @@ onUnmounted(() => {
         <a href="#/audit" :class="{ 'is-active': route.view === 'audit' }" :aria-current="route.view === 'audit' ? 'page' : undefined">Audit</a>
         <a href="#/logs" :class="{ 'is-active': route.view === 'logs' }" :aria-current="route.view === 'logs' ? 'page' : undefined">Logs</a>
         <a href="#/community" :class="{ 'is-active': route.view === 'community' }" :aria-current="route.view === 'community' ? 'page' : undefined">Community</a>
+        <span class="menudeploy">deploy {{ serverTag ?? "unknown" }}</span>
       </div>
     </div>
   </header>
@@ -187,10 +188,14 @@ onUnmounted(() => {
 
   <footer class="foot">
     <div class="container foot__in" style="justify-content: space-between">
-      <span class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template><template v-if="intervalText"> · {{ intervalText }}</template><template v-if="wattsText"> · {{ wattsText }}</template></span>
+      <!-- IR-197 B1: small tier runs the approved one-row compact line
+           (version · watts; below 390 only watts); full tiers keep the whole
+           line. The deploy tag's home is the hamburger menu. -->
+      <span v-if="tier === 'small'" class="mono faint foot__ver"><span class="pv-ver">{{ serverVersion ?? "…" }}<template v-if="wattsText"> · </template></span><template v-if="wattsText">{{ wattsText }}</template></span>
+      <span v-else class="mono faint">Irori {{ serverVersion ?? "…" }}<template v-if="serverTag"> · {{ serverTag }}</template><template v-if="intervalText"> · {{ intervalText }}</template><template v-if="wattsText"> · {{ wattsText }}</template></span>
       <span class="row" style="gap: 8px;">
-        <button class="btn btn--ghost btn--sm" aria-label="Open transfers" @click="transfersOpen = true">Transfers<span v-if="activeTransfers > 0" class="countbub">{{ activeTransfers }}</span></button>
-        <button class="btn btn--ghost btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
+        <button class="btn btn--secondary btn--sm" aria-label="Open transfers" @click="transfersOpen = true">Transfers<span v-if="activeTransfers > 0" class="countbub">{{ activeTransfers }}</span></button>
+        <button class="btn btn--secondary btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
       </span>
     </div>
   </footer>
@@ -201,14 +206,21 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* IR-128 tier chrome (App-owned): the shell tightens below full width and the
-   hamburger keeps a real 44px hit target on both tiers under 1440 (the shared
-   34px .iconbtn floor stops at ≤720 via iroiri.css mobile tiers). */
+/* IR-128 tier chrome (App-owned): the shell tightens below full width.
+   IR-197 S1: every topbar control gets the 44px touch floor on tiers under
+   full (≤720 is already covered by the shared .iconbtn rule in iroiri.css).
+   IR-197 B1: the small-tier footer is one compact row (version · watts); the
+   deploy tag parks in the hamburger menu, and below 390 only watts stay. */
 html[data-tier="small"] .topbar__in { padding: 0 12px; gap: var(--space-3); }
 html[data-tier="small"] .brand-endorsement { display: none; }
 html[data-tier="small"] .page { padding-top: var(--space-4); padding-bottom: var(--space-4); }
 html[data-tier="small"] .foot { margin-top: var(--space-3); }
 html[data-tier="small"] .foot__in { padding: 8px 12px; font-size: 10.5px; }
-html[data-tier="medium"] .navtoggle,
-html[data-tier="small"] .navtoggle { width: 44px; height: 44px; }
+html[data-tier="medium"] .topbar .iconbtn,
+html[data-tier="small"] .topbar .iconbtn { width: 44px; height: 44px; }
+/* B1: footer CTAs join the 44px floor on small tier (phones also via the
+   shared ≤720 rule). */
+html[data-tier="small"] .foot .btn--sm { min-height: 44px; }
+/* B1: below 390 the version segment hides; watts stay. */
+@media (max-width: 389px) { html[data-tier="small"] .pv-ver { display: none; } }
 </style>
