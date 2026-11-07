@@ -86,6 +86,11 @@ async function applyFleetCaps(clear: boolean): Promise<void> {
   }
 }
 
+/** IR-198: per-side outcome as visible row text (was title-only on chips). */
+function fleetOutcomeText(r: FleetClockCapNode): string {
+  return r.results.map((x) => `${x.side}: ${x.ok ? "ok" : (x.error ?? "failed")}`).join(" · ");
+}
+
 // ─── range filter (IRI-025): drives the hero charts and the power/token cards
 const range = ref<OverviewRange>("30m");
 const rangeLabel = computed(() => OVERVIEW_RANGES.find((r) => r.value === range.value)?.label ?? range.value);
@@ -536,46 +541,6 @@ function heroStateView(p: HeroProcess): HeroStateView {
     </div>
   </section>
 
-  <!-- ── IR-189: fleet-wide clock caps — one action fans out to every enabled
-       spark node; per-node outcomes stay visible instead of collapsing into a
-       single status. ── -->
-  <section class="card section-gap" aria-label="Fleet clock caps">
-    <div class="card__head">
-      <div class="row"><h3>Fleet clock caps</h3><Tip text="applies to every enabled spark node · a cap is a ceiling, not an operating point · 'keep after reboot' installs the boot-time oneshot on each node · a stored cap is re-applied whenever a node comes back online" /></div>
-      <span class="mono faint">{{ sparkNodes.length }} spark nodes</span>
-    </div>
-    <div class="card__body">
-      <div class="row" style="align-items: center; gap: 6px; flex-wrap: wrap;">
-        <label class="visually-hidden" for="fleetGpuCap">GPU SM clock cap</label>
-        <select id="fleetGpuCap" v-model="fleetGpuCap" class="select" style="max-width: 165px;">
-          <option value="">GPU: leave alone</option>
-          <option v-for="o in fleetGpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-        <label class="visually-hidden" for="fleetCpuCap">CPU clock cap</label>
-        <select id="fleetCpuCap" v-model="fleetCpuCap" class="select" style="max-width: 165px;">
-          <option value="">CPU: leave alone</option>
-          <option v-for="o in fleetCpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-        <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
-          <input v-model="fleetPersist" type="checkbox" /> keep after reboot
-        </label>
-        <button class="btn btn--secondary btn--sm" :disabled="fleetBusy || (fleetGpuCap === '' && fleetCpuCap === '')" @click="applyFleetCaps(false)">Apply to fleet</button>
-        <button class="btn btn--ghost btn--sm" :disabled="fleetBusy" @click="applyFleetCaps(true)">Clear fleet</button>
-      </div>
-      <p v-if="fleetMsg" class="stat__sub">{{ fleetMsg }}</p>
-      <p v-if="fleetError" class="banner banner--warn">{{ fleetError }}</p>
-      <div v-if="fleetResults !== null" class="row" style="margin-top: 8px; gap: 6px; flex-wrap: wrap;">
-        <span
-          v-for="r in fleetResults"
-          :key="r.nodeId"
-          class="chip"
-          :class="r.status === 200 ? 'chip--ok' : 'chip--warn'"
-          :title="r.results.map((x) => `${x.side}: ${x.ok ? 'ok' : (x.error ?? 'failed')}`).join(' · ')"
-        >{{ r.name }} {{ r.status === 200 ? "✓" : "✕" }}</span>
-      </div>
-    </div>
-  </section>
-
   <!-- Serving processes: one card per running setup, then detected engines -->
   <section v-if="heroProcesses.length > 0" class="hero-grid section-gap" :class="{ 'hero-grid--single': heroProcesses.length === 1 }">
     <article v-for="p in heroProcesses" :key="p.key" class="card" :class="{ 'card--stale': isProbeStale(p) }">
@@ -682,6 +647,45 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
       </div>
     </article>
+  </section>
+
+  <!-- ── IR-189/IR-198: fleet-wide clock caps — one action fans out to every
+       enabled spark node; per-node outcomes stay visible as touch-legible rows
+       instead of collapsing into a single status. Demoted below Nodes/Power
+       (IR-198 option A) and hidden entirely on a NAS-only fleet. ── -->
+  <section v-if="sparkNodes.length > 0" class="card section-gap" aria-label="Fleet clock caps">
+    <div class="card__head">
+      <div class="row"><h3>Fleet clock caps</h3><Tip text="applies to every enabled spark node · a cap is a ceiling, not an operating point · 'keep after reboot' installs the boot-time oneshot on each node · a stored cap is re-applied whenever a node comes back online" /></div>
+      <span class="mono faint">{{ sparkNodes.length }} spark nodes</span>
+    </div>
+    <div class="card__body">
+      <div class="row" style="align-items: center; gap: 6px; flex-wrap: wrap;">
+        <label class="visually-hidden" for="fleetGpuCap">GPU SM clock cap</label>
+        <select id="fleetGpuCap" v-model="fleetGpuCap" class="select" style="max-width: 165px;">
+          <option value="">GPU: leave alone</option>
+          <option v-for="o in fleetGpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label class="visually-hidden" for="fleetCpuCap">CPU clock cap</label>
+        <select id="fleetCpuCap" v-model="fleetCpuCap" class="select" style="max-width: 165px;">
+          <option value="">CPU: leave alone</option>
+          <option v-for="o in fleetCpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
+          <input v-model="fleetPersist" type="checkbox" /> keep after reboot
+        </label>
+        <button class="btn btn--secondary btn--sm" :disabled="fleetBusy || (fleetGpuCap === '' && fleetCpuCap === '')" @click="applyFleetCaps(false)">Apply to fleet</button>
+        <button class="btn btn--ghost btn--sm" :disabled="fleetBusy" @click="applyFleetCaps(true)">Clear fleet</button>
+      </div>
+      <p v-if="fleetMsg" class="stat__sub" role="status">{{ fleetMsg }}</p>
+      <p v-if="fleetError" class="banner banner--warn">{{ fleetError }}</p>
+      <div v-if="fleetResults !== null" class="fleet-orows" role="list" aria-label="Per-node apply outcomes" style="margin-top: 8px;">
+        <div v-for="r in fleetResults" :key="r.nodeId" class="orow" role="listitem">
+          <span class="dot" :class="r.status === 200 ? 'dot--ok' : 'dot--warn'" aria-hidden="true"></span>
+          <span class="orow__n">{{ r.name }}</span>
+          <span class="orow__d">{{ fleetOutcomeText(r) }}</span>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- IRI-081: fleet update posture vs upstream baseline (informational only) -->
@@ -833,4 +837,9 @@ html[data-tier="small"] .barrow + .barrow { margin-top: 6px; }
 html[data-tier="small"] .log { font-size: 11px; line-height: 1.5; padding: 8px 10px; }
 html[data-tier="small"] .feedlog { min-height: 96px; max-height: 118px; }
 html[data-tier="small"] .range-select { min-height: 44px; }
+/* IR-198: per-node fleet cap outcomes as touch-legible rows (was title-only chips). */
+.orow { display: flex; align-items: baseline; gap: 8px; font-family: var(--font-mono); font-size: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.orow:last-child { border-bottom: 0; }
+.orow__n { flex: none; }
+.orow__d { color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 </style>
