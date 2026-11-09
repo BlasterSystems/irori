@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { statfs } from "node:fs/promises";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -301,6 +302,12 @@ async function boot(): Promise<void> {
     journalCounts: (type, sinceMs) => state.eventJournal?.countByNodeSince(type, sinceMs) ?? Promise.resolve([]),
     // IR-189: the clock-cap drift rule reads the live ceiling vs the stored cap.
     clockDrift: (nodeId) => clockCaps.driftStreak(nodeId),
+    // IR-201: the hub-disk rule reads the hub's own filesystem (container root
+    // by default) once per sweep — never per request.
+    hubDiskPct: async () => {
+      const s = await statfs(config.hubDiskPath);
+      return s.blocks > 0 ? ((s.blocks - s.bfree) / s.blocks) * 100 : null;
+    },
     fetchImpl: fetch,
   });
   await state.health.ensureSeed().catch((err: unknown) => log.warn("health seed failed: " + String(err)));

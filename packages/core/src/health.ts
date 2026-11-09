@@ -22,6 +22,12 @@ export const healthMetricSchema = z.enum([
    * "drifted for two minutes".
    */
   "clock_cap_drift",
+  /**
+   * IR-201: the hub's own filesystem usage (used % of HUB_DISK_PATH, default
+   * /). Fleet-scoped: one gauge for the whole hub, evaluated in the sweep —
+   * never per request.
+   */
+  "hub_disk_pct",
 ]);
 export type HealthMetric = z.infer<typeof healthMetricSchema>;
 
@@ -58,7 +64,8 @@ export type HealthRulePut = z.infer<typeof healthRulePutSchema>;
 
 /** One open finding (per node). */
 export const healthFindingSchema = z.object({
-  nodeId: z.string().uuid(),
+  /** Empty string for fleet-scoped findings (the hub itself; IR-201). */
+  nodeId: z.string().uuid().or(z.literal("")),
   ruleId: z.string().uuid(),
   metric: healthMetricSchema,
   severity: healthSeveritySchema,
@@ -72,6 +79,8 @@ export const healthThresholdsSchema = z.object({
   tempWarnC: z.number(),
   tempCriticalC: z.number(),
   diskWarnPct: z.number(),
+  /** IR-201: the hub's own filesystem warn threshold. */
+  hubDiskWarnPct: z.number(),
 });
 export type HealthThresholds = z.infer<typeof healthThresholdsSchema>;
 
@@ -80,7 +89,8 @@ export type HealthThresholds = z.infer<typeof healthThresholdsSchema>;
  * the web falls back to the same values until the API answers). Metric →
  * meaning: gpu_temp_c (°C per GPU), disk_pct (used %), kernel_xid (count),
  * throttle_active (any reason), power_w (package power), node_offline,
- * telemetry_gap_s (seconds since last snapshot).
+ * telemetry_gap_s (seconds since last snapshot), hub_disk_pct (used % of the
+ * hub's own filesystem).
  */
 export const HEALTH_SEED_RULES: Array<{
   name: string;
@@ -89,6 +99,8 @@ export const HEALTH_SEED_RULES: Array<{
   threshold: number;
   severity: HealthSeverity;
   cooldownSec: number;
+  /** Fleet rules evaluate once per sweep (the hub itself); default node. */
+  scope?: "node" | "fleet";
 }> = [
   { name: "GPU temp warn", metric: "gpu_temp_c", op: "gte", threshold: 70, severity: "warn", cooldownSec: 600 },
   { name: "GPU temp critical", metric: "gpu_temp_c", op: "gte", threshold: 90, severity: "critical", cooldownSec: 600 },
@@ -107,6 +119,10 @@ export const HEALTH_SEED_RULES: Array<{
   // registry still claims it. The value is a count of consecutive 30 s sweeps
   // that observed a mismatch — 4 = two minutes of sustained drift.
   { name: "Clock cap drift", metric: "clock_cap_drift", op: "gte", threshold: 4, severity: "warn", cooldownSec: 1800 },
+  // IR-201: the hub's own filesystem fills with docker build cache (the
+  // 2026-11-09 outage class). Fleet-scoped — one gauge per sweep, never per
+  // request; the pg-host disk stays invisible to SQL (epic open question).
+  { name: "Hub disk warn", metric: "hub_disk_pct", op: "gte", threshold: 80, severity: "warn", cooldownSec: 3600, scope: "fleet" },
 ];
 
 /** Shared threshold values for the web (from the seed rules). */
@@ -114,5 +130,6 @@ export function seedThresholds(): HealthThresholds {
   const gpuWarn = HEALTH_SEED_RULES.find((r) => r.metric === "gpu_temp_c" && r.severity === "warn")!;
   const gpuCritical = HEALTH_SEED_RULES.find((r) => r.metric === "gpu_temp_c" && r.severity === "critical")!;
   const disk = HEALTH_SEED_RULES.find((r) => r.metric === "disk_pct")!;
-  return { tempWarnC: gpuWarn.threshold, tempCriticalC: gpuCritical.threshold, diskWarnPct: disk.threshold };
+  const hubDisk = HEALTH_SEED_RULES.find((r) => r.metric === "hub_disk_pct")!;
+  return { tempWarnC: gpuWarn.threshold, tempCriticalC: gpuCritical.threshold, diskWarnPct: disk.threshold, hubDiskWarnPct: hubDisk.threshold };
 }
