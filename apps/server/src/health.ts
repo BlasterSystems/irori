@@ -23,6 +23,11 @@ export interface HealthSinks {
    * the rule (tests, no clock-cap service wired).
    */
   clockDrift?: (nodeId: string) => Promise<number | null>;
+  /**
+   * IR-201: the hub's own filesystem usage in percent (null = not
+   * measurable). Absence skips the rule (tests, gauge not wired).
+   */
+  hubDiskPct?: () => Promise<number | null>;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }
@@ -212,14 +217,22 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
    * inside an open finding once the cooldown elapses, clear when the value
    * recovers. The webhook URL is read only on a transition — this runs on every
    * snapshot for every node-scoped rule, so a per-evaluation secret read would
-   * be a hot-path query.
+   * be a hot-path query. `nodeId === null` marks a fleet-scoped finding (the
+   * hub itself, IR-201) — the lookup must use IS NULL, `eq(col, null)` never
+   * matches.
    */
-  async function evaluate(rule: RuleRow, nodeId: string, value: number): Promise<void> {
+  async function evaluate(rule: RuleRow, nodeId: string | null, value: number): Promise<void> {
     const breach = breaches(rule.op, value, rule.threshold ?? 0);
     const open = await db
       .select()
       .from(healthFindings)
-      .where(and(eq(healthFindings.ruleId, rule.id), eq(healthFindings.nodeId, nodeId), isNull(healthFindings.clearedAt)))
+      .where(
+        and(
+          eq(healthFindings.ruleId, rule.id),
+          nodeId === null ? isNull(healthFindings.nodeId) : eq(healthFindings.nodeId, nodeId),
+          isNull(healthFindings.clearedAt),
+        ),
+      )
       .limit(1);
     const ref = {
       id: rule.id,
@@ -264,7 +277,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
             op: seed.op,
             threshold: seed.threshold,
             severity: seed.severity,
-            scope: "node",
+            scope: seed.scope ?? "node",
             cooldownSec: seed.cooldownSec,
             enabled: true,
           })
@@ -317,7 +330,8 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       const gpuWarn = bySeed.get("GPU temp warn")?.threshold ?? 70;
       const gpuCritical = bySeed.get("GPU temp critical")?.threshold ?? 90;
       const disk = bySeed.get("Disk usage warn")?.threshold ?? 80;
-      return { tempWarnC: gpuWarn ?? 70, tempCriticalC: gpuCritical ?? 90, diskWarnPct: disk ?? 80 };
+      const hubDisk = bySeed.get("Hub disk warn")?.threshold ?? 80;
+      return { tempWarnC: gpuWarn ?? 70, tempCriticalC: gpuCritical ?? 90, diskWarnPct: disk ?? 80, hubDiskWarnPct: hubDisk ?? 80 };
     },
     async onSnapshot(nodeId, snapshot) {
       latest.set(nodeId, snapshot);
@@ -360,6 +374,14 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
           if (value === null) continue;
           await evaluate(driftRule, node.id, value);
         }
+      }
+      // IR-201: the hub-disk rule reads the hub's own filesystem once per
+      // sweep — a null gauge (statfs failure) means not measurable, exactly
+      // like an agent that cannot read its disks.
+      const hubRule = rules.find((r) => r.metric === "hub_disk_pct");
+      if (hubRule !== undefined && opts.hubDiskPct !== undefined) {
+        const value = await opts.hubDiskPct().catch(() => null);
+        if (value !== null) await evaluate(hubRule, null, value);
       }
     },
     async findings() {
