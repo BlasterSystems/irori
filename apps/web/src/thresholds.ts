@@ -11,4 +11,5 @@ export function setThresholds(t: HealthThresholds): void {
   thresholds.tempWarnC = t.tempWarnC;
   thresholds.tempCriticalC = t.tempCriticalC;
   thresholds.diskWarnPct = t.diskWarnPct;
+  thresholds.hubDiskWarnPct = t.hubDiskWarnPct;
 }

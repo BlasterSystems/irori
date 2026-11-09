@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import App from "./App.vue";
 import "./assets/irori.css";
+import { healthThresholdsSchema } from "@irori/core";
 import { setThresholds } from "./thresholds";
 
 // IRI-069: the server's health rules are the single source of truth for UI
@@ -8,7 +9,8 @@ import { setThresholds } from "./thresholds";
 void fetch("/api/v1/health/thresholds")
   .then((res) => (res.ok ? res.json() : null))
   .then((t: unknown) => {
-    if (t !== null && typeof t === "object") setThresholds(t as { tempWarnC: number; tempCriticalC: number; diskWarnPct: number });
+    const parsed = healthThresholdsSchema.safeParse(t);
+    if (parsed.success) setThresholds(parsed.data);
   })
   .catch(() => {});
 

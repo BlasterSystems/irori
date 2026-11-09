@@ -21,6 +21,7 @@ whenever `DATABASE_URL` is set (ADR-0002):
 | `LOG_KEEP_DAYS` | `30` | Durable log retention for rows below `warn` (IRI-078) |
 | `LOG_WARN_KEEP_DAYS` | `180` | Durable log retention for `warn`+ rows (IRI-078) |
 | `CADENCE_MS` | `2000` | Snapshot cadence handed to agents (bounded 1–60 s); the persisted hub setting (hub settings modal) overrides it and is live-pushed via config-update |
+| `HUB_DISK_PATH` | `/` | Filesystem the hub disk gauge watches for the `hub_disk_pct` health rule (IR-201); in the deployed container this is the container root. The gauge runs once per 30 s sweep, never per request |
 | `IRORI_STATIC_DIR` | `apps/web/dist` | Served web assets |
 | `IRORI_AGENT_ARTIFACTS_DIR` | bundled | Served agent installer/unit/bundle (ADR-0007) |
 | `IRORI_GIT_TAG` | none | Deployed git tag surfaced in the version footer |

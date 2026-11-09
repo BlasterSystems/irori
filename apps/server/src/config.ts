@@ -17,6 +17,11 @@ export interface Config {
   /** Snapshot cadence handed to agents in hello-ok (CADENCE_MS env, bounded). */
   cadenceMs: number;
   /**
+   * IR-201: filesystem the hub disk gauge watches — the container root in the
+   * deployed image, which is the disk that fills with docker build cache.
+   */
+  hubDiskPath: string;
+  /**
    * IRI-077: audit rows kept before the retention pass deletes them.
    * Long by design — "who changed what, when" is the one table an operator
    * asks about months later.
@@ -36,6 +41,7 @@ const DEFAULT_MINUTE_KEEP_DAYS = 7;
 const DEFAULT_HOUR_KEEP_DAYS = 90;
 const DEFAULT_DAY_KEEP_DAYS = 365;
 const DEFAULT_CADENCE_MS = 2000;
+const DEFAULT_HUB_DISK_PATH = "/";
 const DEFAULT_AUDIT_KEEP_DAYS = 365;
 const DEFAULT_LOG_KEEP_DAYS = 30;
 const DEFAULT_LOG_WARN_KEEP_DAYS = 180;
@@ -57,6 +63,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     hourKeepDays: parsePositiveInt(env.HOUR_KEEP_DAYS, DEFAULT_HOUR_KEEP_DAYS),
     dayKeepDays: parsePositiveInt(env.DAY_KEEP_DAYS, DEFAULT_DAY_KEEP_DAYS),
     cadenceMs: parseCadenceMs(env.CADENCE_MS),
+    hubDiskPath: env.HUB_DISK_PATH?.trim() || DEFAULT_HUB_DISK_PATH,
     auditKeepDays: parsePositiveInt(env.AUDIT_KEEP_DAYS, DEFAULT_AUDIT_KEEP_DAYS),
     logKeepDays: parsePositiveInt(env.LOG_KEEP_DAYS, DEFAULT_LOG_KEEP_DAYS),
     logWarnKeepDays: parsePositiveInt(env.LOG_WARN_KEEP_DAYS, DEFAULT_LOG_WARN_KEEP_DAYS),

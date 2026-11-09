@@ -39,7 +39,7 @@ describe("parseHash", () => {
 describe("thresholds", () => {
   afterEach(() => {
     // Restore the seed values for other suites (module state is shared).
-    setThresholds({ tempWarnC: 85, tempCriticalC: 92, diskWarnPct: 90 });
+    setThresholds({ tempWarnC: 85, tempCriticalC: 92, diskWarnPct: 90, hubDiskWarnPct: 80 });
   });
 
   it("starts at the core seed values", () => {
@@ -48,10 +48,11 @@ describe("thresholds", () => {
   });
 
   it("overwrites in place (server is the single source of truth)", () => {
-    setThresholds({ tempWarnC: 70, tempCriticalC: 80, diskWarnPct: 85 });
+    setThresholds({ tempWarnC: 70, tempCriticalC: 80, diskWarnPct: 85, hubDiskWarnPct: 75 });
     expect(thresholds.tempWarnC).toBe(70);
     expect(thresholds.tempCriticalC).toBe(80);
     expect(thresholds.diskWarnPct).toBe(85);
+    expect(thresholds.hubDiskWarnPct).toBe(75);
   });
 });
 
