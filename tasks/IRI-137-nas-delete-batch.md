@@ -55,9 +55,9 @@ Add an agent-side batch job kind `nas-delete-batch` that deletes several models 
 
 ## Validation evidence
 
-- Configuration validation: `.agentic/bin/validate` — "Configuration validation passed"; `.agentic/bin/docs-check` — "No heuristic documentation gaps detected" (3 changed files)
-- Tests: new `apps/agent/test/delete-batch.test.ts` (7 tests: kind pin, happy path + summary shape, plan-failure continues, preflight-denial continues [skipIf root], invalid/duplicate skip, malformed params, pre-aborted cancel); full `pnpm test` green (agent 22 files, server 28 passed/19 skipped db-gated, web 58, proxy 4)
-- Build: `pnpm build` exit 0 (agent bundle rebuilt)
+- Configuration validation: `.agentic/bin/validate` — "Configuration validation passed"; `.agentic/bin/docs-check --base origin/main --strict` — pass (CI docs-check green)
+- Tests: new `apps/agent/test/delete-batch.test.ts` (7 tests: kind pin, happy path + summary shape, plan-failure continues, preflight-denial continues [skipIf root], invalid/duplicate skip, malformed params rejected pre-exec, pre-aborted cancel); full `pnpm -r test` green (server 47/47 incl. db-gated job-events, agent 22 files, web 58, proxy 4, db 3)
+- Build/typecheck: `pnpm -r build` exit 0; `apps/agent` `tsc --noEmit` exit 0 after fix — first CI verify run caught `chmodSync(dir, mode, {recursive})` (unsupported options arg in @types/node 24.19.2; vitest/esbuild had masked it), fixed in 9f09740 by restoring perms explicitly per the existing test convention; CI verify green 4m54s
 - Documentation check: pass; API.md/SPEC.md intentionally untouched until IR-209 makes the kind hub-dispatchable (IR-212 documents)
 - Live smoke: esbuild/tsx one-off driving the real `JobManager.start("nas-delete-batch")` → `runNasDeleteBatch` with a scripted modelctl — observed per-model JSON lines, final summary `{kind, total, deleted, failed, skipped, results}`, `DONE: succeeded exit 0`, ordered apply log; throwaway deleted
 
