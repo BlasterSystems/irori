@@ -238,7 +238,10 @@ export async function runQuarantinePrune(
         // repaired reference + metadata. Apply only reuses that verdict.
         const dryArgv = ["cleanup-quarantine", name, "--json", "--root", root];
         const dry = await execFileAsync(binary, dryArgv, { encoding: "utf8", timeout: PRUNE_TIMEOUT_MS, env: { ...process.env, ...env } });
-        const paths = JSON.parse(dry.stdout) as string[];
+        const parsed: unknown = JSON.parse(dry.stdout);
+        // Fail closed: anything but a JSON string array reads as "nothing to
+        // remove", so a malformed dry output can never arm a deletion.
+        const paths = Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : [];
         if (!armed) {
           emit(`${name}: ${paths.length} quarantine tree(s) would be removed (dry run)`);
           result = { name, status: "dry-run", paths };
