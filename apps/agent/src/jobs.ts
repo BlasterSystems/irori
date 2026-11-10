@@ -87,12 +87,13 @@ export type AgentJobRunner = (
 ) => Promise<{ ok: boolean }>;
 
 /** Kinds executed by agent code rather than a single modelctl argv. */
-const RUNNER_KINDS = new Set([
+export const RUNNER_KINDS = new Set([
   "hygiene-audit",
   "hygiene-clean",
   "hygiene-prevent",
   "models-inventory",
   "nas-delete-apply",
+  "nas-delete-batch",
 ]);
 
 /** IR-131: persisted active-job registry — {jobId → pgid} so a crash leaves a
