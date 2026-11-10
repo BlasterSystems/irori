@@ -7,8 +7,12 @@ import {
   modelsPageSchema,
   parseTransferProgress,
   placementResponseSchema,
+  quarantinePruneSummarySchema,
+  stagingTreeReportSchema,
   type DownloadQueueEntry,
   type JobView,
+  type QuarantinePruneSummary,
+  type StagingTreeReport,
   type ModelEntry,
   type ModelsPage,
   type PlacementRow,
@@ -23,7 +27,7 @@ import { jobStreams } from "./jobs";
  * parsed once at this boundary via the @irori/core contracts.
  */
 
-export type { DownloadQueueEntry, HfQuantsResult, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse } from "@irori/core";
+export type { DownloadQueueEntry, HfQuantsResult, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse, QuarantinePruneSummary, StagingTreeReport } from "@irori/core";
 
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });
@@ -520,4 +524,26 @@ export function jobStatusChip(status: JobView["status"]): { label: string; cls: 
 
 export function isValidJobKind(kind: string): boolean {
   return jobKindSchema.safeParse(kind).success;
+}
+
+/** IR-211: the staging-tree-audit job's final JSON line → typed report (null otherwise). */
+export function parseStagingTreeReport(line: string | undefined): StagingTreeReport | null {
+  if (line === undefined) return null;
+  try {
+    const parsed = stagingTreeReportSchema.safeParse(JSON.parse(line) as unknown);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** IR-211: the quarantine-prune job's final JSON line → typed summary (null otherwise). */
+export function parseQuarantinePruneSummary(line: string | undefined): QuarantinePruneSummary | null {
+  if (line === undefined) return null;
+  try {
+    const parsed = quarantinePruneSummarySchema.safeParse(JSON.parse(line) as unknown);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }

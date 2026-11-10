@@ -8,6 +8,7 @@ import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
 import { runNasDeleteApply, runNasDeleteBatch } from "./delete-preflight.js";
+import { runQuarantinePrune, runStagingTreeAudit } from "./staging-trees.js";
 import { hygieneCleanParamsSchema, recipeInstallParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
@@ -232,6 +233,38 @@ async function run(): Promise<void> {
         return kind === "nas-delete-apply"
           ? runNasDeleteApply(params, deleteCtx, emit, signal)
           : runNasDeleteBatch(params, deleteCtx, emit, signal);
+      }
+      if (kind === "staging-tree-audit") {
+        // IR-211: read-only walk of the store's .staging incl. hidden
+        // quarantine trees — staging-audit cannot see dot-dirs.
+        return runStagingTreeAudit(
+          params,
+          {
+            nasRoot: transport.getNasRoot(),
+            pin: transport.getModelctlPin() ?? config.modelctlPin,
+            modelctlPath: config.modelctlPath,
+            hfToken: transport.getHfToken() ?? config.hfToken,
+            agentUser,
+          },
+          emit,
+          signal,
+        );
+      }
+      if (kind === "quarantine-prune") {
+        // IR-211: armed prune per model NAME via modelctl cleanup-quarantine
+        // (validates the repaired reference before deleting).
+        return runQuarantinePrune(
+          params,
+          {
+            nasRoot: transport.getNasRoot(),
+            pin: transport.getModelctlPin() ?? config.modelctlPin,
+            modelctlPath: config.modelctlPath,
+            hfToken: transport.getHfToken() ?? config.hfToken,
+            agentUser,
+          },
+          emit,
+          signal,
+        );
       }
       if (kind === "hygiene-prevent") {
         const result = await applyDockerLogRotation(emit);
