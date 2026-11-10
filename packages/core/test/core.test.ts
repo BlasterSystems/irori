@@ -113,4 +113,8 @@ describe("version gate", () => {
     expect(jobKindSchema.parse("agent-update")).toBe("agent-update");
     expect(AGENT_UPDATE_MIN_VERSION).toBe("0.3.0");
   });
+
+  it("accepts the nas-delete-batch job kind (IR-209)", () => {
+    expect(jobKindSchema.parse("nas-delete-batch")).toBe("nas-delete-batch");
+  });
 });
