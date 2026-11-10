@@ -389,6 +389,26 @@ export function setupServingModel(setups: Array<{ name: string; model: string }>
   return setups.find((s) => s.model === model)?.name ?? null;
 }
 
+/** IR-210: names of serving setups referencing ANY selected model, deduped in
+ *  first-seen order — the bulk-delete confirm's warning line. */
+export function setupServingNames(setups: Array<{ name: string; model: string }>, models: Iterable<string>): string[] {
+  const wanted = new Set(models);
+  const out: string[] = [];
+  for (const s of setups) {
+    if (wanted.has(s.model) && !out.includes(s.name)) out.push(s.name);
+  }
+  return out;
+}
+
+/** IR-210: total bytes of the selected store models (names absent from the
+ *  current page count 0 — the catalog is the source of truth). */
+export function bulkDeleteTotalBytes(entries: Array<{ name: string; bytes: number }>, selected: Iterable<string>): number {
+  const byName = new Map(entries.map((e) => [e.name, e.bytes]));
+  let total = 0;
+  for (const name of selected) total += byName.get(name) ?? 0;
+  return total;
+}
+
 /**
  * IRI-012: dispatch an agent self-update to the hub's own version. The
  * server refuses (409) while the node has an active job/bench/running setup
