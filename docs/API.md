@@ -250,6 +250,16 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   batch kind fail it with "unknown job kind". A succeeded settle prunes each
   name's placement and drops cache rows no node still holds; a failed settle
   keeps placements and still requests a catalog re-read.
+- `staging-tree-audit` walks the store's `.staging` including hidden dirs
+  (`.active-quarantine` per model/stamp, `.cleanup-quarantine` per id) —
+  `staging-audit` cannot see dot-dirs. Read-only; the final JSON line carries
+  per-tree bytes, totals, and the statfs free space. `quarantine-prune`
+  prunes `.active-quarantine` trees per model NAME through `modelctl
+  cleanup-quarantine`, which validates the repaired reference and every
+  copy's metadata before deleting: a dry run without `confirm: "prune"`,
+  armed with it; per-name result lines plus a final summary with the statfs
+  freed-bytes delta. `.cleanup-quarantine` trees are reported but not pruned
+  until modelctl grows a command for them.
 - The global Models cache (`model_meta`) self-heals: a `catalog` frame carries
   the agent's complete store catalog (catalog.json schema 3), so the hub drops
   cache rows the store no longer has — store changes made outside hub jobs

@@ -31,9 +31,13 @@ export const JOB_KINDS = [
   "repair-active",
   "repair-active-apply",
   "staging-audit",
+  "staging-tree-audit",
   "objects-audit",
   "cleanup-staging",
   "gc-objects",
+  // IR-211: armed quarantine prune — per model NAME via modelctl
+  // cleanup-quarantine (validates the repaired reference before deleting).
+  "quarantine-prune",
   "catalog-refresh",
   "sync-cards",
   // Disk hygiene (M7, SPEC §11.6) — executed by the agent itself, not modelctl.
@@ -71,6 +75,38 @@ export type RecipeInstallParams = z.infer<typeof recipeInstallParamsSchema>;
 
 export const jobKindSchema = z.enum(JOB_KINDS);
 export type JobKind = (typeof JOB_KINDS)[number];
+
+/** IR-211: final JSON line of a staging-tree-audit job (agent → hub → web). */
+export const stagingTreeRowSchema = z.object({
+  path: z.string(),
+  kind: z.enum(["staging", "active-quarantine", "cleanup-quarantine", "hidden"]),
+  name: z.string().nullable(),
+  bytes: z.number().nullable(),
+  mtimeMs: z.number().nullable(),
+});
+export const stagingTreeReportSchema = z.object({
+  kind: z.literal("staging-tree-audit"),
+  trees: z.array(stagingTreeRowSchema),
+  totals: z.object({ stagingBytes: z.number(), activeQuarantineBytes: z.number(), cleanupQuarantineBytes: z.number() }),
+  freeBytes: z.number().nullable(),
+  timedOut: z.boolean(),
+});
+export type StagingTreeReport = z.infer<typeof stagingTreeReportSchema>;
+
+/** IR-211: final JSON line of a quarantine-prune job. */
+export const quarantinePruneResultSchema = z.object({
+  name: z.string(),
+  status: z.string(),
+  paths: z.array(z.string()),
+  error: z.string().optional(),
+});
+export const quarantinePruneSummarySchema = z.object({
+  kind: z.literal("quarantine-prune"),
+  armed: z.boolean(),
+  freedBytes: z.number().nullable(),
+  results: z.array(quarantinePruneResultSchema),
+});
+export type QuarantinePruneSummary = z.infer<typeof quarantinePruneSummarySchema>;
 
 export const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "canceled"] as const;
 export const jobStatusSchema = z.enum(JOB_STATUSES);
