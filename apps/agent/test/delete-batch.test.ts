@@ -17,7 +17,11 @@ function tempDir(): string {
 
 afterEach(() => {
   for (const dir of temps.splice(0)) {
-    chmodSync(dir, 0o700, { recursive: true });
+    try {
+      chmodSync(dir, 0o755);
+    } catch {
+      /* already gone */
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -138,6 +142,7 @@ describe("nas-delete-batch", () => {
     expect(result.ok).toBe(false);
     expect(readFileSync(log, "utf8").split("\n").filter(Boolean)).toEqual(["alpha", "gamma"]);
     expect(modelLines(lines)).toContainEqual({ model: "beta", status: "failed", error: expect.stringContaining("preflight denied") });
+    chmodSync(join(store, "objects", "beta"), 0o755);
   });
 
   it("skips invalid names and duplicates without invoking modelctl", async () => {
