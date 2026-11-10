@@ -240,8 +240,11 @@ flowchart LR
   staging directory with a create+unlink probe after the read-only `--json`
   plan and **before** `--apply`, so a denied tree leaves the model active
   instead of orphaning its data (the NAS store can be a CIFS mount whose ACLs
-  deny the agent's principal). The report is cached in `node_inventory` and
-  invalidated by every model-mutating job settle.
+  deny the agent's principal). `nas-delete-batch` runs the same per-model
+  sequence for a whole list in one job (`{names: [string]}`, one output line
+  per model plus a final summary; a failed model never stops the batch). The
+  report is cached in `node_inventory` and invalidated by every model-mutating
+  job settle.
 - **Placement planning**: for model × node → `present / sync / push / unavailable`,
   offered as one-click remediations wherever a model is needed (serving
   start, setups). The dispatch target's one-active-job slot is visible before
@@ -535,7 +538,7 @@ reported in every snapshot; upgrade = re-run install.
 | Nodes | `GET/POST /api/v1/nodes`, `PATCH/DELETE /api/v1/nodes/:id`, `PUT /api/v1/nodes/order`, `POST /api/v1/nodes/:id/agent-update`, `POST /api/v1/nodes/:id/token/rotate`, `GET /install-agent.sh`, `GET /irori-agent.service`, `GET /agent/irori-agent.mjs` |
 | Telemetry | `GET /api/v1/nodes/:id/snapshot`, `/:id/history?range=`, `GET /api/v1/events` (SSE), `GET /api/v1/events/recent?limit=` (feed history, IRI-013) |
 | Inference | `GET /api/v1/nodes/:id/llm`, `PUT /:id/llm-ports`, `GET /api/v1/clusters/:id` |
-| Models | `GET /api/v1/models?q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `GET /api/v1/nodes/:id/models` + `POST /api/v1/nodes/:id/models/refresh` (per-node inventory, IRI-028), `POST /api/v1/nodes/:id/jobs` (`nas-delete-apply`, `delete-local`, `register-local`, `gc-objects`, `sync-local`, `push`), `GET /api/v1/placement?model=&node=` |
+| Models | `GET /api/v1/models?q=&sort=&page=`, `GET/POST /api/v1/downloads` + `DELETE /api/v1/downloads/:id` + `POST /api/v1/downloads/:id/retry` (queue, IRI-014), `GET /api/v1/nodes/:id/models` + `POST /api/v1/nodes/:id/models/refresh` (per-node inventory, IRI-028), `POST /api/v1/nodes/:id/jobs` (`nas-delete-apply`, `nas-delete-batch`, `delete-local`, `register-local`, `gc-objects`, `sync-local`, `push`), `GET /api/v1/placement?model=&node=` |
 | Serving | `GET/POST /api/v1/setups`, `PATCH/DELETE /api/v1/setups/:id`, `POST /api/v1/setups/:id/start\|stop`, `GET /api/v1/setups/:id/log` (stream) |
 | Jobs | `GET /api/v1/jobs?limit=` (recent, last output line), `GET /api/v1/jobs/:id`, `POST /api/v1/jobs/:id/cancel`; SSE `job` (running + terminal) and throttled `job-progress` frames |
 | Cleanup | `GET /api/v1/nodes/:id/cleanup`, `PUT /api/v1/nodes/:id/hygiene`; agent-side `hygiene-audit` / `hygiene-clean` / `hygiene-prevent` jobs (the clean still accepts `dryRun`, the UI no longer plans first) |
