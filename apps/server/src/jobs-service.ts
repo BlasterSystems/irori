@@ -144,12 +144,14 @@ export const MAX_OUTPUT_LINES = 400;
  */
 export const AGENT_UPDATE_GRACE_MS = 10 * 60_000;
 
-/** Job kinds that change the NAS store contents — trigger a catalog re-read. */
+/** Job kinds that change the NAS store contents — trigger a catalog re-read.
+ *  Membership here also flows into INVENTORY_MUTATING_KINDS (spread below). */
 const CATALOG_MUTATING_KINDS = new Set([
   "download",
   "download-queue",
   "nas-delete",
   "nas-delete-apply",
+  "nas-delete-batch",
   "catalog-refresh",
   "repair-active-apply",
   "gc-objects",
@@ -589,7 +591,9 @@ export function createJobsService(
       }
       const name = typeof row.params === "object" && row.params !== null && "name" in row.params ? String((row.params as { name: unknown }).name) : "";
       // Keep the per-node model inventory in step with what actually succeeded.
-      if (status === "succeeded" && name.length > 0) {
+      // The batch kind carries `names` instead of `name` (IR-209) — admit it
+      // here so its own branch below runs.
+      if (status === "succeeded" && (name.length > 0 || row.kind === "nas-delete-batch")) {
         if (row.kind === "sync-local" || row.kind === "download" || row.kind === "push" || row.kind === "register-local") {
           await db.insert(nodeModels).values({ nodeId, model: name }).onConflictDoNothing();
         } else if (row.kind === "delete-local" || row.kind === "nas-delete-apply") {
@@ -600,6 +604,19 @@ export function createJobsService(
           // node that still has the model re-upserts it.
           const [left] = await db.select({ model: nodeModels.model }).from(nodeModels).where(eq(nodeModels.model, name)).limit(1);
           if (left === undefined) await db.delete(modelMeta).where(eq(modelMeta.name, name));
+        } else if (row.kind === "nas-delete-batch") {
+          // IR-208/IR-209: a succeeded batch deleted every listed name — drop
+          // each placement for this node, then prune cache rows that no node
+          // still holds (same convention as the single-delete path above).
+          const raw = typeof row.params === "object" && row.params !== null && "names" in row.params ? row.params.names : undefined;
+          const names = Array.isArray(raw) ? raw.filter((n): n is string => typeof n === "string") : [];
+          if (names.length > 0) {
+            await db.delete(nodeModels).where(and(eq(nodeModels.nodeId, nodeId), inArray(nodeModels.model, names)));
+            const kept = await db.select({ model: nodeModels.model }).from(nodeModels).where(inArray(nodeModels.model, names));
+            const held = new Set(kept.map((k) => k.model));
+            const gone = names.filter((n) => !held.has(n));
+            if (gone.length > 0) await db.delete(modelMeta).where(inArray(modelMeta.name, gone));
+          }
         }
       }
       // Any model-ops settle can change what the node holds — even a failed

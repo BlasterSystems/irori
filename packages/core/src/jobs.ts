@@ -20,6 +20,9 @@ export const JOB_KINDS = [
   "transfer-hostkey-pin",
   "nas-delete",
   "nas-delete-apply",
+  // IR-208: batch store delete — one agent job deletes several models (params
+  // {names: string[]}); per-model plan → preflight → apply inside the agent.
+  "nas-delete-batch",
   "delete-local",
   // Register an existing local HF cache entry after verifying it against the
   // store (modelctl 0.23 register-local) — no transfer (IR-104).
