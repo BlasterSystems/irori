@@ -7,7 +7,7 @@ import { mergeClocksReply, persistCpuCap, readCpuClocks, setCpuCap } from "./cpu
 import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
-import { runNasDeleteApply } from "./delete-preflight.js";
+import { runNasDeleteApply, runNasDeleteBatch } from "./delete-preflight.js";
 import { hygieneCleanParamsSchema, recipeInstallParamsSchema, type HygieneAudit } from "@irori/core";
 import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
@@ -218,21 +218,20 @@ async function run(): Promise<void> {
         emit(JSON.stringify({ paths: files.map((f) => `${dir}/${f.rel}`) }));
         return { ok: true };
       }
-      if (kind === "nas-delete-apply") {
+      if (kind === "nas-delete-apply" || kind === "nas-delete-batch") {
         // Dry-run plan → writability probe → apply (IRI-028): a denied object
-        // tree fails before the model is deactivated.
-        return runNasDeleteApply(
-          params,
-          {
-            nasRoot: transport.getNasRoot(),
-            pin: transport.getModelctlPin() ?? config.modelctlPin,
-            modelctlPath: config.modelctlPath,
-            hfToken: transport.getHfToken() ?? config.hfToken,
-            agentUser,
-          },
-          emit,
-          signal,
-        );
+        // tree fails before the model is deactivated. The batch (IR-208) runs
+        // the same sequence per name; one failed model never stops the batch.
+        const deleteCtx = {
+          nasRoot: transport.getNasRoot(),
+          pin: transport.getModelctlPin() ?? config.modelctlPin,
+          modelctlPath: config.modelctlPath,
+          hfToken: transport.getHfToken() ?? config.hfToken,
+          agentUser,
+        };
+        return kind === "nas-delete-apply"
+          ? runNasDeleteApply(params, deleteCtx, emit, signal)
+          : runNasDeleteBatch(params, deleteCtx, emit, signal);
       }
       if (kind === "hygiene-prevent") {
         const result = await applyDockerLogRotation(emit);
