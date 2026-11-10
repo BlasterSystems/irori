@@ -9,7 +9,7 @@ import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
 import { runNasDeleteApply, runNasDeleteBatch } from "./delete-preflight.js";
 import { runQuarantinePrune, runStagingTreeAudit } from "./staging-trees.js";
-import { hygieneCleanParamsSchema, recipeInstallParamsSchema, type HygieneAudit } from "@irori/core";
+import { hygieneCleanParamsSchema, recipeInstallParamsSchema, type HardwareSnapshot, type HygieneAudit } from "@irori/core";
 import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
 import { MAX_USAGE_BATCH, MAX_LOG_BATCH } from "@irori/core";
@@ -162,6 +162,15 @@ async function run(): Promise<void> {
     logSink.emit({ scope: "agent", source: "system", line: message });
   };
 
+  // IR-213: latest store free bytes from the agent's own telemetry (updated on
+  // every snapshot; null until the nasRoot mount appears in one).
+  let storeFreeBytesCache: number | null = null;
+  const noteStoreFree = (snapshot: HardwareSnapshot, nasRoot: string | null): void => {
+    if (nasRoot === null) return;
+    const entry = snapshot.storage.find((s) => s.mount === nasRoot);
+    if (entry !== undefined) storeFreeBytesCache = entry.totalBytes - entry.usedBytes;
+  };
+
   const jobs: JobManager = new JobManager(
     () => ({
       nasRoot: transport.getNasRoot(),
@@ -172,6 +181,8 @@ async function run(): Promise<void> {
       serverUrl: config.serverUrl,
       stateDir: config.stateDir,
       agentUser,
+      storeFreeBytes: () => storeFreeBytesCache,
+      minStoreFreeBytes: config.minStoreFreeBytes,
       resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
     }),
     {
@@ -337,7 +348,11 @@ async function run(): Promise<void> {
     agentVersion: AGENT_VERSION,
     schemaVersion: SCHEMA_VERSION,
     cadenceMs: config.cadenceMs,
-    collect,
+    collect: async () => {
+      const snapshot = await collect();
+      noteStoreFree(snapshot, transport?.getNasRoot() ?? null);
+      return snapshot;
+    },
     collectLlm: async (detectOnly) =>
       Promise.all([...probes.values()].map((probe) => probe.probe(detectOnly))),
     onLlmConfig: mergeLlmConfig,

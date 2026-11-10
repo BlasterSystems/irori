@@ -35,6 +35,8 @@ export interface AgentConfig {
   logQueueMax: number;
   /** IRORI_HF_TOKEN — optional HF token handed to modelctl as HF_TOKEN (gated/private repos). Bootstrap fallback: a hub-set global token (IRI-019, config-update) wins over this env. */
   hfToken: string;
+  /** IRORI_MIN_STORE_FREE_BYTES — download floor on the store's free space (IR-213); 0 disables. */
+  minStoreFreeBytes: number;
 }
 
 export const DEFAULT_SERVER_URL = "ws://127.0.0.1:3947/agent-ws";
@@ -98,7 +100,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
 
   const hfToken = env.IRORI_HF_TOKEN?.trim() ?? "";
 
-  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows, logFlushMs, logQueueMax, hfToken };
+  // IR-213: downloads must fail fast when the destination pool is low. The
+  // floor is checked against the agent's own telemetry at job start; 0 opts out.
+  const minStoreFreeBytesRaw = Number.parseInt(env.IRORI_MIN_STORE_FREE_BYTES?.trim() ?? "", 10);
+  const minStoreFreeBytes = Number.isFinite(minStoreFreeBytesRaw) && minStoreFreeBytesRaw >= 0 ? minStoreFreeBytesRaw : 1_649_267_441_664; // 1.5 TiB
+
+  return { serverUrl, token, cadenceMs, llmTargets, llmDetectOnly, modelctlPin, modelctlPath, stateDir, usageFlushMs, usageMaxRows, logFlushMs, logQueueMax, hfToken, minStoreFreeBytes };
 }
 
 /** Parse "host:port,host:port" (a bare "port" probes 127.0.0.1). */
