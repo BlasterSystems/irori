@@ -239,6 +239,12 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   --json` (read-only plan), probes every object/staging directory with a
   create+unlink, and only then runs `--apply --yes`. A denied tree fails the
   job with the failing path/errno and leaves the model ACTIVE.
+- The global Models cache (`model_meta`) self-heals: a `catalog` frame carries
+  the agent's complete store catalog (catalog.json schema 3), so the hub drops
+  cache rows the store no longer has — store changes made outside hub jobs
+  (direct modelctl) reconcile on the next frame. `scan` fallback frames and
+  empty catalog frames never prune. Any catalog-mutating job settle —
+  succeeded OR failed — asks the node to re-report its catalog.
 
 ## Job activity (IRI-028)
 
