@@ -610,7 +610,10 @@ export function createJobsService(
       }
       // Store contents may have changed: ask the node to re-report its catalog
       // so the Models page reflects downloads/deletes without manual refresh.
-      if (status === "succeeded" && CATALOG_MUTATING_KINDS.has(row.kind)) {
+      // Failed settles count too — a failed delete is exactly how an operator
+      // probes an out-of-band store change, and a job may mutate the store
+      // before failing; the catalog frame reconciles the cache either way.
+      if (CATALOG_MUTATING_KINDS.has(row.kind)) {
         sendToAgent(nodeId, { type: "catalog-request" });
       }
       const startedAt = settled[0]!.startedAt;
@@ -636,6 +639,15 @@ export function createJobsService(
             target: modelMeta.name,
             set: { repository: e.repository, runtime: e.runtime, bytes: e.bytes, updatedAt: new Date() },
           });
+      }
+      // A source=catalog frame carries the agent's COMPLETE store catalog
+      // (catalog.json schema 3): reconcile the cache by dropping rows the
+      // store no longer has, so store changes made outside hub jobs (direct
+      // modelctl) self-heal on the next frame. scan frames are a best-effort
+      // active/ fallback and must never prune, and an empty frame never
+      // prunes (preserve_if_empty parity with modelctl catalog refresh).
+      if (source === "catalog" && entries.length > 0) {
+        await db.delete(modelMeta).where(notInArray(modelMeta.name, entries.map((e) => e.name)));
       }
     },
 

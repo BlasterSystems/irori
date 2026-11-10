@@ -293,6 +293,59 @@ d("job settle events (db integration)", () => {
     await service.settleOrphansOnHello(nodeId, []);
     const [settled2] = await db.select().from(jobs).where(eq(jobs.id, update.id));
     expect(settled2!.status).toBe("running");
-    await service.onDone(nodeId, update.id, "failed", null); // settle: shared DB hygiene
+    // Hygiene settle: a non-null exit code is a real verdict, so onDone
+    // settles it (a null-exit failed frame is deliberately ignored, IRI-124 —
+    // leaving the row running would block the node's one-active-job slot for
+    // later tests).
+    await service.onDone(nodeId, update.id, "failed", 1);
+  });
+
+  it("reconciles model_meta from a complete catalog frame; scan and empty frames never prune", async () => {
+    const resident = "jobevt-cat-resident";
+    const ghost = "jobevt-cat-ghost";
+    const scanOnly = "jobevt-cat-scanonly";
+    await db.delete(modelMeta).where(inArray(modelMeta.name, [resident, ghost, scanOnly]));
+    await db.insert(modelMeta).values([
+      { name: resident, repository: `org/${resident}`, runtime: "vllm", bytes: 1, meta: { source: "catalog" } },
+      { name: ghost, repository: `org/${ghost}`, runtime: "vllm", bytes: 1, meta: { source: "catalog" } },
+      { name: scanOnly, repository: `org/${scanOnly}`, runtime: "vllm", bytes: 1, meta: { source: "scan" } },
+    ]);
+    const entry = (name: string) => ({ name, runtime: "vllm", repository: `org/${name}`, bytes: 1 });
+
+    // scan frames are a best-effort active/ fallback: upsert, never prune.
+    await service.onCatalog(nodeId, "scan", [entry(resident), entry(scanOnly)]);
+    expect(await db.select().from(modelMeta).where(eq(modelMeta.name, ghost))).toHaveLength(1);
+
+    // Empty catalog frames never prune (preserve_if_empty parity).
+    await service.onCatalog(nodeId, "catalog", []);
+    expect(await db.select().from(modelMeta).where(eq(modelMeta.name, ghost))).toHaveLength(1);
+
+    // A complete catalog frame prunes exactly the rows the store lost — an
+    // out-of-band modelctl delete heals on the next frame instead of listing
+    // a deleted model forever.
+    await service.onCatalog(nodeId, "catalog", [entry(resident)]);
+    expect(await db.select().from(modelMeta).where(eq(modelMeta.name, ghost))).toHaveLength(0);
+    expect(await db.select().from(modelMeta).where(eq(modelMeta.name, scanOnly))).toHaveLength(0);
+    const [row] = await db.select().from(modelMeta).where(eq(modelMeta.name, resident));
+    expect(row!.repository).toBe(`org/${resident}`);
+
+    await db.delete(modelMeta).where(inArray(modelMeta.name, [resident, ghost, scanOnly]));
+  });
+
+  it("asks for a catalog re-read on failed store-mutating settles too, but not on other kinds", async () => {
+    const sent: Array<[string, unknown]> = [];
+    const svc = createJobsService(db, (node, msg) => {
+      sent.push([node, msg]);
+      return true;
+    });
+    const del = await svc.create(nodeId, "nas-delete-apply", { name: "jobevt-cat-failed-del" });
+    await svc.onDone(nodeId, del.id, "failed", 1);
+    expect(sent).toContainEqual([nodeId, { type: "catalog-request" }]);
+
+    sent.length = 0;
+    const sync = await svc.create(nodeId, "sync-local", {});
+    await svc.onDone(nodeId, sync.id, "failed", 1);
+    expect(sent).not.toContainEqual([nodeId, { type: "catalog-request" }]);
+    await svc.onDone(nodeId, sync.id, "succeeded", 0); // settle: shared DB hygiene
   });
 });
