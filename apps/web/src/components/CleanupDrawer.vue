@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
-import { createJob, fetchJob, type JobDetail } from "../models";
+import { createJob, fetchJob, parseQuarantinePruneSummary, parseStagingTreeReport, type JobDetail, type QuarantinePruneSummary, type StagingTreeReport } from "../models";
 import { fetchCleanup, setWeeklySafePass, type CleanupState } from "../api";
 import { fmtBytes } from "../analytics";
 import { thresholds } from "../thresholds";
@@ -42,17 +42,69 @@ async function refresh(): Promise<void> {
 void refresh();
 
 /** Runs a hygiene job to completion, streaming its output lines. */
-async function runJob(kind: "hygiene-audit" | "hygiene-clean" | "hygiene-prevent", params: Record<string, unknown>): Promise<JobDetail> {
+async function runJob(kind: "hygiene-audit" | "hygiene-clean" | "hygiene-prevent" | "staging-tree-audit" | "quarantine-prune", params: Record<string, unknown>): Promise<JobDetail> {
   const job = await createJob(props.nodeId, kind, params);
   for (;;) {
     await new Promise((r) => setTimeout(r, 2000));
     const detail: JobDetail = await fetchJob(job.id);
-    if (kind !== "hygiene-audit") {
+    if (kind !== "hygiene-audit" && kind !== "staging-tree-audit") {
       runOutput.value = detail.output.map((o) => o.line);
     }
     if (detail.job.status !== "queued" && detail.job.status !== "running") return detail;
   }
 }
+
+/** IR-211: staging-tree audit + armed quarantine prune (SPEC §11.6 typed gate per name). */
+const stagingBusy = ref(false);
+const stagingReport = ref<StagingTreeReport | null>(null);
+const stagingError = ref<string | null>(null);
+const pruneArm = ref<string | null>(null);
+const pruneConfirm = ref("");
+const pruneSummary = ref<QuarantinePruneSummary | null>(null);
+let stagingSeq = 0;
+
+async function auditStaging(): Promise<void> {
+  const mySeq = ++stagingSeq;
+  stagingBusy.value = true;
+  stagingError.value = null;
+  try {
+    const detail = await runJob("staging-tree-audit", {});
+    if (mySeq !== stagingSeq) return; // drawer closed mid-poll
+    const report = parseStagingTreeReport(detail.output.at(-1)?.line);
+    if (report === null) {
+      stagingError.value = "the audit job produced no readable report" + (detail.job.status !== "succeeded" ? ` (${detail.job.status})` : "");
+    } else {
+      stagingReport.value = report;
+    }
+  } catch (err) {
+    stagingError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    stagingBusy.value = false;
+  }
+}
+
+async function pruneQuarantine(name: string | null): Promise<void> {
+  if (name === null || pruneArm.value !== name || pruneConfirm.value !== name) return;
+  const mySeq = ++stagingSeq;
+  stagingBusy.value = true;
+  stagingError.value = null;
+  try {
+    const detail = await runJob("quarantine-prune", { names: [name], confirm: "prune" });
+    if (mySeq !== stagingSeq) return; // drawer closed mid-poll
+    const summary = parseQuarantinePruneSummary(detail.output.at(-1)?.line);
+    pruneSummary.value = summary;
+    pruneArm.value = null;
+    pruneConfirm.value = "";
+    if (summary === null) stagingError.value = "the prune job produced no readable summary";
+    else void auditStaging(); // freed bytes are the statfs delta; refresh the tree list
+  } catch (err) {
+    stagingError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    stagingBusy.value = false;
+  }
+}
+
+const pruneRows = computed(() => (stagingReport.value === null ? [] : stagingReport.value.trees.filter((t) => t.kind === "active-quarantine")));
 
 async function runAudit(): Promise<void> {
   const mySeq = ++seq;
@@ -127,6 +179,7 @@ async function applyLogRotation(): Promise<void> {
 
 onBeforeUnmount(() => {
   seq += 1; // in-flight polls stop writing state
+  stagingSeq += 1;
 });
 
 const auditReport = computed(() => {
@@ -292,6 +345,55 @@ function catLabel(category: string): string {
               @click="runClean"
             >{{ phase === "running" ? "cleaning…" : `Clean ${selectedCategories.length} categories` }}</button>
           </div>
+        </div>
+
+        <!-- IR-211: hidden staging debris (quarantine trees staging-audit cannot see) -->
+        <div class="stack" style="gap: 6px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px">
+          <div class="row row--between">
+            <strong class="stat__sub">Staging &amp; quarantine trees</strong>
+            <button class="btn btn--secondary btn--sm" :disabled="stagingBusy || phase === 'busy' || phase === 'running'" @click="auditStaging">
+              {{ stagingBusy ? "working…" : "Audit staging trees" }}
+            </button>
+          </div>
+          <p class="stat__sub faint">
+            staging-audit skips hidden dirs — this walk includes .active-quarantine and .cleanup-quarantine. Quarantine
+            pruning routes through modelctl cleanup-quarantine (validated before deleting); cleanup-quarantine trees are
+            report-only until modelctl grows a command for them.
+          </p>
+          <p v-if="stagingError" class="banner banner--warn">{{ stagingError }}</p>
+          <template v-if="stagingReport !== null">
+            <p class="stat__sub">
+              active-quarantine {{ fmtBytes(stagingReport.totals.activeQuarantineBytes) }} · cleanup-quarantine
+              {{ fmtBytes(stagingReport.totals.cleanupQuarantineBytes) }} · other staging
+              {{ fmtBytes(stagingReport.totals.stagingBytes) }} · store free
+              {{ stagingReport.freeBytes === null ? "unknown" : fmtBytes(stagingReport.freeBytes) }}
+              <span v-if="stagingReport.timedOut">· partial (walk deadline hit)</span>
+            </p>
+            <ul class="hy-details">
+              <li v-for="row in pruneRows" :key="row.path" class="stat__sub">
+                <span class="mono">{{ row.name }}</span>
+                <span class="mono faint"> · {{ fmtBytes(row.bytes ?? 0) }}</span>
+                <span class="faint mono hy-path" :title="row.path"> · {{ row.path }}</span>
+                <span class="row" style="gap: 6px; margin-top: 4px" v-if="pruneArm === row.name">
+                  <input
+                    v-model="pruneConfirm"
+                    class="select"
+                    :placeholder="`type ${row.name} to arm`"
+                    :aria-label="`Type ${row.name} to confirm pruning its quarantine trees`"
+                    style="flex: 1; min-width: 0;"
+                  />
+                  <button class="btn btn--danger btn--sm" :disabled="pruneConfirm !== row.name || stagingBusy" @click="pruneQuarantine(row.name)">Prune</button>
+                  <button class="btn btn--ghost btn--sm" @click="pruneArm = null; pruneConfirm = ''">Cancel</button>
+                </span>
+                <button v-else class="btn btn--ghost btn--sm" style="margin-left: 8px" :disabled="stagingBusy || (row.bytes ?? 0) === 0" @click="pruneArm = row.name; pruneConfirm = ''">Prune…</button>
+              </li>
+            </ul>
+            <p v-if="pruneSummary !== null" class="stat__sub">
+              last prune: {{ pruneSummary.armed ? "armed" : "dry run" }} ·
+              {{ pruneSummary.results.map((r) => `${r.name}: ${r.status}`).join(", ") }}
+              <span v-if="pruneSummary.freedBytes !== null">· freed {{ fmtBytes(pruneSummary.freedBytes) }}</span>
+            </p>
+          </template>
         </div>
 
         <!-- Staged streamed run -->

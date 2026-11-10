@@ -94,6 +94,8 @@ export const RUNNER_KINDS = new Set([
   "models-inventory",
   "nas-delete-apply",
   "nas-delete-batch",
+  "quarantine-prune",
+  "staging-tree-audit",
 ]);
 
 /** IR-131: persisted active-job registry — {jobId → pgid} so a crash leaves a
