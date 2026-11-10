@@ -149,6 +149,51 @@ d("job settle events (db integration)", () => {
     await db.delete(nodes).where(eq(nodes.id, other));
   });
 
+  it("prunes placements and cache rows per name on a succeeded batch (IR-209)", async () => {
+    const other = randomUUID();
+    await db.insert(nodes).values({
+      id: other,
+      name: `jobevt-b-${other.slice(0, 8)}`,
+      kind: "spark",
+      role: "worker",
+      host: "other",
+      agentTokenHash: "x",
+      agentTokenEnc: "x",
+    });
+    const gone1 = "jobevt-batch-gone-1";
+    const gone2 = "jobevt-batch-gone-2";
+    const kept = "jobevt-batch-kept";
+    // Shared disposable DB: a previous aborted run may have left these rows.
+    await db.delete(modelMeta).where(inArray(modelMeta.name, [gone1, gone2, kept]));
+    await db.delete(nodeModels).where(inArray(nodeModels.model, [gone1, gone2, kept]));
+    await db.insert(modelMeta).values([
+      { name: gone1, repository: "org/gone1", runtime: "vllm", bytes: 1, meta: { source: "catalog" } },
+      { name: gone2, repository: "org/gone2", runtime: "vllm", bytes: 1, meta: { source: "catalog" } },
+      { name: kept, repository: "org/kept", runtime: "vllm", bytes: 1, meta: { source: "catalog" } },
+    ]);
+    await db.insert(nodeModels).values([
+      { nodeId, model: gone1 },
+      { nodeId, model: gone2 },
+      { nodeId, model: kept },
+      { nodeId: other, model: kept },
+    ]);
+
+    const row = await service.create(nodeId, "nas-delete-batch", { names: [gone1, gone2, kept] });
+    await service.onDone(nodeId, row.id, "succeeded", 0);
+
+    // Every listed name loses this node's placement; another node's placement survives.
+    expect(await db.select().from(nodeModels).where(inArray(nodeModels.model, [gone1, gone2]))).toHaveLength(0);
+    const mine = await db.select().from(nodeModels).where(eq(nodeModels.model, kept));
+    expect(mine.map((r) => [r.nodeId, r.model])).toEqual([[other, kept]]);
+    // Cache rows for names no node holds are pruned; a held name survives.
+    expect(await db.select().from(modelMeta).where(inArray(modelMeta.name, [gone1, gone2]))).toHaveLength(0);
+    expect(await db.select().from(modelMeta).where(eq(modelMeta.name, kept))).toHaveLength(1);
+
+    await db.delete(modelMeta).where(inArray(modelMeta.name, [gone1, gone2, kept]));
+    await db.delete(nodeModels).where(inArray(nodeModels.model, [gone1, gone2, kept]));
+    await db.delete(nodes).where(eq(nodes.id, other));
+  });
+
   it("register-local upserts the node-model row and drops the cached inventory (IR-104)", async () => {
     const name = "jobevt-reg-model";
     await db.delete(nodeModels).where(eq(nodeModels.model, name));
@@ -347,5 +392,17 @@ d("job settle events (db integration)", () => {
     await svc.onDone(nodeId, sync.id, "failed", 1);
     expect(sent).not.toContainEqual([nodeId, { type: "catalog-request" }]);
     await svc.onDone(nodeId, sync.id, "succeeded", 0); // settle: shared DB hygiene
+
+    // A failed batch may still have deleted some models; the settle keeps
+    // placements (the per-model summary reports what happened) but the store
+    // changed, so the catalog re-read fires either way (IR-209).
+    const batchName = "jobevt-batch-failed";
+    await db.delete(nodeModels).where(eq(nodeModels.model, batchName));
+    await db.insert(nodeModels).values({ nodeId, model: batchName });
+    const batch = await svc.create(nodeId, "nas-delete-batch", { names: [batchName] });
+    await svc.onDone(nodeId, batch.id, "failed", 1);
+    expect(sent).toContainEqual([nodeId, { type: "catalog-request" }]);
+    expect(await db.select().from(nodeModels).where(eq(nodeModels.model, batchName))).toHaveLength(1);
+    await db.delete(nodeModels).where(eq(nodeModels.model, batchName));
   });
 });
