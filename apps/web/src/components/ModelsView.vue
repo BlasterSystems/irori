@@ -7,6 +7,7 @@ import { activeJobsByNode, blockingJobLabel, jobLabel, type JobLive } from "../j
 import { fetchSetups } from "../serve";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
 import {
+  bulkDeleteTotalBytes,
   cancelJob,
   createJob,
   DOWNLOAD_CLEAR_GRACE_MS,
@@ -32,6 +33,7 @@ import {
   removeDownload,
   retryDownload,
   setupServingModel,
+  setupServingNames,
   staleSucceededIds,
   transferSummaryLine,
   type DownloadQueueEntry,
@@ -66,6 +68,29 @@ const placementError = ref<string | null>(null);
 /** IRI-018: serving-setup advisory for the NAS delete flow — scoped to the model name it was fetched for (warnings never block). */
 const deleteSetupWarn = ref<{ name: string; setup: string } | null>(null);
 let deleteSetupSeq = 0;
+
+/** IR-210: bulk store-delete selection (catalog names, survives pagination) + totals. */
+const bulkSelected = ref<Set<string>>(new Set());
+function toggleBulk(name: string): void {
+  const next = new Set(bulkSelected.value);
+  if (!next.delete(name)) next.add(name);
+  bulkSelected.value = next;
+}
+function clearBulk(): void {
+  bulkSelected.value = new Set();
+}
+const bulkAllSelected = computed(() => {
+  const models = modelsPage.value?.models ?? [];
+  return models.length > 0 && models.every((m) => bulkSelected.value.has(m.name));
+});
+function toggleBulkAll(): void {
+  const models = modelsPage.value?.models ?? [];
+  const next = new Set(bulkSelected.value);
+  if (bulkAllSelected.value) models.forEach((m) => next.delete(m.name));
+  else models.forEach((m) => next.add(m.name));
+  bulkSelected.value = next;
+}
+const bulkBytes = computed(() => bulkDeleteTotalBytes(modelsPage.value?.models ?? [], bulkSelected.value));
 
 /** Download-from-HF modal state (paste + rows, IRI-015). */
 const downloadOpen = ref(false);
@@ -469,6 +494,8 @@ interface ConfirmAction {
   body: string;
   danger: string;
   run: () => Promise<void> | void;
+  /** IR-210: scrollable item list (bulk-delete model names); page-level confirm only. */
+  list?: string[];
   /** IRI-043: "placement"/"job" render the confirm INSIDE that surface
    *  (no stacked modal); absent = page-level confirm-card. */
   host?: "placement" | "job";
@@ -651,6 +678,50 @@ async function runNasDelete(name: string): Promise<void> {
     .catch(() => {});
   await runJob(nodeId, "nas-delete-apply", { name });
 }
+
+/**
+ * IR-210: bulk delete confirm. The setup advisory is computed BEFORE the modal
+ * opens (a wrong 76-model dispatch is expensive to unwind) and the drawer
+ * banner repeats it post-dispatch, per the single-delete convention.
+ */
+async function confirmBulkDelete(): Promise<void> {
+  const nodeId = storeNode.value;
+  const names = [...bulkSelected.value];
+  if (nodeId === null || names.length === 0) return;
+  const serving = await fetchSetups()
+    .then((rows) => setupServingNames(rows, names))
+    .catch(() => [] as string[]);
+  const total = bulkBytes.value;
+  confirmAction({
+    title: `Delete ${names.length} models from the NAS?`,
+    body:
+      `Removes every listed model's objects, references and staging from the NAS store via modelctl — ` +
+      `${formatGiB(total)} total. NAS is never written outside modelctl.` +
+      (serving.length > 0
+        ? ` Setup${serving.length === 1 ? "" : "s"} ${serving.join(", ")} serve${serving.length === 1 ? "s" : ""} selected models — deleting breaks their next start.`
+        : ""),
+    list: names,
+    danger: `Delete ${names.length} models`,
+    run: async () => {
+      deleteSetupWarn.value = null;
+      // Advisory only — never delays the dispatch; sequenced so a late
+      // response cannot attach to a different job.
+      const seq = ++deleteSetupSeq;
+      void fetchSetups()
+        .then((rows) => {
+          if (seq !== deleteSetupSeq) return;
+          const serving = setupServingNames(rows, names);
+          deleteSetupWarn.value = serving.length === 0 ? null : { name: "bulk", setup: serving.join(", ") };
+        })
+        .catch(() => {});
+      await runJob(nodeId, "nas-delete-batch", { names });
+      clearBulk();
+    },
+  });
+}
+
+/** The open drawer's batch delete — the advisory banner is scoped to it. */
+const jobBulkDelete = computed(() => job.value?.job.kind === "nas-delete-batch" && deleteSetupWarn.value?.name === "bulk");
 
 /** The open drawer's nas-delete-apply job's target name — the advisory banner is scoped to it. */
 const jobApplyName = computed(() => {
@@ -854,7 +925,7 @@ async function openJob(id: string): Promise<void> {
       clearInterval(jobPoll);
       // A settled delete changes the store catalog — the hub's catalog-request
       // round-trip is async, so refetch now and once more after it lands.
-      if (job.value.job.kind === "nas-delete" || job.value.job.kind === "nas-delete-apply") {
+      if (job.value.job.kind === "nas-delete" || job.value.job.kind === "nas-delete-apply" || job.value.job.kind === "nas-delete-batch") {
         void load();
         clearTimeout(deleteReloadTimer);
         deleteReloadTimer = setTimeout(() => void load(), 5000);
@@ -941,14 +1012,41 @@ onBeforeUnmount(() => {
       no models match — refresh the catalog from a model-ops node
     </p>
 
-    <table v-else-if="modelsPage !== null" class="table">
+    <!-- IR-210: bulk store-delete selection bar (catalog names, catalog-sourced bytes) -->
+    <div v-if="bulkSelected.size > 0 && modelsPage !== null && error === null" class="row row--between bulkbar" role="status">
+      <span class="stat__sub mono">{{ bulkSelected.size }} selected · {{ formatGiB(bulkBytes) }}</span>
+      <span class="row">
+        <button class="btn btn--ghost btn--sm" @click="clearBulk">Clear</button>
+        <button class="btn btn--danger btn--sm" :disabled="storeNode === null" @click="confirmBulkDelete">Delete selected…</button>
+      </span>
+    </div>
+
+    <table v-if="error === null && !(loading && modelsPage === null) && modelsPage !== null && modelsPage.models.length > 0" class="table">
       <thead>
         <tr>
+          <th class="bulk-col">
+            <input
+              type="checkbox"
+              class="bulk-check"
+              :checked="bulkAllSelected"
+              :aria-label="bulkAllSelected ? 'Deselect all models on this page' : 'Select all models on this page'"
+              @change="toggleBulkAll"
+            />
+          </th>
           <th>Model</th><th class="num">Size</th><th></th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="m in modelsPage.models" :key="m.name" class="is-clickable" @click="openModel(m.name)">
+          <td class="bulk-col" @click.stop>
+            <input
+              type="checkbox"
+              class="bulk-check"
+              :checked="bulkSelected.has(m.name)"
+              :aria-label="`Select ${m.name} for bulk delete`"
+              @change="toggleBulk(m.name)"
+            />
+          </td>
           <td>
             <strong>{{ m.name }}</strong>
             <div class="mono faint">{{ m.repository }}</div>
@@ -1130,6 +1228,9 @@ onBeforeUnmount(() => {
         <p v-if="jobApplyName !== null && deleteSetupWarn?.name === jobApplyName" class="banner banner--warn">
           Setup "{{ deleteSetupWarn!.setup }}" serves this model — deleting breaks its next start (advisory, never blocks).
         </p>
+        <p v-else-if="jobBulkDelete && deleteSetupWarn !== null" class="banner banner--warn">
+          Serving setups reference selected models — deleting breaks their next start (advisory, never blocks): {{ deleteSetupWarn.setup }}.
+        </p>
         <template v-if="sheetSummary !== null">
           <pre class="joblog mono">{{ sheetSummary }}</pre>
           <details class="rawlog">
@@ -1293,6 +1394,9 @@ onBeforeUnmount(() => {
           <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Close</button>
         </div>
         <p class="stat__sub" style="margin: 0">{{ confirmState.body }}</p>
+        <ul v-if="confirmState.list !== undefined" class="confirm-list">
+          <li v-for="n in confirmState.list" :key="n" class="mono">{{ n }}</li>
+        </ul>
         <div class="row row--between">
           <span class="stat__sub faint">nothing destructive runs until you confirm</span>
           <div class="row">
@@ -1454,6 +1558,30 @@ onBeforeUnmount(() => {
   padding: 14px;
   display: grid;
   gap: 12px;
+}
+
+/* IR-210: bulk store-delete selection bar, per-row checkboxes, and the
+   confirm modal's scrollable name list. */
+.bulkbar {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--thread);
+  border-radius: var(--radius-sm);
+  background: var(--thread-wash);
+}
+.bulk-col {
+  width: 28px;
+}
+.bulk-check {
+  accent-color: var(--accent);
+}
+.confirm-list {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .tip {
   position: relative;

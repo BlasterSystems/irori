@@ -239,6 +239,17 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   --json` (read-only plan), probes every object/staging directory with a
   create+unlink, and only then runs `--apply --yes`. A denied tree fails the
   job with the failing path/errno and leaves the model ACTIVE.
+- `nas-delete-batch` deletes several store models in one job: params
+  `{names: [string]}`. Per name the agent runs the same plan → preflight →
+  `--apply --yes` sequence as `nas-delete-apply`; output is one JSON line per
+  model (`{model, status: "deleted"|"failed"|"skipped", error?}`) plus a final
+  summary line (`{kind, total, deleted, failed, skipped, results}`). Invalid
+  names and duplicates are `skipped` without exec; a failed model never stops
+  the batch; a cancel marks the remainder `skipped: canceled before delete`.
+  The job succeeds only when every name ended `deleted`; agents predating the
+  batch kind fail it with "unknown job kind". A succeeded settle prunes each
+  name's placement and drops cache rows no node still holds; a failed settle
+  keeps placements and still requests a catalog re-read.
 - The global Models cache (`model_meta`) self-heals: a `catalog` frame carries
   the agent's complete store catalog (catalog.json schema 3), so the hub drops
   cache rows the store no longer has — store changes made outside hub jobs
