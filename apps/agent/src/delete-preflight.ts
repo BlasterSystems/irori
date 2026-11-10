@@ -19,6 +19,8 @@ import { buildCommand, runStreaming, type ModelctlCtx } from "./modelctl.js";
 const execFileAsync = promisify(execFile);
 const PLAN_TIMEOUT_MS = 120_000;
 const MAX_PROBE_DIRS = 2_000;
+/** Store model names: must survive argv embedding and object-tree paths. */
+const MODEL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 interface PlanEntry {
   path?: unknown;
@@ -79,17 +81,19 @@ function planPaths(entries: PlanEntry[] | undefined): string[] {
   return entries.map((entry) => entry.path).filter((path): path is string => typeof path === "string" && path.length > 0);
 }
 
-/** Runs the dry-run plan, probes every removal target, then applies. */
+/** Runs the dry-run plan, probes every removal target, then applies.
+ *  `error` carries a short machine-readable reason for the failure (IR-208
+ *  batch lines); absent on success. */
 export async function runNasDeleteApply(
   params: Record<string, unknown>,
   ctx: ModelctlCtx,
   emit: (line: string) => void,
   signal: AbortSignal,
-): Promise<{ ok: boolean }> {
+): Promise<{ ok: boolean; error?: string }> {
   const name = typeof params.name === "string" ? params.name : "";
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+  if (!MODEL_NAME_RE.test(name)) {
     emit("error: nas-delete-apply needs a valid model name");
-    return { ok: false };
+    return { ok: false, error: "invalid model name" };
   }
   const binary = ctx.modelctlPath ?? "modelctl";
   const env: Record<string, string> = {};
@@ -108,8 +112,9 @@ export async function runNasDeleteApply(
     });
     plan = JSON.parse(stdout) as DeletePlan;
   } catch (err) {
-    emit(`error: delete plan failed: ${err instanceof Error ? err.message : String(err)}`);
-    return { ok: false };
+    const message = err instanceof Error ? err.message : String(err);
+    emit(`error: delete plan failed: ${message}`);
+    return { ok: false, error: `plan failed: ${message}` };
   }
 
   const objects = planPaths(plan.removed_objects);
@@ -120,7 +125,7 @@ export async function runNasDeleteApply(
     if (denied !== null) {
       emit(`error: cannot delete ${name}: the store denies writes in ${denied.path} (${denied.code}: ${denied.message})`);
       emit("error: the model was left ACTIVE — fix ownership/ACLs for the store principal and retry");
-      return { ok: false };
+      return { ok: false, error: `preflight denied: ${denied.path} (${denied.code})` };
     }
     emit(`preflight: writable ${target}`);
   }
@@ -130,6 +135,63 @@ export async function runNasDeleteApply(
   signal.addEventListener("abort", onAbort, { once: true });
   const outcome = await run.done;
   signal.removeEventListener("abort", onAbort);
-  if (outcome.canceled) emit("error: canceled");
-  return { ok: !outcome.canceled && outcome.exitCode === 0 };
+  if (outcome.canceled) {
+    emit("error: canceled");
+    return { ok: false, error: "canceled" };
+  }
+  if (outcome.exitCode !== 0) return { ok: false, error: `apply failed (exit ${outcome.exitCode ?? "signal"})` };
+  return { ok: true };
+}
+
+export interface BatchDeleteResult {
+  model: string;
+  status: "deleted" | "failed" | "skipped";
+  error?: string;
+}
+
+/**
+ * `nas-delete-batch` (IR-208): deletes several models from the store in one
+ * job. Each name runs the exact `nas-delete-apply` sequence (plan → preflight
+ * → apply) so the audit trail and safety properties match the single-delete
+ * path; one structured line is emitted per model and a final summary closes
+ * the job. A failed model never stops the batch — `skipped` marks names the
+ * batch declined to attempt (invalid, duplicate) or never reached (cancel).
+ * The job is green only when every name ended `deleted` — anything skipped
+ * or failed turns it red so the operator cleans the list before rerunning.
+ */
+export async function runNasDeleteBatch(
+  params: Record<string, unknown>,
+  ctx: ModelctlCtx,
+  emit: (line: string) => void,
+  signal: AbortSignal,
+): Promise<{ ok: boolean; error?: string }> {
+  const names = params.names;
+  if (!Array.isArray(names) || names.length === 0 || names.some((n) => typeof n !== "string")) {
+    emit("error: nas-delete-batch needs a non-empty names array of strings");
+    return { ok: false, error: "invalid params" };
+  }
+  const results: BatchDeleteResult[] = [];
+  const attempted = new Set<string>();
+  for (const name of names) {
+    let result: BatchDeleteResult;
+    if (!MODEL_NAME_RE.test(name)) {
+      result = { model: name, status: "skipped", error: "invalid model name" };
+    } else if (attempted.has(name)) {
+      result = { model: name, status: "skipped", error: "duplicate in batch" };
+    } else if (signal.aborted) {
+      result = { model: name, status: "skipped", error: "canceled before delete" };
+    } else {
+      attempted.add(name);
+      emit(`batch: deleting ${name}`);
+      const outcome = await runNasDeleteApply({ name }, ctx, emit, signal);
+      result = outcome.ok ? { model: name, status: "deleted" } : { model: name, status: "failed", error: outcome.error ?? "delete failed" };
+    }
+    results.push(result);
+    emit(JSON.stringify(result));
+  }
+  const deleted = results.filter((r) => r.status === "deleted").length;
+  const failed = results.filter((r) => r.status === "failed").length;
+  const skipped = results.filter((r) => r.status === "skipped").length;
+  emit(JSON.stringify({ kind: "nas-delete-batch", total: names.length, deleted, failed, skipped, results }));
+  return { ok: failed === 0 && skipped === 0 };
 }
