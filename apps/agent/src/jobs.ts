@@ -8,6 +8,10 @@ export interface JobCtx extends ModelctlCtx {
   serverUrl: string;
   /** IRORI_STATE_DIR (IR-131): persists the active-job {jobId → pgid} registry. */
   stateDir?: string;
+  /** IR-213: latest store free bytes from the agent's own telemetry; null until the nasRoot mount appears in a snapshot. */
+  storeFreeBytes?: () => number | null;
+  /** IR-213: download floor in bytes on the store's free space (0 disables; default 1.5 TiB). */
+  minStoreFreeBytes?: number;
 }
 
 /**
@@ -97,6 +101,10 @@ export const RUNNER_KINDS = new Set([
   "quarantine-prune",
   "staging-tree-audit",
 ]);
+
+/** Kinds whose writes land on the NAS store — gated on the store's free
+ *  space (IR-213) before any modelctl runs. */
+const STORE_FLOOR_KINDS = new Set(["download", "download-queue"]);
 
 /** IR-131: persisted active-job registry — {jobId → pgid} so a crash leaves a
  *  killable handle (the detached modelctl child survives agent death). Same
@@ -205,6 +213,20 @@ export class JobManager {
       }
       argv = buildAgentUpdateArgs(jobId, url);
     } else {
+      // IR-213: downloads land on the NAS store — refuse when the store's
+      // free space (agent telemetry, snapshot-fresh) is below the floor.
+      // Unknown telemetry (null) or a disabled floor (0) never blocks.
+      const free = this.ctx().storeFreeBytes?.() ?? null;
+      const floor = this.ctx().minStoreFreeBytes ?? 0;
+      if (STORE_FLOOR_KINDS.has(kind) && floor > 0 && free !== null && free < floor) {
+        this.events.onOutput(
+          jobId,
+          0,
+          `error: store has only ${(free / 2 ** 40).toFixed(2)} TiB free — below the ${(floor / 2 ** 40).toFixed(1)} TiB download floor (IR-213); free space on the store volume or lower IRORI_MIN_STORE_FREE_BYTES`,
+        );
+        this.events.onDone(jobId, "failed", 1);
+        return true;
+      }
       try {
         const built = buildCommand(kind, params, this.ctx());
         argv = built.argv;
