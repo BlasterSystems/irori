@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
 import { broadcastForLanIp, normalizeMac, sendWol } from "./wol.js";
-import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type HardwareSnapshot, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, SCOPE_CAPABLE_AGENT_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type HardwareSnapshot, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
@@ -724,7 +724,16 @@ export function createApp(deps: AppDeps): Express {
       const busy = (await setups.list()).some(
         (s) => s.headNodeId === id && (s.status === "starting" || s.status === "running" || s.status === "stopping"),
       );
-      if (busy) return res.status(409).json({ error: "node has a running setup — stop it first (an agent restart kills it)" });
+      if (busy) {
+        // ADR-0017: agents that isolate setups in systemd scope units survive
+        // their own restarts — updating them no longer kills running engines.
+        // Older agents keep the refusal; the agent re-checks with ground
+        // truth at dispatch (unscooped setups refuse the job).
+        const scopeCapable = node.agentVersion !== null && compareVersions(node.agentVersion, SCOPE_CAPABLE_AGENT_VERSION) >= 0;
+        if (!scopeCapable) {
+          return res.status(409).json({ error: "node has a running setup — stop it first (an agent restart kills it)" });
+        }
+      }
     }
     try {
       const job = await jobs.create(id, "agent-update", { expectedVersion: deps.version });

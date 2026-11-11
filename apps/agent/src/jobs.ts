@@ -12,6 +12,9 @@ export interface JobCtx extends ModelctlCtx {
   storeFreeBytes?: () => number | null;
   /** IR-213: download floor in bytes on the store's free space (0 disables; default 1.5 TiB). */
   minStoreFreeBytes?: number;
+  /** ADR-0017: setups the agent supervises without a scope unit (they die
+   *  with the agent unit on restart). Absent = unknown (no driver wired). */
+  unscoopedRunningSetups?: () => string[];
 }
 
 /**
@@ -210,6 +213,19 @@ export class JobManager {
       if (url.length === 0) {
         this.events.onOutput(jobId, 0, "error: agent has no IRORI_SERVER_URL configured");
         this.events.onDone(jobId, "failed", null);
+        return true;
+      }
+      // ADR-0017: scope-wrapped setups survive the unit restart; anything the
+      // agent still supervises unscooped dies with it — refuse with the names
+      // (ground truth beats the hub's version-keyed gate).
+      const unscooped = this.ctx().unscoopedRunningSetups?.() ?? [];
+      if (unscooped.length > 0) {
+        this.events.onOutput(
+          jobId,
+          0,
+          `error: refusing agent update — running setup(s) ${unscooped.join(", ")} are not scope-wrapped and would be killed by the restart (stop them first)`,
+        );
+        this.events.onDone(jobId, "failed", 1);
         return true;
       }
       argv = buildAgentUpdateArgs(jobId, url);
