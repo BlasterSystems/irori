@@ -27,6 +27,9 @@ export interface ModelctlCtx {
   resolveLocalUser?: (user: string) => { home: string; binary: string } | null;
   /** IR-101: the node's cache owner for transfers; null/absent = agent user. */
   cacheUser?: string | null;
+  /** IR-207: download floor in bytes on the store's free space (0/absent disables);
+   *  passed through as modelctl's --min-free-bytes for download and queue. */
+  minStoreFreeBytes?: number;
 }
 
 export class CommandBuildError extends Error {}
@@ -290,6 +293,8 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       const argv = ["queue", tmp];
       const jobs = num("jobs");
       if (jobs) argv.push("--jobs", String(Math.floor(jobs)));
+      // IR-207: per-entry floor (plus each entry's expected size) inside modelctl.
+      if ((ctx.minStoreFreeBytes ?? 0) > 0) argv.push("--min-free-bytes", String(Math.floor(ctx.minStoreFreeBytes!)));
       argv.push(ROOT_FLAG, root());
       // Best-effort cleanup once the process is gone; modelctl reads it at start.
       setTimeout(() => rmSync(tmp, { force: true }), 60_000).unref();
@@ -324,7 +329,11 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
     case "install": {
       const name = str("name") ?? str("repository");
       if (!name) throw new CommandBuildError(`${kind} needs name or repository`);
-      return { argv: ["download", name] };
+      const argv = ["download", name];
+      // IR-207: the same floor the job-start gate checks rides into modelctl
+      // itself — the per-file check now covers the whole expected download.
+      if ((ctx.minStoreFreeBytes ?? 0) > 0) argv.push("--min-free-bytes", String(Math.floor(ctx.minStoreFreeBytes!)));
+      return { argv };
     }
     case "push": {
       const name = str("name") ?? str("repository");

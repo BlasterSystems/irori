@@ -8,10 +8,12 @@ import {
   parseTransferProgress,
   placementResponseSchema,
   quarantinePruneSummarySchema,
+  pruneCleanupQuarantineSummarySchema,
   stagingTreeReportSchema,
   type DownloadQueueEntry,
   type JobView,
   type QuarantinePruneSummary,
+  type PruneCleanupQuarantineSummary,
   type StagingTreeReport,
   type ModelEntry,
   type ModelsPage,
@@ -27,7 +29,7 @@ import { jobStreams } from "./jobs";
  * parsed once at this boundary via the @irori/core contracts.
  */
 
-export type { DownloadQueueEntry, HfQuantsResult, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse, QuarantinePruneSummary, StagingTreeReport } from "@irori/core";
+export type { DownloadQueueEntry, HfQuantsResult, JobView, ModelEntry, ModelsPage, PlacementRow, PlacementResponse, PruneCleanupQuarantineSummary, QuarantinePruneSummary, StagingTreeReport } from "@irori/core";
 
 async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });
@@ -542,6 +544,17 @@ export function parseQuarantinePruneSummary(line: string | undefined): Quarantin
   if (line === undefined) return null;
   try {
     const parsed = quarantinePruneSummarySchema.safeParse(JSON.parse(line) as unknown);
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** IR-207: the prune-cleanup-quarantine job's final JSON line → typed summary. */
+export function parsePruneCleanupQuarantineSummary(line: string | undefined): PruneCleanupQuarantineSummary | null {
+  if (line === undefined) return null;
+  try {
+    const parsed = pruneCleanupQuarantineSummarySchema.safeParse(JSON.parse(line) as unknown);
     return parsed.success ? parsed.data : null;
   } catch {
     return null;

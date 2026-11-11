@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from "vue";
-import { createJob, fetchJob, parseQuarantinePruneSummary, parseStagingTreeReport, type JobDetail, type QuarantinePruneSummary, type StagingTreeReport } from "../models";
+import { createJob, fetchJob, parsePruneCleanupQuarantineSummary, parseQuarantinePruneSummary, parseStagingTreeReport, type JobDetail, type PruneCleanupQuarantineSummary, type QuarantinePruneSummary, type StagingTreeReport } from "../models";
 import { fetchCleanup, setWeeklySafePass, type CleanupState } from "../api";
 import { fmtBytes } from "../analytics";
 import { thresholds } from "../thresholds";
@@ -42,7 +42,7 @@ async function refresh(): Promise<void> {
 void refresh();
 
 /** Runs a hygiene job to completion, streaming its output lines. */
-async function runJob(kind: "hygiene-audit" | "hygiene-clean" | "hygiene-prevent" | "staging-tree-audit" | "quarantine-prune", params: Record<string, unknown>): Promise<JobDetail> {
+async function runJob(kind: "hygiene-audit" | "hygiene-clean" | "hygiene-prevent" | "staging-tree-audit" | "quarantine-prune" | "prune-cleanup-quarantine", params: Record<string, unknown>): Promise<JobDetail> {
   const job = await createJob(props.nodeId, kind, params);
   for (;;) {
     await new Promise((r) => setTimeout(r, 2000));
@@ -105,6 +105,52 @@ async function pruneQuarantine(name: string | null): Promise<void> {
 }
 
 const pruneRows = computed(() => (stagingReport.value === null ? [] : stagingReport.value.trees.filter((t) => t.kind === "active-quarantine")));
+
+// IR-207: the interrupted cleanup-staging debris (.staging/.cleanup-quarantine) —
+// modelctl 0.24.0's prune-cleanup-quarantine; same two-step arm as the
+// per-name prune, dry-run first (no confirm) so the operator sees the list.
+const debrisArm = ref(false);
+const debrisConfirm = ref("");
+const debrisSummary = ref<PruneCleanupQuarantineSummary | null>(null);
+
+async function pruneDebris(): Promise<void> {
+  if (!debrisArm.value || debrisConfirm.value !== "prune") return;
+  const mySeq = ++stagingSeq;
+  stagingBusy.value = true;
+  stagingError.value = null;
+  try {
+    const detail = await runJob("prune-cleanup-quarantine", { confirm: "prune" });
+    if (mySeq !== stagingSeq) return; // drawer closed mid-poll
+    const summary = parsePruneCleanupQuarantineSummary(detail.output.at(-1)?.line);
+    debrisSummary.value = summary;
+    debrisArm.value = false;
+    debrisConfirm.value = "";
+    if (summary === null) stagingError.value = "the prune job produced no readable summary";
+    else void auditStaging(); // freed bytes are the statfs delta; refresh the tree list
+  } catch (err) {
+    stagingError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    stagingBusy.value = false;
+  }
+}
+
+/** Dry-run first: lists what an armed prune would remove, never deletes. */
+async function previewDebris(): Promise<void> {
+  const mySeq = ++stagingSeq;
+  stagingBusy.value = true;
+  stagingError.value = null;
+  try {
+    const detail = await runJob("prune-cleanup-quarantine", {});
+    if (mySeq !== stagingSeq) return;
+    const summary = parsePruneCleanupQuarantineSummary(detail.output.at(-1)?.line);
+    if (summary === null) stagingError.value = "the prune job produced no readable summary";
+    else debrisSummary.value = summary;
+  } catch (err) {
+    stagingError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    stagingBusy.value = false;
+  }
+}
 
 async function runAudit(): Promise<void> {
   const mySeq = ++seq;
@@ -357,8 +403,9 @@ function catLabel(category: string): string {
           </div>
           <p class="stat__sub faint">
             staging-audit skips hidden dirs — this walk includes .active-quarantine and .cleanup-quarantine. Quarantine
-            pruning routes through modelctl cleanup-quarantine (validated before deleting); cleanup-quarantine trees are
-            report-only until modelctl grows a command for them.
+            pruning routes through modelctl cleanup-quarantine (validated before deleting); cleanup-quarantine debris
+            (an interrupted cleanup prune) goes through modelctl prune-cleanup-quarantine — dry run first, armed only
+            after the typed confirm.
           </p>
           <p v-if="stagingError" class="banner banner--warn">{{ stagingError }}</p>
           <template v-if="stagingReport !== null">
@@ -369,6 +416,32 @@ function catLabel(category: string): string {
               {{ stagingReport.freeBytes === null ? "unknown" : fmtBytes(stagingReport.freeBytes) }}
               <span v-if="stagingReport.timedOut">· partial (walk deadline hit)</span>
             </p>
+            <div v-if="stagingReport.totals.cleanupQuarantineBytes > 0" class="stack" style="gap: 6px; margin-top: 6px">
+              <div class="row" style="gap: 6px; flex-wrap: wrap;">
+                <button class="btn btn--ghost btn--sm" :disabled="stagingBusy || phase === 'busy' || phase === 'running'" @click="previewDebris">
+                  List cleanup debris (dry run)
+                </button>
+                <template v-if="debrisArm">
+                  <input
+                    v-model="debrisConfirm"
+                    class="select"
+                    placeholder="type prune to arm"
+                    aria-label="Type prune to confirm removing the cleanup-quarantine debris"
+                    style="flex: 1; min-width: 0; max-width: 220px;"
+                  />
+                  <button class="btn btn--danger btn--sm" :disabled="debrisConfirm !== 'prune' || stagingBusy" @click="pruneDebris">Prune debris</button>
+                  <button class="btn btn--ghost btn--sm" @click="debrisArm = false; debrisConfirm = ''">Cancel</button>
+                </template>
+                <button v-else class="btn btn--danger btn--sm" :disabled="stagingBusy || phase === 'busy' || phase === 'running'" @click="debrisArm = true; debrisConfirm = ''">
+                  Prune debris…
+                </button>
+              </div>
+              <p v-if="debrisSummary !== null" class="stat__sub">
+                last cleanup prune: {{ debrisSummary.applied ? "applied" : "dry run" }} ·
+                {{ debrisSummary.results.length }} tree(s)
+                <span v-if="debrisSummary.freedBytes !== null">· freed {{ fmtBytes(debrisSummary.freedBytes) }}</span>
+              </p>
+            </div>
             <ul class="hy-details">
               <li v-for="row in pruneRows" :key="row.path" class="stat__sub">
                 <span class="mono">{{ row.name }}</span>

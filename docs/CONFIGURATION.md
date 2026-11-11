@@ -41,7 +41,7 @@ variables are optional unless noted:
 | `IRORI_MODELCTL_PIN` | `0.23.0` | Fallback minimum modelctl version for the `modelctl-install` job; the hub's `modelctl_pin` setting (IR-105) overrides it via config-update and drives per-user auto-provisioning |
 | `IRORI_MODELCTL_PATH` | `/root/.local/bin/modelctl` | Explicit modelctl binary |
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
-| `IRORI_MIN_STORE_FREE_BYTES` | `1649267441664` (1.5 TiB) | Download floor (IR-213): `download` and `download-queue` jobs fail at start when the store volume's free space (agent telemetry, snapshot-fresh) is below this; `0` disables the floor. The per-file check belongs to modelctl's download path — this gate protects the job boundary |
+| `IRORI_MIN_STORE_FREE_BYTES` | `1649267441664` (1.5 TiB) | Download floor (IR-213, IR-207): the job-start gate fails `download`/`download-queue` jobs when the store volume's free space (agent telemetry, snapshot-fresh) is below this, and the same value rides `--min-free-bytes` into modelctl so the per-file check covers the whole expected download; `0` disables both. The per-file check belongs to modelctl's download path — the gate protects the job boundary |
 | `IRORI_USAGE_FLUSH_MS` | `30000` | Usage-buffer upload interval (ADR-0008) |
 | `IRORI_LOG_FLUSH_MS` | `2000` | Durable log-buffer ship interval (IRI-078) |
 | `IRORI_LOG_QUEUE_MAX` | `10000` | In-memory log queue cap before drop-oldest (IRI-078; buffer keeps 50k rows on disk) |

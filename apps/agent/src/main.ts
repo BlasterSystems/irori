@@ -8,7 +8,7 @@ import { readStore } from "./catalog-read.js";
 import { applyDockerLogRotation, auditHygiene, cleanHygiene } from "./hygiene.js";
 import { buildInventory, resolveCacheHome, resolveLocalUser } from "./inventory.js";
 import { runNasDeleteApply, runNasDeleteBatch } from "./delete-preflight.js";
-import { runQuarantinePrune, runStagingTreeAudit } from "./staging-trees.js";
+import { runPruneCleanupQuarantine, runQuarantinePrune, runStagingTreeAudit } from "./staging-trees.js";
 import { hygieneCleanParamsSchema, recipeInstallParamsSchema, type HardwareSnapshot, type HygieneAudit } from "@irori/core";
 import { JobManager, reconcileOrphanedJobs } from "./jobs.js";
 import { SetupDriver, type SetupCaptureHooks } from "./setups.js";
@@ -265,6 +265,23 @@ async function run(): Promise<void> {
         // IR-211: armed prune per model NAME via modelctl cleanup-quarantine
         // (validates the repaired reference before deleting).
         return runQuarantinePrune(
+          params,
+          {
+            nasRoot: transport.getNasRoot(),
+            pin: transport.getModelctlPin() ?? config.modelctlPin,
+            modelctlPath: config.modelctlPath,
+            hfToken: transport.getHfToken() ?? config.hfToken,
+            agentUser,
+          },
+          emit,
+          signal,
+        );
+      }
+      if (kind === "prune-cleanup-quarantine") {
+        // IR-207: dry-run / armed removal of the .staging/.cleanup-quarantine
+        // debris an interrupted cleanup-staging --apply leaves behind
+        // (modelctl 0.24.0; confirm:"prune" arms it, quarantine-prune rule).
+        return runPruneCleanupQuarantine(
           params,
           {
             nasRoot: transport.getNasRoot(),
