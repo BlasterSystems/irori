@@ -71,6 +71,10 @@ export interface SetupDriverDeps {
   /** ADR-0017: the systemd surface for scope isolation; defaults to the real
    *  host systemd. Injected in tests. */
   scope?: ScopeSurface;
+  /** The spawn used for the (possibly scope-wrapped) start script. Tests
+   *  inject a recording fake so scope wrapping is asserted hermetically —
+   *  the fake surface builds the argv but must not really systemd-run it. */
+  startSpawn?: typeof spawn;
   log?: (message: string) => void;
 }
 
@@ -293,9 +297,11 @@ export class SetupDriver {
   private readonly records = new Map<string, DriverRecord>();
   private readonly children = new Map<string, ChildProcess>();
   private readonly scope: ScopeSurface;
+  private readonly startSpawn: typeof spawn;
 
   constructor(private readonly deps: SetupDriverDeps) {
     this.scope = deps.scope ?? systemdScope;
+    this.startSpawn = deps.startSpawn ?? spawn;
   }
   private readonly rings = new Map<string, RingEntry[]>();
   private readonly seqs = new Map<string, number>();
@@ -582,7 +588,7 @@ export class SetupDriver {
     // Tail from here (never from 0) so the tailer cannot re-emit them as
     // engine lines; measured BEFORE spawn so no engine byte is skipped.
     const tailFrom = logFd === null ? 0 : fileSizeOrZero(logPath);
-    const child = spawn(argv[0]!, argv.slice(1), {
+    const child = this.startSpawn(argv[0]!, argv.slice(1), {
       detached: true,
       stdio: logFd !== null ? ["ignore", logFd, logFd] : ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...finalEnv },
