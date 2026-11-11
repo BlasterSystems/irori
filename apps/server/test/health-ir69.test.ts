@@ -110,7 +110,7 @@ d("health service (db integration)", () => {
     expect(rules.length).toBeGreaterThanOrEqual(8);
     expect(rules.find((r) => r.name === "GPU temp warn")?.threshold).toBe(70);
     const t = await health.thresholds();
-    expect(t).toEqual({ tempWarnC: 70, tempCriticalC: 90, diskWarnPct: 80, hubDiskWarnPct: 80 });
+    expect(t).toEqual({ tempWarnC: 70, tempCriticalC: 90, diskWarnPct: 80, hubDiskWarnPct: 80, dbUnavailable: 1 });
     // Idempotent.
     await health.ensureSeed();
     expect((await health.listRules()).length).toBe(rules.length);
@@ -285,6 +285,72 @@ d("hub disk rule (IR-201, db integration)", () => {
     expect((await health.findings()).filter((f) => f.metric === "hub_disk_pct")).toHaveLength(0);
 
     // No gauge wired (older harnesses): the sweep must not throw.
+    const bare = createHealthService(db, "a".repeat(64), { sse: () => {}, journal: async () => {}, now: () => Date.now() });
+    await expect(bare.sweep([], new Set(), new Map())).resolves.toBeUndefined();
+  });
+});
+
+d("db unavailable rule (IR-202, db integration)", () => {
+  let handle: DbHandle;
+  let db: Db;
+
+  beforeAll(async () => {
+    handle = createDbHandle(url!);
+    await handle.migrate();
+    db = handle.db;
+  });
+
+  afterAll(async () => {
+    await handle.close();
+  });
+
+  function makeService(sink: { sseEvents: unknown[] }, dep: () => Promise<boolean>) {
+    return createHealthService(db, "a".repeat(64), {
+      sse: (e) => sink.sseEvents.push(e),
+      journal: async () => {},
+      dbHealthy: dep,
+      now: () => Date.now(),
+    });
+  }
+
+  it("opens a fleet finding when the db is unreachable and clears on recovery", async () => {
+    const sink: { sseEvents: unknown[] } = { sseEvents: [] };
+    let healthy = false;
+    const health = makeService(sink, async () => healthy);
+    await health.ensureSeed();
+    const rule = (await health.listRules()).find((r) => r.name === "Database unavailable");
+    expect(rule?.threshold).toBe(1);
+    expect(rule?.severity).toBe("critical");
+    expect(rule?.scope).toBe("fleet");
+
+    await health.sweep([], new Set(), new Map());
+    const open = (await health.findings()).filter((f) => f.metric === "db_unavailable");
+    expect(open).toHaveLength(1);
+    expect(open[0]!.nodeId).toBe(""); // fleet-scoped wire form
+
+    const event = sink.sseEvents.find((e) => (e as { metric?: string }).metric === "db_unavailable") as
+      | { severity?: string; nodeId?: string | null }
+      | undefined;
+    expect(event?.severity).toBe("critical");
+    expect(event?.nodeId).toBeNull();
+
+    healthy = true;
+    await health.sweep([], new Set(), new Map());
+    expect((await health.findings()).filter((f) => f.metric === "db_unavailable")).toHaveLength(0);
+  });
+
+  it("treats a failed probe as not measurable and tolerates an absent dep", async () => {
+    let calls = 0;
+    const health = makeService({ sseEvents: [] }, async () => {
+      calls += 1;
+      throw new Error("probe failed");
+    });
+    await health.ensureSeed();
+    await health.sweep([], new Set(), new Map());
+    expect(calls).toBe(1); // asked once per sweep, never per request
+    expect((await health.findings()).filter((f) => f.metric === "db_unavailable")).toHaveLength(0);
+
+    // No dep wired (older harnesses): the sweep must not throw.
     const bare = createHealthService(db, "a".repeat(64), { sse: () => {}, journal: async () => {}, now: () => Date.now() });
     await expect(bare.sweep([], new Set(), new Map())).resolves.toBeUndefined();
   });
