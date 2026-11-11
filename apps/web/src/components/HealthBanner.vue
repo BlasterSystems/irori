@@ -25,7 +25,7 @@ const nodeDiskFindings = computed(() => props.findings.filter((f) => f.metric ==
 function hintFor(metric: string): string {
   switch (metric) {
     case "db_unavailable":
-      return "hub data on this page may be stale until the database returns — degraded routes keep answering";
+      return "hub data on the page may be stale until the database returns — degraded routes keep answering";
     case "hub_disk_pct":
       return "check the hub VM filesystem — docker build cache is the usual culprit (docker system df on the deploy host)";
     default:
