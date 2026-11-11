@@ -274,7 +274,11 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
         '  fi',
         '  echo "modelctl $CURRENT is older than $PIN — upgrading"',
         'fi',
-        'uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"',
+        // IR-207: pin uv's bin dir to the target home — a node-level
+        // UV_TOOL_BIN_DIR in the agent env silently redirected a root install
+        // into a cache user's bin (DGX-3, 2026-11-11), leaving the gate
+        // binary stale.
+        `UV_TOOL_BIN_DIR="${homeBin}" uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"`,
         `INSTALLED="$(modelctl --version | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1)"`,
         `[ -n "$INSTALLED" ] || { echo "modelctl --version produced no version"; exit 1; }`,
         `LOWEST="$(printf '%s\\n' "$INSTALLED" "${ctx.pin}" | sort -V | head -n1)"`,
