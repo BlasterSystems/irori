@@ -275,3 +275,76 @@ export async function runQuarantinePrune(
 
 /** Guard re-exported for tests: quarantine names follow the store-name rule. */
 export const QUARANTINE_NAME_RE = NAME_RE;
+
+export interface PruneCleanupQuarantineRow {
+  path: string;
+  status: "removed" | "would_remove" | "failed";
+  bytes: number | null;
+  error?: string;
+}
+export interface PruneCleanupQuarantineSummary {
+  kind: "prune-cleanup-quarantine";
+  applied: boolean;
+  freedBytes: number | null;
+  results: PruneCleanupQuarantineRow[];
+}
+
+/** IR-207: dry-run (default) / armed removal of the `.staging/.cleanup-quarantine`
+ *  debris an interrupted `cleanup-staging --apply` leaves behind — the verb
+ *  modelctl 0.24.0 added. Only direct children of that directory are ever
+ *  touched (modelctl's own rule); `confirm: "prune"` arms it, exactly like
+ *  quarantine-prune. */
+export async function runPruneCleanupQuarantine(
+  params: Record<string, unknown>,
+  ctx: ModelctlCtx,
+  emit: (line: string) => void,
+  signal: AbortSignal,
+): Promise<{ ok: boolean; error?: string }> {
+  const root = ctx.nasRoot;
+  if (!root || root.length === 0) {
+    emit("error: prune-cleanup-quarantine needs a NAS store root");
+    return { ok: false, error: "no nasRoot" };
+  }
+  if (signal.aborted) {
+    emit("error: canceled before prune");
+    return { ok: false, error: "canceled" };
+  }
+  const applied = params.confirm === "prune";
+  const binary = ctx.modelctlPath ?? "modelctl";
+  const env: Record<string, string> = {};
+  if (ctx.hfToken !== undefined && ctx.hfToken.length > 0) env.HF_TOKEN = ctx.hfToken;
+
+  const argv = ["prune-cleanup-quarantine", "--json"];
+  if (applied) argv.push("--apply");
+  argv.push("--root", root);
+
+  const before = applied ? await boundedStatfs(join(root, ".staging")) : null;
+  try {
+    const { stdout } = await execFileAsync(binary, argv, {
+      encoding: "utf8",
+      timeout: PRUNE_TIMEOUT_MS,
+      env: { ...process.env, ...env },
+    });
+    // Fail closed: anything but a JSON array reads as "nothing to remove",
+    // so a malformed modelctl output can never widen the deletion.
+    const parsed: unknown = JSON.parse(stdout);
+    const raw = Array.isArray(parsed) ? parsed : [];
+    const results: PruneCleanupQuarantineRow[] = raw.map((r) => {
+      const row = r as { path?: unknown; status?: unknown; bytes?: unknown };
+      return {
+        path: typeof row.path === "string" ? row.path : "unknown",
+        status: row.status === "removed" || row.status === "would_remove" ? row.status : "failed",
+        bytes: typeof row.bytes === "number" ? row.bytes : null,
+      };
+    });
+    const after = applied ? await boundedStatfs(join(root, ".staging")) : null;
+    const freedBytes = before !== null && after !== null ? Math.max(0, before - after) : null;
+    const summary: PruneCleanupQuarantineSummary = { kind: "prune-cleanup-quarantine", applied, freedBytes, results };
+    emit(JSON.stringify(summary));
+    return { ok: results.every((r) => r.status !== "failed") };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    emit(`error: prune-cleanup-quarantine failed: ${message}`);
+    return { ok: false, error: message };
+  }
+}

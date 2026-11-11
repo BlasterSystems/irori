@@ -110,6 +110,29 @@ describe("store free-space floor (IR-213)", () => {
     expect(readFileSync(log, "utf8").split("\n").filter(Boolean)).toHaveLength(3);
   });
 
+  it("passes the floor through to modelctl's --min-free-bytes for download and queue (IR-207)", async () => {
+    const dir = tempDir();
+    const { path, log } = fakeModelctl(dir);
+    const c = capturedWithDeferred();
+    const mgr = manager(path, 10 * TIB, 1.5 * TIB, c);
+    mgr.start("j-floor", "download", { name: "m" });
+    await c.donePromise;
+    expect(readFileSync(log, "utf8")).toContain(`--min-free-bytes ${1.5 * TIB}`);
+    mgr.start("j-q", "download-queue", { downloads: [{ source: "org/m" }], root: dir });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(readFileSync(log, "utf8").split("--min-free-bytes").length - 1).toBe(2);
+  });
+
+  it("omits the flag when the floor is disabled (modelctl default 0)", async () => {
+    const dir = tempDir();
+    const { path, log } = fakeModelctl(dir);
+    const c = capturedWithDeferred();
+    const mgr = manager(path, 10 * TIB, 0, c);
+    mgr.start("j-nofloor", "download", { name: "m" });
+    await c.donePromise;
+    expect(readFileSync(log, "utf8")).not.toContain("--min-free-bytes");
+  });
+
   it("defaults the floor to 1.5 TiB and honors IRORI_MIN_STORE_FREE_BYTES", () => {
     expect(loadConfig({ IRORI_NODE_TOKEN: "t", IRORI_SERVER_URL: "ws://h:1" }).minStoreFreeBytes).toBe(1.5 * TIB);
     expect(loadConfig({ IRORI_NODE_TOKEN: "t", IRORI_SERVER_URL: "ws://h:1", IRORI_MIN_STORE_FREE_BYTES: "0" }).minStoreFreeBytes).toBe(0);

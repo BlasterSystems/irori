@@ -38,6 +38,10 @@ export const JOB_KINDS = [
   // IR-211: armed quarantine prune — per model NAME via modelctl
   // cleanup-quarantine (validates the repaired reference before deleting).
   "quarantine-prune",
+  // IR-207: modelctl 0.24.0 prune-cleanup-quarantine — the .staging/
+  // .cleanup-quarantine debris an interrupted cleanup-staging --apply leaves
+  // behind. Dry-run unless params.confirm === "prune" (quarantine-prune rule).
+  "prune-cleanup-quarantine",
   "catalog-refresh",
   "sync-cards",
   // Disk hygiene (M7, SPEC §11.6) — executed by the agent itself, not modelctl.
@@ -107,6 +111,21 @@ export const quarantinePruneSummarySchema = z.object({
   results: z.array(quarantinePruneResultSchema),
 });
 export type QuarantinePruneSummary = z.infer<typeof quarantinePruneSummarySchema>;
+
+/** IR-207: one debris tree of a prune-cleanup-quarantine job (modelctl 0.24.0). */
+export const pruneCleanupQuarantineRowSchema = z.object({
+  path: z.string(),
+  status: z.enum(["removed", "would_remove", "failed"]),
+  bytes: z.number().nullable(),
+  error: z.string().optional(),
+});
+export const pruneCleanupQuarantineSummarySchema = z.object({
+  kind: z.literal("prune-cleanup-quarantine"),
+  applied: z.boolean(),
+  freedBytes: z.number().nullable(),
+  results: z.array(pruneCleanupQuarantineRowSchema),
+});
+export type PruneCleanupQuarantineSummary = z.infer<typeof pruneCleanupQuarantineSummarySchema>;
 
 export const JOB_STATUSES = ["queued", "running", "succeeded", "failed", "canceled"] as const;
 export const jobStatusSchema = z.enum(JOB_STATUSES);

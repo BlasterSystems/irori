@@ -2,7 +2,15 @@ import { mkdirSync, mkdtempSync, chmodSync, writeFileSync, readFileSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { QUARANTINE_NAME_RE, runQuarantinePrune, runStagingTreeAudit, type StagingTreeReport, type QuarantinePruneSummary } from "../src/staging-trees.js";
+import {
+  QUARANTINE_NAME_RE,
+  runPruneCleanupQuarantine,
+  runQuarantinePrune,
+  runStagingTreeAudit,
+  type PruneCleanupQuarantineSummary,
+  type StagingTreeReport,
+  type QuarantinePruneSummary,
+} from "../src/staging-trees.js";
 import type { ModelctlCtx } from "../src/modelctl.js";
 
 const temps: string[] = [];
@@ -184,5 +192,87 @@ describe("runQuarantinePrune", () => {
     }
     expect(lines.every((l) => l === "error: quarantine-prune needs a non-empty names array of strings")).toBe(true);
     expect(existsSync(join(dir, "apply.log"))).toBe(false);
+  });
+});
+
+describe("runPruneCleanupQuarantine (IR-207)", () => {
+  /** Fake modelctl for the prune-cleanup-quarantine argv: --json emits ROWS
+   *  (optionally failing under --apply), anything else exits 2. */
+  function fakePruneBinary(dir: string, opts: { rows?: Array<{ path: string; status: string; bytes: number }>; failApply?: boolean } = {}): string {
+    const path = join(dir, "modelctl");
+    const rows = JSON.stringify(opts.rows ?? []);
+    writeFileSync(
+      path,
+      [
+        "#!/bin/sh",
+        `case "$*" in`,
+        `  *--apply*) ${opts.failApply ? "echo 'prune boom' >&2; exit 3" : `printf '%s' '${rows}'`} ;;`,
+        `  *--json*) printf '%s' '${rows}' ;;`,
+        `  *) echo "unexpected: $*" >&2; exit 2 ;;`,
+        `esac`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    return path;
+  }
+
+  const ROWS = [{ path: "/store/.staging/.cleanup-quarantine/abc", status: "would_remove", bytes: 4096 }];
+
+  it("dry-runs by default: would_remove rows, applied false, no statfs delta", async () => {
+    const dir = tempDir();
+    const binary = fakePruneBinary(dir, { rows: ROWS });
+    const lines: string[] = [];
+    const result = await runPruneCleanupQuarantine({}, { nasRoot: "/store", pin: "0.24.0", modelctlPath: binary }, (l) => lines.push(l), new AbortController().signal);
+    expect(result.ok).toBe(true);
+    const summary = JSON.parse(lines.at(-1)!) as PruneCleanupQuarantineSummary;
+    expect(summary.kind).toBe("prune-cleanup-quarantine");
+    expect(summary.applied).toBe(false);
+    expect(summary.freedBytes).toBeNull();
+    expect(summary.results).toEqual([{ path: ROWS[0]!.path, status: "would_remove", bytes: 4096 }]);
+  });
+
+  it("applies with confirm:prune and reports the statfs delta", async () => {
+    const dir = tempDir();
+    mkdirSync(join(dir, ".staging"), { recursive: true }); // boundedStatfs target
+    const binary = fakePruneBinary(dir, { rows: ROWS.map((r) => ({ ...r, status: "removed" })) });
+    const lines: string[] = [];
+    const result = await runPruneCleanupQuarantine({ confirm: "prune" }, { nasRoot: dir, pin: "0.24.0", modelctlPath: binary }, (l) => lines.push(l), new AbortController().signal);
+    expect(result.ok).toBe(true);
+    const summary = JSON.parse(lines.at(-1)!) as PruneCleanupQuarantineSummary;
+    expect(summary.applied).toBe(true);
+    expect(summary.results[0]).toMatchObject({ status: "removed" });
+    // The delta is a real statfs measurement (other processes write to the
+    // same volume) — the point is that it is measured, not null.
+    expect(summary.freedBytes).not.toBeNull();
+    expect(summary.freedBytes).toBeGreaterThanOrEqual(0);
+  });
+
+  it("fails closed on malformed output and on a failing apply", async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "modelctl"), "#!/bin/sh\necho 'not json'\n", { mode: 0o755 });
+    const lines: string[] = [];
+    const result = await runPruneCleanupQuarantine({}, { nasRoot: dir, pin: "0.24.0", modelctlPath: join(dir, "modelctl") }, (l) => lines.push(l), new AbortController().signal);
+    // Malformed modelctl output must FAIL the job (never read as "nothing to
+    // remove") — the operator sees the error instead of a silent no-op.
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not json");
+    expect(lines.some((l) => l.startsWith("{"))).toBe(false); // no summary line
+
+    const failDir = tempDir();
+    const failBinary = fakePruneBinary(failDir, { rows: ROWS, failApply: true });
+    const failLines: string[] = [];
+    const failed = await runPruneCleanupQuarantine({ confirm: "prune" }, { nasRoot: "/store", pin: "0.24.0", modelctlPath: failBinary }, (l) => failLines.push(l), new AbortController().signal);
+    expect(failed.ok).toBe(false);
+    expect(failed.error).toContain("prune boom");
+  });
+
+  it("needs a store root and respects cancellation", async () => {
+    const lines: string[] = [];
+    const noRoot = await runPruneCleanupQuarantine({}, { nasRoot: null, pin: "0.24.0" }, (l) => lines.push(l), new AbortController().signal);
+    expect(noRoot).toMatchObject({ ok: false, error: "no nasRoot" });
+    const aborted = new AbortController();
+    aborted.abort();
+    const canceled = await runPruneCleanupQuarantine({ confirm: "prune" }, { nasRoot: "/store", pin: "0.24.0" }, (l) => lines.push(l), aborted.signal);
+    expect(canceled).toMatchObject({ ok: false, error: "canceled" });
   });
 });

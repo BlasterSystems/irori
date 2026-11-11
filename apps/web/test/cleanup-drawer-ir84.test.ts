@@ -10,14 +10,44 @@ import { mount } from "@vue/test-utils";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 
+/** The mocked job runner responds per dispatched kind (IR-207 debris flow). */
+const modelsState = vi.hoisted(() => ({ kind: "hygiene-audit" as string }));
+
+vi.mock("../src/models", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/models")>();
+  return {
+    ...actual,
+    createJob: vi.fn(async (_nodeId: string, kind: string) => {
+      modelsState.kind = kind;
+      return { id: UUID };
+    }),
+    fetchJob: vi.fn(async () => {
+    let line = '{"outcomes":[{"category":"pip-cache","status":"cleaned","bytesReclaimed":1048576,"itemsRemoved":3,"error":null}]}';
+    if (modelsState.kind === "staging-tree-audit") {
+      line = JSON.stringify({
+        kind: "staging-tree-audit",
+        trees: [{ path: "/store/.staging/.cleanup-quarantine/abc", kind: "cleanup-quarantine", name: null, bytes: 1000, mtimeMs: null }],
+        totals: { stagingBytes: 0, activeQuarantineBytes: 0, cleanupQuarantineBytes: 1000 },
+        freeBytes: null,
+        timedOut: false,
+      });
+    }
+    if (modelsState.kind === "prune-cleanup-quarantine") {
+      line = JSON.stringify({
+        kind: "prune-cleanup-quarantine",
+        applied: true,
+        freedBytes: 1000,
+        results: [{ path: "/store/.staging/.cleanup-quarantine/abc", status: "removed", bytes: 1000 }],
+      });
+    }
+    return {
+      job: { id: UUID, status: "succeeded", kind: modelsState.kind, createdAt: new Date().toISOString(), exitCode: 0, startedAt: null, finishedAt: null, nodeId: UUID },
+      output: [{ seq: 1, line }],
+    };
+  }),
+};
+});
 vi.mock("../src/scrim", () => ({ vScrimClose: {} }));
-vi.mock("../src/models", () => ({
-  createJob: vi.fn(async () => ({ id: UUID })),
-  fetchJob: vi.fn(async () => ({
-    job: { id: UUID, status: "succeeded", kind: "hygiene-audit", createdAt: new Date().toISOString(), exitCode: 0, startedAt: null, finishedAt: null, nodeId: UUID },
-    output: [{ seq: 1, line: '{"outcomes":[{"category":"pip-cache","status":"cleaned","bytesReclaimed":1048576,"itemsRemoved":3,"error":null}]}' }],
-  })),
-}));
 vi.mock("../src/api", () => ({
   fetchCleanup: vi.fn(async () => ({ latestAudit: null, history: [], prevention: { weeklySafePass: false, logRotationApplied: false } })),
   setWeeklySafePass: vi.fn(async () => ({ weeklySafePass: true, logRotationApplied: true })),
@@ -28,6 +58,7 @@ import type { CleanupDrawerProps } from "./cleanup-harness";
 afterEach(() => {
   try { vi.useRealTimers(); } catch { /* not faked */ }
   vi.clearAllMocks();
+  modelsState.kind = "hygiene-audit";
 });
 
 async function mountDrawer() {
@@ -90,6 +121,41 @@ describe("CleanupDrawer", () => {
     const w = await mountDrawer();
     await w.findAll("button").find((b) => b.text() === "History")!.trigger("click");
     expect(w.text()).not.toContain("never audited");
+    w.unmount();
+  });
+
+  it("dry-runs the cleanup debris prune, then arms and applies it (IR-207)", async () => {
+    const w = await mountDrawer();
+    vi.useFakeTimers();
+    // The staging audit renders the debris section (totals > 0).
+    await w.findAll("button").find((b) => b.text() === "Audit staging trees")!.trigger("click");
+    await flush();
+    await vi.advanceTimersByTimeAsync(2100);
+    await flush();
+    expect(w.text()).toContain("cleanup-quarantine 1 KB");
+
+    // Dry run: dispatches without confirm, never deletes.
+    await w.findAll("button").find((b) => b.text() === "List cleanup debris (dry run)")!.trigger("click");
+    await flush();
+    await vi.advanceTimersByTimeAsync(2100);
+    await flush();
+    const { createJob } = (await import("../src/models")) as unknown as { createJob: ReturnType<typeof vi.fn> };
+    expect(createJob).toHaveBeenCalledWith(UUID, "prune-cleanup-quarantine", {});
+    expect(w.text()).toContain("dry run");
+
+    // Arm → typed confirm → apply.
+    await w.findAll("button").find((b) => b.text() === "Prune debris…")!.trigger("click");
+    const armed = w.findAll("button").find((b) => b.text() === "Prune debris")!;
+    expect(armed.attributes("disabled")).toBeDefined(); // confirm empty
+    await w.find("input[aria-label='Type prune to confirm removing the cleanup-quarantine debris']").setValue("prune");
+    expect(armed.attributes("disabled")).toBeUndefined();
+    await armed.trigger("click");
+    await flush();
+    await vi.advanceTimersByTimeAsync(2100);
+    await flush();
+    expect(createJob).toHaveBeenCalledWith(UUID, "prune-cleanup-quarantine", { confirm: "prune" });
+    expect(w.text()).toContain("applied");
+    expect(w.text()).toContain("freed");
     w.unmount();
   });
 });
