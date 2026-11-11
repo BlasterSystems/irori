@@ -51,7 +51,12 @@ export function thermalTransitions(prev: GpuSnapshot[], next: GpuSnapshot[]): Ar
   return out;
 }
 const DEFAULT_WRITE_FLUSH_MS = 5_000;
-const DEFAULT_MARK_SEEN_THROTTLE_MS = 30_000;
+// IR-204 (ingest fix follow-up): node.lastSeenAt feeds the telemetry_gap_s
+// rule (seed 15 s). A 30 s mark-seen throttle made a HEALTHY agent read as a
+// ~30 s gap on every sweep — permanent false findings. 10 s keeps a healthy
+// gap under the threshold while an agent that truly stops answering still
+// trips it within one sweep.
+const DEFAULT_MARK_SEEN_THROTTLE_MS = 10_000;
 /** Probe cadence handed to agents: heads/standalone probe, workers detect-only. */
 const LLM_PROBE_CADENCE_MS = 2_000;
 const LLM_DETECT_CADENCE_MS = 10_000;
