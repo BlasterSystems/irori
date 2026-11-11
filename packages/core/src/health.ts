@@ -28,6 +28,12 @@ export const healthMetricSchema = z.enum([
    * never per request.
    */
   "hub_disk_pct",
+  /**
+   * IR-202: database availability (0 = reachable, 1 = unreachable, evaluated
+   * from the existing dbHealthy dep once per sweep). Fleet-scoped: the hub
+   * has one database; degraded routes keep answering 503 unchanged.
+   */
+  "db_unavailable",
 ]);
 export type HealthMetric = z.infer<typeof healthMetricSchema>;
 
@@ -81,6 +87,8 @@ export const healthThresholdsSchema = z.object({
   diskWarnPct: z.number(),
   /** IR-201: the hub's own filesystem warn threshold. */
   hubDiskWarnPct: z.number(),
+  /** IR-202: the database-unavailable rule threshold (1 = unavailable). */
+  dbUnavailable: z.number(),
 });
 export type HealthThresholds = z.infer<typeof healthThresholdsSchema>;
 
@@ -123,6 +131,11 @@ export const HEALTH_SEED_RULES: Array<{
   // 2026-11-09 outage class). Fleet-scoped — one gauge per sweep, never per
   // request; the pg-host disk stays invisible to SQL (epic open question).
   { name: "Hub disk warn", metric: "hub_disk_pct", op: "gte", threshold: 80, severity: "warn", cooldownSec: 3600, scope: "fleet" },
+  // IR-202: a database outage must be visible to webhooks, Prometheus and the
+  // UI (the 2026-11-09 incident: Overview swallowed the 503s into the
+  // no-nodes-yet ghost). Fleet-scoped — the hub has one database; the value
+  // is 1 only while the same boolean /healthz reports is unreachable.
+  { name: "Database unavailable", metric: "db_unavailable", op: "eq", threshold: 1, severity: "critical", cooldownSec: 600, scope: "fleet" },
 ];
 
 /** Shared threshold values for the web (from the seed rules). */
@@ -131,5 +144,6 @@ export function seedThresholds(): HealthThresholds {
   const gpuCritical = HEALTH_SEED_RULES.find((r) => r.metric === "gpu_temp_c" && r.severity === "critical")!;
   const disk = HEALTH_SEED_RULES.find((r) => r.metric === "disk_pct")!;
   const hubDisk = HEALTH_SEED_RULES.find((r) => r.metric === "hub_disk_pct")!;
-  return { tempWarnC: gpuWarn.threshold, tempCriticalC: gpuCritical.threshold, diskWarnPct: disk.threshold, hubDiskWarnPct: hubDisk.threshold };
+  const db = HEALTH_SEED_RULES.find((r) => r.metric === "db_unavailable")!;
+  return { tempWarnC: gpuWarn.threshold, tempCriticalC: gpuCritical.threshold, diskWarnPct: disk.threshold, hubDiskWarnPct: hubDisk.threshold, dbUnavailable: db.threshold };
 }

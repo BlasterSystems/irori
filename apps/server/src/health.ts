@@ -28,6 +28,12 @@ export interface HealthSinks {
    * measurable). Absence skips the rule (tests, gauge not wired).
    */
   hubDiskPct?: () => Promise<number | null>;
+  /**
+   * IR-202: database availability (true = reachable). The db client's
+   * isHealthy() resolves false while the DB is down; a rejected promise is
+   * treated as not measurable. Absence skips the rule (older harnesses).
+   */
+  dbHealthy?: () => Promise<boolean>;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }
@@ -331,7 +337,8 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       const gpuCritical = bySeed.get("GPU temp critical")?.threshold ?? 90;
       const disk = bySeed.get("Disk usage warn")?.threshold ?? 80;
       const hubDisk = bySeed.get("Hub disk warn")?.threshold ?? 80;
-      return { tempWarnC: gpuWarn ?? 70, tempCriticalC: gpuCritical ?? 90, diskWarnPct: disk ?? 80, hubDiskWarnPct: hubDisk ?? 80 };
+      const db = bySeed.get("Database unavailable")?.threshold ?? 1;
+      return { tempWarnC: gpuWarn ?? 70, tempCriticalC: gpuCritical ?? 90, diskWarnPct: disk ?? 80, hubDiskWarnPct: hubDisk ?? 80, dbUnavailable: db };
     },
     async onSnapshot(nodeId, snapshot) {
       latest.set(nodeId, snapshot);
@@ -382,6 +389,15 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       if (hubRule !== undefined && opts.hubDiskPct !== undefined) {
         const value = await opts.hubDiskPct().catch(() => null);
         if (value !== null) await evaluate(hubRule, null, value);
+      }
+      // IR-202: the database rule reuses the db client's isHealthy() boolean
+      // (the same one /healthz reports) once per sweep — never per request. A
+      // rejected ping is treated as not measurable, exactly like a failed
+      // statfs gauge.
+      const dbRule = rules.find((r) => r.metric === "db_unavailable");
+      if (dbRule !== undefined && opts.dbHealthy !== undefined) {
+        const value = await opts.dbHealthy().then((h) => (h ? 0 : 1)).catch(() => null);
+        if (value !== null) await evaluate(dbRule, null, value);
       }
     },
     async findings() {

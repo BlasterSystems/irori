@@ -308,6 +308,11 @@ async function boot(): Promise<void> {
       const s = await statfs(config.hubDiskPath);
       return s.blocks > 0 ? ((s.blocks - s.bfree) / s.blocks) * 100 : null;
     },
+    // IR-202: the database rule reuses the existing dbHealthy dep (the same
+    // boolean /healthz reports) — 0 = reachable, 1 = unreachable, once per
+    // sweep. isHealthy() resolves false while the DB is down, so degraded
+    // routes keep answering 503 unchanged.
+    dbHealthy: () => state.dbHealthy(),
     fetchImpl: fetch,
   });
   await state.health.ensureSeed().catch((err: unknown) => log.warn("health seed failed: " + String(err)));

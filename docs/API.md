@@ -519,7 +519,13 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   cooldown window per rule. `GET /api/v1/health/findings` returns the open
   findings (NodeDetail renders severity chips).
 - `GET /api/v1/health/thresholds` — the UI threshold values (temp warn /
-  critical, disk warn, hub disk warn (IR-201)); the web has no second copy.
+  critical, disk warn, hub disk warn (IR-201), database unavailable (IR-202));
+  the web has no second copy.
+- Fleet-scoped gauges evaluate once per 30 s sweep, never per request: the
+  hub's own filesystem (`hub_disk_pct` via `HUB_DISK_PATH`, IR-201) and
+  database availability (`db_unavailable`, 1 = the same boolean `/healthz`
+  reports, IR-202) — a failed gauge resolves to not-measurable and skips the
+  rule.
 - `GET /api/v1/metrics` — Prometheus text exposition (irori_up, per-node
   gauges, irori_collector_last_success_timestamp_seconds). **404 while
   disabled**; `GET/PUT /api/v1/settings/metrics` flips the flag (audited).
