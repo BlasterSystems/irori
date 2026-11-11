@@ -267,6 +267,8 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 /* ── Banners ───────────────────────────────────────────────────────── */
 .banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 13px; color: var(--muted); }
 .banner--warn { border-color: var(--thread); background: var(--thread-wash); color: var(--ink); }
+/* IR-203: critical findings read as danger, not just attention. */
+.banner--critical { color: var(--thread-ink); border-left: 3px solid var(--thread); }
 
 /* ── Drawers / pick rows (shared chrome; CleanupDrawer has no scoped styles —
    ServeView/ModelsView keep narrower scoped overrides) ────────────────────── */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NodeInfo } from "@irori/core";
+import type { HealthFinding, NodeInfo } from "@irori/core";
 import { createLiveStore } from "../src/live";
 import { feedLines } from "../src/overview";
 
@@ -103,6 +103,73 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+const findingFixture: HealthFinding = {
+  nodeId: "",
+  ruleId: "11111111-1111-4111-8111-111111111111",
+  metric: "db_unavailable",
+  severity: "critical",
+  summary: "Database unavailable: 1 eq 1",
+  since: "2026-11-11T09:00:00.000Z",
+};
+
+describe("health findings (IR-203)", () => {
+  it("boot-fetches findings and re-fetches throttled on health transitions", async () => {
+    let delayMs = 0;
+    let calls = 0;
+    const fetchHealthFindingsFn = vi.fn(async () => {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, delayMs));
+      return [findingFixture];
+    });
+    const store = createLiveStore({
+      fetchNodesFn: async () => [],
+      fetchRecentJobsFn: async () => [],
+      fetchHealthFindingsFn,
+      EventSourceCtor: MockEventSource as unknown as typeof EventSource,
+    });
+    await store.init();
+    expect(fetchHealthFindingsFn).toHaveBeenCalledTimes(1); // boot fetch
+    expect(store.findings.value).toEqual([findingFixture]);
+
+    const es = MockEventSource.instances.at(-1)!;
+    // One health frame → exactly one throttled re-fetch.
+    es.emit(JSON.stringify({ type: "health", serverTimeMs: 1, nodeId: null, ruleId: findingFixture.ruleId, ruleName: "Database unavailable", metric: "db_unavailable", severity: "critical", state: "open", summary: "x" }));
+    await vi.waitFor(() => expect(fetchHealthFindingsFn).toHaveBeenCalledTimes(2));
+
+    // A burst of transitions emitted synchronously all land in the first
+    // fetch's in-flight window and coalesce into ONE queued re-fetch.
+    delayMs = 25;
+    for (let i = 0; i < 3; i++) {
+      es.emit(JSON.stringify({ type: "health", serverTimeMs: 2 + i, nodeId: null, ruleId: findingFixture.ruleId, ruleName: "Hub disk warn", metric: "hub_disk_pct", severity: "warn", state: "open", summary: "y" }));
+    }
+    await vi.waitFor(() => expect(fetchHealthFindingsFn).toHaveBeenCalledTimes(3));
+    await new Promise((r) => setTimeout(r, 60)); // let any runaway re-fetch land
+    expect(fetchHealthFindingsFn).toHaveBeenCalledTimes(3);
+    // A later transition still triggers a fresh re-fetch (the queue drains).
+    delayMs = 0;
+    es.emit(JSON.stringify({ type: "health", serverTimeMs: 9, nodeId: null, ruleId: findingFixture.ruleId, ruleName: "Hub disk warn", metric: "hub_disk_pct", severity: "warn", state: "clear", summary: "y" }));
+    await vi.waitFor(() => expect(fetchHealthFindingsFn).toHaveBeenCalledTimes(4));
+    expect(store.findings.value).toEqual([findingFixture]);
+  });
+
+  it("keeps the last list and never throws when the findings GET fails", async () => {
+    const fetchHealthFindingsFn = vi.fn(async () => [findingFixture]);
+    const store = createLiveStore({
+      fetchNodesFn: async () => [],
+      fetchRecentJobsFn: async () => [],
+      fetchHealthFindingsFn,
+      EventSourceCtor: MockEventSource as unknown as typeof EventSource,
+    });
+    await store.init();
+    expect(store.findings.value).toHaveLength(1);
+
+    fetchHealthFindingsFn.mockRejectedValueOnce(new Error("HTTP 503"));
+    store.ingest(JSON.stringify({ type: "health", serverTimeMs: 1, nodeId: null, ruleId: findingFixture.ruleId, ruleName: "Database unavailable", metric: "db_unavailable", severity: "critical", state: "clear", summary: "x" }));
+    await vi.waitFor(() => expect(fetchHealthFindingsFn).toHaveBeenCalledTimes(2));
+    expect(store.findings.value).toEqual([findingFixture]); // stale list kept
+  });
 });
 
 describe("createLiveStore", () => {
