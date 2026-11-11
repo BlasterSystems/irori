@@ -1,6 +1,6 @@
 # ADR-0017: Serving survives agent death — per-setup scope units
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-11
 - **Decision owners:** Bruno Pires
 - **Scope:** apps/agent (setups, jobs, unit), apps/server (agent-update guard), deployment

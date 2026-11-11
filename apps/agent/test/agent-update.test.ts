@@ -51,4 +51,29 @@ describe("agent-update job (IRI-012)", () => {
     expect(ev.done[0]?.[1]).toBe("failed");
     expect(ev.done[0]?.[0]).toBe("j1");
   });
+
+  it("refuses while a running setup is not scope-wrapped (ADR-0017)", () => {
+    const ev = capture();
+    const jobs = new JobManager(
+      () => ({
+        nasRoot: null,
+        pin: "0",
+        serverUrl: "ws://hub:3947/agent-ws",
+        unscoopedRunningSetups: () => ["0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e01"],
+      }),
+      ev,
+    );
+    expect(jobs.start("j1", "agent-update", {})).toBe(true);
+    expect(ev.out[0]).toContain("not scope-wrapped");
+    expect(ev.out[0]).toContain("0b6c1c26");
+    expect(ev.done[0]).toEqual(["j1", "failed", 1]);
+  });
+
+  it("proceeds when every running setup is scope-wrapped (ADR-0017)", () => {
+    const ev = capture();
+    const jobs = new JobManager(() => ({ nasRoot: null, pin: "0", serverUrl: "ws://hub:3947/agent-ws", unscoopedRunningSetups: () => [] }), ev);
+    expect(jobs.start("j1", "agent-update", {})).toBe(true);
+    // The transient-unit argv was built (no refusal output) — the job is running.
+    expect(ev.out.filter((l) => l.includes("not scope-wrapped"))).toHaveLength(0);
+  });
 });

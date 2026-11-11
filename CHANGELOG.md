@@ -6,6 +6,20 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Serving survives agent death** (ADR-0017, IRI-144): setups now spawn
+  inside a `iroori-setup-<slug>` systemd transient scope — the engine's
+  cgroup leaves the agent unit, so an agent restart, crash loop, or
+  self-update never kills a running engine. The scope unit name is
+  persisted in the driver record; `stop()` prefers
+  `systemctl stop <unit>` after the stop script; boot adopts a still-active
+  scope even when the recorded process group is gone (daemonizing
+  engines). Hosts without systemd fall back to the previous detached
+  spawn. The agent-update job refuses while an unscooped setup runs
+  (ground truth), and the hub's 409 guard relaxes for agents ≥ 0.8.0.
+  The agent reports version 0.8.0.
+
 ## [0.7.0] — 2026-11-11
 
 ### Added

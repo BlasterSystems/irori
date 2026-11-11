@@ -183,6 +183,7 @@ async function run(): Promise<void> {
       agentUser,
       storeFreeBytes: () => storeFreeBytesCache,
       minStoreFreeBytes: config.minStoreFreeBytes,
+      unscoopedRunningSetups: () => driver.unscoopedRunningSetups(),
       resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
     }),
     {
@@ -498,7 +499,8 @@ async function run(): Promise<void> {
   // Persisted-driver re-attach runs only after `transport` exists: init
   // re-announces live records through the event callbacks, which close over
   // it — invoked earlier they hit the TDZ and crash-looped dgx3 (IR-125).
-  driver.init();
+  // Awaited so scope adoption (ADR-0017) settles before the first hello.
+  await driver.init();
   ensureProbes(config.llmTargets);
   // IR-131: kill orphans left by a previous process BEFORE the first hello —
   // the job-done frames buffer offline and replay on hello-ok.

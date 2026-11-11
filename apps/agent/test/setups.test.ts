@@ -131,8 +131,10 @@ describe("SetupDriver", () => {
   it("keeps durable markers on their own line and never skips pending engine bytes (review fix)", async () => {
     const dir = makeDir();
     // A partial line (no newline yet), a pause long enough for several tailer
-    // drains, then the rest of the line.
-    const start = script(dir, "start.sh", "printf 'partial'; sleep 3; echo ' done'; sleep 60");
+    // drains, then the rest of the line. The pause must comfortably outlast
+    // the marker window below even under workspace-parallel load (a 3 s
+    // pause flaked there — the line closed before the marker landed).
+    const start = script(dir, "start.sh", "printf 'partial'; sleep 10; echo ' done'; sleep 60");
     const stop = script(dir, "stop.sh", "true");
     const result = await h.driver.start(ID, RUN, start, stop, {}, null);
     expect(result.ok).toBe(true);
@@ -148,9 +150,9 @@ describe("SetupDriver", () => {
     expect(h.logs.filter((l) => l.line === "driver: test marker").length).toBe(1);
 
     // The engine's bytes were not skipped: the rest of the line still lands.
-    await waitFor(() => h.logs.some((l) => l.line.includes("partial done")));
+    await waitFor(() => h.logs.some((l) => l.line.includes("partial done")), 15_000);
     await h.driver.stop(ID, 1000).catch(() => {});
-  });
+  }, 15_000);
 
   it("falls back to killing the process group when the stop script fails", async () => {
     const dir = makeDir();

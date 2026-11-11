@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createServer, Socket } from "node:net";
 import { accessSync, appendFileSync, constants, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync, openSync, closeSync, readSync } from "node:fs";
 import { join } from "node:path";
@@ -67,6 +68,9 @@ export interface SetupDriverDeps {
   /** IR-156 test seams for the watchdog windows (defaults above). */
   daemonEngineWarmupMs?: number;
   daemonLogIdleMs?: number;
+  /** ADR-0017: the systemd surface for scope isolation; defaults to the real
+   *  host systemd. Injected in tests. */
+  scope?: ScopeSurface;
   log?: (message: string) => void;
 }
 
@@ -155,6 +159,11 @@ interface DriverRecord {
    *  the run's execution context, even if the node setting changes mid-run. */
   runUser: string | null;
   runHome: string | null;
+  /** ADR-0017: the transient scope unit holding the engine's cgroup, when the
+   *  host systemd could create one. null = plain detached spawn (the engine
+   *  dies with the agent unit). Recorded so stop() prefers `systemctl stop`
+   *  and boot adoption can see an engine the pgid probe misses. */
+  scopeUnit: string | null;
   /** IR-149: next ring seq, persisted at every state write so seqs stay
    *  monotonic across agent restarts (the ServeView panel keys by seq). */
   nextSeq: number;
@@ -188,6 +197,62 @@ function isExecutable(path: string): boolean {
 
 /** systemd's default PATH — the fallback when the agent env has none. */
 const SYSTEMD_DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+/**
+ * ADR-0017: the systemd surface the driver uses to isolate setups from the
+ * agent's own cgroup. A `systemd-run --scope` transient unit owns the start
+ * script and its engine descendants, so an agent restart or crash loop
+ * (KillMode=control-group default) never reaches them — the same trick the
+ * agent-update transient unit uses on itself. The scope lasts exactly as
+ * long as its last process, i.e. the engine's whole lifetime.
+ */
+export interface ScopeSurface {
+  /** Whether transient scope units can be created on this host. */
+  available(): boolean;
+  /** Fresh unique unit name for a setup (random suffix: no collisions). */
+  unitName(setupId: string): string;
+  /** Wrap a spawn argv in the scope unit. */
+  argv(unit: string, argv: string[]): string[];
+  /** Is the unit currently active? (Boot adoption, start guard.) */
+  isActive(unit: string): Promise<boolean>;
+  /** Stop every process in the unit's cgroup (clean SIGTERM from systemd). */
+  stop(unit: string): Promise<void>;
+}
+
+/** The real host systemd. Non-Linux or non-systemd hosts report unavailable
+ *  and the driver falls back to today's plain detached spawn. */
+export const systemdScope: ScopeSurface = {
+  available(): boolean {
+    if (process.platform !== "linux") return false;
+    try {
+      if (!existsSync("/run/systemd/system")) return false; // systemd is not PID 1
+    } catch {
+      return false;
+    }
+    for (const path of ["/usr/bin/systemd-run", "/bin/systemd-run"]) {
+      if (isExecutable(path)) return true;
+    }
+    return false;
+  },
+  unitName(setupId: string): string {
+    return `irori-setup-${setupId.replace(/-/g, "").slice(0, 8)}-${randomBytes(2).toString("hex")}`;
+  },
+  argv(unit: string, argv: string[]): string[] {
+    return ["systemd-run", "--scope", "--quiet", `--unit=${unit}`, "--", ...argv];
+  },
+  async isActive(unit: string): Promise<boolean> {
+    return await new Promise<boolean>((resolve) => {
+      execFile("systemctl", ["is-active", unit], { timeout: 3_000 }, (err, stdout) => {
+        resolve(err === null && stdout.trim() === "active");
+      });
+    });
+  },
+  async stop(unit: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      execFile("systemctl", ["stop", unit], { timeout: 15_000 }, (err) => (err === null ? resolve() : reject(err)));
+    });
+  },
+};
 
 /** A cache user's serve execution context (IRI-045). */
 export interface ServeWrap {
@@ -227,6 +292,11 @@ async function pickFreeLoopbackPort(): Promise<number> {
 export class SetupDriver {
   private readonly records = new Map<string, DriverRecord>();
   private readonly children = new Map<string, ChildProcess>();
+  private readonly scope: ScopeSurface;
+
+  constructor(private readonly deps: SetupDriverDeps) {
+    this.scope = deps.scope ?? systemdScope;
+  }
   private readonly rings = new Map<string, RingEntry[]>();
   private readonly seqs = new Map<string, number>();
   private readonly tailers = new Map<string, { timer: NodeJS.Timeout; offset: number; carry: string }>();
@@ -238,8 +308,6 @@ export class SetupDriver {
   private readonly runIds = new Map<string, string>();
   private readonly stopping = new Set<string>();
 
-  constructor(private readonly deps: SetupDriverDeps) {}
-
   /** Run-log dir, created lazily so a start before init() still lands durably. */
   private mkLogDir(): void {
     try {
@@ -249,8 +317,11 @@ export class SetupDriver {
     }
   }
 
-  /** Loads persisted drivers, drops dead ones, reports live ones. */
-  init(): void {
+  /** Loads persisted drivers, drops dead ones, reports live ones. ADR-0017:
+   *  a scope-wrapped engine can outlive its script's process group (daemonizing
+   *  engines) — dead-group records with a scope unit get one is-active probe,
+   *  and an active scope re-attaches exactly like a live group. */
+  async init(): Promise<void> {
     mkdirSync(join(this.deps.stateDir, LOG_DIR), { recursive: true });
     const file = join(this.deps.stateDir, STATE_FILE);
     if (!existsSync(file)) return;
@@ -263,38 +334,33 @@ export class SetupDriver {
       return;
     }
     const kept: DriverRecord[] = [];
+    const scopeCandidates: DriverRecord[] = [];
     for (const record of records) {
       if (record.pgid !== null && groupAlive(record.pgid)) {
         // Re-attached: the engine survived the agent restart. Its stdout/stderr
         // ride an inherited fd straight into record.logPath (IR-149), so the
         // file kept growing while the agent was gone — resume capture by
         // tailing it from EOF and seed the seq counter monotonically.
-        this.records.set(record.setupId, record);
-        this.runIds.set(record.setupId, record.runId);
-        this.seqs.set(record.setupId, this.seedSeq(record));
-        this.startTailer(record.setupId, record.logPath, "eof");
+        this.reattach(record);
         kept.push(record);
-        if (record.proxyPort !== null && record.enginePort !== null && this.deps.capture !== undefined) {
-          void this.deps.capture
-            .start(record.setupId, record.proxyPort, record.enginePort, record.retention ?? null)
-            .then(() =>
-              this.deps.capture?.log(record.setupId, `driver: capture proxy re-attached :${record.proxyPort} → 127.0.0.1:${record.enginePort}`),
-            )
-            .catch((err: unknown) =>
-              this.deps.capture?.log(
-                record.setupId,
-                `driver: capture proxy re-attach failed on :${record.proxyPort} (${err instanceof Error ? err.message : String(err)})`,
-              ),
-            );
-        }
-        this.deps.events.onEvent(record.setupId, {
-          runId: record.runId,
-          state: "running",
-          exitCode: null,
-          pid: record.pid,
-          pgid: record.pgid,
-          error: null,
-        });
+      } else {
+        if (record.scopeUnit != null) scopeCandidates.push(record);
+        else
+          this.deps.events.onEvent(record.setupId, {
+            runId: record.runId,
+            state: "stopped",
+            exitCode: null,
+            pid: record.pid,
+            pgid: record.pgid,
+            error: null,
+          });
+      }
+    }
+    for (const record of scopeCandidates) {
+      const active = await this.scope.isActive(record.scopeUnit!).catch(() => false);
+      if (active) {
+        this.reattach(record);
+        kept.push(record);
       } else {
         this.deps.events.onEvent(record.setupId, {
           runId: record.runId,
@@ -308,6 +374,36 @@ export class SetupDriver {
     }
     this.persist(kept);
     this.pruneRunLogs();
+  }
+
+  /** Marks a persisted record live again: ring seq, EOF tailer, capture
+   *  re-attach, and the running event (the init() live-group branch body). */
+  private reattach(record: DriverRecord): void {
+    this.records.set(record.setupId, record);
+    this.runIds.set(record.setupId, record.runId);
+    this.seqs.set(record.setupId, this.seedSeq(record));
+    this.startTailer(record.setupId, record.logPath, "eof");
+    if (record.proxyPort !== null && record.enginePort !== null && this.deps.capture !== undefined) {
+      void this.deps.capture
+        .start(record.setupId, record.proxyPort, record.enginePort, record.retention ?? null)
+        .then(() =>
+          this.deps.capture?.log(record.setupId, `driver: capture proxy re-attached :${record.proxyPort} → 127.0.0.1:${record.enginePort}`),
+        )
+        .catch((err: unknown) =>
+          this.deps.capture?.log(
+            record.setupId,
+            `driver: capture proxy re-attach failed on :${record.proxyPort} (${err instanceof Error ? err.message : String(err)})`,
+          ),
+        );
+    }
+    this.deps.events.onEvent(record.setupId, {
+      runId: record.runId,
+      state: "running",
+      exitCode: null,
+      pid: record.pid,
+      pgid: record.pgid,
+      error: null,
+    });
   }
 
   /** Public log route for capture-proxy lifecycle lines (M8). IRI-078: the
@@ -348,6 +444,18 @@ export class SetupDriver {
     return this.rings.get(setupId) ?? [];
   }
 
+  /** ADR-0017: setups this agent currently supervises WITHOUT a scope unit —
+   *  an agent-unit restart kills them. Empty when everything is isolated;
+   *  the agent-update job refuses while this is non-empty. */
+  unscoopedRunningSetups(): string[] {
+    const out: string[] = [];
+    for (const [setupId, record] of this.records) {
+      const live = this.children.has(setupId) || (record.pgid !== null && groupAlive(record.pgid));
+      if (live && record.scopeUnit === null) out.push(setupId);
+    }
+    return out;
+  }
+
   /** Create-time `test -x` validation of script paths (no side effects). */
   validate(scripts: string[]): Array<{ script: string; ok: boolean; error: string | null }> {
     return scripts.map((script) => {
@@ -375,6 +483,11 @@ export class SetupDriver {
     const existing = this.records.get(setupId);
     if (existing && (this.children.has(setupId) || (existing.pgid !== null && groupAlive(existing.pgid)))) {
       return { ok: false, error: "setup is already running" };
+    }
+    if (existing?.scopeUnit != null && (await this.scope.isActive(existing.scopeUnit))) {
+      // ADR-0017: the engine daemonized out of its process group but its scope
+      // still holds it — a second start would double-bind the ports.
+      return { ok: false, error: "setup is already running (systemd scope still active)" };
     }
     // IR-150: every launch attempt and its outcome enter the log ring (and
     // from there the shared feed) — a plain start used to be silent until the
@@ -448,7 +561,13 @@ export class SetupDriver {
     }
 
     const logPath = this.logPaths.get(setupId) ?? join(this.deps.stateDir, LOG_DIR, `${setupId}-${runId}.log`);
-    const argv = serveSpawnArgv(scriptStart, wrap, process.env.PATH);
+    const serviceArgv = serveSpawnArgv(scriptStart, wrap, process.env.PATH);
+    // ADR-0017: when systemd can host a transient scope, the script (and its
+    // engine descendants) leave the agent unit's cgroup — an agent restart or
+    // crash loop no longer kills the engine. The wrap costs nothing when
+    // systemd is unavailable (macOS dev, containers).
+    const scopeUnit = this.scope.available() ? this.scope.unitName(setupId) : null;
+    const argv = scopeUnit === null ? serviceArgv : this.scope.argv(scopeUnit, serviceArgv);
     // IR-149: the engine writes stdout/stderr straight into the run log
     // through an inherited fd, so output keeps flowing while the agent is
     // down and init() resumes tailing the file after a restart. If the fd
@@ -484,12 +603,16 @@ export class SetupDriver {
       retention: capture !== null ? capture.retention ?? null : null,
       runUser: wrap?.user ?? null,
       runHome: wrap?.home ?? null,
+      scopeUnit,
       nextSeq: 0,
     };
     this.records.set(setupId, record);
     this.children.set(setupId, child);
     this.seqs.set(setupId, 0);
     this.persist([...this.records.values()]);
+    if (scopeUnit !== null) {
+      this.pushLog(setupId, `driver: engine isolated in systemd scope ${scopeUnit} (survives agent restarts)`);
+    }
     if (logFd !== null) {
       // Engine output reaches the file through its own fd — tail it into the
       // ring + setup-log frames (IR-149) from the marker boundary.
@@ -629,10 +752,12 @@ export class SetupDriver {
         stopError = `stop script exited with code ${exit.code}`;
         this.pushLog(setupId, `driver: ${stopError}`);
       }
+      await this.stopScope(setupId, record);
       await this.drainGroup(setupId, record.pgid);
     } else {
       stopError = `stop script is not executable: ${record.scriptStop}`;
       this.pushLog(setupId, `driver: ${stopError}`);
+      await this.stopScope(setupId, record);
       await this.drainGroup(setupId, record.pgid, gracefulMs);
     }
 
@@ -648,6 +773,19 @@ export class SetupDriver {
       error: stopError,
     });
     return stopError === null ? { ok: true, error: null } : { ok: false, error: stopError };
+  }
+
+  /** ADR-0017: stop the setup's scope unit (SIGTERM to the whole cgroup —
+   *  reaches daemonized engines the recorded pgid misses). After the stop
+   *  script, never before; the drainGroup fallback still enforces the pgid. */
+  private async stopScope(setupId: string, record: DriverRecord): Promise<void> {
+    if (record.scopeUnit === null) return;
+    try {
+      await this.scope.stop(record.scopeUnit);
+      this.pushLog(setupId, `driver: stopped scope ${record.scopeUnit}`);
+    } catch (err) {
+      this.pushLog(setupId, `driver: scope stop failed (${err instanceof Error ? err.message : String(err)}) — process-group fallback applies`);
+    }
   }
 
   /** Closes the capture proxy for a setup (idempotent, fail-open). */

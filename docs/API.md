@@ -583,9 +583,12 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   (params `{expectedVersion: hubVersion}`) → `202 {job}`. Refusals: `400`
   malformed id, `404` unknown node, `409` when the agent predates
   `AGENT_UPDATE_MIN_VERSION` (it cannot self-update — use the install
-  one-liner once), `409` while the node has an active job, a running bench or
-  a starting/running/stopping setup (the restart kills everything the agent
-  supervises), `409` when the agent is unreachable.
+  one-liner once), `409` while the node has an active job or a running
+  bench, `409` when the agent is unreachable. A `409` for a
+  starting/running/stopping setup applies only to agents below
+  `SCOPE_CAPABLE_AGENT_VERSION` (ADR-0017) — scope-wrapped agents isolate
+  setups in their own cgroup and survive the restart; the agent still
+  refuses the job itself if any running setup is not scope-wrapped.
 - The agent fetches the bundle from the hub (URL derived from its own
   `IRORI_SERVER_URL`), validates it with `node --check`, keeps the previous
   bundle as `.bak` and restarts. Pre-restart failures settle via the normal
