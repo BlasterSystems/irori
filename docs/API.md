@@ -594,9 +594,10 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `IRORI_SERVER_URL`), validates it with `node --check`, keeps the previous
   bundle as `.bak` and restarts. Pre-restart failures settle via the normal
   `job-done` path; the restart itself severs the socket, so success is
-  settled **on the node's next hello** — reported version equal to
-  `expectedVersion` flips the job to `succeeded`; a mismatch leaves it
-  running (a blip-reconnecting old agent must not fail an in-flight update).
+  settled **on the node's next hello** — a reported version at or newer
+  than `expectedVersion` flips the job to `succeeded`; an older report
+  leaves it running (a blip-reconnecting old agent must not fail an
+  in-flight update).
 - `reapOffline` skips `agent-update` rows younger than 10 minutes and fails
   older ones with a `.bak`/journalctl rollback hint; the rule lives in the
   existing reaper loop, so it survives server restarts. No new tables.

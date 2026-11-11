@@ -75,6 +75,12 @@ d("agent-update jobs (db integration)", () => {
     expect((await service.get(bad.id))!.status).toBe("running");
     await db.delete(jobs).where(eq(jobs.id, bad.id));
 
+    // A newer-than-expected report proves the update took (the fleet may run
+    // a bundle newer than the hub's package version) — the slot must free.
+    const ahead = await service.create(nodeId, "agent-update", { expectedVersion: "0.3.0" });
+    await expect(service.settleAgentUpdate(nodeId, "0.4.0")).resolves.toBe("succeeded");
+    expect((await service.get(ahead.id))!.status).toBe("succeeded");
+
     await expect(service.settleAgentUpdate(nodeId, "0.3.0")).resolves.toBe("none");
 
     // IR-68: a job created without expectedVersion (the generic jobs
