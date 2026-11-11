@@ -46,7 +46,10 @@ Make the shipped agent capabilities legible: bump the authoritative versions 0.6
 
 ## Validation evidence
 
-- pending
+- Gates: `pnpm -r build` 0 · `pnpm -r typecheck` 0 · db-gated `pnpm -r test` 0 (agent 24, server 47/47 with the db, web 58, core 12, db 3, proxy 4) · `.agentic/bin/validate` 0 · `docs-check --base origin/main --strict` 0 (first CI run failed on two PRE-EXISTING timing-sensitive tests — transport cadence waitFor and the clocks-test fixed 150 ms sleeps; fixed by deterministic waits in 9e42fab, CI green 4m39s after)
+- Deploy: dev-0.7.0-1 CD success; hub `/api/v1/version` → 0.7.0
+- Fleet rollout: DGX-2, DGX-3, NAS agent-update succeeded → all report **0.7.0**; dgx2 `/opt/irori/irori-agent.mjs` sha256 `68d9c154…` == hub-served bundle (exact match), `0.7.0` + `nas-delete-batch` markers present
+- DGX-1: agent-update REFUSED by the hub (`node has a running setup — stop it first`) — GLM-Flash-TP3-MIIA is serving; one agent-update after it stops completes the rollout (the bulk-delete UI is version-gated off for it meanwhile, exactly as designed)
 
 ## Review
 
