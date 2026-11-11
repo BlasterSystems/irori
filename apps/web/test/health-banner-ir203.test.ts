@@ -24,7 +24,7 @@ function finding(overrides: Partial<HealthFinding> = {}): HealthFinding {
 
 describe("HealthBanner (IR-203)", () => {
   it("renders nothing without findings", () => {
-    const w = mount(HealthBanner as never, { props: { findings: [] } } as never);
+    const w = mount(HealthBanner as never, { props: { findings: [], nodes: [] } } as never);
     expect(w.find(".health-banner").exists()).toBe(false);
     w.unmount();
   });
@@ -37,11 +37,12 @@ describe("HealthBanner (IR-203)", () => {
           finding({
             nodeId: "00000000-0000-4000-8000-000000000002",
             ruleId: "22222222-2222-4222-8222-222222222222",
-            metric: "disk_pct",
+            metric: "kernel_xid",
             severity: "warn",
-            summary: "Disk usage warn: 91 >= 80",
+            summary: "Kernel Xid: 3 > 0",
           }),
         ],
+        nodes: [],
       },
     } as never);
     const rows = w.findAll(".health-banner__row");
@@ -57,6 +58,7 @@ describe("HealthBanner (IR-203)", () => {
     const w = mount(HealthBanner as never, {
       props: {
         findings: [finding({ metric: "hub_disk_pct", severity: "warn", ruleId: "33333333-3333-4333-8333-333333333333", summary: "Hub disk warn: 81 >= 80" })],
+        nodes: [],
       },
     } as never);
     const row = w.find(".health-banner__row");
@@ -69,7 +71,7 @@ describe("HealthBanner (IR-203)", () => {
 
   it("renders unknown fleet metrics summary-only and never blocks wide", () => {
     const w = mount(HealthBanner as never, {
-      props: { findings: [finding({ metric: "kernel_xid" as never, summary: "Xid: 3 > 0" })] },
+      props: { findings: [finding({ metric: "kernel_xid" as never, summary: "Xid: 3 > 0" })], nodes: [] },
     } as never);
     const row = w.find(".health-banner__row");
     expect(row.text()).toContain("Xid");
@@ -77,6 +79,101 @@ describe("HealthBanner (IR-203)", () => {
     w.unmount();
     // IR-196 structural pin: the body shrinks instead of pushing the page wide.
     expect(bannerSource).toContain("min-width: 0");
+  });
+});
+
+describe("HealthBanner node-disk rows (IR-204)", () => {
+  const NODE_ID = "00000000-0000-4000-8000-000000000002";
+  const NODES = [{ id: NODE_ID, name: "DGX-3" }] as never;
+
+  function cleanupBody(reclaimable: number): string {
+    return JSON.stringify({
+      latestAudit: {
+        report: {
+          generatedAtMs: 1,
+          totalBytes: null,
+          freeBytes: null,
+          categories: [{ category: "apt", reclaimableBytes: reclaimable, itemCount: 3 }],
+        },
+      },
+      history: [],
+      prevention: { weeklySafePass: false, logRotationApplied: false },
+    });
+  }
+
+  it("deep-links a disk finding to the node page and shows the est. reclaim", async () => {
+    const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/cleanup")) return new Response(cleanupBody(5 * 1024 ** 3), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchStub);
+    const w = mount(HealthBanner as never, {
+      props: {
+        findings: [finding({ nodeId: NODE_ID, metric: "disk_pct", severity: "warn", ruleId: "44444444-4444-4444-8444-444444444444", summary: "Disk usage warn: 91 >= 80" })],
+        nodes: NODES,
+      },
+    } as never);
+    await new Promise((r) => setTimeout(r, 40));
+    const row = w.find(".health-banner__row");
+    expect(row.text()).toContain("Node disk pressure");
+    expect(row.text()).toContain("DGX-3");
+    const link = row.find("a");
+    expect(link.attributes("href")).toBe(`#/node/${NODE_ID}`);
+    const cta = row.find("button");
+    expect(cta.text()).toContain("est. +5.4 GB");
+    // The est. fetch is a GET; the banner itself never POSTs.
+    expect(fetchStub.mock.calls.every(([i]) => !(i instanceof Request) || i.method !== "POST")).toBe(true);
+    w.unmount();
+  });
+
+  it("hides the est. text when the audit is empty or the fetch fails", async () => {
+    const fetchStub = vi.fn(async () => new Response(cleanupBody(0), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchStub);
+    const w = mount(HealthBanner as never, {
+      props: {
+        findings: [finding({ nodeId: NODE_ID, metric: "disk_pct", severity: "warn", ruleId: "44444444-4444-4444-8444-444444444444", summary: "Disk usage warn: 91 >= 80" })],
+        nodes: NODES,
+      },
+    } as never);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(w.find(".health-banner__cta").text()).toBe("Clean up disk");
+    w.unmount();
+
+    const failStub = vi.fn(async () => new Response("no", { status: 503 }));
+    vi.stubGlobal("fetch", failStub);
+    const w2 = mount(HealthBanner as never, {
+      props: {
+        findings: [finding({ nodeId: NODE_ID, metric: "disk_pct", severity: "warn", ruleId: "55555555-5555-4555-8555-555555555555", summary: "Disk usage warn: 92 >= 80" })],
+        nodes: NODES,
+      },
+    } as never);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(w2.find(".health-banner__cta").text()).toBe("Clean up disk");
+    w2.unmount();
+  });
+
+  it("opens the cleanup drawer on click and no job POST leaves the banner", async () => {
+    const methods: string[] = [];
+    const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      methods.push(init?.method ?? (input instanceof Request ? input.method : "GET"));
+      if (url.includes("/cleanup")) return new Response(cleanupBody(2 * 1024 ** 3), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchStub);
+    const w = mount(HealthBanner as never, {
+      props: {
+        findings: [finding({ nodeId: NODE_ID, metric: "disk_pct", severity: "warn", ruleId: "44444444-4444-4444-8444-444444444444", summary: "Disk usage warn: 91 >= 80" })],
+        nodes: NODES,
+      },
+    } as never);
+    await new Promise((r) => setTimeout(r, 40));
+    await w.find(".health-banner__cta").trigger("click");
+    await new Promise((r) => setTimeout(r, 60));
+    expect(w.find(".drawer-scrim").exists()).toBe(true); // the drawer opened
+    expect(methods.every((m) => m !== "POST")).toBe(true); // read-only banner
+    w.unmount();
   });
 });
 

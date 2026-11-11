@@ -519,8 +519,9 @@ function heroStateView(p: HeroProcess): HeroStateView {
   </div>
 
   <!-- IR-203: global infra banner — open fleet-scoped health findings
-       (database unavailable, hub disk) above everything else. -->
-  <HealthBanner :findings="live.findings.value" />
+       (database unavailable, hub disk) plus IR-204's node-disk rows with the
+       clean-up-disk CTA, above everything else. -->
+  <HealthBanner :findings="live.findings.value" :nodes="sortedNodes" />
 
   <!-- ── Fleet temperatures (IR-129): small tier only, ordered above the
        heroes — on phones the node cards are below the fold. Spark nodes only;
