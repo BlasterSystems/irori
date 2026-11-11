@@ -33,7 +33,7 @@ function makeDir(): string {
 
 function fakeChild(): ChildProcess {
   const child = new EventEmitter() as unknown as ChildProcess;
-  child.pid = FAKE_PID;
+  Object.defineProperty(child, "pid", { value: FAKE_PID }); // pid is readonly on the type
   return child;
 }
 
