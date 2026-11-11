@@ -402,15 +402,12 @@ describe("bounded storage reads (IR-206)", () => {
   const fakeStats: StatsFs = {
     type: 0,
     bsize: 4096,
+    frsize: 4096,
     blocks: 100,
     bfree: 50,
     bavail: 50,
     files: 0,
     ffree: 0,
-    favail: 0,
-    fsid: 0,
-    flag: 0,
-    namemax: 255,
   };
 
   it("still produces a snapshot when a mount's statfs never resolves", async () => {
