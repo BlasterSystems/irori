@@ -492,6 +492,7 @@ async function run(): Promise<void> {
       void logSink.flush();
     },
     getActiveJobIds: () => jobs.activeJobs(),
+    getScopeIsolation: () => driver.hostSupportsScopes(),
     // Transport chatter (handshakes, dropped frames, reconnects) explains
     // node flapping after the fact — durable alongside the setups (IRI-078).
     log: durableLog,

@@ -8,11 +8,6 @@ export const MIN_AGENT_VERSION = "0.1.0";
  *  Older agents cannot self-update — they get the install one-liner once. */
 export const AGENT_UPDATE_MIN_VERSION = "0.3.0";
 
-/** First agent release that isolates serving setups in systemd scope units
- *  (ADR-0017): restarting such an agent no longer kills its running engines,
- *  so the hub's agent-update guard relaxes for these versions. */
-export const SCOPE_CAPABLE_AGENT_VERSION = "0.8.0";
-
 /** Compare two dotted numeric versions; negative if a < b. */
 export function compareVersions(a: string, b: string): number {
   const pa = a.split(".").map((n) => Number.parseInt(n, 10) || 0);

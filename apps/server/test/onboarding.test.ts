@@ -76,7 +76,7 @@ function makeApp(overrides: Partial<AppDeps> = {}) {
     dbHealthy: async () => true,
     rings: createRings(),
     sse: createSseHub({ heartbeatMs: 0 }),
-    getHub: () => ({ online: () => new Set<string>(), sendToNode: () => false }),
+    getHub: () => ({ online: () => new Set<string>(), sendToNode: () => false, isScopeCapable: () => false }),
     version: "9.9.9",
     tag: "dev-0.3.0-dev.4",
     staticDir: null,
@@ -183,6 +183,22 @@ describe("POST /api/v1/nodes/:id/agent-update (IRI-012)", () => {
     const res = await request(app).post(`/api/v1/nodes/${created.id}/agent-update`);
     expect(res.status).toBe(409);
     expect(res.body.error).toContain("setup");
+  });
+
+  it("allows the update while a setup runs on a scope-capable agent (ADR-0017)", async () => {
+    const busyNode = { id: "" };
+    const { app, fake } = makeApp({
+      // The job dispatch itself still refuses (busy node) — the point is the
+      // error provenance: the setups guard was bypassed, the job layer spoke.
+      getJobs: () => stubJobs(async () => { throw new JobBusyError("unreachable"); }),
+      getSetups: (() => ({ list: async () => [{ headNodeId: busyNode.id, status: "running" }] })) as unknown as () => SetupsService | null,
+      getHub: () => ({ online: () => new Set<string>(), sendToNode: () => false, isScopeCapable: () => true }),
+    });
+    const created = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "s1" });
+    busyNode.id = created.id;
+    const res = await request(app).post(`/api/v1/nodes/${created.id}/agent-update`);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("unreachable");
   });
 });
 
