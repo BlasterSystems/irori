@@ -431,7 +431,7 @@ it("does not buffer llm frames while disconnected and drops them on send", async
   // Seeded llm config runs the loop even before hello-ok; frames only flow
   // while ready, and a send on a closed socket is dropped (never buffered).
   transport.sendLlm([fakeLlmPort(8080, 7)]);
-  expect(llmFrames(server).length).toBeGreaterThanOrEqual(1);
+  await vi.waitFor(() => expect(llmFrames(server).length).toBeGreaterThanOrEqual(1), { timeout: 10_000 });
 
   server.kickAll();
   await vi.waitFor(() => expect(transport.isReady()).toBe(false));
@@ -456,11 +456,11 @@ it("applies the global HF token from config-update: set, clear, keep (IRI-019)",
 
   // old-server shape (key absent) keeps the current value
   server.broadcast({ type: "config-update", cadenceMs: 26_000 });
-  await vi.waitFor(() => expect(transport.getCadenceMs()).toBe(26_000));
+  await vi.waitFor(() => expect(transport.getCadenceMs()).toBe(26_000), { timeout: 10_000 });
   expect(transport.getHfToken()).toBe("hf_x");
 
   // null = clear (env fallback applies downstream)
   server.broadcast({ type: "config-update", cadenceMs: 27_000, hfToken: null });
-  await vi.waitFor(() => expect(transport.getCadenceMs()).toBe(27_000));
+  await vi.waitFor(() => expect(transport.getCadenceMs()).toBe(27_000), { timeout: 10_000 });
   expect(transport.getHfToken()).toBeNull();
 });

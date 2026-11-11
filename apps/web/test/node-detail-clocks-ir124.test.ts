@@ -121,7 +121,8 @@ describe("NodeDetail clock caps + temperature overlay (IRI-124)", () => {
     vi.stubGlobal("fetch", fetchStub);
     const { default: NodeDetail } = await import("../src/components/NodeDetail.vue");
     const w = mount(NodeDetail as never, { props: { nodeId: UUID } } as never);
-    await new Promise((r) => setTimeout(r, 150));
+    // Deterministic wait: the selects render once the clocks fetch resolves.
+    await vi.waitFor(() => expect(w.findAll("select").length).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
 
     const selects = w.findAll("select");
     const gpuSelect = selects.find((s) => s.attributes("aria-label") === "GPU SM clock cap in MHz")!;
@@ -150,7 +151,8 @@ describe("NodeDetail clock caps + temperature overlay (IRI-124)", () => {
     vi.stubGlobal("fetch", fetchStub);
     const { default: NodeDetail } = await import("../src/components/NodeDetail.vue");
     const w = mount(NodeDetail as never, { props: { nodeId: UUID } } as never);
-    await new Promise((r) => setTimeout(r, 150));
+    // Deterministic wait: the overlay copy renders once the clocks fetch lands.
+    await vi.waitFor(() => expect(w.text()).toContain("min 45°C · avg 45°C · max 46°C"), { timeout: 10_000 });
 
     const text = w.text();
     expect(text).toContain("usage");
@@ -181,7 +183,7 @@ describe("NodeDetail clock caps + temperature overlay (IRI-124)", () => {
     }));
     const { default: NodeDetail } = await import("../src/components/NodeDetail.vue");
     const w = mount(NodeDetail as never, { props: { nodeId: UUID } } as never);
-    await new Promise((r) => setTimeout(r, 150));
+    await vi.waitFor(() => expect(w.text()).toContain("no cpufreq on this node — CPU caps unavailable"), { timeout: 10_000 });
 
     const text = w.text();
     expect(text).toContain("no cpufreq on this node — CPU caps unavailable");
@@ -209,7 +211,7 @@ describe("NodeDetail clock caps + temperature overlay (IRI-124)", () => {
     }));
     const { default: NodeDetail } = await import("../src/components/NodeDetail.vue");
     const w = mount(NodeDetail as never, { props: { nodeId: UUID } } as never);
-    await new Promise((r) => setTimeout(r, 150));
+    await vi.waitFor(() => expect(w.text()).toContain("agent too old for CPU caps — update the agent"), { timeout: 10_000 });
 
     const text = w.text();
     expect(text).toContain("agent too old for CPU caps — update the agent");
