@@ -4,7 +4,7 @@ import type { HardwareSnapshot, NodeInfo, SetupInfo } from "@irori/core";
 import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries, type Currency } from "@irori/core";
 import { live } from "../live";
 import { tier } from "../tiers";
-import InfraBanner from "./InfraBanner.vue";
+import HealthBanner from "./HealthBanner.vue";
 import NodeCard from "./NodeCard.vue";
 import NodeModal from "./NodeModal.vue";
 import Tip from "./Tip.vue";
@@ -520,7 +520,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
 
   <!-- IR-203: global infra banner — open fleet-scoped health findings
        (database unavailable, hub disk) above everything else. -->
-  <InfraBanner :findings="live.findings.value" />
+  <HealthBanner :findings="live.findings.value" />
 
   <!-- ── Fleet temperatures (IR-129): small tier only, ordered above the
        heroes — on phones the node cards are below the fold. Spark nodes only;
