@@ -115,7 +115,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const usageLatest = ref<UsageEvent[]>([]);
   /** IRI-078: last durable-log pulse — the Logs view's tail watches this. */
   const logPulse = ref<LogUpdateEvent | null>(null);
-  /** IR-203: open findings; the InfraBanner filters to the fleet-scoped rows. */
+  /** IR-203: open findings; the HealthBanner filters to the fleet-scoped rows. */
   const findings = ref<HealthFinding[]>([]);
   /** IR-203: one fetch in flight, at most one queued — a burst of health
    *  transitions (sweep open+clear) collapses into one extra fetch. */

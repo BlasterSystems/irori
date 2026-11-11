@@ -33,17 +33,17 @@ function titleFor(f: HealthFinding): string {
 </script>
 
 <template>
-  <section v-if="infraFindings.length > 0" class="infra-banner" aria-label="Infrastructure findings">
+  <section v-if="infraFindings.length > 0" class="health-banner" aria-label="Infrastructure findings">
     <p
       v-for="f in infraFindings"
       :key="f.ruleId"
-      class="banner infra-banner__row"
+      class="banner health-banner__row"
       :class="{ 'banner--critical': f.severity === 'critical' }"
       role="alert"
     >
-      <span class="infra-banner__marker" aria-hidden="true">{{ f.severity === "critical" ? "▪" : "◇" }}</span>
-      <span class="infra-banner__body">
-        <span class="infra-banner__title">{{ titleFor(f) }}</span>
+      <span class="health-banner__marker" aria-hidden="true">{{ f.severity === "critical" ? "▪" : "◇" }}</span>
+      <span class="health-banner__body">
+        <span class="health-banner__title">{{ titleFor(f) }}</span>
         <span class="stat__sub">{{ f.summary }}</span>
         <span v-if="hintFor(f.metric)" class="stat__sub faint">{{ hintFor(f.metric) }}</span>
       </span>
@@ -52,24 +52,24 @@ function titleFor(f: HealthFinding): string {
 </template>
 
 <style scoped>
-.infra-banner {
+.health-banner {
   display: grid;
   gap: var(--space-2);
   margin-bottom: var(--space-2);
 }
-.infra-banner__row {
+.health-banner__row {
   align-items: baseline;
 }
-.infra-banner__marker {
+.health-banner__marker {
   flex: none;
   font-size: 12px;
 }
-.infra-banner__body {
+.health-banner__body {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
-.infra-banner__title {
+.health-banner__title {
   font-weight: 600;
 }
 </style>
