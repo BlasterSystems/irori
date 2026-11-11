@@ -462,6 +462,12 @@ export class SetupDriver {
     return out;
   }
 
+  /** ADR-0017: whether this host can host scope units at all (host truth for
+   *  the hello frame — independent of any single setup's record). */
+  hostSupportsScopes(): boolean {
+    return this.scope.available();
+  }
+
   /** Create-time `test -x` validation of script paths (no side effects). */
   validate(scripts: string[]): Array<{ script: string; ok: boolean; error: string | null }> {
     return scripts.map((script) => {

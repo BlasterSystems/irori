@@ -166,6 +166,16 @@ afterEach(async () => {
   for (const fn of fns) await fn();
 });
 
+it("reports scopeIsolation in the hello when the host supports scopes (ADR-0017)", async () => {
+  const server = await startFakeServer(30);
+  teardown.push(server.close);
+  const transport = makeTransport({ getScopeIsolation: () => true });
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+  await vi.waitFor(() => expect(server.hellos).toHaveLength(1));
+  expect(server.hellos[0].scopeIsolation).toBe(true);
+});
+
 it("performs the hello handshake, then sends schema-valid snapshots at the negotiated cadence", async () => {
   const server = await startFakeServer(30);
   teardown.push(server.close);
@@ -181,6 +191,8 @@ it("performs the hello handshake, then sends schema-valid snapshots at the negot
     token: "test-token",
     hostname: "test-host",
   });
+  // ADR-0017: absent unless the host reports scope support.
+  expect(server.hellos[0].scopeIsolation).toBeUndefined();
 
   await vi.waitFor(() => expect(transport.getNodeId()).not.toBeNull());
   expect(transport.getCadenceMs()).toBe(30);

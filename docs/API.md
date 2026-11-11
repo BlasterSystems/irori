@@ -585,10 +585,11 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `AGENT_UPDATE_MIN_VERSION` (it cannot self-update — use the install
   one-liner once), `409` while the node has an active job or a running
   bench, `409` when the agent is unreachable. A `409` for a
-  starting/running/stopping setup applies only to agents below
-  `SCOPE_CAPABLE_AGENT_VERSION` (ADR-0017) — scope-wrapped agents isolate
-  setups in their own cgroup and survive the restart; the agent still
-  refuses the job itself if any running setup is not scope-wrapped.
+  starting/running/stopping setup applies only to agents that did not
+  report the `scopeIsolation` hello capability (ADR-0017) — scope-wrapped
+  agents isolate setups in their own cgroup and survive the restart; the
+  agent still refuses the job itself if any running setup is not
+  scope-wrapped.
 - The agent fetches the bundle from the hub (URL derived from its own
   `IRORI_SERVER_URL`), validates it with `node --check`, keeps the previous
   bundle as `.bak` and restarts. Pre-restart failures settle via the normal

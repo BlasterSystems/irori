@@ -142,6 +142,10 @@ export interface AgentHub {
   attach(server: Server): void;
   /** Ids of nodes with a live, authenticated agent connection. */
   online(): ReadonlySet<string>;
+  /** ADR-0017: whether the node's agent reported scope isolation in its most
+   *  recent hello (its setups survive agent restarts). False for old agents
+   *  and before the first hello after a hub restart. */
+  isScopeCapable(nodeId: string): boolean;
   /** Sends a raw frame to a connected node's agent; false when offline. */
   sendToNode(nodeId: string, msg: unknown): boolean;
   /** Resends the node's config-update (probe ports, cadence, nasRoot, HF token) live. */
@@ -178,6 +182,10 @@ function resolveMaxFrameBytes(): number {
 export function createAgentHub(deps: AgentHubDeps): AgentHub {
   const wss = new WebSocketServer({ noServer: true, maxPayload: deps.maxFrameBytes ?? resolveMaxFrameBytes() });
   const onlineNodes = new Set<string>();
+  // ADR-0017: agents that reported scopeIsolation in their hello. In-memory
+  // by design — a hub restart re-learns it from the reconnect hellos within
+  // seconds, and an offline agent cannot be updated anyway.
+  const scopeCapableNodes = new Set<string>();
   const nodeSockets = new Map<string, WebSocket>();
   const lastMarkedAt = new Map<string, number>();
   const pending: Array<{ nodeId: string; kind: "snapshot" | "llm" | "job-done" | "bench-done"; payload: unknown }> = [];
@@ -314,6 +322,10 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         agentVersion = msg.agentVersion;
         onlineNodes.add(id);
         nodeSockets.set(id, ws);
+        // ADR-0017: the hello is the capability source of truth — a downgraded
+        // or replaced agent re-decides it on the next hello.
+        if (msg.scopeIsolation === true) scopeCapableNodes.add(id);
+        else scopeCapableNodes.delete(id);
         // IRI-012: settle any in-flight agent-update from the fresh version.
         // markSeen is throttled, so this hook is the only unthrottled spot.
         if (deps.jobEvents?.onHello) void deps.jobEvents.onHello(id, msg.agentVersion).catch(() => {});
@@ -548,6 +560,7 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
       });
     },
     online: () => onlineNodes,
+    isScopeCapable: (nodeId) => scopeCapableNodes.has(nodeId),
     sendToNode(nodeId, msg) {
       const ws = nodeSockets.get(nodeId);
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) return false;

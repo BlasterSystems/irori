@@ -87,6 +87,9 @@ export interface AgentTransportOptions {
   onReconnect?: () => void;
   /** IR-131: job ids this agent process is running, reported in every hello. */
   getActiveJobIds?: () => Array<{ jobId: string; kind: string }>;
+  /** ADR-0017: host truth reported in hello — the agent isolates setups in
+   *  systemd scope units. Set after the driver exists (lazy, pre-connect). */
+  getScopeIsolation?: () => boolean;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -131,6 +134,7 @@ export class AgentTransport {
   private readonly onLogAck?: (ids: string[]) => void;
   private readonly onReconnect?: () => void;
   private readonly getActiveJobIds?: () => Array<{ jobId: string; kind: string }>;
+  private readonly getScopeIsolation?: () => boolean;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -191,6 +195,7 @@ export class AgentTransport {
     this.onLogAck = options.onLogAck;
     this.onReconnect = options.onReconnect;
     this.getActiveJobIds = options.getActiveJobIds;
+    this.getScopeIsolation = options.getScopeIsolation;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -381,6 +386,9 @@ export class AgentTransport {
         // IR-131: pre-ack agents omit the field; the hub then skips its
         // orphan reconcile (a blip reconnect still has live jobs).
         ...(this.getActiveJobIds !== undefined ? { activeJobs: this.getActiveJobIds() } : {}),
+        // ADR-0017: host truth — evaluated lazily at hello time (the driver
+        // is constructed after the transport; see the main.ts TDZ note).
+        ...(this.getScopeIsolation?.() ? { scopeIsolation: true } : {}),
       });
     } catch {
       // handleClose takes over; nothing else to do here.

@@ -24,6 +24,10 @@ export const helloMsgSchema = z.object({
    *  settle running rows when the field is missing (a ws reconnect without
    *  a restart still has live jobs the old agent cannot report). */
   activeJobs: z.array(z.object({ jobId: z.string().uuid(), kind: z.string() })).optional(),
+  /** ADR-0017: the agent isolates setups in systemd scope units, so an agent
+   *  restart cannot kill a running engine. Absent = not capable (old
+   *  agents) — the hub keeps the agent-update setup guard for them. */
+  scopeIsolation: z.boolean().optional(),
 });
 
 export const snapshotMsgSchema = z.object({

@@ -97,11 +97,15 @@ socket.
 Option B. Setups spawn inside `irori-setup-<slug>` transient scope units;
 the slug is persisted in the setup record; stop prefers
 `systemctl stop <unit>`; boot adopts live scopes. The hub's agent-update
-guard is relaxed from a refusal to a no-guard once the agent bundle
-reporting the scope behavior (agent ≥ the release that ships this ADR) is
-on the node: updating an agent that serves must not require stopping the
-setup. Agents older than that keep the guard (the hub compares the
-node's `agentVersion`).
+guard is relaxed from a refusal to a no-guard once the node's agent
+reports the `scopeIsolation` hello capability: updating an agent that
+serves must not require stopping the setup. The capability is tracked
+in memory on the hub (re-learned from reconnect hellos after a hub
+restart); agents that do not report it keep the guard, and the agent
+itself refuses the update while an unscooped setup runs. (Refined during
+implementation: a version-comparison gate cannot distinguish two agents
+reporting the same version, and the agent version must stay in lockstep
+with the hub's for the update-settle contract.)
 
 ## Consequences
 

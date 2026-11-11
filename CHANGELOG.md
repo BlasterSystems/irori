@@ -16,9 +16,10 @@ All notable changes to Irori are recorded here. Format follows
   `systemctl stop <unit>` after the stop script; boot adopts a still-active
   scope even when the recorded process group is gone (daemonizing
   engines). Hosts without systemd fall back to the previous detached
-  spawn. The agent-update job refuses while an unscooped setup runs
-  (ground truth), and the hub's 409 guard relaxes for agents ≥ 0.8.0.
-  The agent reports version 0.8.0.
+  spawn. The `agent-update` job refuses while an unscooped setup runs
+  (ground truth), and the hub's 409 guard relaxes for agents that report
+  the `scopeIsolation` hello capability (in-memory on the hub; old agents
+  and pre-hello hubs keep the refusal).
 
 ## [0.7.0] — 2026-11-11
 
