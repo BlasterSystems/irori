@@ -14,11 +14,13 @@ export const liveMock: {
   llm: Map<string, unknown>;
   events: { value: unknown[] };
   usageLatest: { value: unknown[] };
+  findings: { value: unknown[] };
   lastEventAgeMs: { value: number | null };
   connected: { value: boolean };
   sortedNodes: { value: MockNode[] };
   getLlm: (nodeId: string) => unknown;
   refreshNodes: () => Promise<void>;
+  refreshFindings: () => Promise<void>;
   on: () => () => void;
   off: () => void;
   send: () => void;
@@ -29,6 +31,7 @@ export const liveMock: {
   llm: reactive(new Map()),
   events: ref([]),
   usageLatest: ref([]),
+  findings: ref([]),
   lastEventAgeMs: ref(null),
   connected: ref(false),
   sortedNodes: computed(() =>
@@ -38,6 +41,7 @@ export const liveMock: {
   ),
   getLlm: (nodeId: string) => liveMock.llm.get(nodeId),
   refreshNodes: async () => {},
+  refreshFindings: async () => {},
   on: () => () => {},
   off: () => {},
   send: () => {},

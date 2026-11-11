@@ -4,13 +4,14 @@ import {
   llmEventSchema,
   sseEventSchema,
   type HardwareSnapshot,
+  type HealthFinding,
   type LlmPortSnapshot,
   type LogUpdateEvent,
   type NodeInfo,
   type SseEvent,
   type UsageEvent,
 } from "@irori/core";
-import { fetchEventsRecent, fetchNodes } from "./api";
+import { fetchEventsRecent, fetchHealthFindings, fetchNodes } from "./api";
 import { fetchRecentJobs, jobLiveFromSummary, type JobLive } from "./jobs";
 
 /** Cap on the newest-first captured-request ring (M8). */
@@ -38,6 +39,8 @@ export interface LiveStoreOptions {
   fetchNodesFn?: typeof fetchNodes;
   fetchEventsRecentFn?: typeof fetchEventsRecent;
   fetchRecentJobsFn?: typeof fetchRecentJobs;
+  /** IR-203: overridable for tests. */
+  fetchHealthFindingsFn?: typeof fetchHealthFindings;
   EventSourceCtor?: typeof EventSource | null;
   now?: () => number;
   /** Interval at which lastEventAgeMs is refreshed. */
@@ -66,6 +69,11 @@ export interface LiveStore {
   usageLatest: Ref<UsageEvent[]>;
   /** IRI-078: last durable-log tail pulse (null until one arrives). */
   logPulse: Ref<LogUpdateEvent | null>;
+  /** IR-203: open health findings (all scopes; consumers filter). Seeded at
+   *  boot and re-fetched throttled on every `health` SSE transition. */
+  findings: Ref<HealthFinding[]>;
+  /** IR-203: re-fetch GET /api/v1/health/findings (silent on failure). */
+  refreshFindings(): Promise<void>;
   /** Latest LLM entry for a node, null when no probe has arrived yet. */
   getLlm(nodeId: string): LlmEntry | null;
   /** ms since the last SSE frame arrived (refreshed by a tick), null before the first event. */
@@ -105,8 +113,14 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const jobs = reactive(new Map<string, JobLive>());
   const events = ref<SseEvent[]>([]);
   const usageLatest = ref<UsageEvent[]>([]);
-  /** IRI-078: last durable-log pulse — the Logs view tail watches this. */
+  /** IRI-078: last durable-log pulse — the Logs view's tail watches this. */
   const logPulse = ref<LogUpdateEvent | null>(null);
+  /** IR-203: open findings; the InfraBanner filters to the fleet-scoped rows. */
+  const findings = ref<HealthFinding[]>([]);
+  /** IR-203: one fetch in flight, at most one queued — a burst of health
+   *  transitions (sweep open+clear) collapses into one extra fetch. */
+  let findingsInFlight = false;
+  let findingsQueued = false;
   const lastEventAtMs = ref<number | null>(null);
   const lastEventAgeMs = ref<number | null>(null);
   const connected = ref(false);
@@ -240,6 +254,11 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       case "log-update":
         logPulse.value = event;
         break;
+      // IR-203: a rule opened or cleared — the frame itself is a pointer, the
+      // findings GET is the source. Throttled re-fetch coalesces sweep bursts.
+      case "health":
+        scheduleFindingsRefresh();
+        break;
       case "usage": {
         // Newest-first ring; also rides the feed (bounded by pushEvent).
         usageLatest.value.unshift(event);
@@ -282,6 +301,31 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     for (const node of fetched) nodes.set(node.id, node);
   }
 
+  /** IR-203: GET /api/v1/health/findings stays the only source; failures keep
+   *  the last list (the banner is best-effort) and the next transition retries. */
+  async function refreshFindings(): Promise<void> {
+    const fetched = await (options.fetchHealthFindingsFn ?? fetchHealthFindings)();
+    if (stopped) return;
+    findings.value = fetched;
+  }
+
+  function scheduleFindingsRefresh(): void {
+    if (findingsInFlight) {
+      findingsQueued = true;
+      return;
+    }
+    findingsInFlight = true;
+    void refreshFindings()
+      .catch(() => {})
+      .finally(() => {
+        findingsInFlight = false;
+        if (findingsQueued) {
+          findingsQueued = false;
+          scheduleFindingsRefresh();
+        }
+      });
+  }
+
   /** Seeds/refreshes the job map (node/kind context for the Telemetry feed). */
   async function refreshJobs(): Promise<void> {
     try {
@@ -317,6 +361,14 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       // Registry unavailable at boot: still open the SSE stream — its onopen
       // re-fetches, and a hard failure here used to leave the store dead
       // (no SSE, no retry) rendering a misleading "no nodes" banner.
+    }
+    // IR-203: one boot fetch — the banner must not wait for the first health
+    // transition to learn about findings opened while the tab was closed.
+    try {
+      await refreshFindings();
+    } catch {
+      // Findings unavailable (older hub): the banner stays empty until the
+      // next health transition re-fetches.
     }
     void refreshJobs();
     if (stopped) return;
@@ -376,6 +428,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     events,
     usageLatest,
     logPulse,
+    findings,
     getLlm,
     lastEventAgeMs,
     connected,
@@ -384,6 +437,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     stop,
     ingest,
     refreshNodes,
+    refreshFindings,
     refreshJobs,
   };
 }
