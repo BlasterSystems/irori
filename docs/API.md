@@ -258,8 +258,12 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   cleanup-quarantine`, which validates the repaired reference and every
   copy's metadata before deleting: a dry run without `confirm: "prune"`,
   armed with it; per-name result lines plus a final summary with the statfs
-  freed-bytes delta. `.cleanup-quarantine` trees are reported but not pruned
-  until modelctl grows a command for them.
+  freed-bytes delta. `prune-cleanup-quarantine` (IR-207, modelctl 0.24.0)
+  removes the `.staging/.cleanup-quarantine` debris an interrupted
+  `cleanup-staging --apply` leaves behind — dry-run unless
+  `confirm: "prune"`; only direct children of that directory are ever
+  touched, and the final summary line carries `applied`, the statfs
+  freed-bytes delta, and per-tree rows.
 - The global Models cache (`model_meta`) self-heals: a `catalog` frame carries
   the agent's complete store catalog (catalog.json schema 3), so the hub drops
   cache rows the store no longer has — store changes made outside hub jobs

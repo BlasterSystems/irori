@@ -99,6 +99,7 @@ export const RUNNER_KINDS = new Set([
   "nas-delete-apply",
   "nas-delete-batch",
   "quarantine-prune",
+  "prune-cleanup-quarantine",
   "staging-tree-audit",
 ]);
 
