@@ -6,6 +6,36 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-11
+
+### Added
+
+- **Bulk store delete** (IR-207): the Models page multi-selects store rows
+  and dispatches ONE `nas-delete-batch` job to the store node — per-model
+  plan → preflight → apply inside the agent, one structured output line per
+  model plus a final summary, a failed model never stops the batch. The
+  confirm modal lists every name with the catalog-sourced byte total and
+  warns about serving setups that reference any selected model. The agent
+  reports version 0.7.0; the action is gated on that version in the UI.
+- **Staging & quarantine audit** (IR-207): the node cleanup drawer audits
+  the store's `.staging` including the hidden dot-dirs `staging-audit`
+  cannot see — `.active-quarantine` trees per model (prunable through
+  `modelctl cleanup-quarantine`, which validates the repaired reference
+  before deleting) and `.cleanup-quarantine` trees (report-only until
+  modelctl grows a prune command), with per-tree sizes, totals, and the
+  statfs freed-bytes delta.
+- **Download free-space floor** (IR-207): `download` and `download-queue`
+  jobs refuse to start when the store volume's free space is below
+  `IRORI_MIN_STORE_FREE_BYTES` (default 1.5 TiB; `0` disables), naming the
+  measured free space and the floor.
+
+### Fixed
+
+- **Models cache self-heal** (2026-11-10): the hub prunes `model_meta` rows
+  absent from a complete `catalog` frame and re-reads the catalog after
+  failed store-mutating settles, so out-of-band store changes reconcile
+  without manual surgery.
+
 ## [0.6.0] — 2026-11-06
 
 ### Added

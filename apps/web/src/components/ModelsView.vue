@@ -5,7 +5,7 @@ import { RECIPE_CAVEATS } from "@irori/core";
 import { live } from "../live";
 import { activeJobsByNode, blockingJobLabel, jobLabel, type JobLive } from "../jobs";
 import { fetchSetups } from "../serve";
-import { DOWNLOAD_BATCH_MAX_ENTRIES, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
+import { DOWNLOAD_BATCH_MAX_ENTRIES, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
 import {
   bulkDeleteTotalBytes,
   cancelJob,
@@ -91,6 +91,15 @@ function toggleBulkAll(): void {
   bulkSelected.value = next;
 }
 const bulkBytes = computed(() => bulkDeleteTotalBytes(modelsPage.value?.models ?? [], bulkSelected.value));
+
+/** IR-207: the store node must run an agent that knows nas-delete-batch
+ *  (0.7.0+); an older agent fails the job with "unknown job kind", so the
+ *  action is hidden instead of dispatching into a guaranteed failure. */
+const bulkSupported = computed(() => {
+  const node = pickStoreNode(nodes.value);
+  if (node === null) return false;
+  return compareVersions(node.agentVersion ?? "0", "0.7.0") >= 0;
+});
 
 /** Download-from-HF modal state (paste + rows, IRI-015). */
 const downloadOpen = ref(false);
@@ -1017,9 +1026,17 @@ onBeforeUnmount(() => {
       <span class="stat__sub mono">{{ bulkSelected.size }} selected · {{ formatGiB(bulkBytes) }}</span>
       <span class="row">
         <button class="btn btn--ghost btn--sm" @click="clearBulk">Clear</button>
-        <button class="btn btn--danger btn--sm" :disabled="storeNode === null" @click="confirmBulkDelete">Delete selected…</button>
+        <button
+          class="btn btn--danger btn--sm"
+          :disabled="storeNode === null || !bulkSupported"
+          :title="bulkSupported ? undefined : 'the store node agent predates the batch kind (0.7.0) — update the agent first'"
+          @click="confirmBulkDelete"
+        >Delete selected…</button>
       </span>
     </div>
+    <p v-if="bulkSelected.size > 0 && !bulkSupported && storeNode !== null" class="stat__sub faint">
+      the store node agent predates the batch-delete kind — run an agent update on that node first.
+    </p>
 
     <table v-if="error === null && !(loading && modelsPage === null) && modelsPage !== null && modelsPage.models.length > 0" class="table">
       <thead>
