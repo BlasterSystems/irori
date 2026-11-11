@@ -462,9 +462,10 @@ it("applies the global HF token from config-update: set, clear, keep (IRI-019)",
   transport.connect(server.url);
   await vi.waitFor(() => expect(transport.isReady()).toBe(true));
 
-  // string = set
+  // string = set (the 10 s wait matches the sibling cadence waits — the
+  // default 1 s flaked under CI coverage load)
   server.broadcast({ type: "config-update", cadenceMs: 25_000, hfToken: "hf_x" });
-  await vi.waitFor(() => expect(transport.getHfToken()).toBe("hf_x"));
+  await vi.waitFor(() => expect(transport.getHfToken()).toBe("hf_x"), { timeout: 10_000 });
 
   // old-server shape (key absent) keeps the current value
   server.broadcast({ type: "config-update", cadenceMs: 26_000 });
