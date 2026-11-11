@@ -44,6 +44,59 @@ describe("discoverUsers", () => {
   });
 });
 
+describe("store reads on a dead mount (IR-206)", () => {
+  it("degrades to a warning store when the read hangs past the deadline", async () => {
+    const started = Date.now();
+    const report = await buildInventory({
+      nasRoot: "/mnt/nas",
+      modelctlPath: "/fake/modelctl",
+      agentUser: "root",
+      users: [],
+      exec: async () => ({ stdout: "", stderr: "" }),
+      readStoreImpl: () => new Promise(() => {}), // wedged mount: never resolves
+      storeDeadlineMs: 60,
+    });
+    // The job resolves promptly with a warning store; the agent is never held.
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(report.store).toMatchObject({
+      root: "/mnt/nas",
+      source: "scan",
+      models: [],
+      leftovers: [],
+    });
+    expect(report.store?.warning).toContain("deadline");
+    expect(report.store?.warning).toContain("dead network mount");
+  });
+
+  it("keeps the normal read path when nothing hangs (seam defaults to the real read)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "irori-ir206-inv-"));
+    temps.push(root);
+    mkdirSync(join(root, "state"), { recursive: true });
+    const report = await buildInventory({
+      nasRoot: root,
+      modelctlPath: "/fake/modelctl",
+      agentUser: "root",
+      users: [],
+      exec: async () => ({ stdout: "", stderr: "" }),
+    });
+    expect(report.store).toMatchObject({ root, source: "scan", warning: "no catalog.json; scanned active/", models: [] });
+  });
+
+  it("maps a throwing read to the failure warning", async () => {
+    const report = await buildInventory({
+      nasRoot: "/mnt/nas",
+      modelctlPath: "/fake/modelctl",
+      agentUser: "root",
+      users: [],
+      exec: async () => ({ stdout: "", stderr: "" }),
+      readStoreImpl: async () => {
+        throw new Error("EIO");
+      },
+    });
+    expect(report.store?.warning).toBe("store inventory failed: EIO");
+  });
+});
+
 describe("userArgv", () => {
   it("runs the agent user directly", () => {
     expect(userArgv("root", "root", "/root", "/root/.local/bin/modelctl", ["delete-local", "m"])).toEqual([

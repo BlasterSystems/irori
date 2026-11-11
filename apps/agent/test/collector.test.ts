@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { StatsFs } from "node:fs/promises";
+import { statfs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +23,7 @@ import {
   readHwmonPowerW,
   readPerCoreClocksKHz,
   readRaplEnergyUj,
+  readStorage,
   resolveUnifiedMemory,
   selectRealMounts,
   networkRates,
@@ -392,5 +395,63 @@ describe("fixture sanity", () => {
     expect(readFileSync(path.join(FIXTURE_SYS, "class/powercap/intel-rapl:0/energy_uj"), "utf8").trim()).toBe(
       "1000000",
     );
+  });
+});
+
+describe("bounded storage reads (IR-206)", () => {
+  const fakeStats: StatsFs = {
+    type: 0,
+    bsize: 4096,
+    blocks: 100,
+    bfree: 50,
+    bavail: 50,
+    files: 0,
+    ffree: 0,
+    favail: 0,
+    fsid: 0,
+    flag: 0,
+    namemax: 255,
+  };
+
+  it("still produces a snapshot when a mount's statfs never resolves", async () => {
+    const procRoot = mkdtempSync(path.join(os.tmpdir(), "irori-ir206-"));
+    try {
+      writeFileSync(
+        path.join(procRoot, "mounts"),
+        ["//nas.lan/llms /mnt/nas cifs rw 0 0", "/dev/nvme0n1p2 / ext4 rw 0 0"].join("\n"),
+      );
+      const asked: string[] = [];
+      const storage = await readStorage(procRoot, undefined, {
+        timeoutMs: 60,
+        statfsImpl: (async (mount: string) => {
+          asked.push(mount);
+          if (mount === "/mnt/nas") return new Promise<StatsFs>(() => {}); // wedged CIFS: never returns
+          return fakeStats;
+        }) as unknown as typeof statfs,
+      });
+      // The wedged mount is still probed (a healthy NAS must report capacity),
+      // the ext4 mount is asked too (parallel), and the snapshot ships.
+      expect(asked).toEqual(["/mnt/nas", "/"]);
+      expect(storage).toHaveLength(1);
+      expect(storage[0]).toMatchObject({ mount: "/", totalBytes: 100 * 4096, usedBytes: 50 * 4096, fs: "ext4" });
+    } finally {
+      rmSync(procRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("skips statfs failures the same as timeouts", async () => {
+    const procRoot = mkdtempSync(path.join(os.tmpdir(), "irori-ir206-"));
+    try {
+      writeFileSync(path.join(procRoot, "mounts"), "/dev/sda1 /data ext4 rw 0 0\n");
+      const storage = await readStorage(procRoot, undefined, {
+        timeoutMs: 60,
+        statfsImpl: (async () => {
+          throw Object.assign(new Error("stale automount"), { code: "ENOENT" });
+        }) as unknown as typeof statfs,
+      });
+      expect(storage).toEqual([]);
+    } finally {
+      rmSync(procRoot, { recursive: true, force: true });
+    }
   });
 });
