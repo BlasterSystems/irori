@@ -156,6 +156,18 @@ flowchart LR
   In-memory rings keep the live view while the DB is unreachable (ADR-0002).
 - **Versioned contracts**: every snapshot carries `schemaVersion` +
   `agentVersion`; old agents and new servers negotiate via the hello handshake.
+- **Health rules & findings (IRI-069, epic IR-200):** the server evaluates
+  seeded rules over snapshot ingest (through the wrapped store) plus a 30 s
+  sweep; findings are per node except the fleet-scoped gauges (hub disk via
+  `HUB_DISK_PATH`, database availability — measured once per sweep, never per
+  request). A failed gauge resolves to not-measurable and skips the rule.
+  Open/clear transitions emit `health` SSE frames (transition pointers — the
+  findings GET is the single source), journal rows, and one webhook POST per
+  cooldown window per rule. The Overview carries a global banner for open
+  infra findings: fleet rows (database unavailable with a stale-data note,
+  hub disk with the runbook hint — `docs/DEPLOYMENT.md`, "Signal runbook")
+  and node-disk rows with a deep link plus the "Clean up disk — est. +N GB"
+  CTA (read-only: dispatch happens only inside the per-node cleanup drawer).
 
 ## 5. Inference monitoring
 

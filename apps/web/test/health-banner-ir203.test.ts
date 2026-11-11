@@ -175,6 +175,17 @@ describe("HealthBanner node-disk rows (IR-204)", () => {
     expect(methods.every((m) => m !== "POST")).toBe(true); // read-only banner
     w.unmount();
   });
+
+  it("banner hint text matches the Signal runbook (IR-205)", () => {
+    // readFileSync, not ?raw: the css pipeline serves ?raw imports as '' in
+    // vitest; cwd is apps/web, the repo docs live two levels up.
+    const runbook = readFileSync(resolve(process.cwd(), "../../docs/DEPLOYMENT.md"), "utf8");
+    expect(runbook).toContain("hub data on the page may be stale until the database returns");
+    expect(runbook).toContain("Degraded routes keep answering");
+    expect(runbook).toContain("Check the hub VM filesystem — docker build cache is the usual culprit");
+    expect(runbook).toContain("docker system df");
+    expect(runbook).toContain("on the deploy host");
+  });
 });
 
 vi.mock("../src/live", async () => ({ live: (await import("./live-mock")).liveMock }));

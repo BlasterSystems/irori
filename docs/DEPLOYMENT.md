@@ -171,3 +171,44 @@ validated with `test -x` inside the agent's own mount namespace.
 
 Not yet (v1 scope is dev CD; PROD follows the same pattern with an
 `irori-prd-vm` runner and environment — see IR-10 epic).
+
+## Signal runbook (IR-200)
+
+What to check when a health signal fires. The Overview banner copies these
+strings (IR-205: banner hint text matches this runbook).
+
+### Database unavailable (`db_unavailable`, fleet)
+
+Degraded routes keep answering: `/healthz` reports `db: false`, routes that
+need the DB return 503, and the live rings keep the running views alive
+(ADR-0002) — hub data on the page may be stale until the database returns.
+Check the pg host (the Proxmox pgsql VM): `systemctl status postgresql`, disk
+and memory (`df -h`, `free -m`), then reachability from the deploy VM
+(`pg_isready -h <pg-host> -p 5432` against the hub's `DATABASE_URL`). Recovery
+is automatic: the rule clears on the first healthy sweep.
+
+### Hub disk pressure (`hub_disk_pct`, fleet)
+
+Check the hub VM filesystem — docker build cache is the usual culprit
+(`docker system df` on the deploy host): `docker builder prune` for build
+cache, then `docker image prune -a` only after confirming nothing running
+uses those images. The gauge measures the filesystem backing `HUB_DISK_PATH`
+(default `/` — the container root in the deployed container; see
+CONFIGURATION.md).
+
+### Node disk pressure (`disk_pct`, per node)
+
+The banner row deep-links to the node; **Clean up disk — est. +N GB** opens
+the per-node cleanup drawer (hygiene audit categories, dry-run plan first,
+nothing deleted without a typed confirm). If no est. shows, run an audit
+there first — the estimate comes from the node's last audit (cached ~5 min).
+
+### Telemetry gap (`telemetry_gap_s`, per node)
+
+Snapshots stopped arriving. Check the agent on the node: `systemctl status
+irori-agent`, `journalctl -u irori-agent -n 50`. Since IR-206 a wedged network
+mount no longer stalls the agent (bounded statfs, async NAS reads) — a gap
+with the agent alive and answering clocks points at the network path, not a
+hung statfs. A wedged CIFS mount still reports capacity if healthy; the
+snapshot skips it after the 2 s bound when it is not.
+
