@@ -230,7 +230,8 @@ export interface JobsService {
   reapOffline(onlineNodes: ReadonlySet<string>): Promise<string[]>;
   /**
    * IRI-012 (ADR-0007): settle an active agent-update job from the node's
-   * hello. "succeeded" when the reported version matches expectedVersion;
+   * hello. "succeeded" when the reported version is at or newer than
+   * expectedVersion (an older report is an in-flight pre-update agent);
    * "pending" on mismatch (an old agent blip-reconnecting mid-update must not
    * fail the in-flight update — the reaper's grace is the backstop); "none"
    * when the node has no active agent-update job.
@@ -777,11 +778,14 @@ export function createJobsService(
         });
         return "succeeded";
       }
-      // Mismatch → leave running: either the update is still in flight (an
-      // old agent blip-reconnected) or the new bundle failed to boot (the
-      // reaper's grace window settles that). Only an exact match proves the
-      // update took.
-      if (compareVersions(agentVersion, expected) !== 0) return "pending";
+      // Mismatch → leave running while the reported version is OLDER than
+      // expected: either the update is still in flight (an old agent
+      // blip-reconnected) or the new bundle failed to boot (the reaper's
+      // grace window settles that). A report at-or-newer than expected proves
+      // the update took — the fleet may legitimately run a newer bundle than
+      // the hub's own package version (dev tags move the bundle ahead of the
+      // release), and only an active-slot job rows this node out.
+      if (compareVersions(agentVersion, expected) < 0) return "pending";
       const finishedAt = new Date();
       await db
         .update(jobs)
