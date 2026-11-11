@@ -514,10 +514,19 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   threshold?, severity?, cooldownSec?, enabled?, webhookUrl?}`) tunes a rule;
   the webhook URL is stored encrypted (ADR-0002) and never returned
   (`hasWebhook` only). Audited.
+- Metric ids (core `healthMetricSchema`): `gpu_temp_c`, `disk_pct`,
+  `kernel_xid`, `throttle_active`, `power_w`, `node_offline`,
+  `telemetry_gap_s`, `reconnect_storm`, `clock_cap_drift`, `hub_disk_pct`
+  (fleet), `db_unavailable` (fleet). Snapshot-driven ids evaluate on ingest
+  through the wrapped store (IR-204); fleet gauges evaluate once per 30 s
+  sweep, never per request.
 - Evaluation runs on snapshot ingest + a 30 s offline/gap sweep; open/clear
   transitions emit `health` SSE events (journaled) and one webhook POST per
   cooldown window per rule. `GET /api/v1/health/findings` returns the open
-  findings (NodeDetail renders severity chips).
+  findings (NodeDetail renders severity chips; the Overview `HealthBanner`
+  renders the fleet rows plus node-disk rows with the clean-up-disk CTA —
+  IR-203/IR-204 — and the ops steps live in `docs/DEPLOYMENT.md`,
+  "Signal runbook").
 - `GET /api/v1/health/thresholds` — the UI threshold values (temp warn /
   critical, disk warn, hub disk warn (IR-201), database unavailable (IR-202));
   the web has no second copy.
