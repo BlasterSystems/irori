@@ -1,5 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import type { StatsFs } from "node:fs/promises";
+import type { StatsFs } from "node:fs";
 import { statfs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
