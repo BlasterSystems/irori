@@ -173,7 +173,7 @@ it("reports scopeIsolation in the hello when the host supports scopes (ADR-0017)
   transport.connect(server.url);
   teardown.push(() => transport.stop());
   await vi.waitFor(() => expect(server.hellos).toHaveLength(1));
-  expect(server.hellos[0].scopeIsolation).toBe(true);
+  expect(server.hellos[0]!.scopeIsolation).toBe(true);
 });
 
 it("performs the hello handshake, then sends schema-valid snapshots at the negotiated cadence", async () => {
@@ -192,7 +192,7 @@ it("performs the hello handshake, then sends schema-valid snapshots at the negot
     hostname: "test-host",
   });
   // ADR-0017: absent unless the host reports scope support.
-  expect(server.hellos[0].scopeIsolation).toBeUndefined();
+  expect(server.hellos[0]!.scopeIsolation).toBeUndefined();
 
   await vi.waitFor(() => expect(transport.getNodeId()).not.toBeNull());
   expect(transport.getCadenceMs()).toBe(30);
