@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
-import { statfs, type StatsFs } from "node:fs/promises";
+import type { StatsFs } from "node:fs";
+import { statfs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
