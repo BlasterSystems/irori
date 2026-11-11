@@ -456,7 +456,12 @@ async function boot(): Promise<void> {
     onOrphans: (nodeId: string, activeJobs: Array<{ jobId: string }> | undefined) => jobsService.settleOrphansOnHello(nodeId, activeJobs),
   };
 
-  const hub = createAgentHub({ store, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); }, setupEvents: {
+  // IR-204 fix (latent IR-069 bug): the hub must ingest through the WRAPPED
+  // store — the raw store's insertSnapshot never ran health.onSnapshot, so
+  // every snapshot-driven rule (disk_pct, gpu_temp_c, kernel_xid, …) was dead
+  // while sweep-driven rules worked. The wrap passes get/markSeen/verifyToken
+  // through and only overrides insertSnapshot.
+  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); }, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),
