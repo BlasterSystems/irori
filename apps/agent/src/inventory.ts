@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { InventoryLeftover, InventoryLocalCache, InventoryModel, InventoryOrphanState, NodeInventory, OrphanState } from "@irori/core";
-import { dirBytes, readStore } from "./catalog-read.js";
+import { dirBytes, readStore, boundedOrNull, type StoreRead } from "./catalog-read.js";
 import { collectUpdateState } from "./updates.js";
 import { runuserWrap } from "./cache-user.js";
 
@@ -26,6 +26,9 @@ import { runuserWrap } from "./cache-user.js";
 const execFileAsync = promisify(execFile);
 const LIST_TIMEOUT_MS = 30_000;
 const PATH_TIMEOUT_MS = 20_000;
+/** IR-206: hard deadline for the whole store read — a wedged network mount
+ *  degrades the inventory to a warning instead of holding the job open. */
+const STORE_DEADLINE_MS = 20_000;
 /** Cap the per-model `du` walk so a cache with hundreds of registrations
  *  cannot stall the job; rows beyond the cap keep bytes null. */
 const MAX_SIZED_MODELS = 40;
@@ -51,6 +54,12 @@ export interface InventoryCtx {
   /** Test seams. */
   passwdPath?: string;
   users?: PasswdUser[];
+  /** IR-206: store-read deadline in ms — the underlying read keeps running,
+   * but the job must not wait past it (a wedged mount degrades to a warning).
+   * Tests shrink it; default 20 s. */
+  storeDeadlineMs?: number;
+  /** IR-206 test seam: the store read itself (default: the real readStore). */
+  readStoreImpl?: (root: string) => Promise<StoreRead>;
   exec?: (file: string, args: string[], opts: { timeout: number }) => Promise<{ stdout: string; stderr: string }>;
   now?: () => number;
 }
@@ -385,28 +394,54 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
   const generatedAtMs = (ctx.now ?? Date.now)();
   let store: NodeInventory["store"] = null;
   if (ctx.nasRoot !== null) {
-    try {
-      const read = await readStore(ctx.nasRoot);
-      store = {
-        root: ctx.nasRoot,
-        source: read.source,
-        warning: read.warning ?? null,
-        models: read.entries.map((entry) => ({
-          name: entry.name,
-          repository: entry.repository,
-          runtime: entry.runtime,
-          bytes: entry.bytes > 0 ? entry.bytes : null,
-        })),
-        leftovers: await readFailedDeletes(ctx.nasRoot),
-      };
-    } catch (err) {
-      store = {
-        root: ctx.nasRoot,
+    // IR-206: hard deadline for the whole store read — a wedged network mount
+    // must degrade the inventory to a warning, never hold the job open. The
+    // dangling read is left behind; the agent keeps answering frames.
+    const nasRoot = ctx.nasRoot;
+    const deadlineMs = ctx.storeDeadlineMs ?? STORE_DEADLINE_MS;
+    const readImpl = ctx.readStoreImpl ?? ((root: string) => readStore(root));
+    const { promise: deadlineP, resolve } = Promise.withResolvers<NodeInventory["store"]>();
+    const timer = setTimeout(() => {
+      resolve({
+        root: nasRoot,
         source: "scan",
-        warning: `store inventory failed: ${err instanceof Error ? err.message : String(err)}`,
+        warning: `store inventory exceeded ${Math.round(deadlineMs / 1000)}s deadline (possibly a dead network mount); skipped`,
         models: [],
         leftovers: [],
-      };
+      });
+    }, deadlineMs);
+    timer.unref?.();
+    try {
+      store = await Promise.race([
+        (async (): Promise<NodeInventory["store"]> => {
+          try {
+            const read = await readImpl(nasRoot);
+            return {
+              root: nasRoot,
+              source: read.source,
+              warning: read.warning ?? null,
+              models: read.entries.map((entry) => ({
+                name: entry.name,
+                repository: entry.repository,
+                runtime: entry.runtime,
+                bytes: entry.bytes > 0 ? entry.bytes : null,
+              })),
+              leftovers: await readFailedDeletes(nasRoot),
+            };
+          } catch (err) {
+            return {
+              root: nasRoot,
+              source: "scan",
+              warning: `store inventory failed: ${err instanceof Error ? err.message : String(err)}`,
+              models: [],
+              leftovers: [],
+            };
+          }
+        })(),
+        deadlineP,
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
   }
   /** IRI-080: standing versions — node runtime, uv, catalog freshness and
@@ -439,7 +474,9 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
   let catalog: { schema: number; generatedAt: string | null } | null = null;
   if (ctx.nasRoot !== null) {
     try {
-      const raw = JSON.parse(await (await import("node:fs/promises")).readFile(`${ctx.nasRoot}/catalog.json`, "utf8")) as { schema?: unknown; generatedAt?: unknown };
+      // IR-206: bounded — a wedged mount leaves catalog null after 2 s
+      // instead of hanging the job on the unbounded read.
+      const raw = JSON.parse((await boundedOrNull(() => readFile(`${ctx.nasRoot}/catalog.json`, "utf8"))) ?? "") as { schema?: unknown; generatedAt?: unknown };
       catalog = { schema: typeof raw.schema === "number" ? raw.schema : 0, generatedAt: typeof raw.generatedAt === "string" ? raw.generatedAt : null };
     } catch {
       catalog = null;

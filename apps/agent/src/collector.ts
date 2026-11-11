@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
-import { statfs } from "node:fs/promises";
+import { statfs, type StatsFs } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -675,36 +675,63 @@ async function readMounts(procRoot: string): Promise<MountEntry[] | null> {
   return null;
 }
 
+/**
+ * IR-206: one statfs raced against a hard timer. A wedged network mount
+ * (dead CIFS) never resolves and used to stall the whole snapshot; now the
+ * mount is skipped (null) and a healthy NAS still reports capacity.
+ */
+async function statfsBounded(
+  mount: string,
+  timeoutMs: number,
+  impl: typeof statfs,
+): Promise<StatsFs | null> {
+  const { promise: timerP, resolve } = Promise.withResolvers<null>();
+  const timer = setTimeout(() => resolve(null), timeoutMs);
+  timer.unref?.();
+  try {
+    return await Promise.race([impl(mount), timerP]);
+  } catch {
+    return null; // listed but not statfs-able (stale automount, permissions)
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function readStorage(
   procRoot: string,
   blockRates?: Map<string, { readBps: number; writeBps: number }>,
+  opts?: { statfsImpl?: typeof statfs; timeoutMs?: number },
 ): Promise<HardwareSnapshot["storage"]> {
   const mounts = await readMounts(procRoot);
   if (mounts === null) return [];
+  const impl = opts?.statfsImpl ?? statfs;
+  const timeoutMs = opts?.timeoutMs ?? 2000;
+  const selected = selectRealMounts(mounts);
+  // Parallel: each statfs carries its own bound, so the worst case is one
+  // timeout window regardless of how many mounts are wedged.
+  const stats = await Promise.all(selected.map((entry) => statfsBounded(entry.mount, timeoutMs, impl)));
   const storage: HardwareSnapshot["storage"] = [];
-  for (const entry of selectRealMounts(mounts)) {
-    try {
-      const stats = await statfs(entry.mount);
-      const totalBytes = stats.blocks * stats.bsize;
-      if (!(totalBytes > 0)) continue;
-      const usedBytes = Math.max(0, (stats.blocks - stats.bfree) * stats.bsize);
-      let device: string | null = null;
-      let readBps: number | null = null;
-      let writeBps: number | null = null;
-      if (blockRates !== undefined) {
-        device = resolveBlockDev(entry.device, blockRates);
-        if (device !== null) {
-          const rates = blockRates.get(device);
-          if (rates !== undefined) {
-            readBps = rates.readBps;
-            writeBps = rates.writeBps;
-          }
+  for (let i = 0; i < selected.length; i++) {
+    const s = stats[i]!;
+    if (s === null) continue; // timed out or failed — skip the mount
+    const entry = selected[i]!;
+    const totalBytes = s.blocks * s.bsize;
+    if (!(totalBytes > 0)) continue;
+    const usedBytes = Math.max(0, (s.blocks - s.bfree) * s.bsize);
+    let device: string | null = null;
+    let readBps: number | null = null;
+    let writeBps: number | null = null;
+    if (blockRates !== undefined) {
+      device = resolveBlockDev(entry.device, blockRates);
+      if (device !== null) {
+        const rates = blockRates.get(device);
+        if (rates !== undefined) {
+          readBps = rates.readBps;
+          writeBps = rates.writeBps;
         }
       }
-      storage.push({ mount: entry.mount, fs: entry.fsType, totalBytes, usedBytes, readBps, writeBps, device });
-    } catch {
-      // Listed but not statfs-able (stale automount, permissions) — skip.
     }
+    storage.push({ mount: entry.mount, fs: entry.fsType, totalBytes, usedBytes, readBps, writeBps, device });
   }
   return storage;
 }

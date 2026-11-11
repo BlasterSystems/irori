@@ -1,5 +1,4 @@
-import { readdirSync, readFileSync, readlinkSync, lstatSync, statSync, existsSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, readlink, lstat, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -9,12 +8,34 @@ import { parseCatalog, CatalogFormatError, type Catalog, type ScannedModel } fro
  * Reads a modelctl store: trusted catalog.json (schema 3) when fresh/valid,
  * otherwise a live scan of active/ with manifest parsing (ADR-0004 — Irori
  * never rewrites the catalog).
+ *
+ * IR-206: every filesystem op is async and races a hard 2 s timer. The old
+ * sync calls (`readdirSync`/`readFileSync`/…) froze the agent MAIN THREAD on
+ * a wedged CIFS mount (no frames, no pongs, no jobs); the async versions
+ * block nothing, and the bound makes a dead mount skip instead of hang.
  */
 
 export interface StoreRead {
   entries: ScannedModel[];
   source: "catalog" | "scan";
   warning?: string;
+}
+
+/** Per-operation bound — a wedged network mount must not hold the read open. */
+export const OP_TIMEOUT_MS = 2000;
+
+/** Races an fs op against a timer; null on timeout OR rejection (skip). */
+export async function boundedOrNull<T>(op: () => Promise<T>): Promise<T | null> {
+  const { promise: timerP, resolve } = Promise.withResolvers<null>();
+  const timer = setTimeout(() => resolve(null), OP_TIMEOUT_MS);
+  timer.unref?.();
+  try {
+    return await Promise.race([op(), timerP]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Minimal YAML for modelctl manifests: flat keys + one nested runtime map + include/companions lists. */
@@ -79,45 +100,41 @@ async function walkBytes(path: string): Promise<number> {
   return total;
 }
 
+/** Manifest YAML if present and readable within the bound; null otherwise. */
+async function readManifestBounded(
+  path: string,
+): Promise<{ name?: string; repo?: string; revision?: string; format?: string; runtimeType?: string } | null> {
+  const yaml = await boundedOrNull(() => readFile(path, "utf8"));
+  return yaml === null ? null : parseManifestFields(yaml);
+}
+
 /** Live scan of active/ — name → manifest parse → object dir size. */
 export async function scanStore(root: string): Promise<ScannedModel[]> {
   const activeDir = join(root, "active");
+  const names = (await boundedOrNull(() => readdir(activeDir)))?.sort() ?? [];
   const entries: ScannedModel[] = [];
-  for (const name of readdirSync(activeDir).sort()) {
+  for (const name of names) {
     const ref = join(activeDir, name);
-    let st;
-    try {
-      st = lstatSync(ref);
-    } catch {
-      continue;
-    }
+    const st = await boundedOrNull(() => lstat(ref));
+    if (st === null) continue;
     if (st.isDirectory()) {
       // A validated directory copy — modelctl doctor can repair it; still list it.
-      const manifestPath = join(root, "manifests", `${name}.yaml`);
-      if (existsSync(manifestPath)) {
-        const mf = parseManifestFields(readFileSync(manifestPath, "utf8"));
+      const mf = await readManifestBounded(join(root, "manifests", `${name}.yaml`));
+      if (mf !== null) {
         entries.push({ name, runtime: mf.runtimeType ?? "unknown", repository: mf.repo ?? name, bytes: await dirBytes(ref) });
       }
       continue;
     }
     if (!st.isSymbolicLink()) continue; // hidden foreign files: doctor's job, not ours
-    let target: string;
-    try {
-      target = resolve(root, readlinkSync(ref));
-    } catch {
-      continue;
-    }
-    let objectDir = target;
-    try {
-      if (!statSync(objectDir).isDirectory()) continue;
-    } catch {
-      continue; // broken link: doctor reports it
-    }
-    const manifestPath = join(root, "manifests", `${name}.yaml`);
+    const linkTarget = await boundedOrNull(() => readlink(ref));
+    if (linkTarget === null) continue;
+    const objectDir = resolve(root, linkTarget);
+    const objectSt = await boundedOrNull(() => stat(objectDir));
+    if (objectSt === null || !objectSt.isDirectory()) continue; // broken link: doctor reports it
     let runtimeType = "unknown";
     let repo = name;
-    if (existsSync(manifestPath)) {
-      const mf = parseManifestFields(readFileSync(manifestPath, "utf8"));
+    const mf = await readManifestBounded(join(root, "manifests", `${name}.yaml`));
+    if (mf !== null) {
       runtimeType = mf.runtimeType ?? runtimeType;
       repo = mf.repo ?? repo;
     } else {
@@ -136,9 +153,10 @@ export async function scanStore(root: string): Promise<ScannedModel[]> {
  */
 export async function readStore(root: string): Promise<StoreRead> {
   const catalogPath = join(root, "catalog.json");
-  if (existsSync(catalogPath)) {
+  const catalogText = await boundedOrNull(() => readFile(catalogPath, "utf8"));
+  if (catalogText !== null) {
     try {
-      const catalog: Catalog = parseCatalog(readFileSync(catalogPath, "utf8"));
+      const catalog: Catalog = parseCatalog(catalogText);
       if (catalog.schema === 3) {
         return { entries: catalog.models.map((m) => ({ ...m })), source: "catalog" };
       }
