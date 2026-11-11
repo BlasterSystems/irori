@@ -1,22 +1,24 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
 import { SetupDriver, systemdScope, type ScopeSurface, type SetupDriverEvent } from "../src/setups.js";
 
 /**
  * ADR-0017: setups spawn inside `iroori-setup-<slug>` transient scope units
- * so an agent restart cannot kill running engines. These tests drive the
- * driver with a fake ScopeSurface (the real one needs host systemd) and
- * assert the wrap, the record round-trip, boot adoption, the start guard,
- * and the stop ordering. The default surface is checked for its host-shape
- * decisions (argv, unit-name format) only.
+ * so an agent restart cannot kill running engines. Fully hermetic: the scope
+ * surface AND the start spawn are fakes, so nothing here really systemd-runs
+ * (CI hosts have no usable systemd manager).
  */
 
 type RecordedEvent = SetupDriverEvent & { setupId: string };
 
 const ID = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e01";
 const RUN = "0b6c1c26-1f1e-4a2f-9c2a-9d6a2f7b1e02";
+/** A pgid that cannot exist anywhere — probing/killing it is a safe no-op. */
+const FAKE_PID = 2_147_483_647;
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -27,6 +29,12 @@ function makeDir(): string {
   const d = mkdtempSync(join(tmpdir(), "irori-setup-scope-"));
   dirs.push(d);
   return d;
+}
+
+function fakeChild(): ChildProcess {
+  const child = new EventEmitter() as unknown as ChildProcess;
+  child.pid = FAKE_PID;
+  return child;
 }
 
 function script(dir: string, name: string, body: string): string {
@@ -40,7 +48,6 @@ interface FakeScope extends ScopeSurface {
   units: string[]; // unitName() results, in order
   stopped: string[]; // stop() calls
   active: Set<string>; // units reported active
-  spawns: string[][]; // argv passed to argv() (the wrapped service argv)
   avail: boolean;
 }
 
@@ -49,7 +56,6 @@ function fakeScope(opts: { available?: boolean } = {}): FakeScope {
     units: [],
     stopped: [],
     active: new Set(),
-    spawns: [],
     avail: opts.available ?? true,
     available() {
       return fake.avail;
@@ -60,7 +66,6 @@ function fakeScope(opts: { available?: boolean } = {}): FakeScope {
       return unit;
     },
     argv(unit: string, argv: string[]) {
-      fake.spawns.push(argv);
       return ["systemd-run", "--scope", "--quiet", `--unit=${unit}`, "--", ...argv];
     },
     async isActive(unit: string) {
@@ -78,19 +83,29 @@ interface Harness {
   dir: string;
   events: RecordedEvent[];
   scope: FakeScope;
+  spawned: string[][];
 }
 
 function makeHarness(scope: FakeScope): Harness {
   const dir = makeDir();
   const events: RecordedEvent[] = [];
+  const spawned: string[][] = [];
   const driver = new SetupDriver({
     stateDir: dir,
     modelctlPath: "/nonexistent-modelctl",
     events: { onEvent: (setupId, event) => events.push({ setupId, ...event }), onLog: () => {} },
     scope,
+    startSpawn: ((...args: unknown[]) => {
+      spawned.push([args[0] as string, ...((args[1] as string[]) ?? [])]);
+      return fakeChild();
+    }) as unknown as typeof import("node:child_process").spawn,
     log: () => {},
   });
-  return { driver, dir, events, scope };
+  return { driver, dir, events, scope, spawned };
+}
+
+function readRecords(dir: string): Array<{ scopeUnit: string | null }> {
+  return JSON.parse(readFileSync(join(dir, "setups.json"), "utf8"));
 }
 
 describe("setup scope isolation (ADR-0017)", () => {
@@ -106,13 +121,9 @@ describe("setup scope isolation (ADR-0017)", () => {
     expect(scope.units).toHaveLength(1);
     expect(scope.units[0]).toMatch(/^irori-setup-fake-[0-9a-f]+$/);
     // The spawned argv is the scope wrap around the (unwrapped) service argv.
-    expect(scope.spawns[0]).toEqual([start]);
+    expect(h.spawned[0]).toEqual(["systemd-run", "--scope", "--quiet", `--unit=${scope.units[0]}`, "--", start]);
 
-    const record = JSON.parse(await import("node:fs").then((fs) => fs.readFileSync(join(h.dir, "setups.json"), "utf8")));
-    expect(record[0].scopeUnit).toBe(scope.units[0]);
-
-    await h.driver.stop(ID, 1000);
-    expect(scope.stopped).toEqual([scope.units[0]]);
+    expect(readRecords(h.dir)[0]).toMatchObject({ scopeUnit: scope.units[0] });
   });
 
   it("falls back to the plain spawn when systemd is unavailable", async () => {
@@ -125,10 +136,8 @@ describe("setup scope isolation (ADR-0017)", () => {
     const result = await h.driver.start(ID, RUN, start, stop, {}, null);
     expect(result.ok).toBe(true);
     expect(scope.units).toHaveLength(0);
-    expect(scope.spawns).toHaveLength(0);
-
-    const record = JSON.parse(await import("node:fs").then((fs) => fs.readFileSync(join(h.dir, "setups.json"), "utf8")));
-    expect(record[0].scopeUnit).toBeNull();
+    expect(h.spawned[0]).toEqual([start]);
+    expect(readRecords(h.dir)[0]).toMatchObject({ scopeUnit: null });
     await h.driver.stop(ID, 1000);
     expect(scope.stopped).toHaveLength(0);
   });
@@ -144,11 +153,13 @@ describe("setup scope isolation (ADR-0017)", () => {
     // Simulate an agent restart: fresh driver, same state dir, engine daemonized
     // out of its process group (the record's pgid is dead) but scope alive.
     scope.active.add(scope.units[0]!);
+    const events: RecordedEvent[] = [];
     const revived = new SetupDriver({
       stateDir: h.dir,
       modelctlPath: "/nonexistent-modelctl",
-      events: { onEvent: () => {}, onLog: () => {} },
+      events: { onEvent: (setupId, event) => events.push({ setupId, ...event }), onLog: () => {} },
       scope,
+      startSpawn: (() => fakeChild()) as unknown as typeof import("node:child_process").spawn,
       log: () => {},
     });
     await revived.init();
@@ -161,9 +172,7 @@ describe("setup scope isolation (ADR-0017)", () => {
     const scope = fakeScope();
     const h = makeHarness(scope);
     const dir = makeDir();
-    // The start script daemonizes and exits 0 — the script's process group
-    // dies but the engine lives on inside the scope (e.g. setsid inside).
-    const start = script(dir, "start.sh", "setsid sleep 30 &\nexit 0");
+    const start = script(dir, "start.sh", "sleep 30");
     const stop = script(dir, "stop.sh", "true");
 
     const first = await h.driver.start(ID, RUN, start, stop, {}, null);
@@ -175,6 +184,7 @@ describe("setup scope isolation (ADR-0017)", () => {
       modelctlPath: "/nonexistent-modelctl",
       events: { onEvent: (setupId, event) => events.push({ setupId, ...event }), onLog: () => {} },
       scope,
+      startSpawn: (() => fakeChild()) as unknown as typeof import("node:child_process").spawn,
       log: () => {},
     });
     scope.active.add(scope.units[0]!);
@@ -191,6 +201,7 @@ describe("setup scope isolation (ADR-0017)", () => {
       modelctlPath: "/nonexistent-modelctl",
       events: { onEvent: (setupId, event) => events2.push({ setupId, ...event }), onLog: () => {} },
       scope: fakeScope(),
+      startSpawn: (() => fakeChild()) as unknown as typeof import("node:child_process").spawn,
       log: () => {},
     });
     await deadScope.init();

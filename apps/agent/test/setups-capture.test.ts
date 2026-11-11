@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SetupDriver, type SetupCaptureHooks, type SetupDriverEvent } from "../src/setups.js";
+import { SetupDriver, type SetupCaptureHooks, type SetupDriverEvent, type ScopeSurface } from "../src/setups.js";
 
 /**
  * M8 capture lifecycle (ADR-0008 §7): the agent binds the proxy before spawn,
@@ -69,6 +69,7 @@ function makeHarness(hooks: Hooks): Harness {
   const dir = makeDir();
   const events: RecordedEvent[] = [];
   const driver = new SetupDriver({
+    scope: noScope,
     stateDir: dir,
     modelctlPath: "/nonexistent-modelctl",
     events: {
@@ -172,6 +173,7 @@ describe("SetupDriver capture lifecycle", () => {
     // A fresh driver on the same state dir re-attaches to the live group.
     const hooks2 = makeHooks();
     const driver2 = new SetupDriver({
+    scope: noScope,
       stateDir: h.dir,
       modelctlPath: "/nonexistent-modelctl",
       events: { onEvent: () => {}, onLog: () => {} },
@@ -201,6 +203,7 @@ describe("SetupDriver capture lifecycle", () => {
     const events: RecordedEvent[] = [];
     const engineChecks: number[] = [];
     const driver = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent-modelctl",
       events: { onEvent: (setupId, event) => events.push({ setupId, ...event }), onLog: () => {} },
@@ -277,3 +280,15 @@ describe("SetupDriver capture lifecycle", () => {
     expect((await h.driver.stop(ID, 2000)).ok).toBe(true);
   });
 });
+
+/** Tests run on non-systemd semantics regardless of host (CI is Linux): the
+ *  ADR-0017 scope wrap is exercised hermetically in setups-scope.test.ts. */
+const noScope: ScopeSurface = {
+  available: () => false,
+  unitName: () => {
+    throw new Error("no scope in this harness");
+  },
+  argv: (_unit, argv) => argv,
+  isActive: async () => false,
+  stop: async () => {},
+};

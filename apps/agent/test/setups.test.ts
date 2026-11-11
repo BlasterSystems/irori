@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { serveSpawnArgv, SetupDriver, type SetupDriverEvent } from "../src/setups.js";
+import { serveSpawnArgv, SetupDriver, type SetupDriverEvent, type ScopeSurface } from "../src/setups.js";
 
 /** The harness records the setupId alongside the event (the source splits them). */
 type RecordedEvent = SetupDriverEvent & { setupId: string };
@@ -35,6 +35,7 @@ function makeHarness(modelctlScript?: string): Harness {
   const events: RecordedEvent[] = [];
   const logs: RecordedLog[] = [];
   const driver = new SetupDriver({
+    scope: noScope,
     stateDir: dir,
     modelctlPath: modelctlScript ?? "/nonexistent-modelctl",
     events: {
@@ -185,6 +186,7 @@ describe("SetupDriver", () => {
     const stop = script(dir, "stop.sh", "true");
     const events: RecordedEvent[] = [];
     const driver = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent",
       events: {
@@ -206,6 +208,7 @@ describe("SetupDriver", () => {
     // A fresh agent process re-attaches: alive → running.
     const events2: RecordedEvent[] = [];
     const driver2 = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent",
       events: { onEvent: (setupId, event) => events2.push({ setupId, ...event }), onLog: () => {} },
@@ -223,6 +226,7 @@ describe("SetupDriver", () => {
     writeFileSync(join(deadDir, "setups.json"), JSON.stringify([{ setupId: ID, runId: RUN, scriptStart: "x", scriptStop: "y", env: {}, pid: 999999, pgid: 999999, startedAt: 0, logPath: "x" }]));
     const events3: RecordedEvent[] = [];
     const driver3 = new SetupDriver({
+    scope: noScope,
       stateDir: deadDir,
       modelctlPath: "/nonexistent",
       events: { onEvent: (setupId, event) => events3.push({ setupId, ...event }), onLog: () => {} },
@@ -241,6 +245,7 @@ describe("SetupDriver", () => {
     const events1: RecordedEvent[] = [];
     const logs1: RecordedLog[] = [];
     const driver1 = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent",
       events: { onEvent: (setupId, event) => events1.push({ setupId, ...event }), onLog: (s, seq, line, ts) => logs1.push({ setupId: s, seq, line, ts }) },
@@ -256,6 +261,7 @@ describe("SetupDriver", () => {
     // Simulated agent restart: a fresh driver over the same state dir re-attaches.
     const logs2: RecordedLog[] = [];
     const driver2 = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent",
       events: { onEvent: () => {}, onLog: (s, seq, line, ts) => logs2.push({ setupId: s, seq, line, ts }) },
@@ -321,6 +327,7 @@ describe("SetupDriver", () => {
     const start = script(dir, "start.sh", "sleep 30");
     const stop = script(dir, "stop.sh", "true");
     const driver = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent-modelctl",
       cacheUser: () => "operator",
@@ -368,6 +375,7 @@ describe("SetupDriver", () => {
     const stop = script(dir, "stop.sh", "true");
     const logs: RecordedLog[] = [];
     const driver = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent-modelctl",
       cacheUser: () => null, // hub without the node setting (IR-101 default)
@@ -390,6 +398,7 @@ describe("SetupDriver", () => {
     const start = script(dir, "start.sh", "sleep 30");
     const stop = script(dir, "stop.sh", "true");
     const driver = new SetupDriver({
+    scope: noScope,
       stateDir: dir,
       modelctlPath: "/nonexistent-modelctl",
       cacheUser: () => "ghost",
@@ -436,6 +445,7 @@ describe("SetupDriver", () => {
       const start = script(dir, "start.sh", 'echo "start HOME=$HOME USER=$USER LOGNAME=$LOGNAME"; echo "HF_HOME=${HF_HOME-UNSET}"; sleep 60');
       const stop = script(dir, "stop.sh", 'echo "stop HOME=$HOME USER=$USER"');
       const driver = new SetupDriver({
+    scope: noScope,
         stateDir: dir,
         modelctlPath: "/nonexistent-modelctl",
         cacheUser: () => "operator",
@@ -486,3 +496,15 @@ describe("SetupDriver", () => {
     await h.driver.stop(ID, 1000);
   });
 });
+
+/** Tests run on non-systemd semantics regardless of host (CI is Linux): the
+ *  ADR-0017 scope wrap is exercised hermetically in setups-scope.test.ts. */
+const noScope: ScopeSurface = {
+  available: () => false,
+  unitName: () => {
+    throw new Error("no scope in this harness");
+  },
+  argv: (_unit, argv) => argv,
+  isActive: async () => false,
+  stop: async () => {},
+};
