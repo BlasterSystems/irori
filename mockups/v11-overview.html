@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Overview · DS v1.1 · Irori</title>
+<link rel="stylesheet" href="irori-v11.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="bs-sidebar">
+    <div class="bs-sidebar__brand">
+      <a class="bs-lockup" href="v11-overview.html" aria-label="Irori home">
+        <span class="bs-lockup__glyph" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+        <span class="bs-lockup__text">
+          <span class="bs-lockup__name">Irori</span>
+          <span class="bs-lockup__endorse">A BlasterSystems product</span>
+        </span>
+      </a>
+    </div>
+    <nav class="bs-nav" aria-label="Primary">
+      <a class="bs-nav-item" href="v11-overview.html" aria-current="page"><span class="bs-nav-item__label">Overview</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Nodes</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="v11-models.html"><span class="bs-nav-item__label">Models</span><span class="bs-nav-item__count">148</span></a>
+      <a class="bs-nav-item" href="v11-serve.html"><span class="bs-nav-item__label">Serve</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Analytics</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Usage</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Chats</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Benchmarks</span></a>
+    </nav>
+    <div class="bs-sidebar__foot">
+      <span class="bs-sidebar__status">
+        <span><span class="pulse" aria-hidden="true"></span>&nbsp;Live · 2 s</span>
+        <span>Irori 0.7.0 · dev-0.7.0-13</span>
+      </span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="bs-topbar">
+      <div class="row grow" style="min-width:0">
+        <button class="iconbtn bs-topbar__menubtn" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navMenu">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <a class="bs-topbar__brand" href="v11-overview.html" aria-label="Irori home">
+          <span class="bs-lockup__glyph" style="width:22px;height:8px" aria-hidden="true">
+            <span class="mark-node" style="width:8px;height:8px;border-width:1.5px"></span>
+            <span class="mark-line" style="left:8px;right:8px;top:3.25px;height:1.5px"></span>
+            <span class="mark-square" style="width:8px;height:8px"></span>
+          </span>
+          <span class="bs-lockup__name" style="font-size:15px">Irori</span>
+        </a>
+        <div class="row row--wrap" role="group" aria-label="History range">
+          <button class="bs-filter" aria-pressed="true">30m</button>
+          <button class="bs-filter" aria-pressed="false">1h</button>
+          <button class="bs-filter" aria-pressed="false">4h</button>
+          <button class="bs-filter" aria-pressed="false">24h</button>
+          <button class="bs-filter" aria-pressed="false">week</button>
+          <button class="bs-filter" aria-pressed="false">month</button>
+        </div>
+      </div>
+      <div class="row">
+        <button class="bs-btn bs-btn--primary" type="button">Add node…</button>
+        <button class="bs-theme" id="themeToggle" type="button" aria-label="Toggle theme"><span></span></button>
+      </div>
+      <nav class="bs-topbar__menu" id="navMenu" aria-label="Primary menu">
+        <a class="bs-nav-item" href="v11-overview.html" aria-current="page"><span class="bs-nav-item__label">Overview</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Nodes</span></a>
+        <a class="bs-nav-item" href="v11-models.html"><span class="bs-nav-item__label">Models</span></a>
+        <a class="bs-nav-item" href="v11-serve.html"><span class="bs-nav-item__label">Serve</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Analytics</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Usage</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Chats</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Benchmarks</span></a>
+        <div class="bs-menu-foot">deploy dev-0.7.0-13 · live · 2 s</div>
+      </nav>
+    </header>
+
+    <main class="content">
+      <div class="pagehead">
+        <div>
+          <h1 class="page-title">Overview</h1>
+          <p class="page-sub"><span class="mono">4 nodes · 4 online · 2 serving · hottest <span class="hot">71 °C DGX-1</span></span></p>
+        </div>
+      </div>
+
+      <!-- ── Serving processes: no chrome while healthy ──────────────── -->
+      <section class="cols cols-2" aria-label="Serving processes">
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <span class="bs-panel__title">GLM-5.3-Flash-EXL3</span>
+            <span class="bs-panel__meta">tensorfold :8081 · DGX-1 +1 worker</span>
+          </div>
+          <div class="statgrid statgrid--6" style="margin-top:-6px">
+            <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">38 <span class="stat__sub">tok/s</span></span><span class="stat__sub">peak 63</span></div>
+            <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">0 <span class="stat__sub">tok/s</span></span></div>
+            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">1</span><span class="stat__sub">running</span></div>
+            <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">55%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:55%"></div></div></div>
+            <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">84 <span class="stat__sub">ms</span></span><span class="stat__sub">E2E 1,240 ms</span></div>
+            <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub">ms</span></span></div>
+          </div>
+          <svg class="spark" viewBox="0 0 600 120" preserveAspectRatio="none" style="height:120px" aria-hidden="true">
+            <line x1="0" y1="118" x2="600" y2="118" stroke="var(--rule)" stroke-width="1.5"/>
+            <polyline fill="none" stroke="var(--thread)" stroke-width="1.5" points="0,78 40,72 80,84 120,66 160,74 200,58 240,70 280,50 320,64 360,44 400,58 440,38 480,52 520,30 560,44 600,18"/>
+            <polyline fill="none" stroke="var(--ink-2)" stroke-width="1.5" points="0,104 60,102 120,106 180,100 240,103 300,98 360,101 420,96 480,99 540,94 600,97"/>
+          </svg>
+          <div class="bs-legend">
+            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--thread)" stroke-width="1.5" fill="none"/></svg>decode</span>
+            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--ink-2)" stroke-width="1.5" fill="none"/></svg>prefill</span>
+          </div>
+        </article>
+
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <span class="bs-panel__title">Qwen3.8-Flash-Next</span>
+            <span class="bs-panel__meta">tensorfold :8082 · DGX-3</span>
+          </div>
+          <div class="statgrid statgrid--6" style="margin-top:-6px">
+            <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">0 <span class="stat__sub">tok/s</span></span><span class="stat__sub">peak 121</span></div>
+            <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">0 <span class="stat__sub">tok/s</span></span></div>
+            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">0 · 0</span><span class="stat__sub">running · waiting</span></div>
+            <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">0%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:0%"></div></div></div>
+            <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">112 <span class="stat__sub">ms</span></span><span class="stat__sub">E2E 2,080 ms</span></div>
+            <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">22.1 <span class="stat__sub">ms</span></span></div>
+          </div>
+          <svg class="spark" viewBox="0 0 600 120" preserveAspectRatio="none" style="height:120px" aria-hidden="true">
+            <line x1="0" y1="118" x2="600" y2="118" stroke="var(--rule)" stroke-width="1.5"/>
+          </svg>
+        </article>
+      </section>
+
+      <h2 class="h2-gap">Nodes</h2>
+      <section class="cols cols-3">
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0"><span class="bs-panel__title">DGX-1</span><span class="bs-chip">head</span><span class="bs-chip">spark</span></div>
+            <span class="bs-panel__meta">agent 0.7.0</span>
+          </div>
+          <div style="margin-top:2px">
+            <div class="barrow"><span>GPU</span><div class="bar"><div class="bar__fill" style="width:34%"></div></div><span class="val"><span class="hot">71 °C</span> · 34%</span></div>
+            <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:18%"></div></div><span class="val">18% · 62 °C</span></div>
+            <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" style="width:76%"></div></div><span class="val">96 / 127 GB</span></div>
+            <div class="barrow"><span>DISK</span><div class="bar"><div class="bar__fill" style="width:44%"></div></div><span class="val">0.84 / 1.9 TB</span></div>
+          </div>
+        </article>
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0"><span class="bs-panel__title">DGX-2</span><span class="bs-chip">worker</span><span class="bs-chip">spark</span></div>
+            <span class="bs-panel__meta">agent 0.7.0</span>
+          </div>
+          <div style="margin-top:2px">
+            <div class="barrow"><span>GPU</span><div class="bar"><div class="bar__fill" style="width:22%"></div></div><span class="val">63 °C · 22%</span></div>
+            <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:12%"></div></div><span class="val">12% · 61 °C</span></div>
+            <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" style="width:69%"></div></div><span class="val">88 / 127 GB</span></div>
+            <div class="barrow"><span>DISK</span><div class="bar"><div class="bar__fill" style="width:47%"></div></div><span class="val">0.90 / 1.9 TB</span></div>
+          </div>
+        </article>
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0"><span class="bs-panel__title">DGX-3</span><span class="bs-chip">spark</span></div>
+            <span class="bs-panel__meta">agent 0.7.0</span>
+          </div>
+          <div style="margin-top:2px">
+            <div class="barrow"><span>GPU</span><div class="bar"><div class="bar__fill" style="width:12%"></div></div><span class="val">58 °C · 12%</span></div>
+            <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:9%"></div></div><span class="val">9% · 57 °C</span></div>
+            <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" style="width:32%"></div></div><span class="val">41 / 127 GB</span></div>
+            <div class="barrow"><span>DISK</span><div class="bar"><div class="bar__fill" style="width:63%"></div></div><span class="val">1.20 / 1.9 TB</span></div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ── Fleet power + NAS store ─────────────────────────────────── -->
+      <section class="cols cols-2 section-gap">
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <span class="bs-label">Fleet power</span>
+            <span class="bs-mark"><span class="bs-glyph bs-glyph--run"></span>estimated</span>
+          </div>
+          <div class="statgrid statgrid--3">
+            <div class="stat"><span class="stat__label">Fleet now<button type="button" class="bs-info" aria-label="How fleet now is worked out">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9.5"/><path d="M12 11v5.5M12 7.6v.2"/></svg>
+              <span class="bs-tip" role="tooltip"><span class="bs-tip__text">Fleet = sparks only. The NAS is excluded (no power or thermal telemetry).</span></span>
+            </button></span><span class="stat__value">190 <span class="stat__sub">W</span></span></div>
+            <div class="stat"><span class="stat__label">Energy · 30m</span><span class="stat__value">0.10 <span class="stat__sub">kWh</span></span></div>
+            <div class="stat"><span class="stat__label">Cost · 30m</span><span class="stat__value">≈ €0.03</span></div>
+          </div>
+          <div style="margin-top:4px">
+            <div class="barrow"><span>DGX-1</span><div class="bar"><div class="bar__fill" style="width:27%"></div></div><span class="val">65 W</span></div>
+            <div class="barrow"><span>DGX-2</span><div class="bar"><div class="bar__fill" style="width:26%"></div></div><span class="val">62 W</span></div>
+            <div class="barrow"><span>DGX-3</span><div class="bar"><div class="bar__fill" style="width:26%"></div></div><span class="val">63 W</span></div>
+          </div>
+          <div class="bs-chart" style="margin-top:8px">
+            <div class="bs-chart__plot" style="height:120px">
+              <div class="bs-chart__grid" style="top:0"></div>
+              <div class="bs-chart__grid" style="top:60px"></div>
+              <div class="bs-chart__grid" style="top:120px"></div>
+              <span class="bs-chart__y" style="top:0">240</span>
+              <span class="bs-chart__y" style="top:60px">120</span>
+              <span class="bs-chart__y" style="top:120px">0</span>
+              <svg viewBox="0 0 600 120" preserveAspectRatio="none" aria-hidden="true">
+                <rect x="8"   y="58" width="34" height="62" fill="var(--ink)"/><rect x="58"  y="45" width="34" height="75" fill="var(--ink)"/>
+                <rect x="108" y="52" width="34" height="68" fill="var(--ink)"/><rect x="158" y="31" width="34" height="89" fill="var(--ink)"/>
+                <rect x="208" y="46" width="34" height="74" fill="var(--ink)"/><rect x="258" y="36" width="34" height="84" fill="var(--ink)"/>
+                <rect x="308" y="49" width="34" height="71" fill="var(--ink)"/><rect x="358" y="41" width="34" height="79" fill="var(--ink)"/>
+                <rect x="408" y="51" width="34" height="69" fill="var(--ink)"/><rect x="458" y="44" width="34" height="76" fill="var(--ink)"/>
+                <rect x="508" y="38" width="34" height="82" fill="var(--ink)"/><rect x="558" y="25" width="34" height="95" fill="var(--ink)"/>
+                <line x1="0" y1="0" x2="600" y2="0" stroke="var(--ink-3)" stroke-width="1.25" stroke-dasharray="4 3"/>
+                <line x1="0" y1="42.5" x2="600" y2="42.5" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3"/>
+              </svg>
+            </div>
+            <div class="bs-chart__x" aria-hidden="true"><span style="left:0">−30m</span><span style="left:50%;transform:translateX(-50%)">−15m</span><span style="right:0">now</span></div>
+            <div class="bs-legend">
+              <span><svg width="9" height="9" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--ink)"/></svg>fleet draw</span>
+              <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 4 L14 4" stroke="var(--thread)" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/></svg>window avg 155 W</span>
+              <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 4 L14 4" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/></svg>240 W per-node envelope</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <span class="bs-label">NAS</span>
+            <span class="bs-chip">nas store</span>
+          </div>
+          <div class="statgrid statgrid--4">
+            <div class="stat"><span class="stat__label">Models</span><span class="stat__value">148</span></div>
+            <div class="stat" style="grid-column:span 3"><span class="stat__label">Store</span><span class="stat__value">14.2 <span class="stat__sub">/ 18.1 TB</span></span><div class="bar bar--lg" style="margin-top:6px"><div class="bar__fill" style="width:78%"></div></div></div>
+          </div>
+          <div class="row row--between">
+            <span class="row"><span class="bs-glyph bs-glyph--run" aria-hidden="true"></span><span class="mono">queue download · 2 entries</span></span>
+            <span class="stat__sub">eta 14m</span>
+          </div>
+          <div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:12%"></div></div>
+          <p class="stat__sub" style="margin-top:4px">12% · 10.6 / 88.0 GB · 96 MB/s</p>
+          <hr class="rule">
+          <div class="row row--between"><span class="bs-label">Tokens · 30m</span></div>
+          <div class="statgrid statgrid--4" style="margin-top:6px">
+            <div class="stat"><span class="stat__label">Input</span><span class="stat__value">1.8M</span></div>
+            <div class="stat"><span class="stat__label">Cached</span><span class="stat__value">5.2M</span></div>
+            <div class="stat"><span class="stat__label">Output</span><span class="stat__value">96k</span></div>
+            <div class="stat"><span class="stat__label">Cost</span><span class="stat__value">≈ €0.41</span></div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ── Telemetry ───────────────────────────────────────────────── -->
+      <section class="bs-panel section-gap">
+        <div class="bs-panel__head">
+          <div class="row"><span class="bs-label">Telemetry</span><span class="bs-chip">streaming</span></div>
+          <span class="bs-panel__meta">2 s cadence</span>
+        </div>
+        <div class="log" style="min-height:148px; max-height:168px">
+          <div><span class="dim">09:41:22</span> DGX-1 · decode 38 tok/s · queue 1 running / 0 waiting</div>
+          <div><span class="dim">09:41:14</span> glm-5.3-flash-exl3 · engine log: AVG decode 37.9 tok/s</div>
+          <div><span class="dim">09:38:51</span> DGX-1 · clocks re-applied on reconnect (gpu 2,200 MHz, cpu 2,600 MHz)</div>
+          <div><span class="dim">09:31:07</span> <span class="ok">bench</span> run-041 completed · 1.9 GB/s</div>
+          <div><span class="dim">09:12:02</span> <span class="err">DGX-3</span> · GPU hw thermal slowdown cleared</div>
+        </div>
+      </section>
+
+      <footer class="refresh-note">
+        <span class="bs-glyph bs-glyph--run" aria-hidden="true"></span>
+        <span>Live · 2 s cadence · fleet 190 W</span>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<span class="mock-note">Static mockup · DS v1.1 proposal · data illustrative</span>
+<script>
+  var btn = document.getElementById("themeToggle");
+  btn.onclick = function(){ var d = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = d ? "light" : "dark";
+    try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} };
+  // Range filters (visual only in the static mockup)
+  document.querySelectorAll('[role="group"][aria-label="History range"] .bs-filter').forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll('[role="group"][aria-label="History range"] .bs-filter').forEach(function(x){ x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+    });
+  });
+  // Hamburger menu (≤900)
+  var navToggle = document.getElementById("navToggle"), navMenu = document.getElementById("navMenu");
+  function closeNav(){ navMenu.classList.remove("is-open"); navToggle.setAttribute("aria-expanded", "false"); }
+  navToggle.onclick = function(e){ e.stopPropagation(); var open = navMenu.classList.toggle("is-open"); navToggle.setAttribute("aria-expanded", String(open)); };
+  document.addEventListener("click", function(e){ if (!navMenu.contains(e.target) && e.target !== navToggle) closeNav(); });
+  navMenu.addEventListener("click", function(e){ if (e.target.closest("a")) closeNav(); });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape" && navMenu.classList.contains("is-open")) { closeNav(); navToggle.focus(); } });
+</script>
+</body>
+</html>
