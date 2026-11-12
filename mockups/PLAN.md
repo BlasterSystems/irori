@@ -304,3 +304,101 @@ stacked 3 rows; clock caps card 2nd on Overview at ~784 px), brief §5.1–5.3.
   IR-175 mount test still lands with it. S8/S9 remain as
   considered-and-rejected depictions; the drawer vocabulary (.sheet/.afford/
   .orow) stays page-scoped unless a later round promotes it.
+
+## DS v1.1 adoption round (2026-11-12)
+
+Status: **built + browser-verified 2026-11-12, awaiting owner review.**
+Proposal of the new BlasterSystems DS v1.1 (identity v0.2, oklch) applied to
+the three main Irori screens. Kit:
+`~/Developer/BlasterSystems design system v1.1/`; reference port:
+`uptime-monitoring/tasks/mockups/ds-v11-dashboard.html`.
+
+- Files: `irori-v11.css` (shared: oklch tokens copied VERBATIM light+dark,
+  type/spacing/effects, panels, chips, glyphs, buttons/filters, underline
+  fields, tables, log, drawer/scrim, charts, sidebar shell) + three screens
+  `v11-overview.html`, `v11-serve.html`, `v11-models.html`. Fonts: added
+  `fira-sans-latin-300(-ext).woff2`; existing 400/500/600 + DM Mono reused.
+- IA/content deliberately UNCHANGED from the approved rounds (overview-v4
+  tiers, serve states, models catalog) — this round only swaps the DS skin;
+  the owner's density/chrome decisions carry over. The overview tier
+  machinery is not re-implemented here; responsive behavior is simplified
+  (sidebar → hamburger ≤900) and the tier rules from overview-v4 apply on
+  port.
+- Key deltas vs the current `irori.css` skin: 232px paper-2 SIDEBAR + topbar
+  (nav moves out of the topbar; hamburger ≤900) · page titles 30/500 · oklch
+  tokens (dark paper #0e1217, much darker than v1.0) · panels are `--card`
+  on `--paper` with 1px rule · buttons ink (`--action-bg`), one filled per
+  screen, destructive = thread-ink text link (`.bs-link--thread`), never a
+  fill · fields are UNDERLINE (`.bs-field__box`) in forms/drawer; toolbar
+  keeps a bordered select/search hybrid · charts get the v1.1 idiom (y-label
+  column, grid lines, mono uppercase x labels, legend swatches); hero
+  sparklines stay bare · log console keeps force-dark values taken from the
+  v1.1 dark palette · thread discipline unchanged: line/live/warn only, one
+  held chip per screen (serve: embed-eval FOREIGN; overview/models: none,
+  healthy).
+- Data unified to the live fleet naming across the three pages (DGX-1/2/3 +
+  NAS, agents 0.7.0, hub dev-0.7.0-13, GLM-5.3-Flash-EXL3 :8081 on
+  DGX-1+DGX-2, Qwen3.8-Flash-Next :8082 on DGX-3, decode 38 peak 63, NAS
+  14.2/18.1 TB · 148 models · modelctl v0.24.0, jobs j-218 push GLM→DGX-3
+  37% + j-217 queue download 12% — replaces the stale spark1/2/3 + 2.4/8.0
+  TB data in serve/models).
+- Verified (Chromium 1568×950 + 320/390/480/600/720/721/780/900/1024):
+  light+dark full-page screenshots on all three pages, 0 console errors;
+  scrollWidth sweep clean 320→1568 both themes (fixed: models store barrow
+  had a fixed 140px column that overflowed 320 — now `.storebarrow` with a
+  minmax narrow-tier override); serve drawer open/close + Escape + paper
+  scrim; models store-health popover open/Escape; hamburger menu open/close
+  at 780 (thread line on the current item).
+- Verification gotcha: the driven tab served a STALE cached iroiri-v11.css
+  after edits (HTML ?v= busting doesn't refresh the stylesheet) — bump the
+  link href with a query before trusting computed styles.
+- IA/content: the SKIN is the only thing this round proposes; the IA contract
+  stays with the previously approved mockups + SPEC. Corrections after the
+  adversarial review (2026-11-12, PmReview/DesignReview/EpicAdversary — see
+  IR-214 evidence): v11-serve does NOT re-depict the starting·transferring
+  staged-transfer card or the wizard entry (carried from approved serve.html +
+  SPEC §7, AC on the Serve child); v11-models does NOT re-depict the detail
+  drawer (armed delete, remediations, capacity math) or the download modal
+  (carried from approved models.html + SPEC §6, AC on the Models child); NO
+  v1.1 page depicts non-healthy states (starting/stale/offline/unmanaged/
+  failed/no-sensor/fleet-down — IR-103 rules + round-3 outcomes, AC on the
+  Overview and Serve children). Fixed in place after review: nav Serve count
+  4 everywhere (total setups), "8 of 148 · page 1 / 6", store-health
+  "148 active", planned placement chips lose the run glyph, hamburger menu
+  gains the deploy-tag + live line (IR-197), jobs footer copy "jobs stream",
+  240 W per-node envelope dash + legend restored.
+- Adversarial review (2026-11-12, pre-implementation variant, IR-214):
+  three read-only reviewers — PM (PmReview), senior UI/UX designer
+  (DesignReview), epic-mechanics adversary (EpicAdversary) — over the three
+  screens + epic text, with a parent-measured Chromium fact pack pushed to
+  each (contrast via oklch→sRGB with alpha compositing, thread counts,
+  geometry, 12-width overflow sweep, interaction asserts). Verdicts: skin
+  port conformant (tokens byte-verbatim, one filled button/screen, thread
+  discipline, chart alignment, 0 errors, no overflow); the blockers were
+  silent IA drops and epic-text gaps, not skin defects.
+  - Fixed in mockups after review: nav Serve count 4 everywhere, "8 of 148
+    · page 1 / 6", store-health "148 active", planned placement chips lose
+    the run glyph, hamburger menu deploy-tag + live line (IR-197), jobs
+    footer copy "jobs stream", 240 W envelope dash + legend restored,
+    bs-info span → button + tip flips left-anchored, drawer focus
+    management + aria-modal, pagination aria-current, glyph optical sizes
+    (9/8 outline, 7/8 filled per kit), reduced-motion iteration-count,
+    h2 on the token scale, field-label tracking 0.06em, blur 12px,
+    alert warn-glyph nudge, statgrid--6 defined, spark vector-effect,
+    latin-ext 300 face, −15m label centering. All re-verified in Chromium.
+  - Pinned in the epic: IR-197 footer supersession (deploy tag keeps its
+    hamburger home; version/watts → sidebar foot + refresh-note), chrome
+    homes (gear, countbub, offline warn chip), markup vocabulary strategy
+    (keep Irori class names, change values; bs-* only for new components),
+    tier machinery port, enumerated sweep widths + contract names,
+    validation surface, spark1/2/3 bullet reworded, destructive-scope +
+    one-filled-per-surface definitions, tasks/IRI-NNN per child.
+  - Carried as AC into children IR-215…IR-223 (filed on sprint 1004).
+  - Owner decisions taken with defaults (flagged in the evidence comment):
+    serve count = total setups; catalog = full 148; footer superseded per
+    mockup; vocabulary = restyle in place; log .ok green ratified;
+    info tips stay 300px popovers; destructive rule scoped to the three
+    screens + shared components; one filled button per visible surface.
+- Not in this round (follow-ups if approved): nodes/node-head/analytics/
+  benchmarks/cleanup/wizard screens, the full overview tier system, dark-
+  first log review, and promoting `irori-v11.css` toward `apps/web` tokens.

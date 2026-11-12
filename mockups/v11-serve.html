@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Serve · DS v1.1 · Irori</title>
+<link rel="stylesheet" href="irori-v11.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  .setup__actions { display: flex; align-items: center; gap: 14px; }
+  .member .bs-row__lat { min-width: 72px; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="bs-sidebar">
+    <div class="bs-sidebar__brand">
+      <a class="bs-lockup" href="v11-overview.html" aria-label="Irori home">
+        <span class="bs-lockup__glyph" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+        <span class="bs-lockup__text">
+          <span class="bs-lockup__name">Irori</span>
+          <span class="bs-lockup__endorse">A BlasterSystems product</span>
+        </span>
+      </a>
+    </div>
+    <nav class="bs-nav" aria-label="Primary">
+      <a class="bs-nav-item" href="v11-overview.html"><span class="bs-nav-item__label">Overview</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Nodes</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="v11-models.html"><span class="bs-nav-item__label">Models</span><span class="bs-nav-item__count">148</span></a>
+      <a class="bs-nav-item" href="v11-serve.html" aria-current="page"><span class="bs-nav-item__label">Serve</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Analytics</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Usage</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Chats</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Benchmarks</span></a>
+    </nav>
+    <div class="bs-sidebar__foot">
+      <span class="bs-sidebar__status">
+        <span><span class="pulse" aria-hidden="true"></span>&nbsp;Live · 2 s</span>
+        <span>Irori 0.7.0 · dev-0.7.0-13</span>
+      </span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="bs-topbar">
+      <div class="row grow" style="min-width:0">
+        <button class="iconbtn bs-topbar__menubtn" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navMenu">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <a class="bs-topbar__brand" href="v11-overview.html" aria-label="Irori home">
+          <span class="bs-lockup__glyph" style="width:22px;height:8px" aria-hidden="true">
+            <span class="mark-node" style="width:8px;height:8px;border-width:1.5px"></span>
+            <span class="mark-line" style="left:8px;right:8px;top:3.25px;height:1.5px"></span>
+            <span class="mark-square" style="width:8px;height:8px"></span>
+          </span>
+          <span class="bs-lockup__name" style="font-size:15px">Irori</span>
+        </a>
+        <span class="bs-chip"><span class="bs-glyph bs-glyph--run" aria-hidden="true"></span>jobs · 2 running</span>
+      </div>
+      <div class="row">
+        <button class="bs-btn bs-btn--primary" type="button" id="wizOpen">New setup…</button>
+        <button class="bs-theme" id="themeToggle" type="button" aria-label="Toggle theme"><span></span></button>
+      </div>
+      <nav class="bs-topbar__menu" id="navMenu" aria-label="Primary menu">
+        <a class="bs-nav-item" href="v11-overview.html"><span class="bs-nav-item__label">Overview</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Nodes</span></a>
+        <a class="bs-nav-item" href="v11-models.html"><span class="bs-nav-item__label">Models</span></a>
+        <a class="bs-nav-item" href="v11-serve.html" aria-current="page"><span class="bs-nav-item__label">Serve</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Analytics</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Usage</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Chats</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Benchmarks</span></a>
+        <div class="bs-menu-foot">deploy dev-0.7.0-13 · live · 2 s</div>
+      </nav>
+    </header>
+
+    <main class="content">
+      <div class="pagehead">
+        <div>
+          <h1 class="page-title">Serve</h1>
+          <p class="page-sub">Setups: model + nodes + your scripts. Irori validates, transfers, supervises — never edits your scripts.</p>
+        </div>
+      </div>
+
+      <section class="stack" style="gap:14px">
+
+        <!-- 1 · healthy cluster: no state chrome -->
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0">
+              <span class="bs-panel__title">GLM-5.3-Flash-EXL3</span>
+              <span class="bs-panel__meta">cluster · DGX-1 :8081 · DGX-2 :8001</span>
+            </div>
+            <div class="setup__actions">
+              <button class="bs-link" type="button" data-open="drawer">Logs</button>
+              <button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Restart</button>
+              <button class="bs-link bs-link--thread" type="button">Stop…</button>
+              <button class="iconbtn" type="button" aria-label="More">⋯</button>
+            </div>
+          </div>
+          <div class="rows-in-panel" style="margin-top:-6px">
+            <div class="bs-row member">
+              <span class="bs-glyph bs-glyph--ok" aria-hidden="true"></span>
+              <div style="min-width:0"><span class="bs-row__name">DGX-1 · head</span><span class="bs-row__target">:8081 · direct 10.0.10.4:8081/v1</span></div>
+              <span class="bs-row__lat">38 tok/s</span>
+              <span></span>
+            </div>
+            <div class="bs-row member">
+              <span class="bs-glyph bs-glyph--ok" aria-hidden="true"></span>
+              <div style="min-width:0"><span class="bs-row__name">DGX-2 · worker</span><span class="bs-row__target">:8001 · 10.0.10.5</span></div>
+              <span class="bs-row__lat faint">joined</span>
+              <span></span>
+            </div>
+          </div>
+          <div class="log" style="max-height:88px">
+            <div><span class="dim">09:41:19</span> engine: AVG decode 38 tok/s · queue 1 running / 0 waiting</div>
+            <div><span class="dim">09:41:18</span> engine: POST /v1/chat/completions 200 · ttft 71 ms · 412 out tok</div>
+          </div>
+        </article>
+
+        <!-- 2 · healthy single -->
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0">
+              <span class="bs-panel__title">Qwen3.8-Flash-Next</span>
+              <span class="bs-panel__meta">single · DGX-3 :8082</span>
+            </div>
+            <div class="setup__actions">
+              <button class="bs-link" type="button">Logs</button>
+              <button class="bs-link bs-link--thread" type="button">Stop…</button>
+              <button class="iconbtn" type="button" aria-label="More">⋯</button>
+            </div>
+          </div>
+          <div class="rows-in-panel" style="margin-top:-6px">
+            <div class="bs-row member">
+              <span class="bs-glyph bs-glyph--ok" aria-hidden="true"></span>
+              <div style="min-width:0"><span class="bs-row__name">DGX-3 · single</span><span class="bs-row__target">:8082 · direct 10.0.10.6:8082/v1</span></div>
+              <span class="bs-row__lat faint">peak 121 tok/s</span>
+              <span></span>
+            </div>
+          </div>
+        </article>
+
+        <!-- 3 · stopped: stage chip, hollow square -->
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0">
+              <span class="bs-panel__title">qwen3-8b-q4</span>
+              <span class="bs-chip bs-chip--stage"><span class="bs-glyph bs-glyph--halt" aria-hidden="true"></span>stopped</span>
+              <span class="bs-panel__meta">single · DGX-1 :8001</span>
+            </div>
+            <div class="setup__actions">
+              <button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Start</button>
+              <button class="bs-link" type="button">Logs</button>
+              <button class="iconbtn" type="button" aria-label="More">⋯</button>
+            </div>
+          </div>
+          <p class="bs-note" style="margin-top:-4px">stopped 3d ago · scripts re-validated at last start (ok) · model present on DGX-1</p>
+        </article>
+
+        <!-- 4 · foreign: the screen's one held chip -->
+        <article class="bs-panel">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0">
+              <span class="bs-panel__title">embed-eval</span>
+              <span class="bs-chip bs-chip--held"><span class="bs-glyph bs-glyph--warn" aria-hidden="true"></span>foreign</span>
+              <span class="bs-panel__meta">single · DGX-1 :8100</span>
+            </div>
+            <div class="setup__actions">
+              <button class="bs-link" type="button">Inspect</button>
+              <button class="iconbtn" type="button" aria-label="More">⋯</button>
+            </div>
+          </div>
+          <div class="bs-alert bs-alert--held" style="border-top:0;padding-top:0">
+            <span class="bs-glyph bs-glyph--warn" aria-hidden="true"></span>
+            <div class="bs-alert__text">
+              <span class="bs-alert__title">Port 8100 answers a different engine</span>
+              <span class="bs-alert__body">Another process took the port. Nothing was stopped.</span>
+            </div>
+          </div>
+        </article>
+
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- Setup detail drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-label="Setup details">
+  <div class="drawer__head">
+    <div class="row" style="min-width:0">
+      <span class="bs-panel__title">GLM-5.3-Flash-EXL3</span>
+      <span class="bs-panel__meta">cluster</span>
+    </div>
+    <button class="iconbtn" id="drawerClose" aria-label="Close details">✕</button>
+  </div>
+  <div class="drawer__body">
+    <dl class="kv">
+      <dt>nodes</dt><dd>DGX-1 (head) · DGX-2 (worker)</dd>
+      <dt>port</dt><dd>8081 / 8001</dd>
+      <dt>endpoint</dt><dd>10.0.10.4:8081/v1</dd>
+      <dt>start</dt><dd>/home/me/glm/start.sh <span class="faint">✓ validated 2d ago</span></dd>
+      <dt>stop</dt><dd>/home/me/glm/stop.sh <span class="faint">✓ validated 2d ago</span></dd>
+      <dt>uptime</dt><dd>2h 14m · 0 restarts</dd>
+    </dl>
+    <div>
+      <span class="bs-label">Engine log · streaming into telemetry</span>
+      <div class="log" style="margin-top:8px; max-height:220px">
+        <div><span class="dim">09:41:19</span> engine: AVG decode 38 tok/s · queue 1 running / 0 waiting</div>
+        <div><span class="dim">09:41:18</span> engine: POST /v1/chat/completions 200 · ttft 71 ms · 412 out tok</div>
+        <div><span class="dim">09:41:02</span> engine: prefill 3,214 tok/s · cache hit 64%</div>
+        <div><span class="dim">09:12:11</span> <span class="ok">engine: Uvicorn listening on 0.0.0.0:8081</span></div>
+        <div><span class="dim">09:12:09</span> engine: KV cache 99.2 GB pool allocated</div>
+        <div><span class="dim">09:12:02</span> <span class="ok">driver: dispatch start → exit 0</span></div>
+      </div>
+    </div>
+    <div>
+      <span class="bs-label">Placement</span>
+      <div class="rows-in-panel" style="margin-top:4px">
+        <div class="bs-row">
+          <span class="bs-glyph bs-glyph--ok" aria-hidden="true"></span>
+          <div style="min-width:0"><span class="bs-row__name">DGX-1 · head</span></div>
+          <span></span>
+          <span class="bs-chip">present · 68.2 GB</span>
+        </div>
+        <div class="bs-row">
+          <span class="bs-glyph bs-glyph--ok" aria-hidden="true"></span>
+          <div style="min-width:0"><span class="bs-row__name">DGX-2 · worker</span></div>
+          <span></span>
+          <span class="bs-chip">present · pushed 2d ago · 3m 41s</span>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="gap:14px">
+      <button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Edit…</button>
+      <button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Duplicate…</button>
+      <button class="bs-link bs-link--thread" type="button">Remove…</button>
+    </div>
+  </div>
+</aside>
+
+<span class="mock-note">Static mockup · DS v1.1 proposal · data illustrative</span>
+<script>
+  var btn = document.getElementById("themeToggle");
+  btn.onclick = function(){ var d = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = d ? "light" : "dark";
+    try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} };
+  var drawer = document.getElementById("drawer"), scrim = document.getElementById("scrim"), lastFocus = null;
+  function openDrawer(){ lastFocus = document.activeElement; drawer.classList.add("is-open"); scrim.classList.add("is-open"); document.getElementById("drawerClose").focus(); }
+  function closeDrawer(){ drawer.classList.remove("is-open"); scrim.classList.remove("is-open"); if (lastFocus) lastFocus.focus(); }
+  document.querySelectorAll("[data-open='drawer']").forEach(function(el){ el.addEventListener("click", openDrawer); });
+  document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+  scrim.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
+  // Hamburger menu (≤900)
+  var navToggle = document.getElementById("navToggle"), navMenu = document.getElementById("navMenu");
+  function closeNav(){ navMenu.classList.remove("is-open"); navToggle.setAttribute("aria-expanded", "false"); }
+  navToggle.onclick = function(e){ e.stopPropagation(); var open = navMenu.classList.toggle("is-open"); navToggle.setAttribute("aria-expanded", String(open)); };
+  document.addEventListener("click", function(e){ if (!navMenu.contains(e.target) && e.target !== navToggle) closeNav(); });
+  navMenu.addEventListener("click", function(e){ if (e.target.closest("a")) closeNav(); });
+</script>
+</body>
+</html>
