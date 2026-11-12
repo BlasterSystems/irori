@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Models · DS v1.1 · Irori</title>
+<link rel="stylesheet" href="irori-v11.css">
+<script>try{var t=localStorage.getItem("irori-mockup-theme");if(t)document.documentElement.dataset.theme=t;else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";}catch(e){}</script>
+<style>
+  .jobrow { display: grid; grid-template-columns: 14px minmax(0, 1.1fr) minmax(180px, 1fr) auto auto auto; gap: 12px; align-items: center; padding: 12px 2px; border-top: 1px solid var(--rule); }
+  .jobrow:first-child { border-top: 0; }
+  .jobrow__rate { font-family: var(--font-mono); font-size: var(--fs-data-sm); color: var(--ink-2); white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+  .popover { position: absolute; top: calc(100% + 6px); right: 0; width: 380px; max-width: 80vw; z-index: 45; display: none;
+    padding: 16px; background: var(--paper-2); border: 1px solid var(--rule-2); border-radius: var(--radius-panel); animation: bs-rise var(--dur-ui) var(--ease-out); }
+  .popover.is-open { display: block; }
+  .toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .toolbar .bs-field { max-width: 320px; flex: 1 1 240px; }
+  .pagerow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 2px 0; }
+  .storebarrow { grid-template-columns: 52px 140px auto; }
+  @media (max-width: 600px) { .storebarrow { grid-template-columns: 52px minmax(0, 140px) auto; } }
+  @media (max-width: 900px) { .jobrow { grid-template-columns: 14px minmax(0, 1fr) auto; } .jobrow__bar, .jobrow__chip { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <aside class="bs-sidebar">
+    <div class="bs-sidebar__brand">
+      <a class="bs-lockup" href="v11-overview.html" aria-label="Irori home">
+        <span class="bs-lockup__glyph" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+        <span class="bs-lockup__text">
+          <span class="bs-lockup__name">Irori</span>
+          <span class="bs-lockup__endorse">A BlasterSystems product</span>
+        </span>
+      </a>
+    </div>
+    <nav class="bs-nav" aria-label="Primary">
+      <a class="bs-nav-item" href="v11-overview.html"><span class="bs-nav-item__label">Overview</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Nodes</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="v11-models.html" aria-current="page"><span class="bs-nav-item__label">Models</span><span class="bs-nav-item__count">148</span></a>
+      <a class="bs-nav-item" href="v11-serve.html"><span class="bs-nav-item__label">Serve</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Analytics</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Usage</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Chats</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Benchmarks</span></a>
+    </nav>
+    <div class="bs-sidebar__foot">
+      <span class="bs-sidebar__status">
+        <span><span class="pulse" aria-hidden="true"></span>&nbsp;Live · 2 s</span>
+        <span>Irori 0.7.0 · dev-0.7.0-13</span>
+      </span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="bs-topbar">
+      <div class="row grow" style="min-width:0">
+        <button class="iconbtn bs-topbar__menubtn" id="navToggle" aria-label="Menu" aria-expanded="false" aria-controls="navMenu">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <a class="bs-topbar__brand" href="v11-overview.html" aria-label="Irori home">
+          <span class="bs-lockup__glyph" style="width:22px;height:8px" aria-hidden="true">
+            <span class="mark-node" style="width:8px;height:8px;border-width:1.5px"></span>
+            <span class="mark-line" style="left:8px;right:8px;top:3.25px;height:1.5px"></span>
+            <span class="mark-square" style="width:8px;height:8px"></span>
+          </span>
+          <span class="bs-lockup__name" style="font-size:15px">Irori</span>
+        </a>
+        <span class="bs-chip"><span class="bs-glyph bs-glyph--run" aria-hidden="true"></span>jobs · 2 running</span>
+      </div>
+      <div class="row">
+        <button class="bs-btn bs-btn--primary" type="button">Download from HF…</button>
+        <button class="bs-theme" id="themeToggle" type="button" aria-label="Toggle theme"><span></span></button>
+      </div>
+      <nav class="bs-topbar__menu" id="navMenu" aria-label="Primary menu">
+        <a class="bs-nav-item" href="v11-overview.html"><span class="bs-nav-item__label">Overview</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Nodes</span></a>
+        <a class="bs-nav-item" href="v11-models.html" aria-current="page"><span class="bs-nav-item__label">Models</span></a>
+        <a class="bs-nav-item" href="v11-serve.html"><span class="bs-nav-item__label">Serve</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Analytics</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Usage</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Chats</span></a>
+        <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Benchmarks</span></a>
+        <div class="bs-menu-foot">deploy dev-0.7.0-13 · live · 2 s</div>
+      </nav>
+    </header>
+
+    <main class="content">
+      <div class="pagehead">
+        <div>
+          <h1 class="page-title">Models</h1>
+          <p class="page-sub"><span class="mono">nas → /mnt/nas/llm-models</span> · modelctl layout, unchanged</p>
+        </div>
+      </div>
+
+      <!-- Store health strip -->
+      <section class="bs-panel">
+        <div class="row row--between row--wrap" style="gap:16px">
+          <div class="row row--wrap" style="gap:16px">
+            <div class="barrow storebarrow"><span>store</span><div class="bar"><div class="bar__fill" style="width:78%"></div></div><span class="val">14.2 / 18.1 TB</span></div>
+            <span class="stat__sub">catalog seq 42 · synced 5m ago</span>
+            <span class="stat__sub">modelctl v0.24.0 · doctor ok</span>
+          </div>
+          <div class="row" style="position:relative">
+            <button class="bs-btn bs-btn--sm bs-btn--secondary" id="hygOpen" type="button" aria-expanded="false" aria-controls="hygPop">Store health</button>
+            <div class="popover" id="hygPop" role="dialog" aria-label="Store health">
+              <dl class="kv">
+                <dt>staging</dt><dd>1 resumable · 0 orphaned</dd>
+                <dt>objects</dt><dd>148 active · 2 unreferenced</dd>
+                <dt>active refs</dt><dd>14 valid · 0 repairable</dd>
+                <dt>quarantine</dt><dd>empty</dd>
+              </dl>
+              <div class="row" style="margin-top:12px; gap:8px">
+                <button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">doctor --json</button>
+                <button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">gc-objects (dry-run)</button>
+              </div>
+              <p class="bs-note" style="margin-top:10px">All mutations dry-run first, then armed. NAS never written outside modelctl.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Jobs: transfers -->
+      <section class="bs-panel section-gap">
+        <div class="bs-panel__head">
+          <span class="bs-label">Jobs</span>
+          <div class="row"><span class="bs-panel__meta">2 running · 1 done today</span><button class="bs-link" type="button">All jobs</button></div>
+        </div>
+        <div class="rows-in-panel" style="margin-top:-4px">
+          <div class="jobrow">
+            <span class="bs-glyph bs-glyph--run" aria-hidden="true"></span>
+            <div style="min-width:0"><span class="bs-row__name mono">j-218 · push GLM-5.3-Flash-EXL3</span><span class="bs-row__target">DGX-2 → DGX-3 · cx70+cx71 · 4 streams</span></div>
+            <div class="jobrow__bar"><div class="bar bar--lg"><div class="bar__fill" style="width:37%"></div></div><span class="stat__sub">25.2 / 68.2 GB</span></div>
+            <span class="jobrow__rate">184 MB/s · ~6m left</span>
+            <span class="bs-chip jobrow__chip"><span class="bs-glyph bs-glyph--run"></span>running</span>
+            <span class="row" style="gap:12px"><button class="bs-link" type="button">Output</button><button class="bs-link bs-link--thread" type="button">Cancel…</button></span>
+          </div>
+          <div class="jobrow">
+            <span class="bs-glyph bs-glyph--run" aria-hidden="true"></span>
+            <div style="min-width:0"><span class="bs-row__name mono">j-217 · queue download (2 entries)</span><span class="bs-row__target">nas → /mnt/nas/llm-models · HF</span></div>
+            <div class="jobrow__bar"><div class="bar bar--lg"><div class="bar__fill" style="width:12%"></div></div><span class="stat__sub">10.6 / 88.0 GB</span></div>
+            <span class="jobrow__rate">96 MB/s · ~14m left</span>
+            <span class="bs-chip jobrow__chip"><span class="bs-glyph bs-glyph--run"></span>running</span>
+            <span class="row" style="gap:12px"><button class="bs-link" type="button">Output</button><button class="bs-link bs-link--thread" type="button">Cancel…</button></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Catalog -->
+      <section class="bs-panel section-gap">
+        <div class="toolbar" style="padding-bottom:12px">
+          <div class="bs-field">
+            <label class="bs-field__label" for="q">Search</label>
+            <div class="bs-field__box bs-field--mono">
+              <input class="bs-field__input" id="q" type="search" placeholder="name, repo, quantization… ⌘K">
+            </div>
+          </div>
+          <div class="row row--wrap" role="group" aria-label="Runtime filters" style="padding-bottom:8px">
+            <button class="bs-filter" aria-pressed="true">vLLM</button>
+            <button class="bs-filter" aria-pressed="true">llama.cpp</button>
+          </div>
+          <div class="row row--wrap" role="group" aria-label="Placement filters" style="padding-bottom:8px">
+            <span class="bs-label" style="margin-right:2px">placement</span>
+            <button class="bs-filter" aria-pressed="true">on head</button>
+            <button class="bs-filter" aria-pressed="true">on any node</button>
+            <button class="bs-filter" aria-pressed="true">not synced</button>
+          </div>
+          <span class="grow"></span>
+          <label class="visually-hidden" for="sort">Sort</label>
+          <select class="select" id="sort" style="min-width:170px">
+            <option>Recently added</option>
+            <option>Name A–Z</option>
+            <option>Size</option>
+          </select>
+        </div>
+
+        <div style="overflow-x:auto">
+          <table class="table" id="cat">
+            <thead><tr>
+              <th>Model</th><th>Runtime</th><th style="text-align:right">Size</th><th>Added</th><th>Placement</th><th></th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>DeepSeek-V4-Flash</strong><div class="mono faint">unsloth/DeepSeek-V4-Flash-0731 · rev 0731</div></td>
+                <td class="mono">vllm</td><td class="num">41.5 GB</td><td class="mono">Oct 15</td>
+                <td><span class="bs-chip bs-chip--stage">all nodes push</span></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>qwen3-8b-q4</strong><div class="mono faint">Qwen/Qwen3-8B-GGUF · Q4_K_M · mmproj</div></td>
+                <td class="mono">llama.cpp</td><td class="num">5.1 GB</td><td class="mono">Oct 14</td>
+                <td><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>all present</span></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>gemma-4-31b-it-q4</strong><div class="mono faint">unsloth/gemma-4-31B-it-GGUF · UD-Q4_K_XL</div></td>
+                <td class="mono">llama.cpp</td><td class="num">19.8 GB</td><td class="mono">Oct 13</td>
+                <td><div class="row row--wrap"><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>DGX-1 ✓</span><span class="bs-chip bs-chip--stage">DGX-2 sync</span></div></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>GLM-5.3-Flash-EXL3</strong><div class="mono faint">DGX/GLM-5.3-Flash-EXL3 · main · mtp</div></td>
+                <td class="mono">vllm</td><td class="num">68.2 GB</td><td class="mono">Oct 12</td>
+                <td><div class="row row--wrap"><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>DGX-1 ✓</span><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>DGX-2 ✓</span><span class="bs-chip bs-chip--stage">DGX-3 push</span></div></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>glm-5.3-flash-dflash2</strong><div class="mono faint">DGX/GLM-5.3-Flash-DFlash2 · draft</div></td>
+                <td class="mono">vllm</td><td class="num">8.1 GB</td><td class="mono">Oct 12</td>
+                <td><div class="row row--wrap"><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>nas ✓</span><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>DGX-1 ✓</span></div></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>phi-4-mini</strong><div class="mono faint">microsoft/phi-4-mini-GGUF · Q8_0</div></td>
+                <td class="mono">llama.cpp</td><td class="num">2.7 GB</td><td class="mono">Oct 8</td>
+                <td><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>all present</span></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>llama-4-scout-q4</strong><div class="mono faint">meta-llama/Llama-4-Scout-GGUF · Q4_K_M</div></td>
+                <td class="mono">llama.cpp</td><td class="num">24.3 GB</td><td class="mono">Oct 5</td>
+                <td><div class="row row--wrap"><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>DGX-1 ✓</span><span class="bs-chip"><span class="bs-glyph bs-glyph--ok"></span>DGX-2 ✓</span></div></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+              <tr>
+                <td><strong>mistral-small-3.2-q5</strong><div class="mono faint">mistralai/Mistral-Small-3.2 · Q5_K_M</div></td>
+                <td class="mono">llama.cpp</td><td class="num">8.9 GB</td><td class="mono">Sep 30</td>
+                <td><span class="bs-chip bs-chip--stage">nas only</span></td>
+                <td class="actions"><button class="bs-btn bs-btn--sm bs-btn--secondary" type="button">Serve</button> <button class="bs-link" type="button">Details</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagerow">
+          <span class="stat__sub">8 of 148 models · page 1 / 6</span>
+          <div class="row" role="group" aria-label="Pagination">
+            <button class="bs-filter" aria-label="Previous page" disabled>‹</button>
+            <button class="bs-filter" aria-current="page">1</button>
+            <button class="bs-filter">2</button>
+            <button class="bs-filter" aria-label="Next page">›</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="refresh-note">
+        <span class="bs-glyph bs-glyph--run" aria-hidden="true"></span>
+        <span>Live · catalog synced 5m ago · jobs stream</span>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<span class="mock-note">Static mockup · DS v1.1 proposal · data illustrative</span>
+<script>
+  var btn = document.getElementById("themeToggle");
+  btn.onclick = function(){ var d = document.documentElement.dataset.theme === "dark";
+    document.documentElement.dataset.theme = d ? "light" : "dark";
+    try{localStorage.setItem("irori-mockup-theme", d ? "light" : "dark");}catch(e){} };
+  // Store health popover
+  var hyg = document.getElementById("hygOpen"), pop = document.getElementById("hygPop");
+  hyg.onclick = function(e){ e.stopPropagation(); var open = pop.classList.toggle("is-open"); hyg.setAttribute("aria-expanded", String(open)); };
+  document.addEventListener("click", function(e){ if (!pop.contains(e.target) && e.target !== hyg) { pop.classList.remove("is-open"); hyg.setAttribute("aria-expanded", "false"); } });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") { pop.classList.remove("is-open"); hyg.setAttribute("aria-expanded", "false"); } });
+  // Filter chips (visual only)
+  document.querySelectorAll(".bs-filter[aria-pressed]").forEach(function(b){
+    b.addEventListener("click", function(){ if (b.getAttribute("aria-pressed") !== null && b.textContent.trim().match(/[a-z]/i) && b.closest('[role="group"]')) b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") !== "true" ? "true" : "false"); });
+  });
+  // Hamburger menu (≤900)
+  var navToggle = document.getElementById("navToggle"), navMenu = document.getElementById("navMenu");
+  function closeNav(){ navMenu.classList.remove("is-open"); navToggle.setAttribute("aria-expanded", "false"); }
+  navToggle.onclick = function(e){ e.stopPropagation(); var open = navMenu.classList.toggle("is-open"); navToggle.setAttribute("aria-expanded", String(open)); };
+  document.addEventListener("click", function(e){ if (!navMenu.contains(e.target) && e.target !== navToggle) closeNav(); });
+  navMenu.addEventListener("click", function(e){ if (e.target.closest("a")) closeNav(); });
+</script>
+</body>
+</html>
