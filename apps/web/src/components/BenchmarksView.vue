@@ -437,7 +437,7 @@ onBeforeUnmount(() => {
                 style="accent-color: var(--ink); margin-right: 6px"
                 @change="toggleSelect(run.id)"
               />
-              <button v-if="run.status === 'running'" class="btn btn--danger btn--sm" @click="cancel(run)">Cancel</button>
+              <button v-if="run.status === 'running'" class="bs-link bs-link--thread" @click="cancel(run)">Cancel</button>
             </td>
           </tr>
           <tr v-if="runsForTab.length === 0 && !loading">

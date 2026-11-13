@@ -292,7 +292,7 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
       </div>
       <div class="card__body">
         <template v-if="chart !== null && chart.paths.length > 0">
-          <LensChart :chart="chart" :unit="unit" :aria-label="`${lens} over ${range}`" :format="fmtPoint" :time-format="bucketFmt" />
+          <LensChart :chart="chart" :unit="unit" labeled :aria-label="`${lens} over ${range}`" :format="fmtPoint" :time-format="bucketFmt" />
           <p class="stat__sub">{{ headline }}</p>
           <p v-if="lens === 'power'" class="stat__sub">estimated, not wall-metered — GPU board + CPU package + base overhead, clamped to the GB10 envelope (240 W)</p>
           <p v-if="lens === 'temps'" class="stat__sub">◇ warn ≥{{ thresholds.tempWarnC }}°C · ▫ critical ≥{{ thresholds.tempCriticalC }}°C — markers are bucket crossings, no rules engine</p>
@@ -304,7 +304,7 @@ const tokenGroupTotals = computed(() => (data.value?.lens === "tokens" ? seriesT
     <section v-if="lens === 'decode' && prefillChart !== null && prefillChart.paths.length > 0" class="card" style="margin-bottom: 12px">
       <div class="card__head"><div class="row"><h3>Prefill throughput</h3><span class="chip">tok/s</span></div></div>
       <div class="card__body">
-        <LensChart :chart="prefillChart" unit="tok/s" :aria-label="`prefill over ${range}`" :format="fmtTps" :time-format="bucketFmt" />
+        <LensChart :chart="prefillChart" unit="tok/s" labeled :aria-label="`prefill over ${range}`" :format="fmtTps" :time-format="bucketFmt" />
         <p class="stat__sub">prefill excludes cached tokens</p>
       </div>
     </section>

@@ -81,7 +81,7 @@ watch(feed, () => {
         <span :class="live.connected.value ? 'pulse' : 'dot dot--warn'" aria-hidden="true"></span>
         {{ live.connected.value ? "live" : "offline" }}
       </span>
-      <button class="btn btn--ghost btn--sm" aria-label="Close telemetry" @click="emit('close')">✕</button>
+      <button class="iconbtn" aria-label="Close telemetry" @click="emit('close')">✕</button>
     </div>
     <div ref="logEl" class="telemetry-log">
       <div v-for="(line, i) in feed" :key="`${line.t}-${i}`"><span class="dim">{{ fmtBucket(line.t, "minute") }}</span> {{ line.text }}</div>
@@ -93,14 +93,15 @@ watch(feed, () => {
 <style scoped>
 .telemetry-drawer {
   position: fixed;
-  top: var(--topbar-h, 64px);
+  top: var(--topbar-h, 60px);
   right: 0;
   bottom: 0;
   z-index: 8;
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--rule-2);
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 .telemetry-resize {
   position: absolute;
@@ -118,18 +119,19 @@ watch(feed, () => {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
 }
 .telemetry-head h3 {
   flex: 1;
-  font-size: 16px;
+  font-size: var(--fs-stat);
+  font-weight: 600;
 }
 .telemetry-log {
   flex: 1;
   overflow: auto;
   padding: 10px 14px 16px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-data-sm);
   line-height: 1.75;
   overflow-wrap: anywhere;
 }

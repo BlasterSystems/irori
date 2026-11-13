@@ -104,7 +104,7 @@ async function runCancel(job: JobLive): Promise<void> {
         <span :class="live.connected.value ? 'pulse' : 'dot dot--warn'" aria-hidden="true"></span>
         {{ live.connected.value ? "live" : "offline" }}
       </span>
-      <button class="btn btn--ghost btn--sm" aria-label="Close transfers" @click="emit('close')">✕</button>
+      <button class="iconbtn" aria-label="Close transfers" @click="emit('close')">✕</button>
     </div>
     <div class="dock-body">
       <div v-if="active.length > 0" class="xsub"><span class="label">Active · {{ active.length }}</span></div>
@@ -114,7 +114,7 @@ async function runCancel(job: JobLive): Promise<void> {
             <span :class="job.status === 'running' && job.cancelRequestedAt === null ? 'dot dot--run' : 'dot dot--warn'" aria-hidden="true"></span> {{ chipLabel(job) }}
           </span>
           <span class="xmodel">{{ modelName(job) }}</span>
-          <button v-if="job.cancelRequestedAt === null" class="btn btn--danger btn--sm" @click="armCancel(job)">Cancel…</button>
+          <button v-if="job.cancelRequestedAt === null" class="bs-link bs-link--thread" @click="armCancel(job)">Cancel…</button>
         </div>
         <div class="dockrow-route">{{ routeText(job) }}</div>
         <div v-if="job.progress?.percent !== null && job.progress?.percent !== undefined" class="bar dockrow-bar">
@@ -132,7 +132,7 @@ async function runCancel(job: JobLive): Promise<void> {
           <p v-if="cancelError !== null" class="stat__sub" style="margin: 0 0 6px; color: var(--thread-ink);">{{ cancelError }}</p>
           <div class="row" style="justify-content: flex-end; gap: 8px;">
             <button class="btn btn--ghost btn--sm" @click="disarmCancel">Keep running</button>
-            <button class="btn btn--danger btn--sm" :disabled="cancelBusy" @click="runCancel(job)">{{ cancelBusy ? "Stopping…" : "Cancel transfer" }}</button>
+            <button class="bs-link bs-link--thread" :disabled="cancelBusy" @click="runCancel(job)">{{ cancelBusy ? "Stopping…" : "Cancel transfer" }}</button>
           </div>
         </div>
       </div>
@@ -161,7 +161,7 @@ async function runCancel(job: JobLive): Promise<void> {
    per the chrome layering contract); rows carry the shared transfer anatomy. */
 .dock {
   position: fixed;
-  top: var(--topbar-h, 64px);
+  top: var(--topbar-h, 60px);
   right: 0;
   bottom: 0;
   z-index: 8;
@@ -170,18 +170,20 @@ async function runCancel(job: JobLive): Promise<void> {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--rule-2);
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 .dock-head {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
 }
 .dock-head h3 {
   flex: 1;
-  font-size: 16px;
+  font-size: var(--fs-stat);
+  font-weight: 600;
 }
 .dock-body {
   flex: 1;
@@ -189,7 +191,7 @@ async function runCancel(job: JobLive): Promise<void> {
 }
 .dockrow {
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
 }
 .dockrow-empty {
   color: var(--faint);
@@ -231,7 +233,7 @@ async function runCancel(job: JobLive): Promise<void> {
   gap: 8px;
   margin-top: 5px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-label-sm);
   color: var(--faint);
 }
 .xsub {
@@ -245,11 +247,11 @@ async function runCancel(job: JobLive): Promise<void> {
   margin-top: 8px;
   border: 1px solid var(--thread);
   background: var(--thread-wash);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-control);
   padding: 8px 10px;
 }
 .dock-foot {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
   padding: 8px 14px;
 }
 @media (max-width: 720px) {

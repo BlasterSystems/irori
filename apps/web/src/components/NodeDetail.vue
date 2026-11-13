@@ -1084,7 +1084,7 @@ onUnmounted(() => {
             <p v-if="leftover.error" class="stat__sub">{{ leftover.error }}</p>
             <div class="row" style="gap: 8px; margin-top: 6px;">
               <button
-                class="btn btn--danger btn--sm"
+                class="bs-link bs-link--thread"
                 :disabled="opBusy || leftover.target === null || nodeBusyJob !== null"
                 :title="nodeBusyLabel || undefined"
                 @click="askDelete({ scope: 'leftover', name: leftover.name, object: leftover.object, target: leftover.target ?? '', bytes: leftover.bytes, error: leftover.error })"
@@ -1215,7 +1215,7 @@ onUnmounted(() => {
           </span>
           <span class="row" style="gap: 8px;">
             <button v-if="job !== null" class="btn btn--ghost btn--sm" @click="openSheet">Show output</button>
-            <button v-if="jobRunning" class="btn btn--danger btn--sm" @click="openSheet(); confirmSheetCancel()">Cancel</button>
+            <button v-if="jobRunning" class="bs-link bs-link--thread" @click="openSheet(); confirmSheetCancel()">Cancel</button>
             <button v-else-if="job !== null" class="btn btn--ghost btn--sm" @click="dismissOpBar">Dismiss</button>
           </span>
         </div>
@@ -1482,7 +1482,7 @@ onUnmounted(() => {
               <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
               <button
                 class="btn btn--sm"
-                :class="confirmState.secondary ? 'btn--secondary' : 'btn--danger'"
+                :class="confirmState.secondary ? 'btn--secondary' : 'bs-link--thread'"
                 :disabled="confirmBusy"
                 @click="runConfirm"
               >{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
@@ -1491,7 +1491,7 @@ onUnmounted(() => {
         </div>
         <div v-if="jobRunning" class="row row--between sheet__foot">
           <span class="faint">streaming…</span>
-          <button class="btn btn--danger btn--sm" @click="confirmSheetCancel">Cancel job</button>
+          <button class="bs-link bs-link--thread" @click="confirmSheetCancel">Cancel job</button>
         </div>
       </aside>
     </div>
@@ -1511,7 +1511,7 @@ onUnmounted(() => {
             <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Cancel</button>
             <button
               class="btn btn--sm"
-              :class="confirmState.secondary ? 'btn--secondary' : 'btn--danger'"
+              :class="confirmState.secondary ? 'btn--secondary' : 'bs-link--thread'"
               :disabled="confirmBusy"
               @click="runConfirm"
             >{{ confirmBusy ? "Working…" : confirmState.danger }}</button>

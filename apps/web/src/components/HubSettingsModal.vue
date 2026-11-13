@@ -183,15 +183,17 @@ onMounted(async () => {
         <section class="setsec">
           <h4>HF token <span class="faint">(optional)</span></h4>
           <p v-if="error" class="banner banner--warn" style="margin-bottom: 8px">{{ error }}</p>
-          <div class="field">
-            <input
-              v-model="token"
-              type="password"
-              autocomplete="new-password"
-              spellcheck="false"
-              class="input mono"
-              placeholder="hf_… — leave blank to keep the current value"
-            />
+          <div class="bs-field bs-field--mono">
+            <div class="bs-field__box">
+              <input
+                v-model="token"
+                type="password"
+                autocomplete="new-password"
+                spellcheck="false"
+                class="bs-field__input"
+                placeholder="hf_… — leave blank to keep the current value"
+              />
+            </div>
           </div>
           <p class="stat__sub">
             Used for gated/private Hugging Face downloads and the quants listing. Stored on the hub and pushed to
@@ -203,15 +205,18 @@ onMounted(async () => {
             <button class="btn btn--secondary btn--sm" :disabled="busy || token.trim() === ''" @click="submitToken(token.trim())">
               {{ busy ? "working…" : tokenOk ? "saved" : "Save token" }}
             </button>
-            <button v-if="configured !== false" class="btn btn--danger btn--sm" :disabled="busy" @click="submitToken(null)">Clear token</button>
+            <button v-if="configured !== false" class="bs-link bs-link--thread" :disabled="busy" @click="submitToken(null)">Clear token</button>
           </div>
         </section>
 
         <section class="setsec">
           <h4>Snapshot cadence</h4>
           <p v-if="cadenceError" class="banner banner--warn" style="margin-bottom: 8px">{{ cadenceError }}</p>
-          <div class="field">
-            <input v-model.number="cadenceSec" type="number" min="1" max="60" step="1" class="input" />
+          <div class="bs-field">
+            <label class="bs-field__label" for="cadenceSec">Seconds per snapshot</label>
+            <div class="bs-field__box">
+              <input id="cadenceSec" v-model.number="cadenceSec" type="number" min="1" max="60" step="1" class="bs-field__input" />
+            </div>
           </div>
           <p class="stat__sub">
             How often every agent samples hardware and LLM ports (default 2 s). Applies live — online agents pick it
@@ -230,15 +235,13 @@ onMounted(async () => {
           <h4>Energy cost</h4>
           <p v-if="energyError" class="banner banner--warn" style="margin-bottom: 8px">{{ energyError }}</p>
           <div class="row" style="align-items: flex-end; gap: 10px">
-            <div class="field" style="flex: 1">
-              <label>Price per kWh</label>
-              <input v-model="energyPrice" type="number" min="0" max="100" step="0.01" class="input mono" inputmode="decimal" />
+            <div class="bs-field bs-field--mono" style="flex: 1">
+              <label class="bs-field__label" for="energyPrice">Price per kWh</label>
+              <div class="bs-field__box"><input id="energyPrice" v-model="energyPrice" type="number" min="0" max="100" step="0.01" class="bs-field__input" inputmode="decimal" /></div>
             </div>
-            <div class="field" style="width: 110px">
-              <label>Currency</label>
-              <select v-model="currency" class="select">
-                <option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option>
-              </select>
+            <div class="bs-field bs-field--mono" style="width: 110px">
+              <label class="bs-field__label" for="energyCurrency">Currency</label>
+              <div class="bs-field__box"><select id="energyCurrency" v-model="currency" class="select"><option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option></select></div>
             </div>
           </div>
           <p class="stat__sub">Used for the Overview power cost estimate over the selected range. Fleet-only — the NAS is excluded.</p>
@@ -253,23 +256,21 @@ onMounted(async () => {
           <h4>Token cost</h4>
           <p v-if="tokenError" class="banner banner--warn" style="margin-bottom: 8px">{{ tokenError }}</p>
           <div class="row" style="align-items: flex-end; gap: 10px">
-            <div class="field" style="flex: 1">
-              <label>Input</label>
-              <input v-model="tokenInputPrice" type="number" min="0" max="1000" step="0.001" class="input mono" inputmode="decimal" />
+            <div class="bs-field bs-field--mono" style="flex: 1">
+              <label class="bs-field__label" for="tokenInputPrice">Input</label>
+              <div class="bs-field__box"><input id="tokenInputPrice" v-model="tokenInputPrice" type="number" min="0" max="1000" step="0.001" class="bs-field__input" inputmode="decimal" /></div>
             </div>
-            <div class="field" style="flex: 1">
-              <label>Cached</label>
-              <input v-model="tokenCachedPrice" type="number" min="0" max="1000" step="0.001" class="input mono" inputmode="decimal" />
+            <div class="bs-field bs-field--mono" style="flex: 1">
+              <label class="bs-field__label" for="tokenCachedPrice">Cached</label>
+              <div class="bs-field__box"><input id="tokenCachedPrice" v-model="tokenCachedPrice" type="number" min="0" max="1000" step="0.001" class="bs-field__input" inputmode="decimal" /></div>
             </div>
-            <div class="field" style="flex: 1">
-              <label>Output</label>
-              <input v-model="tokenOutputPrice" type="number" min="0" max="1000" step="0.001" class="input mono" inputmode="decimal" />
+            <div class="bs-field bs-field--mono" style="flex: 1">
+              <label class="bs-field__label" for="tokenOutputPrice">Output</label>
+              <div class="bs-field__box"><input id="tokenOutputPrice" v-model="tokenOutputPrice" type="number" min="0" max="1000" step="0.001" class="bs-field__input" inputmode="decimal" /></div>
             </div>
-            <div class="field" style="width: 110px">
-              <label>Currency</label>
-              <select v-model="currency" class="select">
-                <option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option>
-              </select>
+            <div class="bs-field bs-field--mono" style="width: 110px">
+              <label class="bs-field__label" for="tokenCurrency">Currency</label>
+              <div class="bs-field__box"><select id="tokenCurrency" v-model="currency" class="select"><option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option></select></div>
             </div>
           </div>
           <p class="stat__sub">Per-million-token prices for the token cost preview on the Overview (NAS section).</p>
@@ -293,7 +294,7 @@ onMounted(async () => {
 .backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--bg, #000) 55%, transparent);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -303,8 +304,8 @@ onMounted(async () => {
 .modal__panel {
   width: min(880px, 100%);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-panel);
 }
 /* Scroll-free 2x2 layout: four self-contained sections + a shared footer row. */
 .modal__grid {
@@ -313,7 +314,7 @@ onMounted(async () => {
 }
 .setsec {
   padding: 14px 20px 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--rule);
 }
 .setsec:nth-child(-n + 2) {
   border-top: 0;
@@ -331,7 +332,7 @@ onMounted(async () => {
     grid-template-columns: 1fr;
   }
   .setsec:nth-child(2) {
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--rule);
   }
   .modal__panel {
     max-height: 92vh;
