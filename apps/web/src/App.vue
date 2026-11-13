@@ -206,8 +206,8 @@ onUnmounted(() => {
           <span v-if="!connected" class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span> Offline</span>
         </div>
         <div class="row bs-topbar__group">
-          <button class="bs-btn bs-btn--sm" aria-label="Open transfers" @click="transfersOpen = true">Transfers<span v-if="activeTransfers > 0" class="countbub">{{ activeTransfers }}</span></button>
-          <button class="bs-btn bs-btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
+          <button class="btn btn--secondary btn--sm" aria-label="Open transfers" @click="transfersOpen = true">Transfers<span v-if="activeTransfers > 0" class="countbub">{{ activeTransfers }}</span></button>
+          <button class="btn btn--secondary btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
           <button class="iconbtn" aria-label="Hub settings" title="Hub settings" @click="hubSettingsOpen = true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
           </button>
@@ -261,6 +261,6 @@ html[data-tier="medium"] .bs-topbar .iconbtn,
 html[data-tier="small"] .bs-topbar .iconbtn { width: 44px; height: 44px; }
 html[data-tier="medium"] .bs-topbar .bs-theme,
 html[data-tier="small"] .bs-topbar .bs-theme { width: 44px; height: 44px; }
-html[data-tier="medium"] .bs-topbar .bs-btn,
-html[data-tier="small"] .bs-topbar .bs-btn { min-height: 44px; }
+html[data-tier="medium"] .bs-topbar .btn,
+html[data-tier="small"] .bs-topbar .btn { min-height: 44px; }
 </style>

@@ -121,11 +121,13 @@ function shortTime(t: number): string {
   <div class="lens-chart" :class="{ 'lens-chart--labeled': labeled === true }">
     <div v-if="labeled === true && yTicks.length > 0" class="lens-chart__ycol" aria-hidden="true">
       <template v-for="t in yTicks" :key="t.label">
-        <span class="lens-chart__grid" :style="{ top: `${t.pct}%` }"></span>
         <span class="lens-chart__ylabel" :style="{ top: `${t.pct}%` }">{{ t.label }}</span>
       </template>
     </div>
     <div class="lens-chart__plot">
+      <template v-if="labeled === true && yTicks.length > 0">
+        <span v-for="t in yTicks" :key="t.label" class="lens-chart__grid" :style="{ top: `${t.pct}%` }"></span>
+      </template>
       <svg
         class="spark"
         :viewBox="`0 0 ${chart.width} ${chart.height}`"

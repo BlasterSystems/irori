@@ -171,7 +171,7 @@ it("topbar controls keep the 44px touch floor; version/watts live in the sidebar
   expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .iconbtn,');
   expect(appSource).toContain('html[data-tier="small"] .bs-topbar .iconbtn { width: 44px; height: 44px; }');
   expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .bs-theme,');
-  expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .bs-btn,');
+  expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .btn,');
   // Supersession: version (+ watts) live in the sidebar foot; the deploy tag
   // keeps its committed hamburger-menu home (B1).
   expect(appSource).toContain("Irori {{ serverVersion ?? \"…\" }}");

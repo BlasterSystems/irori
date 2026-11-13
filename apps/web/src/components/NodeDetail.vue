@@ -1480,12 +1480,8 @@ onUnmounted(() => {
             <span class="stat__sub faint">{{ confirmState.hint ?? "nothing destructive runs until you confirm" }}</span>
             <span class="row">
               <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
-              <button
-                class="btn btn--sm"
-                :class="confirmState.secondary ? 'btn--secondary' : 'bs-link--thread'"
-                :disabled="confirmBusy"
-                @click="runConfirm"
-              >{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+              <button v-if="confirmState.secondary" class="btn btn--secondary btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+              <button v-else class="bs-link bs-link--thread" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
             </span>
           </div>
         </div>
@@ -1509,12 +1505,8 @@ onUnmounted(() => {
           <span class="stat__sub faint">{{ confirmState.hint ?? "nothing destructive runs until you confirm" }}</span>
           <div class="row">
             <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Cancel</button>
-            <button
-              class="btn btn--sm"
-              :class="confirmState.secondary ? 'btn--secondary' : 'bs-link--thread'"
-              :disabled="confirmBusy"
-              @click="runConfirm"
-            >{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+            <button v-if="confirmState.secondary" class="btn btn--secondary btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+            <button v-else class="bs-link bs-link--thread" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
           </div>
         </div>
       </section>
