@@ -1595,7 +1595,7 @@ h1 {
   word-break: break-word;
   background: var(--surface, transparent);
   padding: 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
 }
 .inline-confirm {
   border: 1px solid var(--thread);
