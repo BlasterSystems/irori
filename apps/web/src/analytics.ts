@@ -53,7 +53,10 @@ export interface LensChart {
   height: number;
 }
 
-const COLORS = ["var(--thread)", "var(--ink-2)", "var(--ink-3)", "var(--ok)", "var(--warn)"];
+// Series palette: thread for the primary/live series, neutral inks after —
+// --ok/--warn never existed as tokens (the 4th/5th series silently lost
+// their stroke). IR-219 keeps the shipped LensChart palette shape.
+const COLORS = ["var(--thread)", "var(--ink-2)", "var(--ink-3)", "var(--ink)", "var(--thread-ink)"];
 
 function colorFor(index: number): string {
   return COLORS[index % COLORS.length]!;
