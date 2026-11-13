@@ -1,6 +1,6 @@
 # Research: DS v1.4 adoption + UI feedback round 8 (collapse, topbar controls, cleanup drawer, colour depth, token stats, power default)
 
-Status: **Draft for human validation** — no tickets created yet.
+Status: **Validated 2026-11-13** — epic IR-224 and stories IR-225 to IR-232 created (backlog); gate decisions and both owner revision passes recorded below.
 Round: UI feedback round 8 (after IRI-130 round 7, 2026-11-07) + DS v1.4 upgrade on top of the v1.1 skin shipped by IR-214.
 
 ## Jira target
@@ -126,7 +126,7 @@ Token surfaces today (all of them):
 
 | Surface | Data | Default range |
 |---|---|---|
-| Overview NAS card "Tokens · {range}" block (OverviewView.vue:704-716; `tokenTotals` overview.ts:241-257) | `GET /api/v1/analytics/tokens?range=&groupBy=node` | shared Overview range (**30m**) |
+| Overview NAS card "Tokens · {range}" block (OverviewView.vue:690-706; `tokenTotals` overview.ts:241-257) | `GET /api/v1/analytics/tokens?range=&groupBy=node` | shared Overview range (**30m**) |
 | Analytics tokens lens: 6 fleet macro tiles (Total/Generated/Input computed/Cached/Cache hit/Cost) **with delta% vs prev** (AnalyticsView.vue:186-191, 244-262; `fleet` analytics.ts:137-176) | same endpoint + 2nd fetch with `offsetMs` | **24h** (RANGE_TABS 1h/24h/7d/30d/90d, analytics.ts:21) |
 | Analytics: by cluster/node/setup table, per-model ledger table, cost+token trend charts, reconciliation | same response + `/api/v1/analytics/efficiency`, `/token-reconciliation` (server default 4h) | 24h (lens) |
 | Usage overview KPI grid + charts (UsageView.vue:376-438) | `GET /api/v1/usage/overview` (`kpis{prompt,completion,cached,reasoning,total}`) | **24h**, persisted in URL hash (usage.ts:13-30) |

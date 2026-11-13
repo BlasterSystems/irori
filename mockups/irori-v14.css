@@ -81,6 +81,11 @@ html:not([data-page="away"]) .bs-perf { display: none; }
 .tempitem__name { color: var(--ink); }
 .tempitem__v em { font-style: normal; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 .bs-alert--action { grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; }
+/* Deployed tiers: the temps card is small-tier only (OverviewView.vue:850-851
+   hides it at medium/full) — mirror that here. */
+@media (min-width: 901px) { section[aria-label="Fleet temperatures"] { display: none; } }
+/* Legend swatches: deployed uses inline SVG paths; the mockup uses .sw spans. */
+.bs-legend .sw { display: inline-block; width: 10px; height: 10px; }
 /* ≤480: node-card val lines are long mono nowrap — let them wrap (deployed
    barrow minimums would overflow 320). */
 @media (max-width: 480px) {

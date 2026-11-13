@@ -33,7 +33,7 @@ Nothing outside the round-8 delta changes: IR-203/204 health banner (with the cl
 
 ## S5 — Cleanup drawer (IR-229): unchanged scope
 
-Fixed header + body scroll region + sticky typed-confirm; staging/quarantine/prevention into accordions; reuse the unused `.drawer__body` hook (`irori.css:494`); give ALL eight `.drawer` instances the `__body` wrapper; reconcile the pre-existing ≤720 `visibility` gate (`irori.css:486-487` — five instances statically invisible on phones); CleanupDrawer gains `v-dialog` + `aria-modal` (Escape/focus parity with ServeView). Job flow, endpoints, typed confirms unchanged. Rewrite `chrome-markup.test.ts:100-105` (verbatim `.drawer` rule pin) and the cleanup harness tests. Blast radius and ACs exactly per the IR-229 text.
+Fixed header + body scroll region + sticky typed-confirm; staging/quarantine/prevention into accordions; reuse the unused `.drawer__body` hook (`irori.css:494`); give ALL eight `.drawer` instances the `__body` wrapper; reconcile the pre-existing ≤720 `visibility` gate (`irori.css:486-487` — five instances statically invisible on phones); CleanupDrawer gains `v-dialog` + `aria-modal` (Escape/focus parity with ServeView). Job flow, endpoints, typed confirms unchanged. Rewrite `chrome-markup.test.ts:100-105` (verbatim `.drawer` rule pin) and the cleanup harness tests. The deployed Audit/History tab strip (`CleanupDrawer.vue:304-307`) is not depicted in the restructured mockup; S5 keeps the tabs — job flow unchanged. Blast radius and ACs exactly per the IR-229 text.
 
 ## S6 — Range (IR-230): 24h default, heroes follow, power pinned
 
@@ -50,7 +50,7 @@ Fixed header + body scroll region + sticky typed-confirm; staging/quarantine/pre
 
 **Files**: `apps/web/src/components/OverviewView.vue` (insert own `hero-grid` row directly after the Power | NAS row, :613-703; NAS keeps models/store — its token block :690-698 is removed), `apps/web/src/tokens-data.ts` (fleetTiles: per-stat deltas via one prev-window `offsetMs` fetch, cache-hit delta in points, Output:input / Avg-per-hour / Busiest-hour folds, granularity-aware busiest-day relabel), `apps/web/src/assets/irori.css` (`.stat__delta` DS-calm mono deltas — mockup-verified).
 
-Content per the approved mockup: 8 tiles (Total, Generated, Prompt, Cached, Cache hit, Cost, Avg/hour, Busiest hour), all-nodes fleet scope (documented change from the spark-only NAS fold — server aggregate already sums every ledger node, `analytics.ts:141-156`), follows the topbar range (default 24h). Optional Copy CSV = new KPI-summary export; skip unless the owner asks. Tests: `tokens-data.test.ts` fleetTiles pins naming which tiles carry deltas; reconcile-with-lens check per AC.
+Content per the approved mockup: 8 tiles (Total, Generated, Prompt, Cached, Cache hit, Cost, Avg/hour, Busiest hour), all-nodes fleet scope (documented change from the spark-only NAS fold — server aggregate already sums every ledger node, `analytics.ts:141-156`), follows the shell menu range (default 24h) — the card consumes the same `irori.range` store the heroes use. Optional Copy CSV = new KPI-summary export; skip unless the owner asks. Tests: `tokens-data.test.ts` fleetTiles pins naming which tiles carry deltas; reconcile-with-lens check per AC.
 
 ## S8 — Closeout (IR-232): adjusted for the declined themes
 
@@ -58,4 +58,4 @@ CHANGELOG, docs sweep (`docs/CONFIGURATION.md` — menu controls, collapse, perf
 
 ## Order & process
 
-S4 → S6 → S7 (store dependency); S5 independent (can run parallel to S4); S8 last. One branch `ir-224-ds-v14` for the epic, one commit per ticket (`type(scope): description [IR-22X]`), push + PR referencing the epic. IR-226/227 never start — owner closes them with a one-line reason. Validation per repo rules: `.agentic/bin/validate`, `.agentic/bin/docs-check`, `pnpm test`, `pnpm build`.
+S4 → S6 → S7 (store dependency); S5 independent (can run parallel to S4); S8 last. One branch `ir-224-ds-v14` for the epic, one commit per ticket (`type(scope): description (IR-22X)`), push + PR referencing the epic. IR-226/227 never start — owner closes them with a one-line reason. Validation per repo rules: `.agentic/bin/validate`, `.agentic/bin/docs-check`, `pnpm test`, `pnpm build`.

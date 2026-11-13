@@ -120,7 +120,6 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
         </button>
         <button class="bs-theme" id="themeBtn" aria-label="Toggle dark mode"><span aria-hidden="true"></span></button>
       </div>
-    </header>
     <nav class="bs-topbar__menu" id="mobileMenu" aria-label="Primary menu">
       <a class="bs-nav-item" href="#" aria-current="page"><span class="bs-nav-item__label">Overview</span><span class="bs-nav-item__count">4</span></a>
       <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Models</span><span class="bs-nav-item__count">148</span></a>
@@ -133,8 +132,9 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
         </div>
         <button class="bs-btn bs-btn--secondary bs-btn--sm"><span class="bs-btn__label">Add node</span></button>
       </div>
-      <div class="bs-menu-foot">deploy dev-0.7.0-15 · live · 186 W</div>
+      <div class="bs-menu-foot">deploy dev-0.7.0-15 · live · 187 W</div>
     </nav>
+    </header>
 
     <main class="content" id="content">
       <div class="pagehead">
@@ -152,11 +152,13 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
           <span class="bs-alert__title">Node disk pressure — DGX-1</span>
           <span class="bs-alert__body">Disk usage warn: 88.1 ≥ 80</span>
         </span>
-        <button class="bs-btn bs-btn--secondary bs-btn--sm" id="cleanupCta">Clean up disk — est. 412 GB</button>
+        <button class="bs-btn bs-btn--secondary bs-btn--sm" id="cleanupCta">Clean up disk — est. +366 GB</button>
       </div>
 
       <!-- deployed Fleet temperatures (IR-129, unchanged): spark nodes only,
-           hottest first; the NAS is excluded (no thermal telemetry) -->
+           hottest first; the NAS is excluded (no thermal telemetry). Small tier
+           only in production (OverviewView.vue:850-851 hides it at medium and
+           full) — mirrored by the delta CSS below. -->
       <section class="bs-panel section-gap" aria-label="Fleet temperatures">
         <div class="bs-panel__head">
           <h2 class="bs-panel__title">Fleet temperatures</h2>
@@ -275,7 +277,7 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
             <div class="stat"><span class="stat__label">Energy · 24 h</span><span class="stat__value">3.9 kWh</span><span class="stat__sub">hour buckets · 24 h window, not the range</span></div>
             <div class="stat"><span class="stat__label">Cost · 24 h</span><span class="stat__value">€1.16</span><span class="stat__sub">at €0.30 / kWh</span></div>
           </div>
-          <div class="barrow" style="margin-top:12px"><span>DGX-1</span><div class="bar"><div class="bar__fill" style="width:38%"></div></div><span class="val">92 W</span></div>
+          <div class="barrow" style="margin-top:12px"><span>DGX-1</span><div class="bar"><div class="bar__fill" style="width:42%"></div></div><span class="val">102 W</span></div>
           <div class="barrow"><span>DGX-2</span><div class="bar"><div class="bar__fill" style="width:26%"></div></div><span class="val">63 W</span></div>
           <div class="barrow"><span>DGX-3</span><div class="bar"><div class="bar__fill" style="width:9%"></div></div><span class="val">22 W</span></div>
           <div class="bs-chart" style="margin-top:12px">
@@ -302,7 +304,7 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
               </svg>
             </div>
             <div class="bs-chart__x"><span style="left:0">−24 h</span><span style="left:22%">−18</span><span style="left:44%">−12</span><span style="left:66%">−6</span><span style="right:0">now</span></div>
-            <div class="bs-legend"><span><span class="sw" style="background:var(--ink)"></span> hourly draw</span><span><span class="sw" style="background:var(--thread)"></span> current hour</span><span>window avg 118 W · envelope 240 W</span></div>
+            <div class="bs-legend"><span><span class="sw" style="background:var(--ink)"></span> hourly draw</span><span><span class="sw" style="background:var(--thread)"></span> current hour</span><span>window avg 163 W · envelope 240 W</span></div>
           </div>
         </section>
 
@@ -403,7 +405,7 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
     <div class="hy-drawer__head">
       <div style="min-width:0">
         <div class="hy-drawer__title">Disk hygiene — DGX-1</div>
-        <div class="bs-note mono">audited 2 h ago · est. reclaim 412 GB · nothing deletes without the typed confirm</div>
+        <div class="bs-note mono">audited 2 h ago · est. reclaim 366 GB · nothing deletes without the typed confirm</div>
       </div>
       <button class="iconbtn" id="drawerClose" aria-label="Close disk hygiene">
         <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -416,10 +418,10 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
       </label>
       <div>
         <div class="bs-label" style="margin-bottom:4px">Reclaim categories</div>
-        <div class="hy-cat"><input type="checkbox" checked id="c1"><label class="hy-cat__name" for="c1">HF cache — incomplete blobs</label><span class="hy-cat__bytes">128 GB</span></div>
-        <div class="hy-cat"><input type="checkbox" checked id="c2"><label class="hy-cat__name" for="c2">modelctl staging — settled transfers</label><span class="hy-cat__bytes">214 GB</span></div>
-        <div class="hy-cat"><input type="checkbox" id="c3"><label class="hy-cat__name" for="c3">Docker build cache</label><span class="hy-cat__bytes">18 GB</span></div>
-        <div class="hy-cat"><input type="checkbox" id="c4"><label class="hy-cat__name" for="c4">Journal logs older than 30 d</label><span class="hy-cat__bytes">6 GB</span></div>
+        <div class="hy-cat"><input type="checkbox" id="c1"><label class="hy-cat__name" for="c1">HF cache — incomplete blobs</label><span class="hy-cat__bytes">128 GB · ◆ care</span></div>
+        <div class="hy-cat"><input type="checkbox" id="c2"><label class="hy-cat__name" for="c2">modelctl staging — settled transfers</label><span class="hy-cat__bytes">214 GB · ◆ care</span></div>
+        <div class="hy-cat"><input type="checkbox" checked id="c3"><label class="hy-cat__name" for="c3">Docker build cache</label><span class="hy-cat__bytes">18 GB</span></div>
+        <div class="hy-cat"><input type="checkbox" checked id="c4"><label class="hy-cat__name" for="c4">Journal logs older than 30 d</label><span class="hy-cat__bytes">6 GB</span></div>
       </div>
       <div>
         <div class="hy-acc">
@@ -447,14 +449,14 @@ else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElem
             <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
           </button>
           <div class="hy-acc__panel">
-            <div class="log" style="max-height:120px">hygiene-audit ok · 5 categories · 412 GB reclaimable<br><span class="dim">dry-run deletes: 0 files touched</span><br><span class="ok">safe set pre-checked</span></div>
+            <div class="log" style="max-height:120px">hygiene-audit ok · 4 categories · 366 GB reclaimable<br><span class="dim">dry-run deletes: 0 files touched</span><br><span class="ok">safe set pre-checked</span></div>
           </div>
         </div>
       </div>
     </div>
     <div class="hy-drawer__foot">
       <div class="hy-confirm">
-        <span class="hint">type DGX-1 to arm 360 GB of safe deletes</span>
+        <span class="hint">type DGX-1 to arm 24 GB of safe deletes</span>
         <input class="hy-input" id="confirmInput" placeholder="node name" style="width:140px" autocomplete="off">
         <button class="bs-btn bs-btn--primary bs-btn--sm" id="confirmBtn" disabled>Clean up disk</button>
         <button class="bs-btn bs-btn--secondary bs-btn--sm">Dry-run audit</button>

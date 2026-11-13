@@ -462,3 +462,17 @@ Re-verified: section order matches OverviewView.vue, 12 widths 320→1568
 zero overflow (added a ≤480 barrow wrap override), cleanup CTA opens the
 drawer scene, light + dark clean, 0 console errors. Implementation plan:
 `tasks/IR-224-round8-implementation-plan.md`.
+
+PR-125 review (pre-merge, 2026-11-13): 3 P2 and 8 P3 findings, all fixed —
+mobile menu moved inside the sticky header (was anchored off-screen); drawer
+pre-check now follows the deployed safe/care split (`HYGIENE_SAFE_CATEGORIES`
+pre-checked, care rows opt-in with a diamond marker; head 366 GB, armed set
+24 GB, audit 4 categories — all reconciled); temps card mirrored as
+small-tier-only (delta CSS hides it at 901 and up, per OverviewView.vue:850);
+legend swatches sized (`.sw` was undefined); watts reconciled (fleet 187 W,
+DGX-1 102 W, window avg 163 W, hamburger foot 187 W); banner CTA gained the
+deployed "est. +" format; research-doc citation (NAS token block :690-706)
+and stale status line corrected; plan commit template moved to `(IR-22X)` and
+S7 range wording to the menu store. Recorded, not changed: hero rows stay
+stacked in the mockup (production owns its hero-grid pairing) and the
+deployed Audit/History drawer tabs are not depicted (S5 keeps them).
