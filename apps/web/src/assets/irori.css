@@ -372,6 +372,21 @@ button { font: inherit; color: inherit; }
 .bs-field--mono .bs-field__input { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .bs-field__hint { display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); line-height: 1.4; color: var(--ink-2); }
 
+/* ── Quiet + destructive actions, filter chips (v1.1 action set) ───── */
+.bs-link { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none;
+  font: 500 var(--fs-ui)/1.3 var(--font-sans); color: var(--ink-2); text-decoration: none; cursor: pointer; }
+.bs-link:hover { color: var(--thread-ink); }
+.bs-link--thread { color: var(--thread-ink); }
+/* Pressed filter chips: an ink ring, never a fill — a primary button is
+   never a pressed state (BenchmarksView precedent, IR-218). */
+.bs-filter { min-height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-control); background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule-2); font: 400 var(--fs-ui)/1.2 var(--font-sans); color: var(--ink-2); cursor: pointer;
+  transition: box-shadow var(--dur-press), color var(--dur-press); }
+.bs-filter:hover { box-shadow: inset 0 0 0 1px var(--ink); color: var(--ink); }
+.bs-filter[aria-pressed="true"] { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
+/* Large figure numerals (hero stats) — v1.1 type scale. */
+.bs-figure { font-size: 34px; font-weight: 400; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+
 /* ── Segmented / tabs ──────────────────────────────────────────────── */
 .seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: var(--radius-control); overflow: hidden; background: transparent; }
 .seg button { border: 0; background: none; padding: 6px 12px; font-size: var(--fs-ui); font-weight: 500; color: var(--muted); cursor: pointer; }
