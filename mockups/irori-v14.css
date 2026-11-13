@@ -1,0 +1,145 @@
+/* Irori mockups — round 8 DELTA over the deployed v1.1 skin.
+   Base: @import "irori-v11.css" = the deployed app skin verbatim (light + dark,
+   --rule-2 control outlines, deployed theme toggle). NOTHING visual changes
+   except the round-8 pieces below:
+     1 collapsible sidebar (68px icon rail, >=901; <=900 hamburger unchanged)
+     2 range + Add node live in the MENU (sidebar tools block; hamburger <=900)
+     3 topbar gains an inference-server performance chip (every page except
+       Overview — the Overview's serving heroes carry the same data)
+     4 cleanup drawer restructured (fixed head, body scroll, sticky confirm)
+     5 token stats card (sparkDash-inspired, directly below the NAS card, DS-calm deltas)
+   Round: PLAN.md "DS v1.4 + shell controls round (UI feedback round 8)".
+   Nav icons: inline 18px outline stand-ins; production vendors kit lucide SVGs. */
+
+@import "irori-v11.css";
+
+/* ── 1 · Collapsible sidebar (>=901) ───────────────────────────────── */
+.bs-sidebar { position: sticky; }
+.bs-sidebar__collapse { position: absolute; right: 10px; top: 30px; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink-3); cursor: pointer; }
+.bs-sidebar__collapse:hover { color: var(--ink); background: var(--surface-sunken); }
+html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }
+html[data-nav="collapsed"] .bs-sidebar { width: var(--sidebar-width-collapsed, 68px); padding-left: 0; padding-right: 0; }
+html[data-nav="collapsed"] .bs-sidebar__brand { justify-content: center; padding: 0; }
+html[data-nav="collapsed"] .bs-lockup__text { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0 auto; transform: rotate(180deg); }
+html[data-nav="collapsed"] .bs-nav-item { justify-content: center; padding: 0; gap: 0; }
+html[data-nav="collapsed"] .bs-nav-item::before { left: 5px; }
+html[data-nav="collapsed"] .bs-nav-item__label { display: none; }
+html[data-nav="collapsed"] .bs-nav-item__count { position: absolute; top: 6px; right: 8px; font-size: 10px; }
+html[data-nav="collapsed"] .bs-nav { position: relative; }
+html[data-nav="collapsed"] .bs-sidebar__tools { padding-left: 8px; padding-right: 8px; }
+html[data-nav="collapsed"] .bs-sidebar__tools > .rangeseg { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__tools .tools-label { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: block; }
+html[data-nav="collapsed"] .bs-sidebar__tools .bs-btn { justify-content: center; padding: 0; }
+html[data-nav="collapsed"] .bs-sidebar__tools .bs-btn .bs-btn__label { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__foot { justify-content: center; padding-left: 8px; padding-right: 8px; }
+html[data-nav="collapsed"] .bs-sidebar__status span:not(.has-glyph) { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__status { align-items: center; }
+
+/* ── 2 · Menu tools: range + Add node (sidebar block; hamburger <=900) ── */
+.bs-sidebar__tools { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 0 22px; }
+.bs-sidebar__tools .tools-label { font-family: var(--font-mono); font-size: var(--fs-label-sm, 10.5px); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.rangeseg { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.rangeseg button { min-height: 34px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent;
+  font: 400 var(--fs-ui, 14px)/1.2 var(--font-sans); color: var(--ink-2); cursor: pointer;
+  transition: box-shadow var(--dur-press, 150ms), color var(--dur-press, 150ms); }
+.rangeseg button:hover { box-shadow: inset 0 0 0 1px var(--rule-2); color: var(--ink); }
+.rangeseg button.is-active { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
+.rangeseg-pop { display: none; position: relative; }
+.rangeseg-pop .rangeseg { display: none; position: fixed; z-index: 25; padding: 6px;
+  background: var(--paper-2); border: 1px solid var(--rule-2); border-radius: var(--radius-panel, 4px); }
+.rangeseg-pop.is-open .rangeseg { display: flex; }
+.rangeseg-pop > .iconbtn.is-active { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
+
+/* ── 3 · Topbar inference-server performance chip (every page except
+       Overview — its serving heroes carry the same data) ──────────────── */
+.bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 34px; padding: 0 12px;
+  border: 1px solid var(--rule-2); border-radius: var(--radius-control); background: transparent;
+  font-family: var(--font-mono); font-size: var(--fs-data-sm, 12px); color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+.bs-perf:hover { border-color: var(--ink); color: var(--ink); text-decoration: none; }
+/* Hidden while the user is on the Overview; the "Away page" mock-bar scene
+   previews the chip (production: rendered on all routes but the overview). */
+html:not([data-page="away"]) .bs-perf { display: none; }
+.bs-perf .bs-perf__model { color: var(--ink); }
+.bs-perf .bs-perf__sep { color: var(--ink-3); }
+@media (max-width: 900px) {
+  .bs-perf .bs-perf__model, .bs-perf .bs-perf__sep--model { display: none; }
+  .bs-perf { min-height: 44px; }
+}
+
+/* ── 5 · Token stats deltas (DS-calm: mono ink-2, direction glyph) ─── */
+.stat__delta { display: block; font-family: var(--font-mono); font-size: var(--fs-label-sm, 10.5px); letter-spacing: .02em; color: var(--ink-2); margin-top: 4px; }
+.stat__delta .up::before { content: "▲ "; font-size: 9px; }
+.stat__delta .down::before { content: "▼ "; font-size: 9px; }
+
+/* ── Deployed surfaces rendered skin-only (unchanged by round 8) ───────
+   temps row + health-banner action grid; anatomy mirrors the app. */
+.temps { display: flex; flex-wrap: wrap; gap: 8px 26px; }
+.tempitem { display: inline-flex; align-items: baseline; gap: 7px; font-family: var(--font-mono); font-size: var(--fs-data-sm, 12px); color: var(--ink-2); }
+.tempitem__name { color: var(--ink); }
+.tempitem__v em { font-style: normal; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.bs-alert--action { grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; }
+/* ≤480: node-card val lines are long mono nowrap — let them wrap (deployed
+   barrow minimums would overflow 320). */
+@media (max-width: 480px) {
+  .barrow { grid-template-columns: 44px minmax(0, 1fr) auto; }
+  .barrow .val { white-space: normal; text-align: right; overflow-wrap: anywhere; }
+}
+
+/* ── 4 · Cleanup drawer: restructured (panel never scrolls; body does) ── */
+.drawer-scrim { position: fixed; inset: 0; z-index: 30; background: color-mix(in oklch, var(--paper) 72%, transparent);
+  display: flex; align-items: flex-end; justify-content: center; }
+@media (min-width: 721px) { .drawer-scrim { align-items: center; } }
+.drawer-scrim:not(.is-open) { display: none; }
+.hy-drawer { width: min(560px, 100%); max-height: 88vh; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--rule-2); border-radius: var(--radius-panel, 4px); overflow: hidden;
+  animation: bs-rise var(--dur-ui, 200ms) var(--ease-out, cubic-bezier(.22,.61,.36,1)); }
+@media (max-width: 720px) { .hy-drawer { width: 100%; max-width: 100%; border-radius: 0; border-left: 0; border-right: 0; max-height: 92vh; } }
+.hy-drawer__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 14px 18px 12px; border-bottom: 1px solid var(--rule); flex: none; }
+.hy-drawer__title { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.hy-drawer__body { flex: 1 1 auto; overflow: auto; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.hy-drawer__foot { flex: none; padding: 10px 18px 14px; border-top: 1px solid var(--rule); background: var(--card); }
+.hy-acc { border: 1px solid var(--rule); border-radius: var(--radius-control); }
+.hy-acc + .hy-acc { margin-top: 8px; }
+.hy-acc__btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px;
+  padding: 0 12px; border: 0; background: none; font: 500 var(--fs-ui, 14px)/1.3 var(--font-sans); color: var(--ink); cursor: pointer; text-align: left; }
+.hy-acc__btn:hover { background: var(--surface-sunken); }
+.hy-acc__btn .chev { flex: none; width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.5; transition: transform var(--dur-press, 150ms) var(--ease-out, cubic-bezier(.22,.61,.36,1)); }
+.hy-acc__btn[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.hy-acc__panel { display: none; padding: 4px 12px 12px; border-top: 1px solid var(--rule); }
+.hy-acc__panel.is-open { display: block; }
+.hy-cat { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--rule); }
+.hy-cat:first-child { border-top: 0; }
+.hy-cat__name { font-size: var(--fs-ui, 14px); }
+.hy-cat__bytes { font-family: var(--font-mono); font-size: var(--fs-data-sm, 12px); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hy-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hy-confirm .hint { font-family: var(--font-mono); font-size: var(--fs-label-sm, 10.5px); letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+.hy-input { min-height: 44px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule-2); font: 400 var(--fs-ui, 14px)/1.2 var(--font-mono); color: var(--ink); appearance: none; }
+.hy-input:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--thread); }
+
+/* ── Charts: series colours follow the deployed LensChart palette ──── */
+svg .ser { fill: none; stroke: var(--ink); vector-effect: non-scaling-stroke; stroke-width: 1.5; }
+svg .ser--thread { stroke: var(--thread); }
+svg .ser--muted { stroke: var(--ink-2); }
+svg .pwr-bar { fill: var(--ink); stroke: none; }
+svg .pwr-bar--now { fill: var(--thread); }
+svg .gridline { stroke: var(--rule); vector-effect: non-scaling-stroke; }
+
+/* ── Nav icons (inline stand-ins; production vendors kit lucide SVGs) ── */
+.bs-icon { flex: none; width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── Small-tier compression for the in-menu range + mock chrome ────── */
+@media (max-width: 900px) {
+  .rangeseg button { min-height: 44px; padding: 0 8px; font-size: 12px; }
+}
+.mock-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--paper-2); border-top: 1px solid var(--rule); font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.mock-bar button { min-height: 30px; padding: 0 10px; border: 1px solid var(--rule-2); border-radius: var(--radius-control);
+  background: none; font: inherit; color: var(--ink-2); cursor: pointer; }
+.mock-bar button[aria-pressed="true"] { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
+body.has-mockbar { padding-bottom: 46px; }
