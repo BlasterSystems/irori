@@ -340,8 +340,7 @@ onBeforeUnmount(() => {
         <button
           v-for="c in decodeConcOptions"
           :key="c"
-          class="btn btn--secondary btn--sm"
-          :class="{ 'btn--primary': decodeConc.includes(c) }"
+          class="bs-filter"
           :aria-pressed="decodeConc.includes(c)"
           @click="toggle(decodeConc, c)"
         >
@@ -360,8 +359,7 @@ onBeforeUnmount(() => {
         <button
           v-for="s in prefillSizeOptions"
           :key="s"
-          class="btn btn--secondary btn--sm"
-          :class="{ 'btn--primary': prefillSizes.includes(s) }"
+          class="bs-filter"
           :aria-pressed="prefillSizes.includes(s)"
           @click="toggle(prefillSizes, s)"
         >
@@ -373,8 +371,7 @@ onBeforeUnmount(() => {
         <button
           v-for="c in qualityCategories"
           :key="c"
-          class="btn btn--secondary btn--sm"
-          :class="{ 'btn--primary': qualityCats.includes(c) }"
+          class="bs-filter"
           :aria-pressed="qualityCats.includes(c)"
           @click="toggle(qualityCats, c)"
         >
