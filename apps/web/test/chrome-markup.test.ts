@@ -162,8 +162,8 @@ it("nav collapses to a hamburger disclosure at 900px and below (IR-128, v1.1 she
   expect(appSource).toContain("class=\"bs-topbar__menu\""); // menu + is-open toggle
   expect(appSource).toContain("navToggleBtn.value?.focus()"); // Escape returns focus (APG)
   expect(cssSource).toContain(".bs-topbar__menu { display: none; position: absolute; top: 100%; left: 0; right: 0; padding: 8px 0;");
-  expect(cssSource).toContain(".bs-topbar__menubtn { display: none; }");
-  expect(cssSource).toContain(".bs-topbar__menubtn { display: inline-flex; }");
+  expect(cssSource).toContain(".bs-topbar .bs-topbar__menubtn { display: none; }");
+  expect(cssSource).toContain(".bs-topbar .bs-topbar__menubtn { display: inline-flex; }");
 });
 
 it("topbar controls keep the 44px touch floor; version/watts live in the sidebar foot (IR-197 superseded by the v1.1 shell)", () => {

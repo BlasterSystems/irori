@@ -157,6 +157,8 @@ button { font: inherit; color: inherit; }
 .bs-topbar__brand { display: none; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
 .bs-topbar__group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bs-topbar__menubtn { display: none; }
+/* Specificity above .iconbtn (defined later): the hamburger only exists ≤900. */
+.bs-topbar .bs-topbar__menubtn { display: none; }
 /* The header is the menu anchor; the dropdown spans it edge to edge. */
 .bs-topbar__menu { display: none; position: absolute; top: 100%; left: 0; right: 0; padding: 8px 0;
   background: var(--paper-2); border-bottom: 1px solid var(--rule); }
@@ -189,6 +191,9 @@ button { font: inherit; color: inherit; }
 .page-sub { margin: 6px 0 0; color: var(--ink-3); font-size: var(--fs-small); }
 .page-sub .mono { font-size: var(--fs-data); }
 .pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
+/* IR-223 overflow audit: the action row (segs, selects, buttons) is the
+   pagehead's wide side — let it wrap instead of pushing the page wide. */
+.pagehead > .row { flex-wrap: wrap; }
 .pagehead p { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-ui); }
 .cols { display: grid; gap: var(--space-3); }
 /* Grid items may shrink below content (charts/tables in cells must not
@@ -394,7 +399,8 @@ button { font: inherit; color: inherit; }
 .bs-figure { font-size: 34px; font-weight: 400; letter-spacing: -0.02em; line-height: 1.05; font-variant-numeric: tabular-nums; }
 
 /* ── Segmented / tabs ──────────────────────────────────────────────── */
-.seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: var(--radius-control); overflow: hidden; background: transparent; }
+.seg { display: inline-flex; max-width: 100%; overflow-x: auto; scrollbar-width: none;
+  border: 1px solid var(--rule-2); border-radius: var(--radius-control); overflow-y: hidden; background: transparent; }
 .seg button { border: 0; background: none; padding: 6px 12px; font-size: var(--fs-ui); font-weight: 500; color: var(--muted); cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--border); }
 .seg button.is-active { background: var(--action-bg); color: var(--action-fg); }
@@ -449,13 +455,16 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   .shell { grid-template-columns: 1fr; }
   .bs-sidebar { display: none; }
   .bs-topbar__brand { display: inline-flex; }
-  .bs-topbar__menubtn { display: inline-flex; }
+  .bs-topbar .bs-topbar__menubtn { display: inline-flex; }
   .content { padding: 20px 20px 40px; }
 }
 
 /* ── Mobile fine-tuning (page-local classes live in per-page <style>) ── */
 @media (max-width: 720px) {
   .bs-topbar { flex-wrap: wrap; padding: 0 16px; gap: var(--space-2); }
+  /* The lead (hamburger + lockup) never shrinks or wraps — the action group
+     wraps to the next line instead (44px floors survive at 320). */
+  .bs-topbar > .row.grow { flex: none; flex-wrap: nowrap; }
   .pagehead { flex-direction: column; align-items: flex-start; gap: var(--space-3); }
   .pagehead > .row { flex-wrap: wrap; width: 100%; }
   .row { flex-wrap: wrap; }

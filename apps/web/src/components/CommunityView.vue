@@ -83,3 +83,12 @@ onMounted(() => {
     </section>
   </div>
 </template>
+
+<style scoped>
+/* IR-223 overflow audit: unbreakable release/version tokens set the row's
+   min-content and pushed the page sideways at 320 — wrap them anywhere. */
+.row a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+</style>
