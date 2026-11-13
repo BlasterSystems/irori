@@ -1,13 +1,13 @@
 # ADR-0005: BlasterSystems design system, Vue 3 port (uptime-monitoring recipes)
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Accepted:** 2026-10-19 — owner approval after M1–M7 shipped on these decisions
 - **Date:** 2026-10-16
 - **Decision owners:** operator
 - **Scope:** UI framework, visual language, theming, branding
 - **Tags:** frontend, vue, design-system, blastersystems, branding
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [ADR-0018](0018-blasterystems-design-system-v1-1.md) — DS v1.1 (oklch identity v0.2, sidebar shell, ink action) replaces the v1.0 hex-baked token port
 
 ## Context
 
