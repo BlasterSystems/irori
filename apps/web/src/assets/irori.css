@@ -403,6 +403,11 @@ button { font: inherit; color: inherit; }
 .spark { display: block; width: 100%; cursor: crosshair; }
 .spark line, .spark path, .spark polyline { vector-effect: non-scaling-stroke; }
 
+/* ── Chart legend (v1.1 idiom: 14x8 line swatches, mono caps) ──────── */
+.bs-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.bs-legend > span { display: inline-flex; align-items: center; gap: 7px; }
+
 /* ── Chart hover tooltips (LensChart + Sparkline) ──────────────────── */
 /* z 6: above the sticky footer (5), below drawer/modal scrims (10) and the
    topbar (20) — the chrome layering contract. v1.1: paper-2, no shadow. */
