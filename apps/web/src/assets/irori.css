@@ -1,49 +1,82 @@
-/* Irori mockups — BlasterSystems DS token port (uptime-monitoring recipes).
-   Tokens baked to sRGB hex from Design System.dc.html :17-18; verify against the oracle. */
+/* Irori app stylesheet — BlasterSystems DS v1.1 (identity v0.2, oklch).
+   Token values copied VERBATIM from mockups/irori-v11.css (itself copied
+   verbatim from "BlasterSystems design system v1.1"/tokens/*.css on
+   2026-11-12; round recorded in mockups/PLAN.md "DS v1.1 adoption round",
+   epic IR-214, ADR-0018). NEVER hand-tune oklch.
+   Dark paper is #0e1217; ink action buttons; thread only as a line/live/warn.
+   No elevation box-shadows — inset rings/lines are borders, not shadows. */
 
-/* ── Fonts (self-hosted, latin subset) ─────────────────────────────── */
+/* ── Fonts (self-hosted) ───────────────────────────────────────────── */
+/* Fira Sans 300 exists in the kit but is omitted here: no ported rule sets
+   weight 300 (font-manifest rule — no dead weight). */
 @font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/fira-sans-latin-400.woff2") format("woff2"); }
 @font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url("fonts/fira-sans-latin-500.woff2") format("woff2"); }
 @font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/fira-sans-latin-600.woff2") format("woff2"); }
 @font-face { font-family: "DM Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/dm-mono-latin-400.woff2") format("woff2"); }
 @font-face { font-family: "DM Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("fonts/dm-mono-latin-500.woff2") format("woff2"); }
 
-/* ── Tokens (DS light, baked hex) ──────────────────────────────────── */
+/* ── Tokens: colors (DS v1.1 oklch, verbatim) ──────────────────────── */
 :root {
-  --paper: #F2F4F6; --paper-2: #E8EBEE; --card: #FBFCFD;
-  --ink: #22272D; --ink-2: #4D5258; --ink-3: #6A6E75;
-  --rule: #D4D7DA; --rule-2: #B8BBC0;
-  --thread: #DC4F37; --thread-ink: #BE3827;
-  --thread-wash: rgb(220 79 55 / .12);
-  --grid: rgb(34 39 45 / .05);
-  --overlay: rgb(34 39 45 / .45);
-  --log-bg: #16181C; --log-fg: #D6D9DD; --log-rule: #2A2E34;
   color-scheme: light;
+  --paper: oklch(0.965 0.004 250); --paper-2: oklch(0.935 0.005 250); --card: oklch(0.99 0.002 250);
+  --ink: oklch(0.22 0.015 255); --ink-2: oklch(0.40 0.014 255); --ink-3: oklch(0.51 0.012 255);
+  --rule: oklch(0.87 0.006 255); --rule-2: oklch(0.78 0.008 255);
+  --thread: oklch(0.60 0.19 32); --thread-ink: oklch(0.52 0.18 31);
+  --thread-wash: oklch(0.60 0.19 32 / 0.12);
+  --grid: oklch(0.22 0.015 255 / 0.05);
+  --band: oklch(0.22 0.015 255 / 0.10);
+  --surface-page: var(--paper); --surface-sunken: var(--paper-2); --surface-card: var(--card);
+  --surface-tooltip: var(--paper-2);
+  --text-1: var(--ink); --text-2: var(--ink-2); --text-3: var(--ink-3);
+  --border-1: var(--rule); --border-2: var(--rule-2);
+  --action-bg: var(--ink); --action-bg-hover: var(--ink-2); --action-fg: var(--paper);
+  --accent: var(--thread); --accent-text: var(--thread-ink); --accent-wash: var(--thread-wash);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #1B1E23; --paper-2: #21252A; --card: #23282E;
-    --ink: #EDEFF2; --ink-2: #BEC2C6; --ink-3: #94989E;
-    --rule: #373B41; --rule-2: #4D5258;
-    --thread: #EF7253; --thread-ink: #FA8C6A;
-    --thread-wash: rgb(239 114 83 / .16);
-    --grid: rgb(237 239 242 / .05);
-    --overlay: rgb(5 7 10 / .62);
     color-scheme: dark;
+    --paper: oklch(0.18 0.012 255); --paper-2: oklch(0.21 0.013 255); --card: oklch(0.225 0.014 255);
+    --ink: oklch(0.95 0.004 250); --ink-2: oklch(0.80 0.008 250); --ink-3: oklch(0.66 0.010 250);
+    --rule: oklch(0.31 0.012 255); --rule-2: oklch(0.40 0.014 255);
+    --thread: oklch(0.68 0.17 35); --thread-ink: oklch(0.74 0.15 38);
+    --thread-wash: oklch(0.68 0.17 35 / 0.16);
+    --grid: oklch(0.95 0.004 250 / 0.05);
+    --band: oklch(0.95 0.004 250 / 0.10);
   }
 }
 :root[data-theme="dark"] {
-  --paper: #1B1E23; --paper-2: #21252A; --card: #23282E;
-  --ink: #EDEFF2; --ink-2: #BEC2C6; --ink-3: #94989E;
-  --rule: #373B41; --rule-2: #4D5258;
-  --thread: #EF7253; --thread-ink: #FA8C6A;
-  --thread-wash: rgb(239 114 83 / .16);
-  --grid: rgb(237 239 242 / .05);
-  --overlay: rgb(5 7 10 / .62);
   color-scheme: dark;
+  --paper: oklch(0.18 0.012 255); --paper-2: oklch(0.21 0.013 255); --card: oklch(0.225 0.014 255);
+  --ink: oklch(0.95 0.004 250); --ink-2: oklch(0.80 0.008 250); --ink-3: oklch(0.66 0.010 250);
+  --rule: oklch(0.31 0.012 255); --rule-2: oklch(0.40 0.014 255);
+  --thread: oklch(0.68 0.17 35); --thread-ink: oklch(0.74 0.15 38);
+  --thread-wash: oklch(0.68 0.17 35 / 0.16);
+  --grid: oklch(0.95 0.004 250 / 0.05);
+  --band: oklch(0.95 0.004 250 / 0.10);
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* ── Tokens: type / spacing / effects (v1.1 app subset) ────────────── */
+:root {
+  --font-sans: "Fira Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-endorse: 10.5px; --fs-label-sm: 11px; --fs-label: 11.5px; --fs-data-sm: 12px; --fs-data: 12.5px;
+  --fs-small: 13px; --fs-ui: 14px; --fs-nav: 15px; --fs-body: 16px; --fs-stat: 17px;
+  --fs-h3: 22px; --fs-page-title: 30px;
+  --lh-ui: 1.4; --lh-body: 1.5;
+  --tracking-label: 0.08em; --tracking-mono: 0.06em;
+  --radius-control: 2px; --radius-panel: 4px;
+  --hit-min: 44px; --control-sm: 36px;
+  --panel-pad: 16px 18px 18px;
+  --sidebar-width: 232px; --content-max: 1360px;
+  --grid-cell: 16px; --hairline: 1px; --path-active: 1.5px;
+  --dur-press: 150ms; --dur-ui: 200ms;
+  --ease-out: cubic-bezier(.22, .61, .36, 1);
+  /* Irori log console (dark in both themes; v1.1 dark palette values) */
+  --log-bg: #0e1217; --log-fg: #eceff1; --log-rule: #2c3136; --log-dim: #8e9398;
 }
 
-/* ── Semantic aliases ──────────────────────────────────────────────── */
+/* ── Semantic aliases (Irori legacy names → v1.1 tokens) ───────────── */
 :root {
   --bg: var(--paper); --surface: var(--card); --surface-2: var(--paper-2);
   --border: var(--rule); --border-strong: var(--rule-2);
@@ -52,46 +85,46 @@
   --success: var(--ink); --warning: var(--ink-2); --error: var(--thread);
   --radius-sm: 2px; --radius: 4px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
-  --font-sans: "Fira Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --topbar-h: 64px;
+  --overlay: color-mix(in oklch, var(--paper) 72%, transparent);
+  --topbar-h: 60px;
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--font-sans); }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); font-size: var(--fs-body); line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 /* Flex shell: the version/build footer pins to the viewport bottom on short
-   pages and stays sticky while tall pages scroll (mirrors the topbar). */
+   pages and stays sticky while tall pages scroll (superseded by the v1.1
+   sidebar shell in IR-217; kept until that commit). */
 #app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 h1, h2, h3, h4 { font-weight: 500; letter-spacing: -0.01em; line-height: 1.3; margin: 0; }
-h1 { font-size: 24px; } h2 { font-size: 19px; } h3 { font-size: 15.5px; }
+h1 { font-size: var(--fs-page-title); } h2 { font-size: var(--fs-h3); } h3 { font-size: var(--fs-stat); } h4 { font-size: var(--fs-nav); }
 a { color: inherit; text-decoration: none; }
+a:hover { color: var(--thread-ink); }
 button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--thread); outline-offset: 3px; }
 ::selection { background: var(--thread-wash); }
-.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.mono { font-family: var(--font-mono); font-size: var(--fs-data); }
 .muted { color: var(--muted); } .faint { color: var(--faint); }
 /* top/left 0: without them the box sits at its static position, which can be
  * deep inside a clipped wide table — an absolutely positioned box with no
  * positioned ancestor is laid out against the ICB and extends the DOCUMENT
  * scrollable overflow (IR-196: benchmarks compare labels pushed pages to 610px). */
 .visually-hidden { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; } }
+
+.container { max-width: var(--content-max); margin: 0 auto; padding: 0 24px; }
 .page { flex: 1 0 auto; width: 100%; min-width: 0; padding-top: var(--space-5); padding-bottom: var(--space-7); }
 /* width:100% is load-bearing: .page is a cross-axis flex item of #app and
  * .container's auto margins disable stretch — without a definite cross size
- * every page shrinks to fit-content instead of filling the 1200px cap.
- * Padding is longhand on purpose: .page shares its element with .container,
- * and a padding shorthand here would zero .container's horizontal 24px (the
- * element rendered full-bleed at every width). Horizontal rhythm belongs to
- * .container (24px, 16px in the mobile tier). */
+ * every page shrinks to fit-content instead of filling the cap. */
 .foot { position: sticky; bottom: 0; z-index: 5;
   background: color-mix(in oklch, var(--paper) 90%, transparent); backdrop-filter: blur(8px);
   border-top: 1px solid var(--border); }
 .foot__in { display: flex; align-items: center; min-height: 38px; }
 .pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
-.pagehead p { margin: var(--space-1) 0 0; color: var(--muted); font-size: 14px; }
+.pagehead p { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--fs-ui); }
 .cols { display: grid; gap: var(--space-3); }
 /* Grid items may shrink below content (charts/tables in cells must not
  * force page-level horizontal overflow on narrow viewports). */
@@ -105,8 +138,9 @@ button { font: inherit; color: inherit; }
 .row--between { justify-content: space-between; }
 .grow { flex: 1; }
 .stack { display: grid; gap: var(--space-3); }
-.label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); }
-/* Tooltip metadata: visible = primary value, hover = detail (IRI-025). */
+.label { font-family: var(--font-mono); font-size: var(--fs-label-sm); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--faint); }
+/* Tooltip metadata: visible = primary value, hover = detail (IRI-025).
+   v1.1: paper-2 surface with a rule-2 border, no shadow. */
 .tip { position: relative; display: inline-flex; align-items: center; margin-left: 5px; color: var(--faint); cursor: help; vertical-align: -1px; }
 .tip svg { width: 10px; height: 10px; display: block; }
 .tip:hover { color: var(--fg); }
@@ -115,36 +149,37 @@ button { font: inherit; color: inherit; }
  * overflow whenever the tip sits right of the viewport edge (IR-196 sweep:
  * hiding the 8 tips on Overview alone collapsed 588px -> 367px). */
 .tip::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 6px); width: 300px; max-width: 80vw;
-  background: var(--ink); color: var(--paper); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
+  background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--rule-2); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
   padding: 8px 10px; border-radius: var(--radius-sm); display: none; pointer-events: none; z-index: 30; text-transform: none; letter-spacing: 0; }
 .tip:hover::after { display: block; }
-.mock-note { position: fixed; right: 12px; bottom: 10px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); opacity: .8; }
 
 /* ── Topbar / brand ────────────────────────────────────────────────── */
+/* v1.1 interim: the sidebar shell lands in IR-217; until then the topbar
+   carries the v1.1 surface (paper-2 92% mix, blur 12px). */
 .topbar { position: sticky; top: 0; z-index: 20; height: var(--topbar-h);
-  background: color-mix(in oklch, var(--paper) 90%, transparent); backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--border); }
-.topbar__in { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 100%; display: flex; align-items: center; gap: var(--space-5); }
+  background: color-mix(in oklch, var(--paper-2) 92%, transparent); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--rule); }
+.topbar__in { max-width: var(--content-max); margin: 0 auto; padding: 0 24px; height: 100%; display: flex; align-items: center; gap: var(--space-5); }
 .brand { display: inline-flex; align-items: center; gap: 10px; margin-right: auto; }
 .brand-mark { position: relative; flex: none; width: 30px; height: 10px; }
 .brand-mark .mark-node { position: absolute; left: 0; top: 0; width: 10px; height: 10px; border: 1.5px solid currentColor; border-radius: 50%; }
 .brand-mark .mark-line { position: absolute; left: 10px; right: 10px; top: 4.25px; height: 1.5px; background: var(--thread); }
 .brand-mark .mark-square { position: absolute; right: 0; top: 0; width: 10px; height: 10px; background: currentColor; }
 .brand-text { display: flex; flex-direction: column; gap: 2px; }
-.brand-name { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; line-height: 1; }
-.brand-endorsement { font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); line-height: 1; }
+.brand-name { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; line-height: 1; }
+.brand-endorsement { font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; line-height: 1; color: color-mix(in oklch, currentColor 62%, transparent); }
 .brand:hover .brand-name { color: var(--thread-ink); }
 .nav { display: flex; align-items: center; gap: var(--space-2); }
-.nav a { padding: 6px 10px; font-size: 14px; font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
+.nav a { padding: 6px 10px; font-size: var(--fs-ui); font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
 .nav a:hover { color: var(--fg); }
 .nav a.is-active { color: var(--fg); box-shadow: inset 0 -2px 0 0 var(--ink); }
-.iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); cursor: pointer; }
+.iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--rule-2); border-radius: var(--radius-sm); background: transparent; color: var(--muted); cursor: pointer; }
 .iconbtn:hover { color: var(--fg); border-color: var(--ink); }
 .iconbtn svg { width: 16px; height: 16px; }
 
 /* ── Transfer count bubble (IR-131, promoted from mockups/IRI-048) ─── */
 .countbub { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 16px; padding: 0 4px;
-  margin-left: 5px; border: 1px solid var(--border-strong); border-radius: 8px;
+  margin-left: 5px; border: 1px solid var(--rule-2); border-radius: 8px;
   font-family: var(--font-mono); font-size: 10px; color: var(--fg); background: var(--surface); }
 
 /* ── Tier chrome (IR-128) ──────────────────────────────────────────── */
@@ -154,10 +189,10 @@ button { font: inherit; color: inherit; }
 .topbar__in { position: relative; }
 .range-select { width: auto; min-width: 96px; font-family: var(--font-mono); font-size: 12.5px; }
 .navmenu { display: none; position: absolute; top: calc(100% - 6px); right: 24px; z-index: 21;
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--rule-2); border-radius: var(--radius);
   min-width: 210px; padding: 6px; grid-auto-flow: row; }
 .navmenu.is-open { display: grid; gap: 2px; }
-.navmenu a { padding: 10px 12px; font-size: 14px; font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
+.navmenu a { padding: 10px 12px; font-size: var(--fs-ui); font-weight: 500; color: var(--muted); border-radius: var(--radius-sm); }
 .navmenu a:hover { color: var(--fg); background: var(--surface-2); }
 .navmenu a.is-active { color: var(--fg); box-shadow: inset 2px 0 0 var(--ink); }
 /* IR-197 B1: the deploy tag's committed home — the hamburger menu footer,
@@ -167,37 +202,45 @@ button { font: inherit; color: inherit; }
 html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
-.btn { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 34px; padding: 0 14px;
-  border-radius: var(--radius-sm); border: 1px solid transparent; font-size: 13px; font-weight: 500; cursor: pointer; background: none; white-space: nowrap; }
-.btn--primary { background: var(--accent); color: var(--accent-fg); }
-.btn--primary:hover { background: var(--ink-2); }
-.btn--secondary { border-color: var(--border-strong); color: var(--fg); background: var(--surface); }
-.btn--secondary:hover { border-color: var(--ink); }
-.btn--danger { border-color: var(--thread); color: var(--thread-ink); background: none; }
+/* v1.1: ink action (44px), quiet secondary = transparent + inset rule-2 ring,
+   thread is never a fill (danger keeps a bordered thread look until its
+   screen restyles it as a thread-ink text link, IR-223). */
+.btn { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 18px;
+  border-radius: var(--radius-control); border: 0; font-size: var(--fs-nav); font-weight: 500; cursor: pointer; background: none; white-space: nowrap; }
+.btn--primary { background: var(--action-bg); color: var(--action-fg); }
+.btn--primary:hover { background: var(--action-bg-hover); }
+.btn--secondary { background: transparent; color: var(--fg); box-shadow: inset 0 0 0 1px var(--rule-2); }
+.btn--secondary:hover { box-shadow: inset 0 0 0 1px var(--ink); }
+.btn--danger { border: 1px solid var(--thread); color: var(--thread-ink); background: none; }
 .btn--danger:hover { background: var(--thread-wash); }
 .btn--ghost { color: var(--muted); }
 .btn--ghost:hover { color: var(--fg); }
-.btn--sm { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.btn--sm { min-height: 36px; padding: 0 14px; font-size: var(--fs-ui); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ── Cards / panels ────────────────────────────────────────────────── */
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-.card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
-.card__body { padding: var(--space-4); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-panel); }
+.card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 12px 18px; border-bottom: 1px solid var(--border); }
+.card__body { padding: var(--panel-pad); }
 .card__body--flush { padding: 0; }
-.subcard { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.subcard { border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); }
 
-/* ── Chips / badges / dots (shapes first) ──────────────────────────── */
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
-  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: none; white-space: nowrap; }
-.chip--ok { color: var(--fg); }
-.chip--accent { color: var(--fg); }
-.chip--warn { color: var(--thread-ink); border-color: var(--thread); background: var(--thread-wash); }
+/* ── Chips / badges / dots (shapes first; v1.1 optical sizes) ──────── */
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 9px; border: 1px solid var(--rule-2); border-radius: var(--radius-control);
+  font-family: var(--font-mono); font-size: var(--fs-label-sm); letter-spacing: .06em; text-transform: uppercase; line-height: 1.3; color: var(--ink); background: none; white-space: nowrap; }
+.chip--ok { color: var(--ink); }
+.chip--accent { color: var(--ink); }
+.chip--warn, .chip--held { color: var(--thread-ink); border-color: var(--thread); background: var(--thread-wash); }
+.chip--stage { color: var(--ink-2); }
 .chip--muted { color: var(--faint); border-color: var(--border); }
 .dot { flex: none; width: 8px; height: 8px; display: inline-block; }
-.dot--run { width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 50%; }
-.dot--halt { width: 7px; height: 7px; border: 1.5px solid currentColor; }
-.dot--ok { background: currentColor; }
-.dot--warn { width: 7px; height: 7px; background: currentColor; transform: rotate(45deg); }
+.dot--run { width: 9px; height: 9px; border: 1.5px solid currentColor; border-radius: 50%; }
+.dot--halt { width: 9px; height: 9px; border: 1.5px solid currentColor; }
+.dot--ok { width: 8px; height: 8px; background: currentColor; }
+.dot--warn { width: 8px; height: 8px; border: 1.5px solid currentColor; transform: rotate(45deg); }
+/* Optical sizes inside chips: outline 8, ok/warn 7 (kit calibration). */
+.chip .dot--run, .chip .dot--halt { width: 8px; height: 8px; }
+.chip .dot--ok, .chip .dot--warn { width: 7px; height: 7px; }
 .pulse { position: relative; width: 7px; height: 7px; border-radius: 50%; background: var(--thread); }
 .pulse::after { content: ""; position: absolute; inset: -4px; border: 1px solid var(--thread); border-radius: 50%; opacity: .5;
   animation: pulse 2.2s ease-out infinite; }
@@ -209,32 +252,32 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .statgrid--3 { grid-template-columns: repeat(3, 1fr); }
 .statgrid--6 { grid-template-columns: repeat(6, 1fr); }
 .statgrid--7 { grid-template-columns: repeat(7, 1fr); }
-.stat__label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); display: block; }
-.stat__value { font-family: var(--font-mono); font-size: 20px; font-weight: 500; line-height: 1.2; margin-top: 2px; white-space: nowrap; }
+.stat__label { font-family: var(--font-mono); font-size: var(--fs-label-sm); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--faint); display: block; }
+.stat__value { font-family: var(--font-mono); font-size: var(--fs-stat); font-weight: 400; line-height: 1.2; margin-top: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* IR-196: a statgrid item's default min-width:auto lets a nowrap value push
  * the item box (and the page) past the viewport; shrink the item and
  * ellipsize the value instead — same contract .stat__sub already has ≤720. */
 .statgrid .stat { min-width: 0; }
 .statgrid .stat__value { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .stat__value--sm { font-size: 15px; }
-.stat__sub { display: block; font-family: var(--font-mono); font-size: 11px; color: var(--faint); margin-top: 2px; }
+.stat__sub { display: block; font-family: var(--font-mono); font-size: var(--fs-label-sm); color: var(--faint); margin-top: 2px; }
 .stat__value .stat__sub { display: inline; margin-left: 3px; }
-.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-family: var(--font-mono); font-size: 12px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-family: var(--font-mono); font-size: var(--fs-data-sm); }
 .kv dt { color: var(--faint); } .kv dd { margin: 0; text-align: right; }
 
 /* ── Bars ──────────────────────────────────────────────────────────── */
-.bar { position: relative; height: 6px; border-radius: 1px; background: var(--surface-2); overflow: hidden; }
+.bar { position: relative; height: 6px; border-radius: var(--radius-control); background: var(--surface-sunken); overflow: hidden; }
 .bar__fill { position: absolute; inset: 0 auto 0 0; background: var(--ink); transition: width .5s ease; }
 /* Trailing available-space segment (disk rows, IR-98): right-anchored, warn hue. */
 .bar__fill--free { inset: 0 0 0 auto; background: var(--thread); }
 @media (prefers-reduced-motion: reduce) { .bar__fill { transition: none; } }
 .bar--lg { height: 10px; }
-.barrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted); }
+.barrow { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-data-sm); color: var(--muted); }
 .barrow + .barrow { margin-top: 8px; }
 /* min-width 0 + ellipsis: the auto column's nowrap value otherwise sets the
  * barrow's min-content and pushed cards (and the page) past the viewport
  * (IR-196: the node-link barrows pushed Overview to 327px at 320). */
-.barrow .val { color: var(--fg); text-align: right; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.barrow .val { color: var(--fg); text-align: right; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 /* IRI-124: interface rows carry comma-joined address lists that must wrap
  * inside the card — the auto column would otherwise grow past it and paint
  * over the neighbouring grid cell (.cols > * min-width only stops page
@@ -242,43 +285,46 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 .barrow--net { grid-template-columns: 64px 1fr; }
 .barrow--net .val { white-space: normal; overflow-wrap: anywhere; text-align: right; }
 /* IRI-124: chart legend for two-series sparklines (usage + temperature). */
-.chart-legend { display: flex; align-items: center; gap: 12px; margin-top: 6px; color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+.chart-legend { display: flex; align-items: center; gap: 12px; margin-top: 6px; color: var(--muted); font-family: var(--font-mono); font-size: var(--fs-label-sm); }
 .chart-legend__line { display: inline-block; width: 14px; border-top: 1.5px solid var(--ink-2); margin-right: 5px; vertical-align: 3px; }
 .chart-legend__line--dashed { border-top-style: dashed; border-top-color: var(--thread); }
 .metric--hot { color: var(--thread-ink); }
 
-/* ── Tables ────────────────────────────────────────────────────────── */
-.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.table th { text-align: left; font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--faint); padding: 8px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+/* ── Tables (DS v1.1: hairlines + mono labels; kit has no table) ───── */
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-ui); }
+.table th { text-align: left; font-family: var(--font-mono); font-size: var(--fs-label-sm); font-weight: 400; letter-spacing: var(--tracking-label); text-transform: uppercase;
+  color: var(--faint); padding: 10px 12px; border-bottom: 1px solid var(--rule-2); }
 /* overflow-wrap anywhere: unbreakable tokens (model names, repo ids) set the
  * column min-content and pushed pages sideways (IR-196 node cache/models
  * tables). Wrapping suffices here — scroll wrappers are only for tables too
  * wide to wrap legibly (card__body--flush). */
-.table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow-wrap: anywhere; }
+.table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; overflow-wrap: anywhere; }
 .table tr:last-child td { border-bottom: 0; }
-.table .mono { font-size: 12px; }
+.table .mono { font-size: var(--fs-data-sm); }
+.table .num { font-family: var(--font-mono); font-size: var(--fs-data-sm); white-space: nowrap; font-variant-numeric: tabular-nums; text-align: right; }
+.table td.actions { text-align: right; white-space: nowrap; }
 
 /* ── Log / console (force dark surface in both themes) ─────────────── */
-.log { background: var(--log-bg); color: var(--log-fg); border-radius: var(--radius); border: 1px solid var(--log-rule);
-  font-family: var(--font-mono); font-size: 12px; line-height: 1.6; padding: var(--space-3) var(--space-4); overflow: auto; }
-.log .dim { color: #7D838B; } .log .ok { color: #9CC29C; } .log .err { color: #F08B72; }
+.log { background: var(--log-bg); color: var(--log-fg); border-radius: var(--radius-panel); border: 1px solid var(--log-rule);
+  font-family: var(--font-mono); font-size: var(--fs-data-sm); line-height: 1.6; padding: var(--space-3) var(--space-4); overflow: auto; }
+.log .dim { color: var(--log-dim); } .log .ok { color: #9cc29c; } .log .err { color: #ee6a4a; }
 
 /* ── Banners ───────────────────────────────────────────────────────── */
-.banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 13px; color: var(--muted); }
+.banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--rule-2); border-radius: var(--radius-sm); font-size: var(--fs-small); color: var(--muted); }
 .banner--warn { border-color: var(--thread); background: var(--thread-wash); color: var(--ink); }
 /* IR-203: critical findings read as danger, not just attention. */
 .banner--critical { color: var(--thread-ink); border-left: 3px solid var(--thread); }
 
 /* ── Drawers / pick rows (shared chrome; CleanupDrawer has no scoped styles —
-   ServeView/ModelsView keep narrower scoped overrides) ────────────────────── */
+   ServeView/ModelsView keep narrower scoped overrides). v1.1 surface: card,
+   rule-2 border, 4px radius, no shadow; scrim is paper at 72%. ── */
 .drawer-scrim { position: fixed; inset: 0; background: var(--overlay);
   display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
 .drawer { width: min(560px, 100%); max-height: 88vh; overflow: auto; padding: 14px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  background: var(--surface); border: 1px solid var(--rule-2); border-radius: var(--radius-panel); }
 @media (min-width: 721px) { .drawer-scrim { align-items: center; } }
 .pick { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px;
-  border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; flex-wrap: wrap; }
+  border: 1px solid var(--border); border-radius: var(--radius-panel); cursor: pointer; flex-wrap: wrap; }
 .pick.is-on { border-color: var(--ink); }
 .pick input { width: 16px; height: 16px; }
 
@@ -287,24 +333,37 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
  * (e.g. one carrying helper text) must not stretch its own rows and shove
  * its control to the bottom (IRI-050 NodeModal Role helper). */
 .field { display: grid; gap: 5px; align-content: start; }
-.field > label { font-size: 12.5px; font-weight: 500; color: var(--muted); }
-.input, .select { width: 100%; min-height: 32px; padding: 5px 10px; font: inherit; font-size: 13.5px; color: var(--fg);
-  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); }
-.input.mono { font-family: var(--font-mono); font-size: 12.5px; }
-/* IR-152: the focus ring is attention, not error. --thread is the danger
- * token; a focused-valid input must not read as errored, so the ring rides
- * --ink/--border-strong (App-wide DS change). */
-.input:focus, .select:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 16%, transparent); }
+.field > label { font-family: var(--font-mono); font-size: var(--fs-label-sm); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+/* Toolbar/search/select keep the bordered hybrid; the wizard forms migrate
+ * to the underline .bs-field below with their screen tickets. */
+.input, .select { width: 100%; min-height: 36px; padding: 5px 10px; font: inherit; font-size: var(--fs-ui); color: var(--fg);
+  background: transparent; border: 0; border-radius: var(--radius-control); box-shadow: inset 0 0 0 1px var(--rule-2); appearance: none; }
+.input.mono { font-family: var(--font-mono); font-size: var(--fs-data); }
+/* Focus is attention: the v1.1 kit rides the thread ring on focus. */
+.input:focus, .select:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--thread); }
+.input::placeholder, .select::placeholder { color: var(--faint); }
+
+/* ── Underline field (v1.1 forms.card.html) ────────────────────────── */
+.bs-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bs-field__label { font-family: var(--font-mono); font-size: var(--fs-label-sm); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.bs-field__box { display: flex; align-items: baseline; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--rule-2); transition: border-color var(--dur-press); }
+.bs-field__box:hover { border-bottom-color: var(--ink-2); }
+.bs-field__box:focus-within { border-bottom: 1.5px solid var(--thread); padding-bottom: 7.5px; }
+.bs-field__input { flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink);
+  font: 400 var(--fs-stat)/1.3 var(--font-sans); outline: none; appearance: none; }
+.bs-field__input::placeholder { color: var(--faint); }
+.bs-field--mono .bs-field__input { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.bs-field__hint { display: flex; align-items: center; gap: 8px; font-size: var(--fs-small); line-height: 1.4; color: var(--ink-2); }
 
 /* ── Segmented / tabs ──────────────────────────────────────────────── */
-.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
-.seg button { border: 0; background: none; padding: 6px 12px; font-size: 12.5px; font-weight: 500; color: var(--muted); cursor: pointer; }
+.seg { display: inline-flex; border: 1px solid var(--rule-2); border-radius: var(--radius-control); overflow: hidden; background: transparent; }
+.seg button { border: 0; background: none; padding: 6px 12px; font-size: var(--fs-ui); font-weight: 500; color: var(--muted); cursor: pointer; }
 .seg button + button { border-left: 1px solid var(--border); }
-.seg button.is-active { background: var(--ink); color: var(--paper); }
+.seg button.is-active { background: var(--action-bg); color: var(--action-fg); }
 .seg button:hover:not(.is-active) { color: var(--fg); background: var(--surface-2); }
 .seg button:disabled, .btn:disabled, .tabs button:disabled { opacity: .5; cursor: not-allowed; }
 .tabs { display: flex; gap: var(--space-2); border-bottom: 1px solid var(--border); }
-.tabs button { border: 0; background: none; padding: 8px 4px; margin-bottom: -1px; font-size: 13.5px; font-weight: 500; color: var(--muted); cursor: pointer; box-shadow: inset 0 -2px 0 0 transparent; }
+.tabs button { border: 0; background: none; padding: 8px 4px; margin-bottom: -1px; font-size: var(--fs-ui); font-weight: 500; color: var(--muted); cursor: pointer; box-shadow: inset 0 -2px 0 0 transparent; }
 .tabs button:hover:not(.is-active) { color: var(--fg); }
 .tabs button.is-active { color: var(--fg); box-shadow: inset 0 -2px 0 0 var(--ink); }
 
@@ -314,14 +373,14 @@ html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }
 
 /* ── Chart hover tooltips (LensChart + Sparkline) ──────────────────── */
 /* z 6: above the sticky footer (5), below drawer/modal scrims (10) and the
-   topbar (20) — the chrome layering contract. */
+   topbar (20) — the chrome layering contract. v1.1: paper-2, no shadow. */
 .charttip {
   position: fixed; z-index: 6; pointer-events: none;
   transform: translate(-50%, calc(-100% - 10px));
-  background: color-mix(in oklch, var(--card) 92%, transparent); backdrop-filter: blur(8px);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 5px 8px; font-family: var(--font-mono); font-size: 11.5px;
-  color: var(--fg); white-space: nowrap; box-shadow: 0 2px 12px rgb(0 0 0 / .18);
+  background: var(--surface-tooltip);
+  border: 1px solid var(--rule); border-radius: var(--radius-panel);
+  padding: 5px 8px; font-family: var(--font-mono); font-size: var(--fs-data-sm);
+  color: var(--fg); white-space: nowrap;
 }
 .charttip__time { color: var(--faint); margin-bottom: 2px; }
 .charttip__row { display: flex; align-items: center; gap: 6px; }
@@ -341,8 +400,8 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   .cols-4, .cols-3 { grid-template-columns: repeat(2, 1fr); }
   .cols-side { grid-template-columns: 1fr; }
 }
-.ghost-grid { border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--faint);
-  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+.ghost-grid { border: 1px dashed var(--rule-2); border-radius: var(--radius-panel); color: var(--faint);
+  font-family: var(--font-mono); font-size: var(--fs-label-sm); text-transform: uppercase; letter-spacing: .08em;
   display: flex; align-items: center; justify-content: center; min-height: 64px; }
 
 /* ── Mobile tiers (must stay after the 1080 block to cascade) ─────── */
@@ -367,7 +426,7 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   .toolbar { flex-wrap: wrap; }
   .cols-2, .cols-3, .cols-4 { grid-template-columns: 1fr; }
   .statgrid, .statgrid--3, .statgrid--6, .statgrid--7 { grid-template-columns: repeat(2, 1fr); }
-  .stat__value { font-size: 17px; }
+  .stat__value { font-size: var(--fs-stat); }
   .statgrid .stat__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
   .seg::-webkit-scrollbar { display: none; }
@@ -405,7 +464,6 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
 }
 @media (max-width: 480px) {
   .chart { height: 140px; }
-  .mock-note { display: none; }
   .log { font-size: 11.5px; }
 }
 @media print { .foot { position: static; } }
