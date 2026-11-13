@@ -242,7 +242,7 @@ const hasRetentionHint = computed(() => (chats.value?.capturedWithoutBodies ?? 0
   background: var(--surface-2, rgba(127, 127, 127, 0.06));
 }
 .turn--error {
-  border-color: var(--error, #c0392b);
+  border-color: var(--error);
 }
 .turn--marker {
   border-style: dashed;
