@@ -997,6 +997,15 @@ const totalPages = computed(() => {
   return Math.max(1, Math.ceil(p.total / p.pageSize));
 });
 
+/** IR-222 review: under an active search/runtime filter the page total is
+ *  the FILTERED count, not the catalog total — label it honestly (the nav
+ *  count carries the unfiltered total). */
+const stripCountLabel = computed(() => {
+  const filtered = search.value.trim() !== "" || runtimeFiltering.value;
+  const n = modelsPage.value?.total ?? "—";
+  return filtered ? `${n} matching (catalog total in the nav)` : `catalog ${n} objects`;
+});
+
 function go(delta: number): void {
   const next = page.value + delta;
   if (next < 1 || next > totalPages.value) return;
@@ -1198,7 +1207,7 @@ onBeforeUnmount(() => {
               <div class="bar"><div class="bar__fill" :style="{ width: `${storeNas.storePct ?? 0}%` }"></div></div>
               <span class="val" :class="{ 'metric--hot': storeHot }">{{ storeVal }}</span>
             </div>
-            <span class="stat__sub">catalog {{ modelsPage?.total ?? "—" }} objects · page {{ modelsPage?.page ?? page }} / {{ totalPages }} @ {{ modelsPage?.pageSize ?? MODELS_PAGE_SIZE }}/page</span>
+            <span class="stat__sub">{{ stripCountLabel }} · page {{ modelsPage?.page ?? page }} / {{ totalPages }} @ {{ modelsPage?.pageSize ?? MODELS_PAGE_SIZE }}/page</span>
             <span class="stat__sub">
               {{ storeNodeInfo?.name ?? "no store node" }}<template v-if="storeNodeInfo?.agentVersion !== null && storeNodeInfo?.agentVersion !== undefined"> · agent {{ storeNodeInfo.agentVersion }}</template> · {{ live.connected.value ? "live" : "offline" }}
             </span>
