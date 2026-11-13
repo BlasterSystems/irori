@@ -10,8 +10,10 @@ it("App.vue exposes the topbar gear opening the Hub settings modal", () => {
   for (const token of ['aria-label="Hub settings"', '<HubSettingsModal v-if="hubSettingsOpen"', "hubSettingsOpen = true"]) {
     expect(appSource).toContain(token);
   }
-  // IRI-025: the gear moved to the topbar — it appears before the footer, which no longer has one.
-  expect(appSource.indexOf('aria-label="Hub settings"')).toBeLessThan(appSource.indexOf("<footer"));
+  // IRI-025: the gear lives in the topbar chrome, beside the theme toggle;
+  // the v1.1 shell has no footer at all (IR-214 supersession).
+  expect(appSource).not.toContain("<footer");
+  expect(appSource.indexOf('aria-label="Hub settings"')).toBeLessThan(appSource.indexOf('aria-label="Toggle theme"'));
 });
 
 it("HubSettingsModal keeps the token write-only and tri-state", () => {

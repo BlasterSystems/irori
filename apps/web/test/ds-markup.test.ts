@@ -25,21 +25,32 @@ it("NodeCard keeps the DS card vocabulary", () => {
   expect(nodeCardSource).toContain("waiting for first snapshot");
 });
 
-it("App keeps the DS topbar lockup and nav", () => {
-  for (const cls of ["topbar__in", "brand-mark", "mark-node", "mark-line", "mark-square", "brand-name", "brand-endorsement", "nav", "is-active", "chip--warn", "dot--warn"]) {
+it("App keeps the DS v1.1 shell: sidebar lockup, nav, topbar chrome", () => {
+  // Sidebar: canonical v1.1 lockup + nav items with aria-current.
+  for (const cls of ["bs-sidebar", "bs-lockup", "bs-lockup__glyph", "mark-node", "mark-line", "mark-square", "bs-lockup__name", "bs-lockup__endorse", "bs-nav", "bs-nav-item", "aria-current", "bs-sidebar__foot"]) {
     expect(appSource).toContain(cls);
   }
   expect(appSource).toContain("irori-theme");
   // IRI-025: no status chip while healthy; the warn OFFLINE chip is the only state.
   expect(appSource).toContain('v-if="!connected"');
   expect(appSource).not.toContain("Connecting…");
-  // IRI-025: the hub-settings gear lives in the topbar, right of the theme toggle.
+  // IRI-025: the hub-settings gear lives in the topbar, beside the theme toggle.
   expect(appSource).toContain('aria-label="Hub settings"');
   // IRI-013: the fleet page body moved to OverviewView — the shell keeps only routing.
   expect(appSource).toContain("<OverviewView v-else />");
   // M8: Usage is a first-class nav entry mounted as its own view.
   expect(appSource).toContain("usageHash()");
   expect(appSource).toContain('<UsageView v-else-if="route.view === \'usage\'" />');
+  // IR-214: nav counts are hub-derived totals; the mobile menu carries the
+  // deploy line (IR-197 B1 home) and the live status.
+  expect(appSource).toContain("bs-nav-item__count");
+  expect(appSource).toContain("refreshNavCounts");
+  expect(appSource).toContain("bs-menu-foot");
+  expect(appSource).toContain('deploy {{ serverTag ?? "unknown" }}');
+  expect(appSource).toContain('Irori {{ serverVersion ?? "…" }}');
+  // Transfers stay reachable from page chrome with the live count bubble.
+  expect(appSource).toContain('aria-label="Open transfers"');
+  expect(appSource).toContain("countbub");
 });
 
 it("UsageView keeps the DS section vocabulary (M8)", () => {
@@ -63,19 +74,19 @@ it("OverviewView keeps the page vocabulary: pagehead, card grid, first-run ghost
   expect(src).toContain("<NodeModal");
 });
 
-it("App pins the version/build footer to the viewport-bottom shell", () => {
-  expect(appSource).toContain('<footer class="foot">');
-  expect(appSource).toContain('class="container foot__in"');
+it("App pins the v1.1 shell geometry: sidebar column, sticky paper-2 topbar", () => {
   for (const rule of [
-    "#app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }",
-    ".foot { position: sticky; bottom: 0; z-index: 5;",
-    ".foot__in { display: flex; align-items: center; min-height: 38px; }",
+    ".shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }",
+    ".bs-sidebar { position: sticky; top: 0; flex: none; width: var(--sidebar-width); height: 100vh;",
+    "background: var(--paper-2); border-right: 1px solid var(--rule);",
+    ".bs-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;",
+    "backdrop-filter: blur(12px); border-bottom: 1px solid var(--rule); }",
+    ".content { padding: 28px 32px 48px; min-width: 0; max-width: var(--content-max); }",
   ]) {
     expect(cssSource).toContain(rule);
   }
-  // IR-197 B1: the deploy tag's committed home is the hamburger menu footer
-  // line, so the mobile footer can drop the tag (approved S2/B1 scene).
-  expect(cssSource).toContain(".menudeploy { grid-column: 1 / -1; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); }");
+  // IR-197 B1: the deploy tag's committed home is the mobile menu footer.
+  expect(cssSource).toContain(".bs-menu-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 12px 22px 4px; border-top: 1px solid var(--rule);");
 });
 
 it("NodeDetail keeps the DS drill-down vocabulary", () => {
