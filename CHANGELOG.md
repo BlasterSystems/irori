@@ -8,6 +8,18 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **BlasterSystems DS v1.1 across the web UI** (ADR-0018, epic IR-214):
+  oklch tokens verbatim (dark paper `#0e1217`), a 232px paper-2 sidebar
+  shell with topbar chrome and a 900px hamburger menu (IR-217), ink action
+  buttons with one filled per visible surface, destructive actions as
+  thread-ink text links, underline form fields, a labeled chart idiom
+  (44px y column, hairline grid, mono uppercase x labels, legend
+  swatches), the v1.1 media tiers alongside the data-tier machinery, and
+  Irori-owned force-dark log/table/tip treatments. The Overview, Serve and
+  Models screens plus every remaining route render the v1.1 skin; the
+  IR-197 footer is superseded (version/watts live in the sidebar foot and
+  the refresh-note, the deploy tag keeps its hamburger-menu home).
+
 - **Serving survives agent death** (ADR-0017, IRI-144): setups now spawn
   inside a `iroori-setup-<slug>` systemd transient scope — the engine's
   cgroup leaves the agent unit, so an agent restart, crash loop, or
