@@ -154,32 +154,30 @@ it("charts show a hover tooltip; call sites pass unit formatters", () => {
   expect(cssSource).toContain("z-index: 6");
 });
 
-it("nav collapses to a 44px hamburger disclosure below full width (IR-128)", () => {
-  expect(appSource).toContain(`v-if="tier === 'full'" class="nav"`);
-  expect(appSource).toContain('class="iconbtn navtoggle"');
+it("nav collapses to a hamburger disclosure at 900px and below (IR-128, v1.1 shell)", () => {
+  // The hamburger + dropdown live in the topbar; the sidebar folds away via CSS.
+  expect(appSource).toContain('class="iconbtn bs-topbar__menubtn"');
   expect(appSource).toContain(':aria-expanded="navOpen ? \'true\' : \'false\'"');
   expect(appSource).toContain('id="navMenu"');
+  expect(appSource).toContain("class=\"bs-topbar__menu\""); // menu + is-open toggle
   expect(appSource).toContain("navToggleBtn.value?.focus()"); // Escape returns focus (APG)
-  expect(cssSource).toContain(".navmenu {");
-  expect(cssSource).toContain('html[data-tier="small"] .container { padding-left: 12px; padding-right: 12px; }');
+  expect(cssSource).toContain(".bs-topbar__menu { display: none; position: absolute; top: 100%; left: 0; right: 0; padding: 8px 0;");
+  expect(cssSource).toContain(".bs-topbar__menubtn { display: none; }");
+  expect(cssSource).toContain(".bs-topbar__menubtn { display: inline-flex; }");
 });
 
-it("topbar controls get the 44px touch floor and the footer runs B1 (IR-197)", () => {
-  // S1 (approved): every topbar control ≥44px on tiers under full — theme and
-  // gear join the hamburger; ≤720 is covered by the shared .iconbtn rule.
-  expect(appSource).toContain('html[data-tier="medium"] .topbar .iconbtn,');
-  expect(appSource).toContain('html[data-tier="small"] .topbar .iconbtn { width: 44px; height: 44px; }');
-  // S2/B1 (approved): the small-tier footer is ONE row — version · watts only
-  // (wordmark, deploy tag, cadence dropped); below 390 only watts stay.
-  expect(appSource).toContain(`v-if="tier === 'small'" class="mono faint foot__ver"`);
-  expect(appSource).toContain('class="pv-ver"');
-  expect(appSource).toContain('@media (max-width: 389px) { html[data-tier="small"] .pv-ver { display: none; } }');
-  // The deploy tag's committed home is the hamburger menu footer line.
-  expect(appSource).toContain('class="menudeploy">deploy {{ serverTag ?? "unknown" }}</span>');
-  expect(cssSource).toContain(".menudeploy { grid-column: 1 / -1;");
-  // Approved scene: bordered secondary CTAs with the 44px floor.
-  expect(appSource).toContain('class="btn btn--secondary btn--sm"');
-  expect(appSource).toContain('html[data-tier="small"] .foot .btn--sm { min-height: 44px; }');
+it("topbar controls keep the 44px touch floor; version/watts live in the sidebar foot (IR-197 superseded by the v1.1 shell)", () => {
+  // S1 (approved) carries over: every topbar control ≥44px on tiers under full.
+  expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .iconbtn,');
+  expect(appSource).toContain('html[data-tier="small"] .bs-topbar .iconbtn { width: 44px; height: 44px; }');
+  expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .bs-theme,');
+  expect(appSource).toContain('html[data-tier="medium"] .bs-topbar .bs-btn,');
+  // Supersession: version (+ watts) live in the sidebar foot; the deploy tag
+  // keeps its committed hamburger-menu home (B1).
+  expect(appSource).toContain("Irori {{ serverVersion ?? \"…\" }}");
+  expect(appSource).toContain("{{ wattsText }}");
+  expect(appSource).toContain('deploy {{ serverTag ?? "unknown" }}');
+  expect(cssSource).toContain(".bs-menu-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 12px 22px 4px; border-top: 1px solid var(--rule);");
 });
 
 it("transfers stay reachable after every close: dock + op bar + honest cancel (IR-131)", () => {
