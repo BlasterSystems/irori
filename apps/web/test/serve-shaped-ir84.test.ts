@@ -50,13 +50,15 @@ const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
 });
 
 describe("ServeView shaped-data tier", () => {
-  it("renders a running setup card with the healthy chip", async () => {
+  it("renders a running healthy setup without state chrome (IR-221)", async () => {
     vi.stubGlobal("fetch", fetchStub);
     const { default: ServeView } = await import("../src/components/ServeView.vue");
     const w = mount(ServeView as never, { props: { route: { recipeJob: null } } } as never);
     await new Promise((r) => setTimeout(r, 120));
     expect(w.text()).toContain("GLM-Flash-TP2-MIIA");
-    expect(w.text()).toContain("healthy");
+    // IR-221: healthy is the resting state — no state chip on the card or
+    // drawer head (member rows + rate lines carry the state).
+    expect(w.text()).not.toContain("healthy");
     w.unmount();
   });
 
