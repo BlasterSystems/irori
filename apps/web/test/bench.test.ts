@@ -15,7 +15,7 @@ import {
 /* ── DS fidelity guard (same pattern as ds-markup.test.ts) ── */
 
 it("BenchmarksView keeps the DS vocabulary", () => {
-  for (const cls of ["pagehead", "tabs", "is-active", "card", "card__head", "card__body", "card__body--flush", "table", "chip", "dot--run", "dot--ok", "dot--halt", "dot--warn", "chip--ok", "chip--muted", "chip--warn", "btn--primary", "btn--sm", "btn--danger", "field", "input", "select", "mono", "faint", "stat__sub", "row--between", "label"]) {
+  for (const cls of ["pagehead", "tabs", "is-active", "card", "card__head", "card__body", "card__body--flush", "table", "chip", "dot--run", "dot--ok", "dot--halt", "dot--warn", "chip--ok", "chip--muted", "chip--warn", "btn--primary", "btn--sm", "bs-link--thread", "field", "input", "select", "mono", "faint", "stat__sub", "row--between", "label"]) {
     expect(benchmarksViewSource).toContain(cls);
   }
   expect(benchmarksViewSource).toContain("aria-label=\"Benchmark type\"");

@@ -429,10 +429,10 @@ function catLabel(category: string): string {
                     aria-label="Type prune to confirm removing the cleanup-quarantine debris"
                     style="flex: 1; min-width: 0; max-width: 220px;"
                   />
-                  <button class="btn btn--danger btn--sm" :disabled="debrisConfirm !== 'prune' || stagingBusy" @click="pruneDebris">Prune debris</button>
+                  <button class="bs-link bs-link--thread" :disabled="debrisConfirm !== 'prune' || stagingBusy" @click="pruneDebris">Prune debris</button>
                   <button class="btn btn--ghost btn--sm" @click="debrisArm = false; debrisConfirm = ''">Cancel</button>
                 </template>
-                <button v-else class="btn btn--danger btn--sm" :disabled="stagingBusy || phase === 'busy' || phase === 'running'" @click="debrisArm = true; debrisConfirm = ''">
+                <button v-else class="bs-link bs-link--thread" :disabled="stagingBusy || phase === 'busy' || phase === 'running'" @click="debrisArm = true; debrisConfirm = ''">
                   Prune debris…
                 </button>
               </div>
@@ -455,7 +455,7 @@ function catLabel(category: string): string {
                     :aria-label="`Type ${row.name} to confirm pruning its quarantine trees`"
                     style="flex: 1; min-width: 0;"
                   />
-                  <button class="btn btn--danger btn--sm" :disabled="pruneConfirm !== row.name || stagingBusy" @click="pruneQuarantine(row.name)">Prune</button>
+                  <button class="bs-link bs-link--thread" :disabled="pruneConfirm !== row.name || stagingBusy" @click="pruneQuarantine(row.name)">Prune</button>
                   <button class="btn btn--ghost btn--sm" @click="pruneArm = null; pruneConfirm = ''">Cancel</button>
                 </span>
                 <button v-else class="btn btn--ghost btn--sm" style="margin-left: 8px" :disabled="stagingBusy || (row.bytes ?? 0) === 0" @click="pruneArm = row.name; pruneConfirm = ''">Prune…</button>
