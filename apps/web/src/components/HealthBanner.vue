@@ -81,7 +81,7 @@ function openCleanup(nodeId: string): void {
     <p
       v-for="f in infraFindings"
       :key="f.ruleId"
-      class="banner health-banner__row"
+      class="health-banner__row"
       :class="{ 'banner--critical': f.severity === 'critical' }"
       role="alert"
     >
@@ -95,7 +95,7 @@ function openCleanup(nodeId: string): void {
     <p
       v-for="f in nodeDiskFindings"
       :key="f.ruleId"
-      class="banner health-banner__row"
+      class="health-banner__row"
       :class="{ 'banner--critical': f.severity === 'critical' }"
       role="alert"
     >
@@ -117,34 +117,51 @@ function openCleanup(nodeId: string): void {
 </template>
 
 <style scoped>
+/* IR-220: the v1.1 alert idiom — a glyph column + text stack on hairline
+   rules, no bordered box (the old .banner chrome is gone). Severity keeps
+   the banner--critical class name for the tests; it now reads as ink on the
+   title, the marker carries the thread. */
 .health-banner {
-  display: grid;
-  gap: var(--space-2);
   margin-bottom: var(--space-2);
 }
 .health-banner__row {
-  align-items: baseline;
-  flex-wrap: wrap;
-  row-gap: 6px;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-top: 1px solid var(--rule);
+  font-size: var(--fs-ui);
+  color: var(--ink);
+}
+.health-banner__row:first-child {
+  border-top: 0;
+  padding-top: 2px;
 }
 .health-banner__marker {
-  flex: none;
+  margin-top: 5px;
   font-size: 12px;
+  line-height: 1;
+  color: var(--thread);
 }
 .health-banner__body {
   display: grid;
   gap: 2px;
   min-width: 0;
-  flex: 1;
 }
 .health-banner__title {
-  font-weight: 600;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  line-height: 1.35;
+}
+.health-banner__row.banner--critical .health-banner__title {
+  color: var(--thread-ink);
 }
 .health-banner__link {
   color: inherit;
 }
 .health-banner__cta {
-  flex: none;
+  grid-column: 3;
   align-self: center;
 }
 </style>
