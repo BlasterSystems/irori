@@ -224,10 +224,10 @@ const rowCount = computed(() => rows.value.length);
   background: var(--surface-2, rgba(127, 127, 127, 0.08));
 }
 .log-row--error {
-  background: color-mix(in srgb, var(--error, #c0392b) 8%, transparent);
+  background: color-mix(in srgb, var(--error) 8%, transparent);
 }
 .log-row--warn {
-  background: color-mix(in srgb, var(--warning, #d9a300) 8%, transparent);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
 .log-row__ts {
   font-size: 11px;
