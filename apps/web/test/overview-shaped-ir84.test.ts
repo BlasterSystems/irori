@@ -74,4 +74,30 @@ describe("OverviewView shaped tier", () => {
     liveMock.llm.delete(UUID);
     w.unmount();
   });
+
+  it("renders a starting setup as a hero with the starting chip (IR-220 round-3 MAJOR)", async () => {
+    vi.stubGlobal("fetch", fetchStub);
+    const startingRow = setupInfoSchema.parse({
+      ...setupRow,
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "Qwen3.8-Flash-Next",
+      status: "starting",
+    });
+    const startingStub = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/setups") return new Response(JSON.stringify({ setups: [startingRow] }), { status: 200, headers: { "content-type": "application/json" } });
+      return fetchStub(input);
+    });
+    vi.stubGlobal("fetch", startingStub);
+    const { default: OverviewView } = await import("../src/components/OverviewView.vue");
+    liveMock.nodes.set(UUID, { id: UUID, name: "dgx1", online: true, role: "head", kind: "spark" });
+    const w = mount(OverviewView as never);
+    await new Promise((r) => setTimeout(r, 150));
+    const text = w.text();
+    expect(text).toContain("Qwen3.8-Flash-Next"); // the starting setup is a hero card
+    expect(text).toContain("starting"); // its state chip, not silent absence
+    liveMock.nodes.delete(UUID);
+    liveMock.llm.delete(UUID);
+    w.unmount();
+  });
 });

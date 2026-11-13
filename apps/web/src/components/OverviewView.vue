@@ -13,6 +13,7 @@ import { fetchAnalytics, fetchLlmHistory, fetchUpdates, setFleetClockCap, type F
 import { capOptions, CPU_CLOCK_CAP_PRESETS, GPU_CLOCK_CAP_PRESETS } from "../detail-data";
 import { downloadBytesLine, downloadEntryEta, downloadProgressPct, downloadSpeedView, fetchDownloadQueue, fetchModelsPage, formatEta, type DownloadQueueEntry } from "../models";
 import { fetchSetups } from "../serve";
+import { serverCadenceMs } from "../version";
 import { fmtTokens } from "../usage";
 import { energyCost, tokenCost } from "../cost-settings";
 import {
@@ -139,7 +140,9 @@ const heroProcesses = computed<HeroProcess[]>(() => {
   const processes: HeroProcess[] = [];
   const covered = new Set<string>();
   for (const s of setups.value) {
-    if (s.status !== "running") continue;
+    // IR-220 round-3 MAJOR: "starting" setups are heroes too — weights load
+    // for tens of seconds and the surface must show that (state chip below).
+    if (s.status !== "running" && s.status !== "starting") continue;
     covered.add(`${s.headNodeId}:${s.port}`);
     const snap = live.getLlm(s.headNodeId)?.ports?.find((p) => p.port === s.port) ?? null;
     processes.push({
@@ -393,6 +396,20 @@ function powerBarPct(watts: number | null): number {
 
 // ─── hero visibility (IRI-025): hide what has no data, never leave dead space
 
+/** IR-220: refresh-note footer — live status + cadence + fleet draw. */
+const refreshNoteText = computed(() => {
+  if (!live.connected.value) return "Offline — showing the last known state";
+  const cadence = serverCadenceMs.value === null ? null : `${Math.round(serverCadenceMs.value / 1000)} s`;
+  const parts = [cadence === null ? "Live" : `Live · ${cadence} cadence`];
+  if (power.value.fleetNow !== null) parts.push(`fleet ${fmtWatts(power.value.fleetNow)}`);
+  return parts.join(" · ");
+});
+
+/** IR-220: token tiles sanity — cached can exceed prompt on capture gaps
+ *  (cache reads without a logged prompt); the tile never shows that. */
+const cachedShown = computed(() => Math.min(tokenSum.value.cached, tokenSum.value.input));
+const cachedClamped = computed(() => tokenSum.value.cached > tokenSum.value.input);
+
 function showTtft(h: HeroData): boolean {
   return h.ttftP95Ms !== null || h.e2eP95Ms !== null;
 }
@@ -567,8 +584,14 @@ function heroStateView(p: HeroProcess): HeroStateView {
           <div v-if="showItl(p.hero)" class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
         </div>
         <!-- IR-128: sparklines hidden ONLY on small — shown on medium and
-             full (owner final call). -->
-        <LensChartVue v-if="tier !== 'small' && charts.get(p.key) !== undefined" :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
+             full (owner final call). IR-220: v1.1 legend swatches. -->
+        <template v-if="tier !== 'small' && charts.get(p.key) !== undefined">
+          <LensChartVue :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
+          <div class="bs-legend" aria-hidden="true" style="margin-top: 8px;">
+            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--thread)" stroke-width="1.5" fill="none"/></svg>decode</span>
+            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--ink-2)" stroke-width="1.5" fill="none"/></svg>prefill</span>
+          </div>
+        </template>
       </div>
     </article>
   </section>
@@ -606,12 +629,34 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
         <div style="margin-top: 14px;">
           <span class="label">fleet draw<Tip text="selected window · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average · hover a bar for its slot and energy" /></span>
-          <svg class="powerchart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true" @pointermove="onBarMove" @pointerleave="barHover = null">
-            <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" :opacity="barHover === null || barHover.index === i ? 1 : 0.45" />
-            <line x1="0" :y1="BAR_TOP" :x2="600" :y2="BAR_TOP" stroke="var(--border-strong)" stroke-width="1.25" stroke-dasharray="4 3" />
-            <line v-if="avgLineY !== null" x1="0" :y1="avgLineY" :x2="600" :y2="avgLineY" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3" />
-            <line x1="0" y1="84" x2="600" y2="84" stroke="var(--border)" />
-          </svg>
+          <!-- IR-220: v1.1 labeled-chart idiom — y column, grid, x labels, legend. -->
+          <div class="pwr">
+            <div class="pwr__ycol" aria-hidden="true">
+              <span class="pwr__grid" :style="{ top: `${(BAR_TOP / 90) * 100}%` }"></span>
+              <span class="pwr__grid" :style="{ top: `${(((BAR_TOP + BAR_BOTTOM) / 2) / 90) * 100}%` }"></span>
+              <span class="pwr__grid" :style="{ top: `${(BAR_BOTTOM / 90) * 100}%` }"></span>
+              <span class="pwr__y" :style="{ top: `${(BAR_TOP / 90) * 100}%` }">240</span>
+              <span class="pwr__y" :style="{ top: `${(((BAR_TOP + BAR_BOTTOM) / 2) / 90) * 100}%` }">120</span>
+              <span class="pwr__y" :style="{ top: `${(BAR_BOTTOM / 90) * 100}%` }">0</span>
+            </div>
+            <div class="pwr__plot">
+              <svg class="powerchart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true" @pointermove="onBarMove" @pointerleave="barHover = null">
+                <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" :opacity="barHover === null || barHover.index === i ? 1 : 0.45" />
+                <line x1="0" :y1="BAR_TOP" :x2="600" :y2="BAR_TOP" stroke="var(--ink-3)" stroke-width="1.25" stroke-dasharray="4 3" />
+                <line v-if="avgLineY !== null" x1="0" :y1="avgLineY" :x2="600" :y2="avgLineY" stroke="var(--thread)" stroke-width="1.25" stroke-dasharray="4 3" />
+                <line x1="0" y1="84" x2="600" y2="84" stroke="var(--border)" />
+              </svg>
+            </div>
+          </div>
+          <div class="pwr pwr__xrow" aria-hidden="true">
+            <span>−{{ rangeLabel }}</span>
+            <span class="pwr__now">now</span>
+          </div>
+          <div class="bs-legend" aria-hidden="true" style="margin-top: 8px;">
+            <span><svg width="9" height="9" viewBox="0 0 9 9"><rect width="9" height="9" fill="var(--ink)"/></svg>fleet draw</span>
+            <span v-if="powerBars.avgW !== null"><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 4 L14 4" stroke="var(--thread)" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/></svg>window avg {{ Math.round(powerBars.avgW) }} W</span>
+            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 4 L14 4" stroke="var(--ink-3)" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/></svg>240 W per-node envelope</span>
+          </div>
           <div v-if="barTip !== null" class="charttip" :style="{ left: `${barTip.x}px`, top: `${barTip.y}px` }" aria-hidden="true">
             <div class="charttip__time">{{ barTip.slot }}</div>
             <div class="charttip__row">
@@ -647,7 +692,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
         <div class="statgrid" style="margin-top: 8px;">
           <div class="stat"><span class="stat__label">Input</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.input) }}</span></div>
-          <div class="stat"><span class="stat__label">Cached</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.cached) }}</span></div>
+          <div class="stat"><span class="stat__label">Cached</span><span class="stat__value stat__value--sm">{{ fmtTokens(cachedShown) }}</span><span v-if="cachedClamped" class="stat__sub">capture gap — capped at input</span></div>
           <div class="stat"><span class="stat__label">Output</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.generated) }}</span></div>
           <div class="stat"><span class="stat__label">Cost<Tip v-if="tokenCost !== null" :text="tokenCostTip" /></span><span class="stat__value stat__value--sm">{{ tokenCostText ?? "—" }}</span></div>
         </div>
@@ -727,6 +772,12 @@ function heroStateView(p: HeroProcess): HeroStateView {
     </div>
   </section>
 
+  <!-- IR-220: v1.1 refresh-note — live status, cadence, fleet draw. -->
+  <footer class="refresh-note" aria-label="Refresh status">
+    <span class="dot dot--run" aria-hidden="true"></span>
+    <span>{{ refreshNoteText }}</span>
+  </footer>
+
   <NodeModal v-if="addOpen" mode="create" @close="addOpen = false" />
 </template>
 
@@ -741,10 +792,13 @@ function heroStateView(p: HeroProcess): HeroStateView {
 .hero-grid--single {
   grid-template-columns: 1fr;
 }
-/* Hero heads: long model names truncate, the node label never breaks. */
+/* Hero heads: long model names truncate, the node label never breaks.
+   v1.1 panel head: title 17/600 + mono meta (IR-220). */
 .hero__title {
   min-width: 0;
   flex: 0 1 auto;
+  font-size: var(--fs-stat);
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -752,8 +806,8 @@ function heroStateView(p: HeroProcess): HeroStateView {
 /* One mono meta line carries backend :port · node · workers (IR-127). */
 .hero__meta {
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--faint);
+  font-size: var(--fs-data-sm);
+  color: var(--ink-3);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -803,6 +857,18 @@ html[data-tier="small"] .tempitem__name { flex: none; }
 .section-gap { margin: 20px 0 12px; }
 .h2-gap { margin: 20px 0 10px; }
 .powerchart { width: 100%; height: 96px; display: block; margin-top: 6px; }
+/* IR-220: labeled power chart (v1.1 idiom) — 44px y column, hairline grid,
+   mono uppercase x labels. Percent tops map the 600×90 viewBox onto the box. */
+.pwr { display: flex; }
+.pwr__plot { position: relative; flex: 1; min-width: 0; }
+.pwr__ycol { position: relative; flex: none; width: 44px; }
+.pwr__grid { position: absolute; left: 0; right: 0; border-top: 1px solid var(--rule); }
+.pwr__y { position: absolute; right: 8px; transform: translateY(-50%);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1; color: var(--ink-3); }
+.pwr__xrow { position: relative; height: 14px; margin-left: 44px; margin-top: 4px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.pwr__xrow > span { position: absolute; left: 0; top: 0; }
+.pwr__xrow > .pwr__now { left: auto; right: 0; }
 .feedlog { border: 0; border-radius: 0 0 var(--radius) var(--radius); min-height: 120px; max-height: 220px; }
 /* ── IR-128: width tiers. The tier store (src/tiers.ts) mirrors small ≤900 /
    medium 901–1440 / full >1440 onto <html data-tier>; 900 matches the old
