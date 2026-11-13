@@ -401,4 +401,64 @@ the three main Irori screens. Kit:
     screens + shared components; one filled button per visible surface.
 - Not in this round (follow-ups if approved): nodes/node-head/analytics/
   benchmarks/cleanup/wizard screens, the full overview tier system, dark-
-  first log review, and promoting `irori-v11.css` toward `apps/web` tokens.
+  first log review, and promoting `irori.css` toward `apps/web` tokens.
+
+## Round 8 revision — deployed skin kept, decision mockup (2026-11-13)
+
+Status: **revised after owner review + re-verified 2026-11-13** —
+`v14-round8.html` + `irori-v14.css` (delta over the deployed v1.1 skin,
+imported verbatim). Epic IR-224 (stories IR-225…IR-232, backlog); research
+doc `tasks/research-ds-v14-ui-feedback-round-8.md` (gate decisions +
+revision recorded there); pre-gate adversarial review: 24 findings.
+
+Owner corrections (2026-11-13): **keep the deployed colours** (light/dark
+v1.1 palette — no mist/stone/dusk, no theme menu; the v1.4 four-step scale
+is declined) · power + token stats keep their **current lower positions**
+(power in its hero-grid row; token stats takes the NAS card's token slot) ·
+range + Add node live **in the menu** (sidebar tools; hamburger ≤900;
+collapsed rail: Add node icon + JS-positioned range popover) · the topbar
+gains an **inference-server performance chip** on every page (live decode +
+watts, compressed ≤900) · everything else identical to the deployed app.
+
+- Verified (headless Chromium): deployed skin renders identically
+  (auto-dark `#0e1217` via the imported block), 2 themes × 11 widths
+  (320→1568) zero overflow (fixed: perf-chip compression), 0 console
+  errors; collapse 232→68px with count bubbles + range popover escaping
+  the rail's overflow clip; drawer panel never scrolls, body scrolls at
+  the 88vh cap, typed "DGX-1" arms the destructive CTA, Escape closes.
+- Defects found and fixed during review: missing SVG series rules (charts
+  rendered black), popover clipped by sidebar `overflow-x: hidden`,
+  series palette now follows the deployed LensChart idiom (decode thread,
+  prefill ink-2, bars filled ink / current hour thread).
+- Token stats card content unchanged from the first pass (owner OK): 8
+  tiles, DS-calm mono deltas, default 24h, follows the menu range.
+- Effect on stories: IR-227 (S3 tokens/theme runtime) is obsolete as
+  written; IR-226 (S2 ADR-0019) likely unnecessary (no token migration);
+  IR-228 (S4) gains the perf chip and moves range/Add node into the menu;
+  IR-230/231 positions per the deployed layout. Revision comments posted
+  on the epic and affected stories.
+
+Second owner pass (2026-11-13): three corrections applied to
+`v14-round8.html` and re-verified —
+- Perf chip is NOT on every page: it appears once the user navigates away
+  from the Overview (its serving heroes already carry decode + watts
+  there); hidden on the Overview itself. Mockup: hidden by default, new
+  "Away page · chip" mock-bar scene previews the chip state. (IR-228)
+- Power card is pinned to the 24 h window — by default AND when 30 m is
+  selected it does not follow the menu range: energy, cost, hourly chart
+  and window avg stay on 24 h; Fleet now stays minute-fresh. (IR-230)
+- Token stats card moved to directly BELOW the NAS card (owner: "below or
+  around the NAS card"); NAS keeps models/store; production keeps the
+  deployed Power | NAS hero-grid pairing, token stats as its own row
+  after it. (IR-231)
+
+Follow-up (same day): after the owner flagged the missing sections, the
+mockup was rebuilt to render the FULL deployed Overview — health banner
+(IR-203/204) with the cleanup CTA wired to the drawer scene, Fleet
+temperatures (IR-129), Nodes cards, Fleet clock caps and Updates
+(IRI-081) are untouched deployed surfaces — and the hero tiles were
+aligned to the deployed anatomy (Decode/Prefill/Queue/KV cache/TTFT/ITL).
+Re-verified: section order matches OverviewView.vue, 12 widths 320→1568
+zero overflow (added a ≤480 barrow wrap override), cleanup CTA opens the
+drawer scene, light + dark clean, 0 console errors. Implementation plan:
+`tasks/IR-224-round8-implementation-plan.md`.

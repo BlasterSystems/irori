@@ -1,0 +1,570 @@
+<!doctype html>
+<!-- Irori · round-8 decision mockup (revised after owner review 2026-11-13).
+     BASE = the deployed v1.1 skin verbatim (irori-v11.css imported; light + dark,
+     deployed theme toggle). Renders the FULL deployed Overview — the health
+     banner, Fleet temperatures, Nodes cards, Fleet clock caps and Updates are
+     untouched deployed surfaces (owner: focused change, nothing removed) —
+     plus the round-8 pieces:
+       1 collapsible sidebar (chevron; 68px icon rail; <=900 hamburger unchanged)
+       2 range + Add node live IN THE MENU (sidebar tools; hamburger <=900;
+         collapsed rail: Add node icon + range popover)
+       3 topbar shows inference-server performance stats once the user leaves
+         the Overview (its serving heroes carry the same data) — hidden on the
+         Overview itself; the "Away page" mock-bar scene previews the chip
+       4 cleanup drawer restructured: fixed head, body scroll, sticky typed confirm
+       5 token stats card — own card directly BELOW the NAS card (owner:
+         "below or around the NAS card"; NAS keeps models/store)
+       6 power card pinned to the 24 h window — by default and when 30 m is
+         selected (does not follow the menu range); Fleet now minute-fresh
+     Stories: IR-225 (S1), epic IR-224. Serve mockups/ and open v14-round8.html. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Irori · round-8 decision mockup (revised)</title>
+<link rel="stylesheet" href="irori-v14.css">
+<script>
+/* Deployed theme boot: stored pick (dark/light), else prefers-color-scheme. */
+(function(){var v=null;try{v=localStorage.getItem("irori-theme")}catch(e){}
+if(v)document.documentElement.dataset.theme=v;
+else if(matchMedia("(prefers-color-scheme: dark)").matches)document.documentElement.dataset.theme="dark";})();
+</script>
+</head>
+<body class="has-mockbar">
+
+<div class="shell" id="app">
+  <aside class="bs-sidebar">
+    <div class="bs-sidebar__brand">
+      <a class="bs-lockup" href="#">
+        <span class="bs-lockup__glyph" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+        <span class="bs-lockup__text"><span class="bs-lockup__name">Irori</span><span class="bs-lockup__endorse">A BlasterSystems product</span></span>
+      </a>
+      <button class="bs-sidebar__collapse" id="collapseBtn" aria-label="Collapse menu" aria-expanded="true">
+        <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </div>
+    <nav class="bs-nav" aria-label="Primary">
+      <a class="bs-nav-item" href="#" aria-current="page"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg><span class="bs-nav-item__label">Overview</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5-8 4.5-8-4.5L12 3z"/><path d="M4 12l8 4.5 8-4.5"/><path d="M4 16.5L12 21l8-4.5"/></svg><span class="bs-nav-item__label">Models</span><span class="bs-nav-item__count">148</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M10 8.5l6 3.5-6 3.5v-7z"/></svg><span class="bs-nav-item__label">Serve</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/></svg><span class="bs-nav-item__label">Analytics</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V10"/><path d="M10 20V4"/><path d="M15 20v-7"/><path d="M20 20V7"/></svg><span class="bs-nav-item__label">Usage</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 0-3 6.2L21 19l-.9-3.4A7.9 7.9 0 0 0 20 12z"/></svg><span class="bs-nav-item__label">Chats</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 14a7 7 0 0 1 14 0"/><path d="M12 14l3.5-3.5"/><path d="M3.5 14h3M17.5 14h3"/></svg><span class="bs-nav-item__label">Benchmarks</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6l7-3z"/><path d="M9.5 12l2 2 3.5-4"/></svg><span class="bs-nav-item__label">Audit</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6V3z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg><span class="bs-nav-item__label">Logs</span></a>
+      <a class="bs-nav-item" href="#"><svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.3 3.8 5.2 3.8 8.5s-1.3 6.2-3.8 8.5c-2.5-2.3-3.8-5.2-3.8-8.5s1.3-6.2 3.8-8.5z"/></svg><span class="bs-nav-item__label">Community</span></a>
+    </nav>
+    <!-- 2 · menu tools: range + Add node (deployed pagehead controls move here) -->
+    <div class="bs-sidebar__tools">
+      <span class="tools-label">Range</span>
+      <div class="rangeseg" role="group" aria-label="History range">
+        <button aria-pressed="false">30m</button>
+        <button aria-pressed="false">1h</button>
+        <button aria-pressed="false">4h</button>
+        <button aria-pressed="true" class="is-active">24h</button>
+        <button aria-pressed="false">7d</button>
+        <button aria-pressed="false">30d</button>
+      </div>
+      <div class="rangeseg-pop" id="rangePop">
+        <button class="iconbtn" id="rangePopBtn" aria-label="History range" aria-expanded="false">
+          <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/></svg>
+        </button>
+        <div class="rangeseg" role="group" aria-label="History range">
+          <button aria-pressed="false">30m</button>
+          <button aria-pressed="false">1h</button>
+          <button aria-pressed="false">4h</button>
+          <button aria-pressed="true" class="is-active">24h</button>
+          <button aria-pressed="false">7d</button>
+          <button aria-pressed="false">30d</button>
+        </div>
+      </div>
+      <button class="bs-btn bs-btn--secondary bs-btn--sm" title="Register a node and install the agent">
+        <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="bs-btn__label">Add node</span>
+      </button>
+    </div>
+    <div class="bs-sidebar__foot">
+      <div class="bs-sidebar__status">
+        <span class="has-glyph row" style="gap:7px"><span class="pulse" aria-hidden="true"></span> live · 4 s</span>
+        <span>Irori 0.7.0 · dev-0.7.0-15</span>
+        <span>187 W of 720 W</span>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="bs-topbar">
+      <div class="bs-topbar__group">
+        <button class="iconbtn bs-topbar__menubtn" id="menuBtn" aria-label="Menu" aria-expanded="false">
+          <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <a class="bs-topbar__brand bs-lockup" href="#">
+          <span class="bs-lockup__glyph" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
+          <span class="bs-lockup__name">Irori</span>
+        </a>
+      </div>
+      <div class="bs-topbar__group">
+        <!-- 3 · inference-server performance stats: shown once the user navigates
+             away from the Overview (heroes carry it there) · "Away page" scene -->
+        <a class="bs-perf" href="#" title="Inference server · live — open Serve">
+          <span class="pulse" aria-hidden="true"></span>
+          <span class="bs-perf__model">GLM-5.3-Flash-EXL3</span>
+          <span class="bs-perf__sep bs-perf__sep--model">·</span> 38 tok/s
+          <span class="bs-perf__sep">·</span> 187 W
+        </a>
+        <button class="bs-btn bs-btn--secondary bs-btn--sm">Transfers <span class="mono">· 2</span></button>
+        <button class="bs-btn bs-btn--secondary bs-btn--sm">Telemetry</button>
+        <button class="iconbtn" title="Hub settings" aria-label="Hub settings">
+          <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2l.4 2.6h4l.4-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5A7 7 0 0 0 19 12z"/></svg>
+        </button>
+        <button class="bs-theme" id="themeBtn" aria-label="Toggle dark mode"><span aria-hidden="true"></span></button>
+      </div>
+    </header>
+    <nav class="bs-topbar__menu" id="mobileMenu" aria-label="Primary menu">
+      <a class="bs-nav-item" href="#" aria-current="page"><span class="bs-nav-item__label">Overview</span><span class="bs-nav-item__count">4</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Models</span><span class="bs-nav-item__count">148</span></a>
+      <a class="bs-nav-item" href="#"><span class="bs-nav-item__label">Serve</span><span class="bs-nav-item__count">4</span></a>
+      <div class="bs-sidebar__tools" style="padding-top:8px">
+        <span class="tools-label">Range</span>
+        <div class="rangeseg" role="group" aria-label="History range">
+          <button aria-pressed="false">30m</button><button aria-pressed="false">1h</button><button aria-pressed="false">4h</button>
+          <button aria-pressed="true" class="is-active">24h</button><button aria-pressed="false">7d</button><button aria-pressed="false">30d</button>
+        </div>
+        <button class="bs-btn bs-btn--secondary bs-btn--sm"><span class="bs-btn__label">Add node</span></button>
+      </div>
+      <div class="bs-menu-foot">deploy dev-0.7.0-15 · live · 186 W</div>
+    </nav>
+
+    <main class="content" id="content">
+      <div class="pagehead">
+        <div>
+          <h1 class="page-title">Overview</h1>
+          <p class="page-sub">4 nodes · 4 online · 2 serving · hottest 62°C DGX-1 · <span class="mono">range and Add node live in the menu</span></p>
+        </div>
+      </div>
+
+      <!-- deployed IR-203/204 health banner (unchanged): per-node disk-pressure
+           rows carry the clean-up-disk CTA — wired to the drawer scene -->
+      <div class="bs-alert bs-alert--action" role="status">
+        <span class="bs-glyph bs-glyph--warn" style="color: var(--thread-ink)" aria-hidden="true"></span>
+        <span class="bs-alert__text">
+          <span class="bs-alert__title">Node disk pressure — DGX-1</span>
+          <span class="bs-alert__body">Disk usage warn: 88.1 ≥ 80</span>
+        </span>
+        <button class="bs-btn bs-btn--secondary bs-btn--sm" id="cleanupCta">Clean up disk — est. 412 GB</button>
+      </div>
+
+      <!-- deployed Fleet temperatures (IR-129, unchanged): spark nodes only,
+           hottest first; the NAS is excluded (no thermal telemetry) -->
+      <section class="bs-panel section-gap" aria-label="Fleet temperatures">
+        <div class="bs-panel__head">
+          <h2 class="bs-panel__title">Fleet temperatures</h2>
+          <span class="bs-panel__aside">hottest first</span>
+        </div>
+        <div class="temps">
+          <span class="tempitem"><span class="tempitem__name">DGX-1</span><span class="tempitem__v">62°C <em>gpu</em></span><span class="tempitem__v">58°C <em>cpu</em></span></span>
+          <span class="tempitem"><span class="tempitem__name">DGX-2</span><span class="tempitem__v">59°C <em>gpu</em></span><span class="tempitem__v">55°C <em>cpu</em></span></span>
+          <span class="tempitem"><span class="tempitem__name">DGX-3</span><span class="tempitem__v">48°C <em>gpu</em></span><span class="tempitem__v">44°C <em>cpu</em></span></span>
+        </div>
+      </section>
+
+      <!-- serving heroes (deployed position: first) -->
+      <div class="hero-grid">
+        <section class="bs-panel" aria-label="Serving setup GLM">
+          <div class="bs-panel__head">
+            <h2 class="bs-panel__title">GLM-5.3-Flash-EXL3</h2>
+            <span class="bs-panel__aside">tensorfold :8081 · DGX-1 + DGX-2</span>
+          </div>
+          <div class="statgrid">
+            <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">38 <span class="stat__sub">tok/s</span></span><span class="stat__sub">peak 63</span></div>
+            <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">412 <span class="stat__sub">tok/s</span></span><span class="stat__sub">cache hit 96%</span></div>
+            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">2</span><span class="stat__sub">running</span></div>
+            <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">55%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:55%"></div></div></div>
+            <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">84 <span class="stat__sub">ms</span></span></div>
+            <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">18.4 <span class="stat__sub">ms</span></span></div>
+          </div>
+          <svg class="chart" viewBox="0 0 600 64" preserveAspectRatio="none" role="img" aria-label="Decode throughput, last 24 hours" style="margin-top:12px">
+            <polyline class="ser ser--thread" points="0,44 40,42 80,45 120,38 160,40 200,34 240,36 280,30 320,33 360,28 400,31 440,26 480,29 520,24 560,27 600,25"/>
+            <polyline class="ser ser--muted" points="0,52 40,51 80,53 120,49 160,50 200,47 240,48 280,45 320,46 360,43 400,45 440,41 480,43 520,40 560,42 600,40"/>
+          </svg>
+          <div class="bs-legend" style="margin-top:8px"><span><span class="sw" style="background:var(--thread)"></span> decode</span><span><span class="sw" style="background:var(--ink-2)"></span> prefill</span></div>
+        </section>
+        <section class="bs-panel" aria-label="Serving setup Qwen">
+          <div class="bs-panel__head">
+            <h2 class="bs-panel__title">Qwen3.8-Flash-Next</h2>
+            <span class="bs-panel__aside">:8082 · DGX-3</span>
+          </div>
+          <div class="statgrid">
+            <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">21 <span class="stat__sub">tok/s</span></span><span class="stat__sub">peak 121</span></div>
+            <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">238 <span class="stat__sub">tok/s</span></span><span class="stat__sub">cache hit 88%</span></div>
+            <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">0</span><span class="stat__sub">waiting</span></div>
+            <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">34%</span><div class="bar" style="margin-top:6px"><div class="bar__fill" style="width:34%"></div></div></div>
+            <div class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">112 <span class="stat__sub">ms</span></span></div>
+            <div class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">22.1 <span class="stat__sub">ms</span></span></div>
+          </div>
+          <svg class="chart" viewBox="0 0 600 64" preserveAspectRatio="none" role="img" aria-label="Decode throughput, last 24 hours" style="margin-top:12px">
+            <polyline class="ser ser--thread" points="0,40 40,42 80,39 120,43 160,41 200,44 240,42 280,45 320,43 360,46 400,44 440,47 480,45 520,48 560,46 600,47"/>
+            <polyline class="ser ser--muted" points="0,50 40,49 80,51 120,48 160,50 200,47 240,49 280,46 320,48 360,45 400,47 440,44 480,46 520,43 560,45 600,44"/>
+          </svg>
+          <div class="bs-legend" style="margin-top:8px"><span><span class="sw" style="background:var(--thread)"></span> decode</span><span><span class="sw" style="background:var(--ink-2)"></span> prefill</span></div>
+        </section>
+      </div>
+
+      <!-- deployed Nodes section (unchanged): one card per spark node — the
+           NAS keeps its own card below; role chip + kind chip + agent version -->
+      <h2 class="h2-gap">Nodes</h2>
+      <section class="cols cols-3" aria-label="Spark nodes">
+        <section class="bs-panel" aria-label="Node DGX-1">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0;gap:8px">
+              <h2 class="bs-panel__title">DGX-1</h2>
+              <span class="bs-chip">head</span>
+              <span class="bs-chip bs-chip--stage">spark</span>
+            </div>
+            <span class="bs-panel__meta">Agent 0.7.0</span>
+          </div>
+          <p class="stat__sub" style="margin:0 0 10px">:8081 TensorFold</p>
+          <div class="barrow"><span>GPU0</span><div class="bar"></div><span class="val">NVIDIA GB10 · 92% · 48 W · 62°C</span></div>
+          <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:24%"></div></div><span class="val">24% · 58°C</span></div>
+          <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" style="width:96%"></div></div><span class="val">116.4 / 121.6 GB</span></div>
+          <div class="barrow"><span>DISK</span><div class="bar"><div class="bar__fill" style="width:88%"></div></div><span class="val hot">866 GB / 983 GB</span></div>
+        </section>
+        <section class="bs-panel" aria-label="Node DGX-2">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0;gap:8px">
+              <h2 class="bs-panel__title">DGX-2</h2>
+              <span class="bs-chip">worker</span>
+              <span class="bs-chip bs-chip--stage">spark</span>
+            </div>
+            <span class="bs-panel__meta">Agent 0.7.0</span>
+          </div>
+          <div class="barrow"><span>GPU0</span><div class="bar"></div><span class="val">NVIDIA GB10 · 93% · 41 W · 59°C</span></div>
+          <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:18%"></div></div><span class="val">18% · 55°C</span></div>
+          <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" style="width:85%"></div></div><span class="val">103.8 / 121.6 GB</span></div>
+          <div class="barrow"><span>DISK</span><div class="bar"><div class="bar__fill" style="width:52%"></div></div><span class="val">512 GB / 983 GB</span></div>
+        </section>
+        <section class="bs-panel" aria-label="Node DGX-3">
+          <div class="bs-panel__head">
+            <div class="row" style="min-width:0;gap:8px">
+              <h2 class="bs-panel__title">DGX-3</h2>
+              <span class="bs-chip">worker</span>
+              <span class="bs-chip bs-chip--stage">spark</span>
+            </div>
+            <span class="bs-panel__meta">Agent 0.7.0</span>
+          </div>
+          <div class="barrow"><span>GPU0</span><div class="bar"></div><span class="val">NVIDIA GB10 · 12% · 9 W · 48°C</span></div>
+          <div class="barrow"><span>CPU</span><div class="bar"><div class="bar__fill" style="width:9%"></div></div><span class="val">9% · 44°C</span></div>
+          <div class="barrow"><span>MEM</span><div class="bar"><div class="bar__fill" style="width:85%"></div></div><span class="val">103.3 / 121.6 GB</span></div>
+          <div class="barrow"><span>DISK</span><div class="bar"><div class="bar__fill" style="width:75%"></div></div><span class="val">739 GB / 983 GB</span></div>
+        </section>
+      </section>
+
+      <!-- 6 · power: pinned to the 24 h window (default AND 30 m selected —
+           does not follow the menu range); Fleet now minute-fresh.
+           Production keeps the deployed Power | NAS hero-grid pairing here;
+           the token stats card is its own row directly below the NAS card -->
+      <div class="hero-grid section-gap">
+        <section class="bs-panel" aria-label="Fleet power">
+          <div class="bs-panel__head">
+            <h2 class="bs-panel__title">Power</h2>
+            <span class="bs-chip">estimated</span>
+          </div>
+          <div class="statgrid statgrid--3">
+            <div class="stat"><span class="stat__label">Fleet now</span><span class="stat__value">187 W</span><span class="stat__sub">live · minute buckets, not the range</span></div>
+            <div class="stat"><span class="stat__label">Energy · 24 h</span><span class="stat__value">3.9 kWh</span><span class="stat__sub">hour buckets · 24 h window, not the range</span></div>
+            <div class="stat"><span class="stat__label">Cost · 24 h</span><span class="stat__value">€1.16</span><span class="stat__sub">at €0.30 / kWh</span></div>
+          </div>
+          <div class="barrow" style="margin-top:12px"><span>DGX-1</span><div class="bar"><div class="bar__fill" style="width:38%"></div></div><span class="val">92 W</span></div>
+          <div class="barrow"><span>DGX-2</span><div class="bar"><div class="bar__fill" style="width:26%"></div></div><span class="val">63 W</span></div>
+          <div class="barrow"><span>DGX-3</span><div class="bar"><div class="bar__fill" style="width:9%"></div></div><span class="val">22 W</span></div>
+          <div class="bs-chart" style="margin-top:12px">
+            <div class="bs-chart__plot">
+              <div class="bs-chart__grid" style="top:0%"><span class="bs-chart__y">240</span></div>
+              <div class="bs-chart__grid" style="top:33.3%"><span class="bs-chart__y">160</span></div>
+              <div class="bs-chart__grid" style="top:66.6%"><span class="bs-chart__y">80</span></div>
+              <div class="bs-chart__grid" style="top:100%"><span class="bs-chart__y">0</span></div>
+              <svg viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Fleet draw, last 24 hours, hourly buckets">
+                <line class="gridline" x1="0" y1="40" x2="600" y2="40"/>
+                <line class="gridline" x1="0" y1="80" x2="600" y2="80"/>
+                <rect class="pwr-bar" x="6"   y="52" width="34" height="68" opacity=".25"/>
+                <rect class="pwr-bar" x="55"  y="46" width="34" height="74" opacity=".25"/>
+                <rect class="pwr-bar" x="104" y="30" width="34" height="90" opacity=".25"/>
+                <rect class="pwr-bar" x="153" y="22" width="34" height="98" opacity=".25"/>
+                <rect class="pwr-bar" x="202" y="34" width="34" height="86" opacity=".25"/>
+                <rect class="pwr-bar" x="251" y="44" width="34" height="76" opacity=".25"/>
+                <rect class="pwr-bar" x="300" y="26" width="34" height="94" opacity=".25"/>
+                <rect class="pwr-bar" x="349" y="18" width="34" height="102" opacity=".25"/>
+                <rect class="pwr-bar" x="398" y="38" width="34" height="82" opacity=".25"/>
+                <rect class="pwr-bar" x="447" y="48" width="34" height="72" opacity=".25"/>
+                <rect class="pwr-bar" x="496" y="42" width="34" height="78" opacity=".25"/>
+                <rect class="pwr-bar pwr-bar--now" x="545" y="30" width="34" height="90" opacity=".85"/>
+              </svg>
+            </div>
+            <div class="bs-chart__x"><span style="left:0">−24 h</span><span style="left:22%">−18</span><span style="left:44%">−12</span><span style="left:66%">−6</span><span style="right:0">now</span></div>
+            <div class="bs-legend"><span><span class="sw" style="background:var(--ink)"></span> hourly draw</span><span><span class="sw" style="background:var(--thread)"></span> current hour</span><span>window avg 118 W · envelope 240 W</span></div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- NAS store card (deployed pairing: Power | NAS) — its token block
+           moved out; the Token stats card sits directly below this row -->
+      <div class="hero-grid section-gap">
+        <section class="bs-panel" aria-label="NAS store">
+          <div class="bs-panel__head">
+            <h2 class="bs-panel__title">NAS</h2>
+            <span class="bs-chip">NAS store</span>
+          </div>
+          <div class="statgrid statgrid--3">
+            <div class="stat"><span class="stat__label">Models</span><span class="stat__value">148</span></div>
+            <div class="stat"><span class="stat__label">Store</span><span class="stat__value">14.2 / 18.1 TB</span></div>
+            <div class="stat"><span class="stat__label">Free</span><span class="stat__value">3.9 TB</span></div>
+          </div>
+          <p class="bs-note" style="margin-top:10px">Token stats card sits directly below — one token surface per page.</p>
+        </section>
+      </div>
+
+      <!-- 5 · token stats card: own card, directly below the NAS card -->
+      <div class="hero-grid section-gap">
+        <section class="bs-panel" aria-label="Token stats">
+          <div class="bs-panel__head">
+            <h2 class="bs-panel__title">Token stats</h2>
+            <span class="bs-panel__aside">■ recorded · token ledger · last 24 h</span>
+          </div>
+          <div class="statgrid statgrid--4">
+            <div class="stat"><span class="stat__label">Total tokens</span><span class="stat__value">58.4M</span><span class="stat__sub">generated plus prompt</span><span class="stat__delta"><span class="up"></span>12% vs prev. 24 h</span></div>
+            <div class="stat"><span class="stat__label">Generated</span><span class="stat__value">2.1M</span><span class="stat__sub">3.6% of all tokens</span><span class="stat__delta"><span class="up"></span>18% vs prev. 24 h</span></div>
+            <div class="stat"><span class="stat__label">Prompt (input)</span><span class="stat__value">56.3M</span><span class="stat__sub">51.9M cached · 4.4M computed</span><span class="stat__delta"><span class="up"></span>12% vs prev. 24 h</span></div>
+            <div class="stat"><span class="stat__label">Cache hit</span><span class="stat__value">92%</span><span class="stat__sub">the prefix cache saved 51.9M prefill tokens</span><span class="stat__delta"><span class="up"></span>1.2 pts vs prev. 24 h</span></div>
+            <div class="stat"><span class="stat__label">Output : input</span><span class="stat__value">1 : 27</span><span class="stat__sub">27 prompt tokens read per token generated</span></div>
+            <div class="stat"><span class="stat__label">Cost · 24 h</span><span class="stat__value">€1.84</span><span class="stat__sub">per-model pricing, server-side</span></div>
+            <div class="stat"><span class="stat__label">Average per hour</span><span class="stat__value">2.4M</span><span class="stat__sub">over 24 hours tracked</span></div>
+            <div class="stat"><span class="stat__label">Busiest hour</span><span class="stat__value">6.1M</span><span class="stat__sub">today, 09:00–10:00</span></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- deployed Fleet clock caps (unchanged): one cap applied to every
+           enabled spark node; a cap is a ceiling, not an operating point -->
+      <section class="bs-panel section-gap" aria-label="Fleet clock caps">
+        <div class="bs-panel__head">
+          <h2 class="bs-panel__title">Fleet clock caps</h2>
+          <span class="bs-panel__aside">3 spark nodes</span>
+        </div>
+        <div class="row row--wrap" style="gap:10px">
+          <select class="select" style="max-width:165px" aria-label="GPU SM clock cap"><option>GPU: leave alone</option></select>
+          <select class="select" style="max-width:165px" aria-label="CPU clock cap"><option>CPU: leave alone</option></select>
+          <label class="stat__sub" style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox"> keep after reboot</label>
+          <button class="bs-btn bs-btn--secondary bs-btn--sm">Apply to fleet</button>
+          <button class="bs-btn bs-btn--secondary bs-btn--sm">Clear fleet</button>
+        </div>
+      </section>
+
+      <!-- deployed Updates (IRI-081, unchanged): fleet update posture vs
+           upstream baseline, informational only -->
+      <section class="bs-panel section-gap" aria-label="Updates">
+        <div class="bs-panel__head">
+          <h2 class="bs-panel__title">Updates</h2>
+          <span class="bs-chip bs-chip--stage">baseline fresh</span>
+        </div>
+        <table class="table">
+          <thead><tr><th>Node</th><th>Posture</th><th>DGX OS / driver</th><th>Reboot</th></tr></thead>
+          <tbody>
+            <tr><td>DGX-1</td><td><span class="bs-chip bs-chip--stage">current</span></td><td class="mono">7.2.4 / 580.67</td><td>no</td></tr>
+            <tr><td>DGX-2</td><td><span class="bs-chip bs-chip--stage">current</span></td><td class="mono">7.2.4 / 580.67</td><td>no</td></tr>
+            <tr><td>DGX-3</td><td><span class="bs-chip bs-chip--stage">current</span></td><td class="mono">7.2.4 / 580.67</td><td>no</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- deployed telemetry feed (unchanged) -->
+      <section class="bs-panel section-gap" aria-label="Telemetry">
+        <div class="bs-panel__head"><h2 class="bs-panel__title">Telemetry</h2><span class="bs-chip">streaming</span></div>
+        <div class="log" style="min-height:96px;max-height:140px;margin-top:4px">
+          <div><span class="dim">21:58:41</span> setup a10d0499 · engine ready · weights staged 41 s</div>
+          <div><span class="dim">21:59:02</span> <span class="ok">j-218</span> push GLM → DGX-3 · 37% · 184 MB/s</div>
+          <div><span class="dim">21:59:20</span> probe :8081 ok · decode 38 tok/s · kv 55%</div>
+          <div><span class="dim">21:59:44</span> <span class="dim">j-217</span> queue download · 12% · 96 MB/s</div>
+        </div>
+      </section>
+
+      <footer class="refresh-note" aria-label="Refresh status">
+        <span class="pulse" aria-hidden="true"></span>
+        <span>live · 4 s cadence · one persisted range (menu) drives the serving heroes · power card pinned to a 24 h window (30 m included) · fleet now is minute-fresh</span>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<!-- 4 · cleanup drawer, restructured: fixed head, body scroll, sticky typed-confirm -->
+<div class="drawer-scrim" id="drawerScrim">
+  <aside class="hy-drawer" role="dialog" aria-modal="true" aria-label="Disk hygiene — DGX-1">
+    <div class="hy-drawer__head">
+      <div style="min-width:0">
+        <div class="hy-drawer__title">Disk hygiene — DGX-1</div>
+        <div class="bs-note mono">audited 2 h ago · est. reclaim 412 GB · nothing deletes without the typed confirm</div>
+      </div>
+      <button class="iconbtn" id="drawerClose" aria-label="Close disk hygiene">
+        <svg class="bs-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="hy-drawer__body">
+      <label class="row" style="gap:10px">
+        <input type="checkbox" checked>
+        <span class="bs-sub">Weekly safe pass and log rotation <span class="faint mono">· runs hygiene-audit first, deletes only the safe set</span></span>
+      </label>
+      <div>
+        <div class="bs-label" style="margin-bottom:4px">Reclaim categories</div>
+        <div class="hy-cat"><input type="checkbox" checked id="c1"><label class="hy-cat__name" for="c1">HF cache — incomplete blobs</label><span class="hy-cat__bytes">128 GB</span></div>
+        <div class="hy-cat"><input type="checkbox" checked id="c2"><label class="hy-cat__name" for="c2">modelctl staging — settled transfers</label><span class="hy-cat__bytes">214 GB</span></div>
+        <div class="hy-cat"><input type="checkbox" id="c3"><label class="hy-cat__name" for="c3">Docker build cache</label><span class="hy-cat__bytes">18 GB</span></div>
+        <div class="hy-cat"><input type="checkbox" id="c4"><label class="hy-cat__name" for="c4">Journal logs older than 30 d</label><span class="hy-cat__bytes">6 GB</span></div>
+      </div>
+      <div>
+        <div class="hy-acc">
+          <button class="hy-acc__btn" aria-expanded="false" data-acc>
+            <span>Staging trees — arm per tree <span class="faint mono">· 2 trees · 214 GB</span></span>
+            <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <div class="hy-acc__panel">
+            <div class="kv"><dt>/mnt/llms/.staging/j-218-glm-push</dt><dd>184 GB · 37% done — arming blocked while the job runs</dd></div>
+            <div class="kv"><dt>/mnt/llms/.staging/j-217-download</dt><dd>30 GB · settled — arm with typed name</dd></div>
+          </div>
+        </div>
+        <div class="hy-acc">
+          <button class="hy-acc__btn" aria-expanded="false" data-acc>
+            <span>Quarantine — arm per batch <span class="faint mono">· 46 GB</span></span>
+            <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <div class="hy-acc__panel">
+            <div class="kv"><dt>batch 2026-11-12-republish</dt><dd>46 GB · typed confirm "prune"</dd></div>
+          </div>
+        </div>
+        <div class="hy-acc">
+          <button class="hy-acc__btn" aria-expanded="false" data-acc>
+            <span>Run output <span class="faint mono">· last audit</span></span>
+            <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+          <div class="hy-acc__panel">
+            <div class="log" style="max-height:120px">hygiene-audit ok · 5 categories · 412 GB reclaimable<br><span class="dim">dry-run deletes: 0 files touched</span><br><span class="ok">safe set pre-checked</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="hy-drawer__foot">
+      <div class="hy-confirm">
+        <span class="hint">type DGX-1 to arm 360 GB of safe deletes</span>
+        <input class="hy-input" id="confirmInput" placeholder="node name" style="width:140px" autocomplete="off">
+        <button class="bs-btn bs-btn--primary bs-btn--sm" id="confirmBtn" disabled>Clean up disk</button>
+        <button class="bs-btn bs-btn--secondary bs-btn--sm">Dry-run audit</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="mock-bar" role="toolbar" aria-label="Mockup scenes">
+  <span>round 8 · revised</span>
+  <button data-scene="overview" aria-pressed="true">Overview</button>
+  <button data-scene="away" aria-pressed="false">Away page · chip</button>
+  <button data-scene="drawer" aria-pressed="false">Cleanup drawer</button>
+  <span class="grow"></span>
+  <span id="mockWidth"></span>
+</div>
+<div class="mock-note">static mockup · numbers illustrative · IR-225 · "Away page" previews the topbar chip only</div>
+
+<script>
+(function(){
+  var root = document.documentElement;
+  var $ = function(s){ return document.querySelector(s); };
+  var $$ = function(s){ return Array.prototype.slice.call(document.querySelectorAll(s)); };
+
+  // scene switch
+  var scrim = $("#drawerScrim");
+  function scene(name){
+    $$(".mock-bar [data-scene]").forEach(function(b){ b.setAttribute("aria-pressed", String(b.dataset.scene === name)); });
+    if(name === "drawer"){ scrim.classList.add("is-open"); $("#confirmInput").focus(); }
+    else { scrim.classList.remove("is-open"); }
+    // the perf chip is hidden on the Overview; the "away" scene previews it
+    if(name === "away"){ root.setAttribute("data-page", "away"); }
+    else { root.removeAttribute("data-page"); }
+  }
+  $$(".mock-bar [data-scene]").forEach(function(b){ b.addEventListener("click", function(){ scene(b.dataset.scene); }); });
+  $("#drawerClose").addEventListener("click", function(){ scene("overview"); });
+  $("#cleanupCta").addEventListener("click", function(){ scene("drawer"); });
+  scrim.addEventListener("mousedown", function(e){ if(e.target === scrim) scene("overview"); });
+  document.addEventListener("keydown", function(e){ if(e.key === "Escape") scene("overview"); });
+
+  // typed confirm arms the destructive action
+  $("#confirmInput").addEventListener("input", function(e){
+    $("#confirmBtn").disabled = e.target.value !== "DGX-1";
+  });
+
+  // collapse
+  $("#collapseBtn").addEventListener("click", function(){
+    var on = root.getAttribute("data-nav") === "collapsed";
+    root.setAttribute("data-nav", on ? "" : "collapsed");
+    this.setAttribute("aria-expanded", String(on));
+    this.setAttribute("aria-label", on ? "Collapse menu" : "Expand menu");
+  });
+
+  // collapsed-rail range popover (fixed: escapes the sidebar overflow clip)
+  $("#rangePopBtn").addEventListener("click", function(e){
+    e.stopPropagation();
+    var pop = $("#rangePop");
+    var open = pop.classList.toggle("is-open");
+    this.setAttribute("aria-expanded", String(open));
+    if(open){
+      var r = this.getBoundingClientRect();
+      var seg = pop.querySelector(".rangeseg");
+      seg.style.left = Math.round(r.right + 8) + "px";
+      seg.style.top = Math.max(8, Math.round(r.top)) + "px";
+    }
+  });
+  document.addEventListener("click", function(e){
+    if(!$("#rangePop").contains(e.target)) $("#rangePop").classList.remove("is-open");
+  });
+
+  // deployed binary theme toggle (dark/light, stored)
+  $("#themeBtn").addEventListener("click", function(){
+    var dark = root.getAttribute("data-theme") === "dark";
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try{ localStorage.setItem("irori-theme", next); }catch(err){}
+  });
+
+  // range segs (visual only — data is static); keep every copy in sync
+  function wireSeg(seg){
+    seg.addEventListener("click", function(e){
+      var b = e.target.closest("button"); if(!b) return;
+      $$(".rangeseg").forEach(function(s){ $$s(s).forEach(function(x){
+        x.setAttribute("aria-pressed", String(x.textContent === b.textContent));
+        x.classList.toggle("is-active", x.textContent === b.textContent);
+      });});
+    });
+  }
+  function $$s(scope){ return Array.prototype.slice.call(scope.querySelectorAll("button")); }
+  $$(".rangeseg").forEach(wireSeg);
+
+  // accordions
+  $$("[data-acc]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var open = b.getAttribute("aria-expanded") === "true";
+      b.setAttribute("aria-expanded", String(!open));
+      b.parentElement.querySelector(".hy-acc__panel").classList.toggle("is-open", !open);
+    });
+  });
+
+  // mobile menu (small tier)
+  $("#menuBtn").addEventListener("click", function(){
+    var open = $("#mobileMenu").classList.toggle("is-open");
+    this.setAttribute("aria-expanded", String(open));
+  });
+
+  // width readout
+  function w(){ $("#mockWidth").textContent = window.innerWidth + " px"; }
+  window.addEventListener("resize", w); w();
+})();
+</script>
+</body>
+</html>
