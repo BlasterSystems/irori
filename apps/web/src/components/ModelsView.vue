@@ -3,8 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { fetchNodes, fetchRecipes, installRecipe, fetchRecipeDraft, type RecipeRow } from "../api";
 import { RECIPE_CAVEATS } from "@irori/core";
 import { live } from "../live";
-import { activeJobsByNode, blockingJobLabel, jobLabel, type JobLive } from "../jobs";
+import { activeJobsByNode, blockingJobLabel, jobLabel, jobStreams, type JobLive } from "../jobs";
 import { fetchSetups } from "../serve";
+import { fmtBytes } from "../analytics";
+import { computeNasData } from "../overview";
+import { thresholds } from "../thresholds";
+import CleanupDrawer from "./CleanupDrawer.vue";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
 import {
   bulkDeleteTotalBytes,
@@ -40,6 +44,7 @@ import {
   type HfQuantsResult,
   type JobDetail,
   type JobView,
+  type ModelEntry,
   type ModelsPage,
   type PlacementResponse,
 } from "../models";
@@ -118,7 +123,27 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const result = await fetchModelsPage(page.value, search.value, sort.value);
+    let result: ModelsPage;
+    if (runtimeFiltering.value) {
+      // The chips cannot be answered server-side (/api/v1/models filters by q
+      // only) — merge every page in the chosen order, filter by runtime and
+      // paginate at the hub's 25/page (IR-222: counts stay hub-derived).
+      const all: ModelEntry[] = [];
+      for (let p = 1; ; p++) {
+        const res = await fetchModelsPage(p, search.value, sort.value);
+        all.push(...res.models);
+        if (all.length >= res.total || res.models.length === 0) break;
+      }
+      const filtered = all.filter((m) => runtimeSel.value.includes(m.runtime));
+      result = {
+        page: page.value,
+        pageSize: MODELS_PAGE_SIZE,
+        total: filtered.length,
+        models: filtered.slice((page.value - 1) * MODELS_PAGE_SIZE, page.value * MODELS_PAGE_SIZE),
+      };
+    } else {
+      result = await fetchModelsPage(page.value, search.value, sort.value);
+    }
     if (seq !== loadSeq) return;
     modelsPage.value = result;
   } catch (err) {
@@ -129,8 +154,22 @@ async function load(): Promise<void> {
   }
 }
 
-function onSortToggle(): void {
-  sort.value = sort.value === "recent" ? "name" : "recent";
+/** IR-222 runtime filter chips (aria-pressed): all pressed = the server-paged
+ *  catalog as before; a subset switches to the merged+filtered page. */
+const RUNTIMES = ["vllm", "llama.cpp"] as const;
+/** Mirrors the hub's MODELS_PAGE_SIZE — the merged+filtered page slices at it. */
+const MODELS_PAGE_SIZE = 25;
+const runtimeSel = ref<string[]>([]);
+const runtimeFiltering = computed(() => runtimeSel.value.length > 0 && runtimeSel.value.length < RUNTIMES.length);
+function toggleRuntime(rt: string): void {
+  runtimeSel.value = runtimeSel.value.includes(rt) ? runtimeSel.value.filter((r) => r !== rt) : [...runtimeSel.value, rt];
+  page.value = 1;
+  void load();
+}
+
+function onSortChange(ev: Event): void {
+  const v = (ev.target as HTMLSelectElement).value;
+  sort.value = v === "name" ? "name" : "recent";
   try {
     localStorage.setItem("irori.models.sort", sort.value);
   } catch {
@@ -142,7 +181,37 @@ function onSortToggle(): void {
 
 /** Store node for hygiene verbs and the modal banner (NAS-preferred, IRI-014). */
 const nodes = ref<NodeInfo[]>([]);
-const storeNode = computed(() => pickStoreNode(nodes.value)?.id ?? null);
+const storeNodeInfo = computed(() => pickStoreNode(nodes.value));
+const storeNode = computed(() => storeNodeInfo.value?.id ?? null);
+
+/** IR-222 store strip: disk from the store node's live snapshot, catalog
+ *  counts from the same fetch as the page — never a hardcoded total. */
+const storeSnapshot = computed(() => (storeNodeInfo.value === null ? null : live.snapshots.get(storeNodeInfo.value.id) ?? null));
+const storeNas = computed(() => computeNasData(null, null, storeSnapshot.value));
+const storeVal = computed(() =>
+  storeNas.value.storeUsedBytes !== null && storeNas.value.storeTotalBytes !== null
+    ? `${fmtBytes(storeNas.value.storeUsedBytes)} / ${fmtBytes(storeNas.value.storeTotalBytes)}`
+    : null,
+);
+const storeHot = computed(() => storeNas.value.storePct !== null && storeNas.value.storePct >= thresholds.diskWarnPct);
+
+/** Store-wide hygiene verbs for the strip popover (per-model repair stays in
+ *  the drawer); labels follow the modelctl verbs they dispatch. */
+const STORE_VERBS: Array<{ kind: string; label: string }> = [
+  { kind: "doctor", label: "doctor --json" },
+  { kind: "staging-audit", label: "staging audit" },
+  { kind: "objects-audit", label: "objects audit" },
+  { kind: "catalog-refresh", label: "refresh catalog" },
+  { kind: "sync-cards", label: "sync cards" },
+  { kind: "gc-objects", label: "gc-objects (dry-run)" },
+];
+const hygOpen = ref(false);
+/** IR-222: "clean up disk — run audit" opens the shared per-node cleanup drawer. */
+const cleanupNode = ref<{ id: string; name: string } | null>(null);
+function openCleanup(nodeId: string): void {
+  const n = nodes.value.find((x) => x.id === nodeId);
+  if (n !== undefined) cleanupNode.value = { id: n.id, name: n.name };
+}
 
 /** IRI-082: curated recipe catalog (SparkRun + MiaAI). */
 const recipes = ref<RecipeRow[]>([]);
@@ -177,6 +246,7 @@ void fetchRecipes().then((r) => { recipes.value = r.recipes; }).catch(() => {});
 
 onMounted(() => {
   document.addEventListener("click", onDocClick); // IRI-020: row-menu click-away
+  document.addEventListener("keydown", onDocKeydown); // IR-222: Escape closes the popover/menu
   void fetchNodes()
     .then((rows) => {
       nodes.value = rows;
@@ -184,6 +254,7 @@ onMounted(() => {
     .catch(() => {
       /* registry unavailable: download modal surfaces "no model-ops node" */
     });
+  void live.refreshJobs(); // IR-222: re-seed the jobs rows from the hub
   void load();
   void refreshQueue();
 });
@@ -493,9 +564,23 @@ function openRowMenu(kind: "catalog" | "queue", id: string, name: string, ev: Mo
   rowMenu.value = { kind, id, name, x: Math.max(8, (rect?.right ?? 0) - 210), y: (rect?.bottom ?? 0) + 6 };
 }
 
+/** IR-222: destructive menu entries read as thread-ink text (never a fill). */
+function isRowMenuDanger(act: string): boolean {
+  if (rowMenu.value?.kind === "catalog") return act === "delete";
+  return act === "cancel-job" || act === "retry-force" || act === "remove";
+}
+
 function onDocClick(ev: MouseEvent): void {
   const t = ev.target as HTMLElement | null;
   if (rowMenu.value !== null && t !== null && !t.closest(".rowpop") && !t.closest(".rowopts")) rowMenu.value = null;
+  // IR-222 store-health popover: closes on any outside press, like the rowpop.
+  if (hygOpen.value && t !== null && !t.closest(".hygpop") && !t.closest(".hygopen")) hygOpen.value = false;
+}
+
+function onDocKeydown(ev: KeyboardEvent): void {
+  if (ev.key !== "Escape") return;
+  hygOpen.value = false;
+  rowMenu.value = null;
 }
 
 interface ConfirmAction {
@@ -505,9 +590,9 @@ interface ConfirmAction {
   run: () => Promise<void> | void;
   /** IR-210: scrollable item list (bulk-delete model names); page-level confirm only. */
   list?: string[];
-  /** IRI-043: "placement"/"job" render the confirm INSIDE that surface
-   *  (no stacked modal); absent = page-level confirm-card. */
-  host?: "placement" | "job";
+  /** IRI-043: "job" renders the confirm INSIDE the sheet (no stacked modal);
+   *  absent = page-level confirm-card. */
+  host?: "job";
 }
 const confirmState = ref<ConfirmAction | null>(null);
 const confirmBusy = ref(false);
@@ -553,14 +638,7 @@ function runRowMenu(act: string): void {
   if (m === null) return;
   if (m.kind === "catalog") {
     if (act === "details") void openModel(m.name);
-    else if (act === "delete") {
-      confirmAction({
-        title: `Delete ${m.name} from the NAS?`,
-        body: "Removes the model's objects, references and staging from the NAS store via modelctl. NAS is never written outside modelctl.",
-        danger: "Delete from NAS",
-        run: () => runNasDelete(m.name),
-      });
-    }
+    else if (act === "delete" && storeNode.value !== null) startNasDelete(storeNode.value, m.name);
     return;
   }
   const e = downloadQueueEntries.value.find((x) => x.id === m.id);
@@ -608,17 +686,21 @@ function runRowMenu(act: string): void {
   }
 }
 
-/** The detail drawer's per-placement delete routes through the same confirm. */
-function confirmDrawerDelete(nodeId: string): void {
-  if (selected.value === null) return;
-  const name = selected.value;
-  confirmAction({
-    title: `Delete ${name} from the NAS?`,
-    body: "Removes the model's objects, references and staging from the NAS store via modelctl. NAS is never written outside modelctl.",
-    danger: "Delete from NAS",
-    host: "placement", // IRI-043: confirms inside the detail drawer
-    run: () => runJob(nodeId, "nas-delete-apply", { name }),
-  });
+/** IR-222 armed delete (SPEC §6): the plan is a dry-run `nas-delete` job —
+ *  the job sheet shows it, then arms the typed `nas-delete-apply` once the
+ *  plan settles. The serving-setup advisory rides along (never blocks). */
+function startNasDelete(nodeId: string, name: string): void {
+  deleteSetupWarn.value = null;
+  const seq = ++deleteSetupSeq;
+  void fetchSetups()
+    .then((rows) => {
+      if (seq !== deleteSetupSeq) return;
+      const setup = setupServingModel(rows, name);
+      deleteSetupWarn.value = setup === null ? null : { name, setup };
+    })
+    .catch(() => {});
+  armName.value = "";
+  void runJob(nodeId, "nas-delete", { name });
 }
 
 /** IRI-020: the job drawer's Cancel job gets the same guard as the queue menu. */
@@ -668,26 +750,6 @@ const jobBatchEntries = computed(() => {
 });
 const jobSummaryText = computed(() => (jobBatchEntries.value.length > 0 ? downloadJobSummary(jobBatchEntries.value) : ""));
 
-/** Row-level delete entry point — applies immediately behind the confirm
- *  dialog (owner decision: no dry-run/arm dance); the modelctl write path is
- *  unchanged. */
-async function runNasDelete(name: string): Promise<void> {
-  const nodeId = storeNode.value;
-  if (nodeId === null) return;
-  deleteSetupWarn.value = null;
-  // Advisory only — never delays the delete dispatch; sequenced so a late
-  // response cannot attach to a different model's job.
-  const seq = ++deleteSetupSeq;
-  void fetchSetups()
-    .then((rows) => {
-      if (seq !== deleteSetupSeq) return;
-      const setup = setupServingModel(rows, name);
-      deleteSetupWarn.value = setup === null ? null : { name, setup };
-    })
-    .catch(() => {});
-  await runJob(nodeId, "nas-delete-apply", { name });
-}
-
 /**
  * IR-210: bulk delete confirm. The setup advisory is computed BEFORE the modal
  * opens (a wrong 76-model dispatch is expensive to unwind) and the drawer
@@ -732,13 +794,37 @@ async function confirmBulkDelete(): Promise<void> {
 /** The open drawer's batch delete — the advisory banner is scoped to it. */
 const jobBulkDelete = computed(() => job.value?.job.kind === "nas-delete-batch" && deleteSetupWarn.value?.name === "bulk");
 
-/** The open drawer's nas-delete-apply job's target name — the advisory banner is scoped to it. */
+/** The open sheet's nas-delete/apply target name — the advisory banner is
+ *  scoped to it (the plan and the armed apply share it). */
 const jobApplyName = computed(() => {
   const j = job.value?.job;
-  if (j === undefined || j.kind !== "nas-delete-apply") return null;
+  if (j === undefined || (j.kind !== "nas-delete-apply" && j.kind !== "nas-delete")) return null;
   const name = j.params["name"];
   return typeof name === "string" && name.length > 0 ? name : null;
 });
+
+/** IR-222 armed delete (SPEC §6): once the dry-run plan job has settled, the
+ *  sheet offers the typed arm — the apply only runs when the typed name
+ *  matches the planned model. */
+const armName = ref("");
+const armBusy = ref(false);
+const armJob = computed(() => {
+  const j = job.value;
+  if (j === null || j.job.kind !== "nas-delete" || j.job.status !== "succeeded") return null;
+  const name = j.job.params["name"];
+  return typeof name === "string" && name.length > 0 ? { name } : null;
+});
+async function runArmDelete(): Promise<void> {
+  const a = armJob.value;
+  if (a === null || armBusy.value || armName.value !== a.name) return;
+  armBusy.value = true;
+  try {
+    await runJob(job.value!.job.nodeId, "nas-delete-apply", { name: a.name });
+  } finally {
+    armBusy.value = false;
+    armName.value = "";
+  }
+}
 
 /** IRI-051: what the open job sheet is FOR — target node plus model, so the
  *  sheet stops reading as an anonymous "sync-local RUNNING" modal. */
@@ -752,6 +838,103 @@ const jobContext = computed(() => {
   if (typeof name === "string" && name.length > 0) parts.push(name);
   return parts.length > 0 ? parts.join(" · ") : null;
 });
+
+/** IR-222 refresh-note: live status, catalog size, jobs stream (Overview precedent). */
+const refreshNoteText = computed(() => {
+  if (!live.connected.value) return "Offline — showing the last known state";
+  return `Live · catalog ${modelsPage.value?.total ?? 0} models · jobs stream`;
+});
+
+/** IR-222 jobs rows: active transfer jobs from the live store (seeded from
+ *  GET /api/v1/jobs, kept current by SSE) — hub data, never a hardcoded list. */
+const TRANSFER_KINDS = ["sync-local", "push", "download-queue"];
+const activeTransfers = computed(() => {
+  const out: JobLive[] = [];
+  for (const j of live.jobs.values()) {
+    if (!TRANSFER_KINDS.includes(j.kind) || (j.status !== "queued" && j.status !== "running")) continue;
+    out.push(j);
+  }
+  return out.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+});
+const doneTodayCount = computed(() => {
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  let n = 0;
+  for (const j of live.jobs.values()) {
+    if (TRANSFER_KINDS.includes(j.kind) && j.finishedAt !== null && Date.parse(j.finishedAt) >= dayStart.getTime()) n++;
+  }
+  return n;
+});
+const jobsMeta = computed(() => `${activeTransfers.value.length} running · ${doneTodayCount.value} done today`);
+
+function jobRowName(j: JobLive): string {
+  return `${j.kind}${jobLabel(j.params)}`;
+}
+function jobRowTarget(j: JobLive): string {
+  const node = nodes.value.find((n) => n.id === j.nodeId)?.name ?? "node";
+  if (j.kind === "push") {
+    const hosts = j.params["hosts"];
+    const dest = Array.isArray(hosts) ? hosts.filter((h): h is string => typeof h === "string").join(", ") : "";
+    return dest.length > 0 ? `${node} → ${dest}` : node;
+  }
+  if (j.kind === "sync-local") return `${node} ← nas`;
+  return `${node} · nas store`;
+}
+function jobRowPct(j: JobLive): number | null {
+  const p = j.progress?.percent;
+  return typeof p === "number" ? Math.max(0, Math.min(100, p)) : null;
+}
+function jobRowBytes(j: JobLive): string | null {
+  const b = j.progress?.bytes;
+  return typeof b === "number" && b > 0 ? fmtBytes(b) : null;
+}
+function jobRowRate(j: JobLive): string | null {
+  const p = j.progress;
+  if (p === null || p === undefined) return null;
+  const parts: string[] = [];
+  if (typeof p.rateBytesPerSec === "number" && p.rateBytesPerSec > 0) parts.push(downloadSpeedLabel(p.rateBytesPerSec).label);
+  if (typeof p.etaSeconds === "number" && p.etaSeconds > 0) parts.push(`~${formatEta(p.etaSeconds)} left`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** Catalog-row lookups for the drawer's kv (repo/added/runtime come from the
+ *  same fetch as the page; the placement response carries name+bytes only). */
+function catalogEntry(name: string): ModelEntry | null {
+  return modelsPage.value?.models.find((m) => m.name === name) ?? null;
+}
+const drawerRuntime = computed(() => (selected.value === null ? null : catalogEntry(selected.value)?.runtime ?? null));
+const drawerRepo = computed(() => (selected.value === null ? null : catalogEntry(selected.value)?.repository ?? null));
+const drawerAdded = computed(() => {
+  if (selected.value === null) return null;
+  const iso = catalogEntry(selected.value)?.firstSeenAt ?? "";
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && iso !== "" ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
+});
+/** "Oct 12" from a catalog firstSeenAt (mockup Added column). */
+function addedLabel(iso: string): string {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && iso !== "" ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
+}
+
+/** IR-222 pagination: page buttons with aria-current; 0 marks an ellipsis gap. */
+const pageList = computed<Array<number | 0>>(() => {
+  const n = totalPages.value;
+  const cur = page.value;
+  if (n <= 9) return Array.from({ length: n }, (_, i) => i + 1);
+  const out: Array<number | 0> = [1];
+  const lo = Math.max(2, cur - 1);
+  const hi = Math.min(n - 1, cur + 1);
+  if (lo > 2) out.push(0);
+  for (let p = lo; p <= hi; p++) out.push(p);
+  if (hi < n - 1) out.push(0);
+  out.push(n);
+  return out;
+});
+function goTo(p: number): void {
+  if (p === page.value) return;
+  page.value = p;
+  void load();
+}
 
 /** IRI-051: aggregate line for the sheet — download-queue keeps its batch
  *  summary; transfer kinds get the hub-parsed progress (IR-131) via
@@ -890,9 +1073,9 @@ const opBarJob = computed(() => {
   if (opDismissedFor.value === id) return null;
   return j;
 });
-function confirmOpBarCancel(): void {
-  const j = opBarJob.value;
-  if (j === null) return;
+/** IR-222: shared guarded-cancel for the op bar and the jobs rows — the same
+ *  blast-radius copy, the shared page confirm. */
+function confirmTransferCancel(j: JobLive): void {
   const isBatch = j.kind === "download-queue";
   confirmAction({
     title: isBatch ? "Cancel this download batch?" : `Cancel this ${j.kind} transfer?`,
@@ -909,6 +1092,11 @@ function confirmOpBarCancel(): void {
       await refreshQueue();
     },
   });
+}
+
+function confirmOpBarCancel(): void {
+  const j = opBarJob.value;
+  if (j !== null) confirmTransferCancel(j);
 }
 /** IRI-018: delayed catalog refetch after a terminal delete job (cleared on unmount). */
 let deleteReloadTimer: ReturnType<typeof setTimeout> | undefined;
@@ -963,6 +1151,7 @@ function closeJob(): void {
 
 onBeforeUnmount(() => {
   document.removeEventListener("click", onDocClick);
+  document.removeEventListener("keydown", onDocKeydown);
   clearTimeout(debounce);
   clearTimeout(deleteReloadTimer);
   clearTimeout(clearTimer); // IR-96: no prune after unmount
@@ -975,7 +1164,7 @@ onBeforeUnmount(() => {
   <div class="page">
     <header class="pagehead">
       <h1>Models</h1>
-      <p class="mono faint">NAS store · catalog.json (schema 3) · no store writes outside modelctl</p>
+      <p><span class="mono">nas → {{ storeNodeInfo?.nasRoot ?? "NAS store" }}</span> · no store writes outside modelctl</p>
     </header>
 
     <!-- IR-131 IRI-044 parity: the last transfer opened here stays reachable
@@ -988,116 +1177,203 @@ onBeforeUnmount(() => {
             <span class="chip" :class="opBarJob.cancelRequestedAt !== null ? 'chip--warn' : ''"><span class="dot dot--run" aria-hidden="true"></span> {{ opBarJob.cancelRequestedAt !== null ? "canceling" : opBarJob.kind }}</span>
             <span class="stat__sub faint" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ jobLabel(opBarJob.params).slice(1) || opBarJob.kind }} · {{ opBarJob.lastLine ?? "waiting for output…" }}</span>
           </span>
-          <span class="row" style="gap: 8px;">
-            <button class="btn btn--ghost btn--sm" @click="openJob(opBarJob.id)">Show output</button>
-            <button v-if="opBarJob.cancelRequestedAt === null" class="btn btn--danger btn--sm" @click="confirmOpBarCancel">Cancel</button>
-            <button class="btn btn--ghost btn--sm" @click="opDismissedFor = opBarJob!.id">Dismiss</button>
+          <span class="row" style="gap: 12px;">
+            <button class="bs-link" @click="openJob(opBarJob.id)">Output</button>
+            <button v-if="opBarJob.cancelRequestedAt === null" class="bs-link bs-link--thread" @click="confirmOpBarCancel">Cancel…</button>
+            <button class="bs-link" @click="opDismissedFor = opBarJob!.id">Dismiss</button>
           </span>
         </div>
       </div>
     </div>
 
-    <div class="row row--between row--wrap" style="margin-bottom: 12px">
-      <input
-        v-model="search"
-        class="search"
-        type="search"
-        placeholder="Search name or repository…"
-        aria-label="Search models"
-        @input="onSearchInput"
-      />
-      <div class="row" style="gap: 8px">
-        <span v-if="modelsPage" class="mono faint">{{ modelsPage.total }} models</span>
-        <button class="btn btn--secondary btn--sm" @click="onSortToggle">
-          {{ sort === "recent" ? "Recently added ↓" : "Name A–Z" }}
-        </button>
-        <button class="btn btn--primary btn--sm" @click="downloadOpen = true">Download from HF…</button>
+    <!-- IR-222 store strip: NAS disk from the live snapshot, catalog counts
+         from the same fetch as the page; the popover carries the store-wide
+         hygiene verbs. -->
+    <section class="card strip" aria-label="Store health">
+      <div class="card__body strip__body">
+        <div class="row row--between row--wrap" style="gap: 16px;">
+          <div class="row row--wrap" style="gap: 16px; min-width: 0;">
+            <div v-if="storeVal !== null" class="barrow storebarrow">
+              <span>store</span>
+              <div class="bar"><div class="bar__fill" :style="{ width: `${storeNas.storePct ?? 0}%` }"></div></div>
+              <span class="val" :class="{ 'metric--hot': storeHot }">{{ storeVal }}</span>
+            </div>
+            <span class="stat__sub">catalog {{ modelsPage?.total ?? "—" }} objects · page {{ modelsPage?.page ?? page }} / {{ totalPages }} @ {{ modelsPage?.pageSize ?? MODELS_PAGE_SIZE }}/page</span>
+            <span class="stat__sub">
+              {{ storeNodeInfo?.name ?? "no store node" }}<template v-if="storeNodeInfo?.agentVersion !== null && storeNodeInfo?.agentVersion !== undefined"> · agent {{ storeNodeInfo.agentVersion }}</template> · {{ live.connected.value ? "live" : "offline" }}
+            </span>
+          </div>
+          <div class="row" style="position: relative;">
+            <button class="btn btn--secondary btn--sm hygopen" :aria-expanded="hygOpen ? 'true' : 'false'" aria-controls="hygPop" @click.stop="hygOpen = !hygOpen">Store health</button>
+            <div v-if="hygOpen" id="hygPop" class="popover hygpop" role="dialog" aria-label="Store health">
+              <dl class="kv">
+                <dt>objects</dt><dd>{{ modelsPage?.total ?? 0 }} active</dd>
+                <dt>store root</dt><dd>{{ storeNodeInfo?.nasRoot ?? "—" }}</dd>
+                <dt>agent</dt><dd>{{ storeNodeInfo?.agentVersion ?? "—" }}</dd>
+              </dl>
+              <div class="row row--wrap" style="margin-top: 12px; gap: 8px;">
+                <button
+                  v-for="v in STORE_VERBS"
+                  :key="v.kind"
+                  class="btn btn--secondary btn--sm"
+                  :disabled="storeNode === null"
+                  @click="runHygiene(v.kind, false)"
+                >{{ v.label }}</button>
+              </div>
+              <p class="stat__sub faint" style="margin: 10px 0 0;">All mutations dry-run first, then armed. NAS never written outside modelctl.</p>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <!-- IR-222 jobs rows: active transfer jobs from the live store, with
+         guarded Output/Cancel — the mockup's jobs panel on hub data. -->
+    <section v-if="activeTransfers.length > 0 || doneTodayCount > 0" class="card section-gap" aria-label="Jobs">
+      <div class="card__head">
+        <h3>Jobs</h3>
+        <span class="stat__sub faint">{{ jobsMeta }}</span>
+      </div>
+      <div class="jobrows">
+        <div v-for="j in activeTransfers" :key="j.id" class="jobrow">
+          <span class="dot" :class="j.cancelRequestedAt !== null ? 'dot--warn' : 'dot--run'" aria-hidden="true"></span>
+          <div class="jobrow__main">
+            <span class="jobrow__name mono">{{ jobRowName(j) }}</span>
+            <span class="jobrow__target">{{ jobRowTarget(j) }}</span>
+          </div>
+          <div class="jobrow__bar">
+            <div v-if="jobRowPct(j) !== null" class="bar bar--lg"><div class="bar__fill" :style="{ width: `${jobRowPct(j)}%` }"></div></div>
+            <span v-else class="stat__sub">no progress{{ jobStreams(j.kind, j.params) > 1 ? ` · ${jobStreams(j.kind, j.params)} streams` : "" }}</span>
+            <span v-if="jobRowBytes(j) !== null" class="stat__sub">{{ jobRowBytes(j) }}</span>
+          </div>
+          <span class="jobrow__rate">{{ jobRowRate(j) ?? "—" }}</span>
+          <span class="chip jobrow__chip" :class="j.cancelRequestedAt !== null ? 'chip--warn' : ''"><span class="dot dot--run" aria-hidden="true"></span>{{ j.cancelRequestedAt !== null ? "canceling" : j.status }}</span>
+          <span class="row jobrow__actions" style="gap: 12px;">
+            <button class="bs-link" @click="openJob(j.id)">Output</button>
+            <button v-if="j.cancelRequestedAt === null" class="bs-link bs-link--thread" @click="confirmTransferCancel(j)">Cancel…</button>
+          </span>
+        </div>
+      </div>
+    </section>
 
     <p v-if="error" class="banner banner--warn">{{ error }}</p>
     <p v-else-if="loading && modelsPage === null" class="faint">loading…</p>
-    <p v-else-if="modelsPage !== null && modelsPage.models.length === 0" class="faint">
-      no models match — refresh the catalog from a model-ops node
-    </p>
 
-    <!-- IR-210: bulk store-delete selection bar (catalog names, catalog-sourced bytes) -->
-    <div v-if="bulkSelected.size > 0 && modelsPage !== null && error === null" class="row row--between bulkbar" role="status">
-      <span class="stat__sub mono">{{ bulkSelected.size }} selected · {{ formatGiB(bulkBytes) }}</span>
-      <span class="row">
-        <button class="btn btn--ghost btn--sm" @click="clearBulk">Clear</button>
-        <button
-          class="btn btn--danger btn--sm"
-          :disabled="storeNode === null || !bulkSupported"
-          :title="bulkSupported ? undefined : 'the store node agent predates the batch kind (0.7.0) — update the agent first'"
-          @click="confirmBulkDelete"
-        >Delete selected…</button>
-      </span>
-    </div>
-    <p v-if="bulkSelected.size > 0 && !bulkSupported && storeNode !== null" class="stat__sub faint">
-      the store node agent predates the batch-delete kind — run an agent update on that node first.
-    </p>
+    <!-- Catalog: toolbar (bordered hybrid search + pressed filter chips + sort),
+         IR-210 bulk selection, the hairline table and aria-current pagination. -->
+    <section v-if="error === null && modelsPage !== null" class="card section-gap" aria-label="Catalog">
+      <div class="card__body catalog-toolbar">
+        <input
+          v-model="search"
+          class="input search"
+          type="search"
+          placeholder="Search name or repository…"
+          aria-label="Search models"
+          @input="onSearchInput"
+        />
+        <div class="row row--wrap" role="group" aria-label="Runtime filters" style="padding-bottom: 8px;">
+          <button v-for="rt in RUNTIMES" :key="rt" class="bs-filter" :aria-pressed="runtimeSel.includes(rt)" @click="toggleRuntime(rt)">{{ rt }}</button>
+        </div>
+        <span class="grow"></span>
+        <label class="visually-hidden" for="sort">Sort</label>
+        <select id="sort" class="select sortsel" :value="sort" @change="onSortChange">
+          <option value="recent">Recently added</option>
+          <option value="name">Name A–Z</option>
+        </select>
+        <button class="btn btn--primary btn--sm" @click="downloadOpen = true">Download from HF…</button>
+      </div>
 
-    <table v-if="error === null && !(loading && modelsPage === null) && modelsPage !== null && modelsPage.models.length > 0" class="table">
-      <thead>
-        <tr>
-          <th class="bulk-col">
-            <input
-              type="checkbox"
-              class="bulk-check"
-              :checked="bulkAllSelected"
-              :aria-label="bulkAllSelected ? 'Deselect all models on this page' : 'Select all models on this page'"
-              @change="toggleBulkAll"
-            />
-          </th>
-          <th>Model</th><th class="num">Size</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="m in modelsPage.models" :key="m.name" class="is-clickable" @click="openModel(m.name)">
-          <td class="bulk-col" @click.stop>
-            <input
-              type="checkbox"
-              class="bulk-check"
-              :checked="bulkSelected.has(m.name)"
-              :aria-label="`Select ${m.name} for bulk delete`"
-              @change="toggleBulk(m.name)"
-            />
-          </td>
-          <td>
-            <strong>{{ m.name }}</strong>
-            <div class="mono faint">{{ m.repository }}</div>
-          </td>
-          <td class="num mono">{{ formatGiB(m.bytes) }}</td>
-          <td @click.stop>
-            <button
-              v-if="storeNode !== null"
-              class="btn btn--ghost btn--sm rowopts"
-              :aria-label="`Actions for ${m.name}`"
-              @click="openRowMenu('catalog', m.name, m.name, $event)"
-            >⋯</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+      <!-- IR-210: bulk store-delete selection bar (catalog names, catalog-sourced bytes) -->
+      <div v-if="bulkSelected.size > 0" class="row row--between bulkbar" role="status">
+        <span class="stat__sub mono">{{ bulkSelected.size }} selected · {{ formatGiB(bulkBytes) }}</span>
+        <span class="row" style="gap: 12px;">
+          <button class="bs-link" @click="clearBulk">Clear</button>
+          <button
+            class="bs-link bs-link--thread"
+            :disabled="storeNode === null || !bulkSupported"
+            :title="bulkSupported ? undefined : 'the store node agent predates the batch kind (0.7.0) — update the agent first'"
+            @click="confirmBulkDelete"
+          >Delete selected…</button>
+        </span>
+      </div>
+      <p v-if="bulkSelected.size > 0 && !bulkSupported && storeNode !== null" class="stat__sub faint bulkwarn">
+        the store node agent predates the batch-delete kind — run an agent update on that node first.
+      </p>
 
-    <div v-if="modelsPage !== null && totalPages > 1" class="row row--between" style="margin-top: 10px">
-      <button class="btn btn--secondary btn--sm" :disabled="page <= 1" @click="go(-1)">← Prev</button>
-      <span class="mono faint">page {{ modelsPage.page }} / {{ totalPages }}</span>
-      <button class="btn btn--secondary btn--sm" :disabled="page >= totalPages" @click="go(1)">Next →</button>
-    </div>
+      <p v-if="modelsPage.models.length === 0" class="stat__sub faint catalog-empty">
+        no models match — refresh the catalog from a model-ops node
+      </p>
+      <div v-else style="overflow-x: auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="bulk-col">
+                <input
+                  type="checkbox"
+                  class="bulk-check"
+                  :checked="bulkAllSelected"
+                  :aria-label="bulkAllSelected ? 'Deselect all models on this page' : 'Select all models on this page'"
+                  @change="toggleBulkAll"
+                />
+              </th>
+              <th>Model</th><th>Runtime</th><th class="num">Size</th><th>Added</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in modelsPage.models" :key="m.name" class="is-clickable" @click="openModel(m.name)">
+              <td class="bulk-col" @click.stop>
+                <input
+                  type="checkbox"
+                  class="bulk-check"
+                  :checked="bulkSelected.has(m.name)"
+                  :aria-label="`Select ${m.name} for bulk delete`"
+                  @change="toggleBulk(m.name)"
+                />
+              </td>
+              <td>
+                <strong>{{ m.name }}</strong>
+                <div class="mono faint">{{ m.repository }}</div>
+              </td>
+              <td class="mono">{{ m.runtime }}</td>
+              <td class="num mono">{{ formatGiB(m.bytes) }}</td>
+              <td class="mono">{{ addedLabel(m.firstSeenAt) }}</td>
+              <td @click.stop>
+                <button
+                  v-if="storeNode !== null"
+                  class="btn btn--ghost btn--sm rowopts"
+                  :aria-label="`Actions for ${m.name}`"
+                  @click="openRowMenu('catalog', m.name, m.name, $event)"
+                >⋯</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div v-if="totalPages > 1" class="pagerow">
+        <span class="stat__sub">{{ modelsPage.models.length }} of {{ modelsPage.total }} models · page {{ modelsPage.page }} / {{ totalPages }}</span>
+        <div class="row" role="group" aria-label="Pagination">
+          <button class="bs-filter" aria-label="Previous page" :disabled="page <= 1" @click="go(-1)">‹</button>
+          <template v-for="(p, pi) in pageList" :key="`${pi}-${p}`">
+            <span v-if="p === 0" class="stat__sub pagerow-gap" aria-hidden="true">…</span>
+            <button v-else class="bs-filter" :aria-current="p === page ? 'page' : undefined" @click="goTo(p)">{{ p }}</button>
+          </template>
+          <button class="bs-filter" aria-label="Next page" :disabled="page >= totalPages" @click="go(1)">›</button>
+        </div>
+      </div>
+    </section>
 
     <!-- IRI-014 download queue: adds always queue; the NAS drains when idle -->
     <section
       v-if="downloadQueueEntries.length > 0 || queueError !== null"
-      class="card"
-      style="margin-top: 14px; padding: 12px"
+      class="card section-gap"
       aria-label="Download queue"
     >
-      <div class="row row--between">
+      <div class="card__head">
         <h3>Download queue</h3>
         <span class="stat__sub faint">queued adds dispatch to the NAS store node when idle</span>
       </div>
+      <div class="card__body">
       <p v-if="queueError" class="banner banner--warn">{{ queueError }}</p>
       <div v-if="showQueueTotals" class="dlbar-row" style="margin: 8px 0 2px; max-width: none">
         <span class="stat__sub mono" style="flex: none">batch</span>
@@ -1136,6 +1412,7 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
+      </div>
     </section>
 
     <!-- IRI-043 (option C): the primary drawer and the job sheet share ONE
@@ -1144,16 +1421,20 @@ onBeforeUnmount(() => {
       <div class="overlay-row">
         <section v-if="selected !== null" class="card drawer" aria-label="Model detail">
         <div class="card__head">
-          <h3 class="mono">{{ selected }}</h3>
-          <button class="btn btn--secondary btn--sm" @click="closeDetail">Close</button>
+          <div class="row" style="min-width: 0;">
+            <h3>{{ selected }}</h3>
+            <span v-if="drawerRuntime !== null" class="chip">{{ drawerRuntime }}</span>
+          </div>
+          <button class="iconbtn" aria-label="Close details" @click="closeDetail">✕</button>
         </div>
         <p v-if="placementLoading" class="faint">loading placement…</p>
         <p v-else-if="placementError" class="banner banner--warn">{{ placementError }}</p>
         <template v-else-if="placement !== null">
-          <p class="stat__sub">
-            {{ formatGiB(placement.model.bytes) }} · from
-            <span class="mono">{{ placement.model.name }}</span>
-          </p>
+          <dl class="kv">
+            <dt>repo</dt><dd>{{ drawerRepo ?? "—" }}</dd>
+            <dt>size</dt><dd>{{ formatGiB(placement.model.bytes) }}</dd>
+            <dt v-if="drawerAdded !== null">added</dt><dd v-if="drawerAdded !== null">{{ drawerAdded }}</dd>
+          </dl>
           <table class="table">
             <thead>
               <tr><th>Node</th><th>State</th><th></th></tr>
@@ -1170,7 +1451,10 @@ onBeforeUnmount(() => {
                        holder for the DISPATCHING node is the real blocker,
                        so name it instead of letting the click 409. -->
                   <span v-if="dispatchBlocker(row)" class="mono faint" style="display: block;">{{ dispatchBlockerLabel(row) }}</span>
-                  <span v-if="row.action === 'unavailable' && row.reason" class="mono faint"> {{ row.reason }}</span>
+                  <span v-if="row.action === 'unavailable' && row.reason" class="stat__sub capacityline">
+                    {{ row.reason }} ·
+                    <button class="bs-link" @click="openCleanup(row.node.id)">clean up disk — run audit</button>
+                  </span>
                 </td>
                 <td>
                   <button
@@ -1190,37 +1474,30 @@ onBeforeUnmount(() => {
                   >{{ dispatchBlocker(row) !== null ? "Busy" : "Push" }}</button>
                   <button
                     v-else-if="row.node.kind === 'nas'"
-                    class="btn btn--secondary btn--sm"
+                    class="bs-link bs-link--thread"
                     :disabled="dispatchBlocker(row) !== null"
                     :title="dispatchBlocker(row) !== null ? dispatchBlockerLabel(row) : undefined"
-                    @click="confirmDrawerDelete(row.node.id)"
-                  >Delete from NAS</button>
+                    @click="selected !== null && startNasDelete(row.node.id, selected)"
+                  >Delete from NAS…</button>
                 </td>
               </tr>
             </tbody>
           </table>
-          <div v-if="confirmState !== null && confirmState.host === 'placement'" class="inline-confirm" role="alertdialog" :aria-label="confirmState.title">
-            <p class="stat__sub" style="margin: 0 0 4px"><strong>{{ confirmState.title }}</strong></p>
-            <p class="stat__sub" style="margin: 0 0 8px">{{ confirmState.body }}</p>
-            <div class="row row--between">
-              <span class="stat__sub faint">nothing destructive runs until you confirm</span>
-              <span class="row">
-                <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
-                <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
-              </span>
-            </div>
-          </div>
           <p class="stat__sub faint">
-            Sync/push jobs stream in the side panel · deletes confirm inline — no second modal
+            Sync/push jobs stream in the side sheet · deletes arm from the job sheet — dry-run plan first, then a typed apply
           </p>
           <details class="hygiene">
             <summary class="stat__sub">Store maintenance…</summary>
             <div class="row row--wrap" style="gap: 6px; margin-top: 8px">
               <template v-for="v in HYGIENE_VERBS" :key="v.kind">
                 <button
-                  v-if="storeNode !== null"
-                  class="btn btn--sm"
-                  :class="v.destructive ? 'btn--ghost' : 'btn--secondary'"
+                  v-if="storeNode !== null && v.destructive"
+                  class="bs-link bs-link--thread"
+                  @click="runHygiene(v.kind, v.perModel)"
+                >{{ v.label }}</button>
+                <button
+                  v-else-if="storeNode !== null"
+                  class="btn btn--secondary btn--sm"
                   @click="runHygiene(v.kind, v.perModel)"
                 >{{ v.label }}</button>
               </template>
@@ -1238,7 +1515,7 @@ onBeforeUnmount(() => {
             {{ job.job.kind }}
             <span class="chip" :class="jobStatusChip(job.job.status).cls">{{ jobStatusChip(job.job.status).label }}</span>
           </h3>
-          <button class="btn btn--secondary btn--sm" @click="closeJob">Close</button>
+          <button class="iconbtn" aria-label="Close job output" @click="closeJob">✕</button>
         </div>
         <p v-if="jobContext !== null" class="stat__sub mono" style="margin: -8px 0 0;">{{ jobContext }}</p>
         <p v-if="jobError" class="banner banner--warn">{{ jobError }}</p>
@@ -1249,29 +1526,46 @@ onBeforeUnmount(() => {
           Serving setups reference selected models — deleting breaks their next start (advisory, never blocks): {{ deleteSetupWarn.setup }}.
         </p>
         <template v-if="sheetSummary !== null">
-          <pre class="joblog mono">{{ sheetSummary }}</pre>
+          <pre class="log joblog mono">{{ sheetSummary }}</pre>
           <details class="rawlog">
             <summary class="stat__sub">raw output — collapsed</summary>
-            <pre class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
+            <pre class="log joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
           </details>
           <p v-if="job.job.kind === 'download-queue'" class="stat__sub faint">summary from the download queue (IR 71 progress fields) · raw output stays in the job record</p>
           <p v-else class="stat__sub faint">hub-parsed transfer progress (IR-131) · raw output stays in the job record</p>
         </template>
-        <pre v-else class="joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
+        <pre v-else class="log joblog mono">{{ job.output.map((o) => o.line).join("\n") || "no output yet…" }}</pre>
         <div v-if="confirmState !== null && confirmState.host === 'job'" class="inline-confirm" role="alertdialog" :aria-label="confirmState.title">
           <p class="stat__sub" style="margin: 0 0 4px"><strong>{{ confirmState.title }}</strong></p>
           <p class="stat__sub" style="margin: 0 0 8px">{{ confirmState.body }}</p>
           <div class="row row--between">
             <span class="stat__sub faint">nothing destructive runs until you confirm</span>
-            <span class="row">
-              <button class="btn btn--ghost btn--sm" @click="dismissConfirm">Cancel</button>
-              <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+            <span class="row" style="gap: 12px;">
+              <button class="bs-link" @click="dismissConfirm">Cancel</button>
+              <button class="bs-link bs-link--thread" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
             </span>
+          </div>
+        </div>
+        <!-- IR-222 armed delete: the dry-run plan settled — arm with a typed confirm. -->
+        <div v-if="armJob !== null" class="inline-confirm" role="alertdialog" :aria-label="`Arm delete of ${armJob.name}`">
+          <p class="stat__sub" style="margin: 0 0 4px"><strong>Plan settled — arm the delete?</strong></p>
+          <p class="stat__sub" style="margin: 0 0 8px">The dry-run plan finished. Arming runs modelctl delete --apply --yes for {{ armJob.name }} — objects, references and staging leave the NAS store.</p>
+          <div class="row" style="gap: 8px;">
+            <input
+              v-model="armName"
+              class="input mono arm-input"
+              type="text"
+              :placeholder="`type ${armJob.name} to arm`"
+              :aria-label="`Type ${armJob.name} to arm the delete`"
+            />
+            <button class="bs-link bs-link--thread" :disabled="armBusy || armName !== armJob.name" @click="runArmDelete">
+              {{ armBusy ? "Deleting…" : "Delete from NAS (--apply --yes)" }}
+            </button>
           </div>
         </div>
         <div v-if="job.job.status === 'running' || job.job.status === 'queued'" class="row row--between sheet__foot">
           <span class="faint">streaming…</span>
-          <button class="btn btn--danger btn--sm" @click="confirmDrawerCancel">Cancel job</button>
+          <button class="bs-link bs-link--thread" @click="confirmDrawerCancel">Cancel job…</button>
         </div>
       </aside>
 
@@ -1280,13 +1574,13 @@ onBeforeUnmount(() => {
     <section v-if="downloadOpen" class="card drawer dl-drawer" aria-label="Download from Hugging Face">
         <div class="card__head">
           <h3>Download from HF to NAS</h3>
-          <button class="btn btn--secondary btn--sm" @click="downloadOpen = false">Close</button>
+          <button class="iconbtn" aria-label="Close download modal" @click="downloadOpen = false">✕</button>
         </div>
         <p v-if="storeNode === null" class="banner banner--warn">
           No online model-ops node (node with the NAS root mounted) — adds queue until one is online.
         </p>
         <div class="field">
-          <label class="stat__sub" for="dl-paste">Hugging Face repos — one owner/model per line (# comments ignored)</label>
+          <label for="dl-paste">Hugging Face repos — one owner/model per line (# comments ignored)</label>
           <textarea
             id="dl-paste"
             v-model="downloadPaste"
@@ -1299,7 +1593,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div class="field">
-          <span class="stat__sub">Downloads to queue ({{ downloadRows.length }})</span>
+          <span class="label">Downloads to queue ({{ downloadRows.length }})</span>
           <p v-if="downloadRows.length === 0" class="stat__sub faint">
             Nothing parsed yet — paste repos above and parse, then tweak names before queueing.
           </p>
@@ -1332,9 +1626,9 @@ onBeforeUnmount(() => {
                     <template v-else>
                       <p v-if="expandError" class="banner banner--warn">{{ expandError }}</p>
                       <template v-if="expandListing !== null">
-                        <div class="row row--wrap">
-                          <button class="btn btn--ghost btn--sm" @click="expandSelected = new Set(expandListing.quants.filter((q) => !q.ambiguous).map((q) => q.tag))">All</button>
-                          <button class="btn btn--ghost btn--sm" @click="expandSelected = new Set()">None</button>
+                        <div class="row row--wrap" style="gap: 12px;">
+                          <button class="bs-link" @click="expandSelected = new Set(expandListing.quants.filter((q) => !q.ambiguous).map((q) => q.tag))">All</button>
+                          <button class="bs-link" @click="expandSelected = new Set()">None</button>
                           <span v-if="expandListing.quants.length === 0" class="stat__sub faint">no GGUF model files found in this repo</span>
                         </div>
                         <div class="expand-grid">
@@ -1356,7 +1650,7 @@ onBeforeUnmount(() => {
                           </label>
                         </div>
                         <div class="field expand-companion">
-                          <label class="stat__sub" for="dl-mtp">MTP draft (companion)</label>
+                          <label for="dl-mtp">MTP draft (companion)</label>
                           <select id="dl-mtp" v-model="expandMtp" class="select">
                             <option value="">Auto (modelctl default)</option>
                             <option v-for="c in expandListing.companions.mtp.candidates" :key="c.path" :value="c.path">{{ c.path }}</option>
@@ -1368,11 +1662,11 @@ onBeforeUnmount(() => {
                             multiple mmproj files without an f16 default — modelctl will refuse this entry
                           </span>
                         </div>
-                        <div class="row">
-                          <button class="btn btn--primary btn--sm" :disabled="expandAddable === 0" @click="applyExpand">
+                        <div class="row" style="gap: 12px;">
+                          <button class="btn btn--secondary btn--sm" :disabled="expandAddable === 0" @click="applyExpand">
                             Add {{ expandAddable }} row{{ expandAddable === 1 ? "" : "s" }}
                           </button>
-                          <button class="btn btn--ghost btn--sm" @click="closeExpand">Cancel</button>
+                          <button class="bs-link" @click="closeExpand">Cancel</button>
                         </div>
                       </template>
                     </template>
@@ -1383,10 +1677,16 @@ onBeforeUnmount(() => {
           </table>
         </div>
         <div class="field">
-          <label class="stat__sub" for="dl-jobs">Parallel jobs</label>
+          <label for="dl-jobs">Parallel jobs</label>
           <input id="dl-jobs" v-model.number="downloadJobs" class="input" type="number" min="1" max="16" />
         </div>
         <p v-if="downloadError" class="banner banner--warn">{{ downloadError }}</p>
+        <p v-if="downloadRows.length > 0" class="banner dl-preflight">
+          <span class="stat__sub">
+            preflight: {{ downloadRows.length }} entr{{ downloadRows.length === 1 ? "y" : "ies" }} · ONE download-queue batch ·
+            dispatched to {{ storeNodeInfo?.name ?? "the store node" }} when idle · resumable staging · companion files included
+          </span>
+        </p>
         <div class="row row--between">
           <span class="stat__sub faint">Always queued · dispatched to the NAS when idle · resumable · companion files included</span>
           <button class="btn btn--primary btn--sm" :disabled="downloadBusy || downloadRows.length === 0" @click="submitDownload">
@@ -1399,7 +1699,7 @@ onBeforeUnmount(() => {
 
     <!-- IRI-020: per-row actions menu (catalog + queue); closes on any outside click -->
     <div v-if="rowMenu !== null" class="rowpop" role="menu" :aria-label="`Actions for ${rowMenu.name}`" :style="{ top: `${rowMenu.y}px`, left: `${rowMenu.x}px` }">
-      <button v-for="it in rowMenuItems" :key="it.act" class="btn btn--ghost btn--sm menu-item" @click="runRowMenu(it.act)">{{ it.label }}</button>
+      <button v-for="it in rowMenuItems" :key="it.act" class="menu-item" :class="{ 'menu-item--thread': isRowMenuDanger(it.act) }" @click="runRowMenu(it.act)">{{ it.label }}</button>
     </div>
 
     <!-- IRI-020: shared confirmation for destructive actions with no drawer
@@ -1408,7 +1708,7 @@ onBeforeUnmount(() => {
       <section class="card confirm-card" role="alertdialog" aria-modal="true" :aria-label="confirmState.title">
         <div class="card__head">
           <h3>{{ confirmState.title }}</h3>
-          <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Close</button>
+          <button class="iconbtn" aria-label="Close confirm" @click="dismissConfirm">✕</button>
         </div>
         <p class="stat__sub" style="margin: 0">{{ confirmState.body }}</p>
         <ul v-if="confirmState.list !== undefined" class="confirm-list">
@@ -1416,9 +1716,9 @@ onBeforeUnmount(() => {
         </ul>
         <div class="row row--between">
           <span class="stat__sub faint">nothing destructive runs until you confirm</span>
-          <div class="row">
+          <div class="row" style="gap: 12px;">
             <button class="btn btn--secondary btn--sm" @click="dismissConfirm">Cancel</button>
-            <button class="btn btn--danger btn--sm" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
+            <button class="bs-link bs-link--thread" :disabled="confirmBusy" @click="runConfirm">{{ confirmBusy ? "Working…" : confirmState.danger }}</button>
           </div>
         </div>
       </section>
@@ -1439,7 +1739,7 @@ onBeforeUnmount(() => {
           <div class="mono faint">{{ r.upstreamUrl }} @ {{ r.commitSha.slice(0, 8) }}</div>
           <div v-if="r.nodeCountMax > 1" class="faint">cluster: {{ r.nodeCountMin }}–{{ r.nodeCountMax }} nodes</div>
         </div>
-        <button class="btn" :disabled="recipeBusy === r.slug" @click="installRecipeCard(r)">{{ recipeBusy === r.slug ? "staging…" : "Install" }}</button>
+        <button class="btn btn--secondary btn--sm" :disabled="recipeBusy === r.slug" @click="installRecipeCard(r)">{{ recipeBusy === r.slug ? "staging…" : "Install" }}</button>
       </div>
       <p v-if="recipes.length === 0" class="muted">catalog empty (unpinned entries stay hidden until the pin pass lands)</p>
       <p v-if="recipeDraft !== null" class="banner banner--ok">{{ recipeDraft.text }}</p>
@@ -1451,6 +1751,16 @@ onBeforeUnmount(() => {
       </details>
     </div>
   </section>
+
+  <!-- IR-222: "clean up disk — run audit" opens the shared per-node drawer
+       (typed confirms live inside it, never dispatched from the link). -->
+  <CleanupDrawer v-if="cleanupNode !== null" :node-id="cleanupNode.id" :node-name="cleanupNode.name" @close="cleanupNode = null" />
+
+  <!-- IR-222: v1.1 refresh-note — live status, catalog size, jobs stream. -->
+  <footer class="refresh-note" aria-label="Refresh status">
+    <span class="dot dot--run" aria-hidden="true"></span>
+    <span>{{ refreshNoteText }}</span>
+  </footer>
 </template>
 
 <style scoped>
@@ -1464,7 +1774,7 @@ onBeforeUnmount(() => {
 .drawer-scrim {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--bg, #000) 55%, transparent);
+  background: var(--overlay);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1476,17 +1786,190 @@ onBeforeUnmount(() => {
   overflow: auto;
   padding: 14px;
 }
+/* Surface/typography come from the shared .log (force-dark console); this
+   only caps the height and wraps long lines. */
 .joblog {
   max-height: 40vh;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  background: var(--surface, transparent);
-  padding: 10px;
-  border-radius: 6px;
 }
 .num {
   text-align: right;
+}
+
+/* ── IR-222 v1.1 page surfaces ─────────────────────────────────────── */
+/* Store strip: compact card body, mockup storebarrow (narrow middle column
+ * so 320px never overflows — PLAN.md gotcha). */
+.strip__body {
+  padding: 12px 18px;
+}
+.storebarrow {
+  grid-template-columns: 52px minmax(0, 140px) auto;
+}
+/* Store-health popover (v1.1 paper-2 surface, explicit width — never
+ * shrink-to-fit); opens under the button, closes on outside press/Escape. */
+.popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 380px;
+  max-width: 80vw;
+  z-index: 45;
+  padding: 16px;
+  background: var(--paper-2);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-panel);
+  animation: pop-rise var(--dur-ui) var(--ease-out);
+}
+@keyframes pop-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .popover { animation: none; }
+}
+
+/* Jobs rows (mockup .jobrow grid on hub data). */
+.jobrows {
+  display: flex;
+  flex-direction: column;
+}
+.jobrow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1.1fr) minmax(180px, 1fr) auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--rule);
+}
+.jobrow:first-child {
+  border-top: 0;
+}
+.jobrow__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.jobrow__name {
+  min-width: 0;
+  font-size: var(--fs-ui);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jobrow__target {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-data-sm);
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jobrow__bar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.jobrow__rate {
+  font-family: var(--font-mono);
+  font-size: var(--fs-data-sm);
+  color: var(--ink-2);
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.jobrow__chip {
+  justify-self: start;
+}
+
+/* Catalog toolbar (bordered hybrid search + chips + sort) and pagerow. */
+.catalog-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 12px;
+}
+.catalog-toolbar .search {
+  flex: 1 1 240px;
+  max-width: 320px;
+}
+.sortsel {
+  width: auto;
+  min-width: 170px;
+  min-height: 44px;
+}
+.pagerow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 18px 14px;
+}
+/* aria-current page button reads as the pressed chip: ink ring via a real
+   border (inset rings live in the shared stylesheet only, never here). */
+.pagerow .bs-filter[aria-current="page"] {
+  border: 1.5px solid var(--ink);
+  padding: 0 10.5px;
+  color: var(--ink);
+}
+.pagerow-gap {
+  padding: 0 2px;
+}
+.catalog-empty {
+  margin: 0;
+  padding: 0 18px 14px;
+}
+.capacityline {
+  display: block;
+}
+.arm-input {
+  max-width: 280px;
+}
+/* Destructive links stay tappable when blocked (dispatch/agent guards). */
+.bs-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ≤900 tier: the jobrow drops its bar/rate columns and the toolbar wraps. */
+html[data-tier="small"] .jobrow {
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+html[data-tier="small"] .jobrow__bar,
+html[data-tier="small"] .jobrow__rate {
+  display: none;
+}
+html[data-tier="small"] .storebarrow {
+  grid-template-columns: 46px minmax(0, 110px) auto;
+}
+html[data-tier="small"] .catalog-toolbar {
+  gap: 8px;
+}
+html[data-tier="small"] .catalog-toolbar .search {
+  min-width: 0;
+  flex-basis: 100%;
+  max-width: none;
+}
+html[data-tier="small"] .sortsel {
+  min-width: 0;
+  flex: 1;
+}
+html[data-tier="small"] .pagerow {
+  padding: 8px 12px 12px;
+}
+html[data-tier="small"] .bulkbar {
+  padding: 8px 12px;
+}
+html[data-tier="small"] .catalog-empty {
+  padding: 0 12px 12px;
 }
 /* IRI-016 (brief §7): real DS rhythm between the modal's field groups, an
    unstretched secondary action, and a proportional numeric input. */
@@ -1511,14 +1994,14 @@ onBeforeUnmount(() => {
 .dlbar {
   flex: 1;
   max-width: 260px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border, #333);
+  height: 6px;
+  border-radius: var(--radius-control);
+  background: var(--border);
   overflow: hidden;
 }
 .dlbar__fill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: var(--accent);
   transition: width 0.6s ease, background-color 0.6s ease;
 }
@@ -1555,18 +2038,32 @@ onBeforeUnmount(() => {
   padding: 6px;
   display: grid;
   gap: 2px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border-strong, #666);
-  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
 }
 .rowpop .menu-item {
   display: block;
   width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
   text-align: left;
-  border: none;
+  font: 400 var(--fs-ui)/1.3 var(--font-sans);
+  color: var(--ink-2);
+  cursor: pointer;
 }
 .rowpop .menu-item:hover {
-  background: var(--surface-2, rgba(127, 127, 127, 0.15));
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.rowpop .menu-item--thread {
+  color: var(--thread-ink);
+}
+.rowpop .menu-item--thread:hover {
+  background: none;
+  color: var(--thread-ink);
+  text-decoration: underline;
 }
 .confirm-card {
   width: min(520px, 92vw);
@@ -1578,13 +2075,18 @@ onBeforeUnmount(() => {
 }
 
 /* IR-210: bulk store-delete selection bar, per-row checkboxes, and the
-   confirm modal's scrollable name list. */
+   confirm modal's scrollable name list. The bar sits between the toolbar and
+   the table inside the catalog card — a thread band, no radius. */
 .bulkbar {
-  margin: 0 0 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--thread);
-  border-radius: var(--radius-sm);
+  margin: 0;
+  padding: 8px 18px;
+  border-top: 1px solid var(--thread);
+  border-bottom: 1px solid var(--thread);
   background: var(--thread-wash);
+}
+.bulkwarn {
+  margin: 0;
+  padding: 8px 18px 0;
 }
 .bulk-col {
   width: 28px;
@@ -1612,11 +2114,12 @@ onBeforeUnmount(() => {
   display: none;
   width: 420px;
   max-width: 80vw;
-  background: var(--surface, #111);
-  border: 1px solid var(--border-strong, #666);
-  border-radius: 4px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.5;
   white-space: normal;
