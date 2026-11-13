@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { clampTipX, hoverIndex } from "../sparkline";
-import { fmtBucket } from "../analytics";
 import type { LensChart } from "../analytics";
 
 const props = defineProps<{
@@ -106,10 +105,16 @@ const xTicks = computed(() => {
   const idx = [...new Set([0, mid, n - 1])];
   return idx.map((i) => {
     const t = props.chart.times[i];
-    const label = t === undefined ? "" : (props.timeFormat !== undefined ? props.timeFormat(t) : fmtBucket(t));
+    const label = t === undefined ? "" : (props.timeFormat !== undefined ? props.timeFormat(t) : shortTime(t));
     return { label, mid: i === mid };
   });
 });
+
+/** Axis-label fallback when no timeFormat is passed: "HH:MM" local. */
+function shortTime(t: number): string {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 </script>
 
 <template>
