@@ -632,14 +632,14 @@ function heroStateView(p: HeroProcess): HeroStateView {
           <!-- IR-220: v1.1 labeled-chart idiom — y column, grid, x labels, legend. -->
           <div class="pwr">
             <div class="pwr__ycol" aria-hidden="true">
-              <span class="pwr__grid" :style="{ top: `${(BAR_TOP / 90) * 100}%` }"></span>
-              <span class="pwr__grid" :style="{ top: `${(((BAR_TOP + BAR_BOTTOM) / 2) / 90) * 100}%` }"></span>
-              <span class="pwr__grid" :style="{ top: `${(BAR_BOTTOM / 90) * 100}%` }"></span>
               <span class="pwr__y" :style="{ top: `${(BAR_TOP / 90) * 100}%` }">240</span>
               <span class="pwr__y" :style="{ top: `${(((BAR_TOP + BAR_BOTTOM) / 2) / 90) * 100}%` }">120</span>
               <span class="pwr__y" :style="{ top: `${(BAR_BOTTOM / 90) * 100}%` }">0</span>
             </div>
             <div class="pwr__plot">
+              <span class="pwr__grid" :style="{ top: `${(BAR_TOP / 90) * 100}%` }"></span>
+              <span class="pwr__grid" :style="{ top: `${(((BAR_TOP + BAR_BOTTOM) / 2) / 90) * 100}%` }"></span>
+              <span class="pwr__grid" :style="{ top: `${(BAR_BOTTOM / 90) * 100}%` }"></span>
               <svg class="powerchart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true" @pointermove="onBarMove" @pointerleave="barHover = null">
                 <rect v-for="(b, i) in powerBars.bars" :key="b.t" :x="barX(i)" :y="barY(b.pct)" :width="barW" :height="barH(b.pct)" fill="var(--ink)" :opacity="barHover === null || barHover.index === i ? 1 : 0.45" />
                 <line x1="0" :y1="BAR_TOP" :x2="600" :y2="BAR_TOP" stroke="var(--ink-3)" stroke-width="1.25" stroke-dasharray="4 3" />
