@@ -70,11 +70,15 @@ baseUrl includes `/v1`; the stored `endpoint` is always canonicalized to the
 
 ### Hub settings (runtime, IRI-019)
 
-The global HF token is defined in the UI (footer gear → Hub settings) or via
+The global HF token is defined in the UI (topbar gear → Hub settings; the
+v1.1 shell moved the gear from the retired footer into the topbar chrome —
+epic IR-214) or via
 `PUT /api/v1/settings/hf-token` (`{ "hfToken": "hf_…" }` sets, `null`
 clears). It lives in the `settings` table, is pushed to online agents via
 `config-update` (offline agents pick it up on their next hello), and always
 wins over the agent's `IRORI_HF_TOKEN`. `GET /api/v1/settings/hf-token` is
 presence-only — the token itself never appears in a response body. The token
 is always optional; when unset, modelctl runs without `HF_TOKEN` and the
-quants listing sends no Authorization header.
+quants listing sends no Authorization header. The modal's fields (HF token,
+snapshot cadence, energy cost, token cost) are unchanged by the v1.1
+restyle — only the surface (underline fields, ink actions) moved.
