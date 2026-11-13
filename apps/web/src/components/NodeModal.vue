@@ -132,12 +132,10 @@ async function copyToken(): Promise<void> {
               ? "Token rotated. The old token stops working at the agent's next reconnect — update /etc/irori/agent.env and restart irori-agent."
               : "Copy the token now — this is the only time it is shown." }}
           </p>
-          <div class="field" style="margin-bottom: 10px">
-            <label>Agent token</label>
-            <div class="row">
-              <input class="input mono" :value="revealedToken" readonly />
-              <button class="btn btn--secondary btn--sm" @click="copyToken">{{ copied ? "copied ✓" : "Copy" }}</button>
-            </div>
+          <div class="bs-field bs-field--mono" style="margin-bottom: 10px">
+            <label class="bs-field__label">Agent token</label>
+            <div class="bs-field__box"><input class="bs-field__input" :value="revealedToken" readonly /></div>
+            <div class="row"><button class="btn btn--secondary btn--sm" @click="copyToken">{{ copied ? "copied ✓" : "Copy" }}</button></div>
           </div>
           <pre class="log" style="margin: 0 0 10px">{{ envBlock }}</pre>
           <div class="field" style="margin-bottom: 10px">
@@ -167,7 +165,7 @@ async function copyToken(): Promise<void> {
         <!-- Create / edit form -->
         <template v-else>
           <div class="stack" style="gap: 10px">
-            <div class="field"><label>Name</label><input v-model="form.name" class="input" placeholder="dgx1" /></div>
+            <div class="bs-field"><label class="bs-field__label">Name</label><div class="bs-field__box"><input v-model="form.name" class="bs-field__input" placeholder="dgx1" /></div></div>
             <div class="cols cols-2" style="gap: 10px">
               <div class="field"><label>Kind</label>
                 <select v-model="form.kind" class="select">
@@ -181,17 +179,17 @@ async function copyToken(): Promise<void> {
                 <p class="stat__sub">Auto-adjusted when serving setups change (head, worker, standalone). A manual choice persists until this node's membership changes.</p>
               </div>
             </div>
-            <div class="field"><label>Host / IP</label><input v-model="form.host" class="input mono" placeholder="10.20.30.5 or dgx1.example.com" /></div>
-            <div class="field"><label>LLM probe ports (comma-separated)</label><input v-model="form.ports" class="input mono" placeholder="8080, 8081" /></div>
-            <div class="field"><label>NAS store root (model-ops nodes)</label><input v-model="form.nasRoot" class="input mono" placeholder="/mnt/nas" /></div>
-            <div class="field">
-              <label>Model cache user (optional)</label>
-              <input v-model="form.cacheUser" class="input mono" placeholder="operator" />
+            <div class="bs-field bs-field--mono"><label class="bs-field__label">Host / IP</label><div class="bs-field__box"><input v-model="form.host" class="bs-field__input" placeholder="10.20.30.5 or dgx1.example.com" /></div></div>
+            <div class="bs-field bs-field--mono"><label class="bs-field__label">LLM probe ports (comma-separated)</label><div class="bs-field__box"><input v-model="form.ports" class="bs-field__input" placeholder="8080, 8081" /></div></div>
+            <div class="bs-field bs-field--mono"><label class="bs-field__label">NAS store root (model-ops nodes)</label><div class="bs-field__box"><input v-model="form.nasRoot" class="bs-field__input" placeholder="/mnt/nas" /></div></div>
+            <div class="bs-field bs-field--mono">
+              <label class="bs-field__label">Model cache user (optional)</label>
+              <div class="bs-field__box"><input v-model="form.cacheUser" class="bs-field__input" placeholder="operator" /></div>
               <p class="stat__sub">Model transfers and serve engines run as this user; it needs its own modelctl and GPU access. Empty = the agent user (root).</p>
             </div>
-            <div class="field">
-              <label>Wake-on-LAN MAC (optional)</label>
-              <input v-model="form.wolMac" class="input mono" placeholder="aa:bb:cc:dd:ee:ff" />
+            <div class="bs-field bs-field--mono">
+              <label class="bs-field__label">Wake-on-LAN MAC (optional)</label>
+              <div class="bs-field__box"><input v-model="form.wolMac" class="bs-field__input" placeholder="aa:bb:cc:dd:ee:ff" /></div>
               <p class="stat__sub">Enables the Wake action (magic packet to the node's /24 broadcast). Empty = cannot wake.</p>
             </div>
           </div>
@@ -217,7 +215,7 @@ async function copyToken(): Promise<void> {
 .backdrop {
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--bg, #000) 55%, transparent);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -229,7 +227,7 @@ async function copyToken(): Promise<void> {
   max-height: 92vh;
   overflow: auto;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius, 8px);
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius-panel);
 }
 </style>
