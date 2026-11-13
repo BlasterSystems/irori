@@ -234,7 +234,7 @@ const hasRetentionHint = computed(() => (chats.value?.capturedWithoutBodies ?? 0
 }
 .turn {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   padding: 8px 10px;
   margin-bottom: 8px;
 }
@@ -269,7 +269,7 @@ const hasRetentionHint = computed(() => (chats.value?.capturedWithoutBodies ?? 0
 .turn__img {
   max-width: 180px;
   max-height: 180px;
-  border-radius: 6px;
+  border-radius: var(--radius-panel);
   border: 1px solid var(--border);
 }
 .turn__tools {
