@@ -108,6 +108,20 @@ describe("CleanupDrawer", () => {
     w.unmount();
   });
 
+  it("follows a settled clean with a fresh audit (IR-240)", async () => {
+    const w = await mountDrawer();
+    vi.useFakeTimers();
+    await w.find("input[aria-label='Type the node name to confirm the clean']").setValue("dgx1");
+    await w.findAll("button").find((b) => b.text().startsWith("Clean"))!.trigger("click");
+    await flush();
+    await vi.advanceTimersByTimeAsync(4200); // clean poll + the follow-up audit poll
+    await flush();
+    const { createJob } = (await import("../src/models")) as unknown as { createJob: ReturnType<typeof vi.fn> };
+    expect(createJob).toHaveBeenCalledWith(UUID, "hygiene-clean", { categories: expect.any(Array), dryRun: false });
+    expect(createJob).toHaveBeenCalledWith(UUID, "hygiene-audit", {});
+    w.unmount();
+  });
+
   it("toggles the weekly safe pass through the api", async () => {
     const w = await mountDrawer();
     const weekly = w.find("input[type='checkbox']");

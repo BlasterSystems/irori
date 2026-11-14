@@ -64,27 +64,31 @@ async function copyHubRunbook(): Promise<void> {
   }
 }
 
-/** IR-204: est. reclaim per disk-finding node — lazy, once per node, silent
- *  on failure (0 hides the est. text). Same shape as ServeView's
- *  hygieneOffers so the two CTAs stay consistent. */
+/** IR-204: est. reclaim per disk-finding node — silent on failure (0 hides
+ *  the est. text). Same shape as ServeView's hygieneOffers so the two CTAs
+ *  stay consistent. IR-240: no once-per-node guard — refetch per
+ *  nodeDiskFindings change and on drawer close, so a post-clean est. shows
+ *  without a reload. */
 const reclaim = ref<Map<string, number>>(new Map());
+async function refreshReclaim(): Promise<void> {
+  for (const row of nodeDiskFindings.value) {
+    reclaim.value.set(row.nodeId, 0);
+    void fetchCleanup(row.nodeId)
+      .then((state) => {
+        const report = state.latestAudit?.report;
+        const categories =
+          report !== null && report !== undefined && Array.isArray((report as { categories?: unknown }).categories)
+            ? (report as { categories: Array<{ reclaimableBytes: number }> }).categories
+            : [];
+        reclaim.value.set(row.nodeId, categories.reduce((sum, c) => sum + c.reclaimableBytes, 0));
+      })
+      .catch(() => reclaim.value.set(row.nodeId, 0));
+  }
+}
 watch(
   nodeDiskFindings,
-  (rows) => {
-    for (const row of rows) {
-      if (reclaim.value.has(row.nodeId)) continue;
-      reclaim.value.set(row.nodeId, 0);
-      void fetchCleanup(row.nodeId)
-        .then((state) => {
-          const report = state.latestAudit?.report;
-          const categories =
-            report !== null && report !== undefined && Array.isArray((report as { categories?: unknown }).categories)
-              ? (report as { categories: Array<{ reclaimableBytes: number }> }).categories
-              : [];
-          reclaim.value.set(row.nodeId, categories.reduce((sum, c) => sum + c.reclaimableBytes, 0));
-        })
-        .catch(() => reclaim.value.set(row.nodeId, 0));
-    }
+  () => {
+    void refreshReclaim();
   },
   { immediate: true },
 );
@@ -94,6 +98,10 @@ watch(
 const cleanupNode = ref<{ id: string; name: string } | null>(null);
 function openCleanup(nodeId: string): void {
   cleanupNode.value = { id: nodeId, name: nodeName(nodeId) };
+}
+function closeCleanup(): void {
+  cleanupNode.value = null;
+  void refreshReclaim();
 }
 </script>
 
@@ -140,7 +148,7 @@ function openCleanup(nodeId: string): void {
       </button>
     </p>
   </section>
-  <CleanupDrawer v-if="cleanupNode !== null" :node-id="cleanupNode.id" :node-name="cleanupNode.name" @close="cleanupNode = null" />
+  <CleanupDrawer v-if="cleanupNode !== null" :node-id="cleanupNode.id" :node-name="cleanupNode.name" @close="closeCleanup" />
 </template>
 
 <style scoped>

@@ -193,7 +193,13 @@ async function runClean(): Promise<void> {
     }
     lastRunOk.value = detail.job.status === "succeeded";
     phase.value = "done";
-    await refresh();
+    if (detail.job.status === "succeeded" && mySeq === seq) {
+      // IR-240: a hygiene-clean never writes an audit row — follow the clean
+      // with a fresh audit (the agent's audit cache is already invalidated)
+      // so rows/chips show post-clean values without a manual Re-audit.
+      await runJob("hygiene-audit", {}).catch(() => null);
+    }
+    if (mySeq === seq) await refresh();
   } catch (err) {
     if (mySeq !== seq) return;
     error.value = err instanceof Error ? err.message : String(err);
