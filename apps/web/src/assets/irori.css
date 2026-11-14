@@ -68,7 +68,7 @@
   --radius-control: 2px; --radius-panel: 4px;
   --hit-min: 44px; --control-sm: 36px;
   --panel-pad: 16px 18px 18px;
-  --sidebar-width: 232px; --content-max: 1360px;
+  --sidebar-width: 232px; --sidebar-width-collapsed: 68px; --content-max: 1360px;
   --grid-cell: 16px; --hairline: 1px; --path-active: 1.5px;
   --dur-press: 150ms; --dur-ui: 200ms;
   --ease-out: cubic-bezier(.22, .61, .36, 1);
@@ -200,9 +200,9 @@ button { font: inherit; color: inherit; }
 @media (min-width: 901px) {
   html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }
   html[data-nav="collapsed"] .bs-sidebar { width: var(--sidebar-width-collapsed, 68px); padding-left: 0; padding-right: 0; }
-  html[data-nav="collapsed"] .bs-sidebar__brand { justify-content: center; padding: 0; }
+  html[data-nav="collapsed"] .bs-sidebar__brand { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; }
   html[data-nav="collapsed"] .bs-lockup__text { display: none; }
-  html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0 auto; transform: rotate(180deg); }
+  html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0; transform: rotate(180deg); }
   html[data-nav="collapsed"] .bs-nav { position: relative; }
   html[data-nav="collapsed"] .bs-nav-item { justify-content: center; padding: 0; gap: 0; }
   html[data-nav="collapsed"] .bs-nav-item::before { left: 5px; }
@@ -211,11 +211,12 @@ button { font: inherit; color: inherit; }
   html[data-nav="collapsed"] .bs-sidebar__tools { padding-left: 8px; padding-right: 8px; }
   html[data-nav="collapsed"] .bs-sidebar__tools > .rangeseg { display: none; }
   html[data-nav="collapsed"] .bs-sidebar__tools .tools-label { display: none; }
-  html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: block; }
+  html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: flex; justify-content: center; }
   html[data-nav="collapsed"] .bs-sidebar__tools .btn { justify-content: center; padding: 0; }
   html[data-nav="collapsed"] .bs-sidebar__tools .tools-cta-label { display: none; }
   html[data-nav="collapsed"] .bs-sidebar__foot { justify-content: center; padding-left: 8px; padding-right: 8px; }
   html[data-nav="collapsed"] .bs-sidebar__status span:not(:first-child) { display: none; }
+  html[data-nav="collapsed"] .bs-sidebar__status { align-items: center; }
 }
 .bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;
   border: 1px solid var(--rule-2); border-radius: var(--radius-control); background: transparent;
