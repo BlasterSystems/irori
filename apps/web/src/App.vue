@@ -23,22 +23,21 @@ import { loadServerVersion, serverCadenceMs, serverTag, serverVersion } from "./
 import { loadCostSettings } from "./cost-settings";
 import { fetchModelsPage } from "./models";
 import { fetchSetups } from "./serve";
-import { DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import { fmtTps, fmtWatts } from "./analytics";
-import { OVERVIEW_RANGES, pickPrimaryPort } from "./overview";
+import { OVERVIEW_RANGES, pickPrimaryPort, snapshotNodeWatts } from "./overview";
 import { overviewRange, setOverviewRange } from "./range";
 
 const { connected } = live;
 
 /** Fleet power now: per reporting node gpu + cpu package + base overhead,
- *  clamped to the GB10 envelope — the same math as the server power analytics. */
+ *  clamped to the GB10 envelope — the same math as the server power analytics
+ *  (shared snapshotNodeWatts; IR-224 S6 uses it for the Overview now-surfaces). */
 const fleetWatts = computed<number | null>(() => {
   let total: number | null = null;
   for (const snap of live.snapshots.values()) {
-    const gpu = (snap.gpus ?? []).reduce((a, g) => a + (g.powerW ?? 0), 0);
-    const cpu = snap.cpu?.packagePowerW ?? 0;
-    if (gpu === 0 && cpu === 0) continue; // nothing readable on this node
-    total = (total ?? 0) + Math.min(gpu + cpu + DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W);
+    const w = snapshotNodeWatts(snap);
+    if (w === null) continue; // nothing readable on this node
+    total = (total ?? 0) + w;
   }
   return total;
 });

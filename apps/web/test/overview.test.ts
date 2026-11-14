@@ -274,11 +274,12 @@ describe("feedLines", () => {
 const OVERVIEW_SRC = readFileSync(new URL("../src/components/OverviewView.vue", import.meta.url), "utf8");
 
 describe("OverviewView source pins", () => {
-  it("keeps the page contract: per-process heroes, nodes grid, one feed, add-node", () => {
+  it("keeps the page contract: per-process heroes, nodes grid, one feed, menu-owned add-node", () => {
     expect(OVERVIEW_SRC).toContain("heroProcesses");
     expect(OVERVIEW_SRC).toContain("statgrid statgrid--6");
     expect(OVERVIEW_SRC).toContain(">Telemetry</h3>");
-    expect(OVERVIEW_SRC).toContain("Add node…</button>");
+    // IR-224 S4: Add node lives in the shell menu — the pagehead has no CTA.
+    expect(OVERVIEW_SRC).not.toContain("Add node…</button>");
     expect(OVERVIEW_SRC).toContain('class="hero-grid section-gap"');
     expect(OVERVIEW_SRC).toContain("fetchLlmHistory(nodeId, range.value)");
   });
@@ -315,9 +316,21 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).not.toContain("appear with the first requests");
   });
 
-  it("width tiers: one range state with two surfaces, sparkline hidden only on small (IR-128)", () => {
-    expect(OVERVIEW_SRC).toContain(`v-if="tier === 'full'" class="seg"`);
-    expect(OVERVIEW_SRC).toContain('class="select range-select"');
+  it("width tiers: menu-owned persisted range, power pinned 24h, sparkline hidden only on small (IR-128, IR-224)", () => {
+    // IR-224 S4/S6: the range lives in the shell menu store (default 24h) —
+    // the pagehead has no range surfaces any more.
+    expect(OVERVIEW_SRC).not.toContain(`v-if="tier === 'full'" class="seg"`);
+    expect(OVERVIEW_SRC).not.toContain('class="select range-select"');
+    expect(OVERVIEW_SRC).toContain("const range = overviewRange;");
+    // IR-224 S6 owner revision: the power card is pinned to the 24 h window —
+    // by default and when 30 m is selected it never follows the menu range.
+    expect(OVERVIEW_SRC).toContain('const POWER_WINDOW: OverviewRange = "24h";');
+    expect(OVERVIEW_SRC).toContain('fetchAnalytics("power", POWER_WINDOW, "node")');
+    expect(OVERVIEW_SRC).toContain("Energy · 24 h");
+    expect(OVERVIEW_SRC).not.toContain("Energy · {{ rangeLabel }}");
+    // Fleet now + per-node barrows read live snapshots, never range buckets.
+    expect(OVERVIEW_SRC).toContain("snapshotNodeWatts");
+    expect(OVERVIEW_SRC).toContain("liveFleetNow");
     expect(OVERVIEW_SRC).toContain("tier !== 'small' && charts.get(p.key) !== undefined");
     expect(OVERVIEW_SRC).toContain('html[data-tier="small"] .hero-grid');
     expect(OVERVIEW_SRC).not.toContain("@media (max-width: 900px)"); // superseded by the tier store

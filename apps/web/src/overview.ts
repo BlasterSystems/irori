@@ -1,4 +1,4 @@
-import { GB10_SYSTEM_ENVELOPE_W, type AnalyticsPoint, type AnalyticsSeries, type HardwareSnapshot, type LlmPortSnapshot, type SseEvent } from "@irori/core";
+import { DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W, type AnalyticsPoint, type AnalyticsSeries, type HardwareSnapshot, type LlmPortSnapshot, type SseEvent } from "@irori/core";
 import { jobLabel } from "./jobs";
 import type { LlmHistoryPoint } from "./api";
 import { fmtBucket, lensChart, type LensChart } from "./analytics";
@@ -24,6 +24,17 @@ export interface HeroData {
   itlP95Ms: number | null;
   /** cached / prompt for the current probe pass; null when counters absent. */
   cacheHitPct: number | null;
+}
+
+/** Live per-node draw (IR-224 S6): GPU + CPU package + base overhead, clamped
+ *  to the GB10 envelope — the same math as the server power analytics. Null
+ *  when the snapshot reports nothing readable (gpu and cpu both 0/absent):
+ *  the now-surfaces must never average stale range buckets. */
+export function snapshotNodeWatts(snap: HardwareSnapshot): number | null {
+  const gpu = (snap.gpus ?? []).reduce((a, g) => a + (g.powerW ?? 0), 0);
+  const cpu = snap.cpu?.packagePowerW ?? 0;
+  if (gpu === 0 && cpu === 0) return null;
+  return Math.min(gpu + cpu + DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W);
 }
 
 /** The port the hero speaks about: serving ports first, busiest decode wins;

@@ -6,7 +6,6 @@ import { live } from "../live";
 import { tier } from "../tiers";
 import HealthBanner from "./HealthBanner.vue";
 import NodeCard from "./NodeCard.vue";
-import NodeModal from "./NodeModal.vue";
 import Tip from "./Tip.vue";
 import LensChartVue from "./LensChart.vue";
 import { fetchAnalytics, fetchLlmHistory, fetchUpdates, setFleetClockCap, type FleetClockCapNode, type LlmHistoryPoint, type UpdatesResponse } from "../api";
@@ -32,6 +31,7 @@ import {
   peakDecode,
   powerBarSlot,
   relativeTime,
+  snapshotNodeWatts,
   TEMP_CRIT_C,
   TEMP_WARN_C,
   tokenTotals,
@@ -40,6 +40,7 @@ import {
   type OverviewRange,
 } from "../overview";
 import { fmtBytes, fmtBucket, fmtTps, fmtWatts, type LensChart } from "../analytics";
+import { overviewRange } from "../range";
 import { thresholds } from "../thresholds";
 import { clampTipX } from "../sparkline";
 
@@ -93,9 +94,13 @@ function fleetOutcomeText(r: FleetClockCapNode): string {
   return r.results.map((x) => (x.ok ? `${x.side.toUpperCase()} ${x.appliedMHz ?? "cleared"}` : `${x.side.toUpperCase()} failed — ${x.error ?? "unknown"}`)).join(" · ");
 }
 
-// ─── range filter (IRI-025): drives the hero charts and the power/token cards
-const range = ref<OverviewRange>("30m");
+// ─── range (IR-224 S6): one persisted range owned by the shell menu (default
+// 24h per the owner gate) — heroes and the token card follow it. The POWER
+// CARD is the owner-revision exception: pinned to the 24 h window (default
+// and 30 m included), it never follows the menu range.
+const range = overviewRange;
 const rangeLabel = computed(() => OVERVIEW_RANGES.find((r) => r.value === range.value)?.label ?? range.value);
+const POWER_WINDOW: OverviewRange = "24h";
 const nasNode = computed<NodeInfo | null>(() => sortedNodes.value.find((n) => n.kind === "nas") ?? null);
 
 // ─── serving processes: one hero card per running setup, detected engines last ──
@@ -246,7 +251,30 @@ const currencySymbol = computed(() => {
   if (tokenCost.value !== null) return CURRENCY_SYMBOL[tokenCost.value.currency];
   return null;
 });
-const fleetNowText = computed(() => (power.value.fleetNow !== null ? fmtWatts(power.value.fleetNow) : "—"));
+const fleetNowText = computed(() => {
+  if (liveFleetNow.value !== null) return fmtWatts(liveFleetNow.value);
+  return power.value.fleetNow !== null ? fmtWatts(power.value.fleetNow) : "—";
+});
+// IR-224 S6: Fleet now and the per-node barrows are NOW surfaces — at 24h the
+// hub returns hour buckets, so they read live snapshots (minute-fresh) and
+// never the range-fetched series.
+const liveNodeWatts = computed(() => {
+  const map = new Map<string, number | null>();
+  for (const n of sparkNodes.value) {
+    const snap = live.snapshots.get(n.id) ?? null;
+    map.set(n.id, snap === null ? null : snapshotNodeWatts(snap));
+  }
+  return map;
+});
+const liveFleetNow = computed(() => {
+  let total: number | null = null;
+  for (const n of sparkNodes.value) {
+    const w = liveNodeWatts.value.get(n.id) ?? null;
+    if (w === null) continue;
+    total = (total ?? 0) + w;
+  }
+  return total;
+});
 const energyKwhText = computed(() => {
   if (energyKwh.value === null) return null;
   const kwh = energyKwh.value;
@@ -295,7 +323,9 @@ async function refreshDownloads(): Promise<void> {
 
 async function refreshCards(): Promise<void> {
   try {
-    const res = await fetchAnalytics("power", range.value, "node");
+    // IR-224 S6: the power card is pinned to the 24 h window — energy, cost,
+    // hourly chart and window avg never shrink with the menu range.
+    const res = await fetchAnalytics("power", POWER_WINDOW, "node");
     rawPower.value = res.series;
     powerGranularity.value = res.granularity;
   } catch {
@@ -332,9 +362,7 @@ watch(feed, async () => {
   if (feedLog.value !== null) feedLog.value.scrollTop = feedLog.value.scrollHeight;
 });
 
-// ─── add node + lifecycle ───────────────────────────────────────────────────
-
-const addOpen = ref(false);
+// ─── lifecycle ──────────────────────────────────────────────────────────────
 
 let processTimer: ReturnType<typeof setInterval> | null = null;
 let cardsTimer: ReturnType<typeof setInterval> | null = null;
@@ -401,7 +429,7 @@ const refreshNoteText = computed(() => {
   if (!live.connected.value) return "Offline — showing the last known state";
   const cadence = serverCadenceMs.value === null ? null : `${Math.round(serverCadenceMs.value / 1000)} s`;
   const parts = [cadence === null ? "Live" : `Live · ${cadence} cadence`];
-  if (power.value.fleetNow !== null) parts.push(`fleet ${fmtWatts(power.value.fleetNow)}`);
+  if (liveFleetNow.value !== null) parts.push(`fleet ${fmtWatts(liveFleetNow.value)}`);
   return parts.join(" · ");
 });
 
@@ -519,20 +547,9 @@ function heroStateView(p: HeroProcess): HeroStateView {
         <span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online · {{ heroProcesses.length }} serving<template v-if="fleetTempData.hottest !== null"> · hottest <span :class="{ hot: fleetTempData.hottest.tempC >= TEMP_WARN_C }">{{ fleetTempData.hottest.tempC }}°C {{ fleetTempData.hottest.name }}</span></template></span>
       </p>
     </div>
-    <div class="row">
-      <!-- IR-128: one shared range state, two surfaces — seg at full, native
-           select below full (mockups/overview-v4.html). -->
-      <div v-if="tier === 'full'" class="seg" role="group" aria-label="History range">
-        <button v-for="r in OVERVIEW_RANGES" :key="r.value" :class="{ 'is-active': range === r.value }" @click="range = r.value">{{ r.label }}</button>
-      </div>
-      <template v-else>
-        <label class="visually-hidden" for="rangeSelect">History range</label>
-        <select id="rangeSelect" v-model="range" class="select range-select">
-          <option v-for="r in OVERVIEW_RANGES" :key="r.value" :value="r.value">{{ r.label }}</option>
-        </select>
-      </template>
-      <button class="btn btn--primary" @click="addOpen = true">Add node…</button>
-    </div>
+    <!-- IR-224 S4/S6: the range control and the Add node CTA live in the shell
+         menu now (sidebar tools; hamburger ≤900; collapsed-rail popover) —
+         the pagehead carries only the title and the fleet summary. -->
   </div>
 
   <!-- IR-203: global infra banner — open fleet-scoped health findings
@@ -616,19 +633,21 @@ function heroStateView(p: HeroProcess): HeroStateView {
       <div class="card__body" style="padding-top: 12px;">
         <div class="statgrid statgrid--3">
           <div class="stat"><span class="stat__label">Fleet now<Tip text="fleet = sparks only · the NAS is excluded (no power telemetry)" /></span><span class="stat__value">{{ fleetNowText }}</span></div>
-          <div class="stat"><span class="stat__label">Energy · {{ rangeLabel }}<Tip text="average draw across the window" /></span><span class="stat__value">{{ energyKwhText ?? "—" }}<template v-if="energyKwhText !== null"> <span class="stat__sub" style="display: inline;">kWh</span></template></span></div>
-          <div class="stat"><span class="stat__label">Cost · {{ rangeLabel }}<Tip v-if="energyCost !== null" :text="`@ ${energyCost.pricePerKwh} ${CURRENCY_SYMBOL[energyCost.currency]}/kWh · hub setting`" /></span><span class="stat__value">{{ costText ?? "—" }}</span></div>
+          <div class="stat"><span class="stat__label">Energy · 24 h<Tip text="average draw across the pinned 24 h window — the power card does not follow the menu range (IR-224)" /></span><span class="stat__value">{{ energyKwhText ?? "—" }}<template v-if="energyKwhText !== null"> <span class="stat__sub" style="display: inline;">kWh</span></template></span></div>
+          <div class="stat"><span class="stat__label">Cost · 24 h<Tip v-if="energyCost !== null" :text="`@ ${energyCost.pricePerKwh} ${CURRENCY_SYMBOL[energyCost.currency]}/kWh · hub setting`" /></span><span class="stat__value">{{ costText ?? "—" }}</span></div>
         </div>
         <div style="margin-top: 10px;">
-          <div v-for="n in power?.nodes ?? []" :key="n.key" class="barrow">
-            <span>{{ n.label }}</span>
-            <div class="bar"><div class="bar__fill" :style="{ width: powerBarPct(n.watts) + '%' }"></div></div>
-            <span class="val">{{ fmtWatts(n.watts) }}</span>
+          <!-- IR-224 S6: per-node draws are live snapshot reads (minute-fresh),
+               never the range-fetched hour buckets. -->
+          <div v-for="n in sparkNodes" :key="n.id" class="barrow">
+            <span>{{ n.name }}</span>
+            <div class="bar"><div class="bar__fill" :style="{ width: powerBarPct(liveNodeWatts.get(n.id) ?? null) + '%' }"></div></div>
+            <span class="val">{{ liveNodeWatts.get(n.id) === null ? "—" : fmtWatts(liveNodeWatts.get(n.id)) }}</span>
           </div>
-          <p v-if="power?.nodes.length === 0" class="stat__sub">no power data yet</p>
+          <p v-if="liveNodeWatts.size === 0 || [...liveNodeWatts.values()].every((w) => w === null)" class="stat__sub">waiting for node telemetry</p>
         </div>
         <div style="margin-top: 14px;">
-          <span class="label">fleet draw<Tip text="selected window · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average · hover a bar for its slot and energy" /></span>
+          <span class="label">fleet draw<Tip text="pinned 24 h window · grey dashes = 240 W envelope (per-node clamp) · red dashes = window average · hover a bar for its slot and energy" /></span>
           <!-- IR-220: v1.1 labeled-chart idiom — y column, grid, x labels, legend. -->
           <div class="pwr">
             <div class="pwr__ycol" aria-hidden="true">
@@ -649,7 +668,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
             </div>
           </div>
           <div class="pwr pwr__xrow" aria-hidden="true">
-            <span>−{{ rangeLabel }}</span>
+            <span>−24 h</span>
             <span class="pwr__now">now</span>
           </div>
           <div class="bs-legend" aria-hidden="true" style="margin-top: 8px;">
@@ -777,8 +796,6 @@ function heroStateView(p: HeroProcess): HeroStateView {
     <span class="dot dot--run" aria-hidden="true"></span>
     <span>{{ refreshNoteText }}</span>
   </footer>
-
-  <NodeModal v-if="addOpen" mode="create" @close="addOpen = false" />
 </template>
 
 <style scoped>

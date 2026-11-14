@@ -76,15 +76,18 @@ it("UsageView keeps the DS section vocabulary (M8)", () => {
   expect(src).toContain("live.connected");
 });
 
-it("OverviewView keeps the page vocabulary: pagehead, card grid, first-run ghost, add node", () => {
+it("OverviewView keeps the page vocabulary: pagehead, card grid, first-run ghost", () => {
   const src = readFileSync(new URL("../src/components/OverviewView.vue", import.meta.url), "utf8");
-  for (const cls of ["pagehead", "cols-3", "ghost-grid", "btn--primary"]) {
+  // IR-224 S4/S6: the range control and the Add node CTA live in the shell
+  // menu — the pagehead carries the title and the fleet summary only.
+  for (const cls of ["pagehead", "cols-3", "ghost-grid"]) {
     expect(src).toContain(cls);
   }
+  expect(src).not.toContain("Add node…");
+  expect(src).not.toContain("<NodeModal");
   // IRI-010: the empty state is the mockup's first-run ghost; node management
-  // moved into the NodeModal instead of a pointer at the API.
+  // lives in the shell-level NodeModal (reachable from any route).
   expect(src).toContain("no nodes yet");
-  expect(src).toContain("<NodeModal");
 });
 
 it("App pins the v1.1 shell geometry: sidebar column, sticky paper-2 topbar", () => {
