@@ -274,6 +274,26 @@ describe("feedLines", () => {
     const lines = feedLines(events, nodeName);
     expect(lines.map((l) => l.text)).toEqual(["spark1 · download-queue 2 models started"]);
   });
+
+  it("appends the queue row's reason to a failed download-queue batch (IR-244)", () => {
+    const events: SseEvent[] = [
+      {
+        type: "job",
+        serverTimeMs: 1,
+        nodeId: "a",
+        kind: "download-queue",
+        status: "failed",
+        durationMs: 1000,
+        params: { downloads: [{ source: "brandonmusic/Inkling-2-Small-NVFP4-CSF-Flare", name: "Inkling-2-Small-NVFP4-CSF-Flare" }] },
+      } as SseEvent,
+    ];
+    const reason = "ManifestError: cannot infer a runtime: repository has no safetensors, bin, or GGUF weights";
+    const lines = feedLines(events, nodeName, 30, undefined, (n) => (n === "Inkling-2-Small-NVFP4-CSF-Flare" ? reason : null));
+    expect(lines[0]!.text).toBe(`spark1 · download-queue Inkling-2-Small-NVFP4-CSF-Flare failed · 1s · ${reason}`);
+    // No matching row / other kinds: text unchanged.
+    const plain = feedLines(events, nodeName, 30);
+    expect(plain[0]!.text).toBe("spark1 · download-queue Inkling-2-Small-NVFP4-CSF-Flare failed · 1s");
+  });
 });
 
 // ─── source pins (DOM-free, per chrome-markup convention) ───────────────────

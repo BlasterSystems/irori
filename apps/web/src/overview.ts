@@ -396,16 +396,26 @@ export function feedLines(
   cap = 30,
   /** IR-102: job context (node id + kind + params) for job-progress labels. */
   jobById?: (jobId: string) => { nodeId: string; kind: string; params?: Record<string, unknown> } | undefined,
+  /** IR-244: queue-row errors for failed download-queue terminal lines. */
+  downloadError?: (name: string) => string | null,
 ): FeedLine[] {
   const lines: FeedLine[] = [];
   for (const event of events) {
     const node = "nodeId" in event && typeof event.nodeId === "string" ? nodeName(event.nodeId) : "node";
     switch (event.type) {
       case "job": {
-        lines.push({
-          t: event.serverTimeMs,
-          text: `${node} · ${event.kind}${jobLabel(event.params)} ${event.status === "running" ? "started" : event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}`,
-        });
+        let text = `${node} · ${event.kind}${jobLabel(event.params)} ${event.status === "running" ? "started" : event.status}${event.durationMs !== null ? ` · ${fmtDuration(event.durationMs)}` : ""}`;
+        // IR-244: a failed batch's reason lives in the queue rows (the
+        // job-progress frames that carried it are transient, cap 120).
+        if (event.kind === "download-queue" && event.status === "failed" && downloadError !== undefined) {
+          const params = (event as { params?: { downloads?: Array<{ name?: unknown }> } }).params;
+          const names = Array.isArray(params?.downloads)
+            ? params!.downloads!.map((d) => (typeof d?.name === "string" ? d.name : null)).filter((n): n is string => n !== null)
+            : [];
+          const err = names.map((n) => downloadError(n)).find((e) => typeof e === "string" && e.length > 0) ?? null;
+          if (err !== null) text += ` · ${err}`;
+        }
+        lines.push({ t: event.serverTimeMs, text });
         break;
       }
       case "job-progress": {

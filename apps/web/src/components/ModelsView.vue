@@ -1414,6 +1414,9 @@ onBeforeUnmount(() => {
                 <span class="tip__box" role="tooltip">{{ e.error }}</span>
               </span>
               <span v-else class="chip" :class="downloadStatusChip(e.status).cls">{{ downloadStatusChip(e.status).label }}</span>
+              <!-- IR-244: the reason is visible text, not hover-only; the
+                   tooltip keeps the untruncated message. -->
+              <div v-if="e.error !== null && e.error !== ''" class="dlerr" :title="e.error">{{ e.error }}</div>
             </td>
             <td class="num" style="width: 44px">
               <button class="btn btn--ghost btn--sm rowopts" :aria-label="`Actions for ${e.name}`" @click="openRowMenu('queue', e.id, e.name, $event)">⋯</button>
@@ -2025,6 +2028,17 @@ html[data-tier="small"] .catalog-empty {
 .dlbar__speed--slow { color: var(--warning); }
 .dlbar__speed--ok { color: var(--accent); }
 .dlbar__speed--fast { color: var(--success); }
+/* IR-244: failed-row reason as visible one-line text (full text in the
+   title/tooltip) — contained so a long ManifestError cannot floor the column. */
+.dlerr {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--warning);
+}
 @media (prefers-reduced-motion: reduce) {
   .dlbar__fill, .dlbar__speed { transition: none; }
 }
