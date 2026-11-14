@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { HardwareSnapshot, NodeInfo, SetupInfo } from "@irori/core";
-import { CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries, type Currency } from "@irori/core";
+import { analyticsRangeMs, CURRENCY_SYMBOL, GB10_SYSTEM_ENVELOPE_W, type AnalyticsSeries, type Currency } from "@irori/core";
 import { live } from "../live";
 import { tier } from "../tiers";
 import HealthBanner from "./HealthBanner.vue";
@@ -14,6 +14,7 @@ import { downloadBytesLine, downloadEntryEta, downloadProgressPct, downloadSpeed
 import { fetchSetups } from "../serve";
 import { serverCadenceMs } from "../version";
 import { fmtTokens } from "../usage";
+import { overviewTokenTiles } from "../tokens-data";
 import { energyCost, tokenCost } from "../cost-settings";
 import {
   binFleetPower,
@@ -237,15 +238,59 @@ const power = computed(() => computePower(rawPower.value.filter((s) => sparkIds.
 const fleetPoints = computed(() => fleetPowerSeries(rawPower.value, sparkIds.value));
 const powerBars = computed(() => binFleetPower(fleetPoints.value, granularityMs(powerGranularity.value)));
 const energyKwh = computed(() => fleetEnergyKwh(fleetPoints.value, granularityMs(powerGranularity.value)));
-const tokenSum = computed(() => tokenTotals(rawTokens.value, sparkIds.value));
+// IR-224 S7 (IR-231): all-nodes fleet scope — the server aggregate sums every
+// node with ledger rows; the old NAS fold was spark-only (documented change).
+const allNodeIds = computed(() => new Set(sortedNodes.value.map((n) => n.id)));
+const tokenSum = computed(() => tokenTotals(rawTokens.value, allNodeIds.value));
+const tokenGranularity = ref<"minute" | "hour" | "day">("hour");
+const prevTokens = ref<AnalyticsSeries[]>([]);
+const prevTokenSum = computed(() => tokenTotals(prevTokens.value, allNodeIds.value));
+const tokenBuckets = computed(() => {
+  const map = new Map<number, number>();
+  for (const s of rawTokens.value) {
+    for (const p of s.points) {
+      const total = (p.generated ?? 0) + (p.prompt ?? 0);
+      map.set(p.t, (map.get(p.t) ?? 0) + total);
+    }
+  }
+  return [...map.entries()].map(([t, total]) => ({ t, total }));
+});
+const busiestBucket = computed(() => {
+  let best: { t: number; total: number } | null = null;
+  for (const b of tokenBuckets.value) if (best === null || b.total > best.total) best = b;
+  return best;
+});
+const tokenTiles = computed(() =>
+  overviewTokenTiles(
+    {
+      total: tokenSum.value.input + tokenSum.value.generated,
+      generated: tokenSum.value.generated,
+      prompt: tokenSum.value.input,
+      cached: tokenSum.value.cached,
+    },
+    prevTokens.value.length === 0
+      ? null
+      : {
+          total: prevTokenSum.value.input + prevTokenSum.value.generated,
+          generated: prevTokenSum.value.generated,
+          prompt: prevTokenSum.value.input,
+          cached: prevTokenSum.value.cached,
+        },
+    tokenCostMinor.value,
+    tokenCostCurrency.value,
+    {
+      windowHours: analyticsRangeMs(range.value) / 3_600_000,
+      busiest:
+        busiestBucket.value === null
+          ? null
+          : { total: busiestBucket.value.total, label: fmtBucket(busiestBucket.value.t, tokenGranularity.value) },
+      dayBuckets: tokenGranularity.value === "day",
+    },
+  ),
+);
 // IRI-072: server-priced; the web formats only.
 const tokenCostMinor = ref<number | null>(null);
 const tokenCostCurrency = ref<Currency | null>(null);
-const tokenCostLabel = computed(() =>
-  tokenCostMinor.value === null || tokenCostCurrency.value === null
-    ? null
-    : `≈ ${CURRENCY_SYMBOL[tokenCostCurrency.value]}${(tokenCostMinor.value / 100).toFixed(2)}`,
-);
 const currencySymbol = computed(() => {
   if (energyCost.value !== null) return CURRENCY_SYMBOL[energyCost.value.currency];
   if (tokenCost.value !== null) return CURRENCY_SYMBOL[tokenCost.value.currency];
@@ -283,12 +328,6 @@ const energyKwhText = computed(() => {
 const costText = computed(() => {
   if (energyKwh.value === null || energyCost.value === null) return null;
   return `≈ ${CURRENCY_SYMBOL[energyCost.value.currency]}${(energyKwh.value * energyCost.value.pricePerKwh).toFixed(2)}`;
-});
-const tokenCostText = computed(() => tokenCostLabel.value);
-const tokenPriceTip = computed(() => {
-  if (tokenCost.value === null) return "";
-  const s = CURRENCY_SYMBOL[tokenCost.value.currency];
-  return `same period as the power chart · prices: input ${s}${tokenCost.value.input} · cached ${s}${tokenCost.value.cached} · output ${s}${tokenCost.value.output} per Mtok`;
 });
 const tokenCostTip = computed(() => {
   if (tokenCost.value === null) return "";
@@ -334,12 +373,18 @@ async function refreshCards(): Promise<void> {
   try {
     const res = await fetchAnalytics("tokens", range.value, "node");
     rawTokens.value = res.series;
+    tokenGranularity.value = res.granularity;
     // IRI-072: cost is computed server-side (per-model pricing) — the web
     // only formats.
     tokenCostMinor.value = res.costMinor;
     tokenCostCurrency.value = res.costCurrency;
+    // IR-224 S7: ONE prev-window fetch feeds every delta tile (same window
+    // shifted back one range — the IRI-075 idiom).
+    const prev = await fetchAnalytics("tokens", range.value, "node", { offsetMs: analyticsRangeMs(range.value) });
+    prevTokens.value = prev.series;
   } catch {
     // Ledger unavailable — the token stats stay empty.
+    prevTokens.value = [];
   }
   try {
     const page = await fetchModelsPage(1, "", "recent");
@@ -432,11 +477,6 @@ const refreshNoteText = computed(() => {
   if (liveFleetNow.value !== null) parts.push(`fleet ${fmtWatts(liveFleetNow.value)}`);
   return parts.join(" · ");
 });
-
-/** IR-220: token tiles sanity — cached can exceed prompt on capture gaps
- *  (cache reads without a logged prompt); the tile never shows that. */
-const cachedShown = computed(() => Math.min(tokenSum.value.cached, tokenSum.value.input));
-const cachedClamped = computed(() => tokenSum.value.cached > tokenSum.value.input);
 
 function showTtft(h: HeroData): boolean {
   return h.ttftP95Ms !== null || h.e2eP95Ms !== null;
@@ -705,15 +745,26 @@ function heroStateView(p: HeroProcess): HeroStateView {
           <div class="bar" style="margin-top: 6px;"><div class="bar__fill" :style="{ width: (downloadProgressPct(activeDownload) ?? 0) + '%' }"></div></div>
           <p v-if="downloadLineText !== null" class="stat__sub" style="margin-top: 4px;">{{ downloadLineText }}</p>
         </div>
-        <hr class="rule" />
-        <div class="row row--between">
-          <span class="label">Tokens · {{ rangeLabel }}<Tip v-if="tokenCost !== null" :text="tokenPriceTip" /></span>
-        </div>
-        <div class="statgrid" style="margin-top: 8px;">
-          <div class="stat"><span class="stat__label">Input</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.input) }}</span></div>
-          <div class="stat"><span class="stat__label">Cached</span><span class="stat__value stat__value--sm">{{ fmtTokens(cachedShown) }}</span><span v-if="cachedClamped" class="stat__sub">capture gap — capped at input</span></div>
-          <div class="stat"><span class="stat__label">Output</span><span class="stat__value stat__value--sm">{{ fmtTokens(tokenSum.generated) }}</span></div>
-          <div class="stat"><span class="stat__label">Cost<Tip v-if="tokenCost !== null" :text="tokenCostTip" /></span><span class="stat__value stat__value--sm">{{ tokenCostText ?? "—" }}</span></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- IR-224 S7 (IR-231): Token stats — own row directly below the NAS card
+       (owner second pass); the NAS keeps models/store. All-nodes fleet scope
+       (documented change from the spark-only fold); deltas come from one
+       prev-window fetch; the card follows the menu range. -->
+  <section class="hero-grid section-gap">
+    <article class="card">
+      <div class="card__head"><h3>Token stats</h3><span class="chip">■ recorded · token ledger · last {{ rangeLabel }}</span></div>
+      <div class="card__body" style="padding-top: 12px;">
+        <div class="statgrid statgrid--4">
+          <div v-for="t in tokenTiles" :key="t.label" class="stat">
+            <span class="stat__label">{{ t.label }}<Tip v-if="t.label === 'Cost' && tokenCost !== null" :text="tokenCostTip" /></span>
+            <span class="stat__value">{{ t.value }}</span>
+            <span v-if="t.sub !== null" class="stat__sub">{{ t.sub }}</span>
+            <span v-if="t.deltaPct !== null" class="stat__delta" :class="t.deltaPct >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPct * 10) / 10) }}% vs prev. {{ rangeLabel }}</span>
+            <span v-else-if="t.deltaPts !== null" class="stat__delta" :class="t.deltaPts >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPts * 10) / 10) }} pts vs prev. {{ rangeLabel }}</span>
+          </div>
         </div>
       </div>
     </article>

@@ -123,3 +123,97 @@ export function modelsCsv(models: Array<{ model: string; total: number; generate
 export function fmtHitPct(v: number | null | undefined): string {
   return v === null || v === undefined ? "—" : `${v.toFixed(1)}%`;
 }
+
+// ─── Overview Token stats card (IR-224 S7 / IR-231) ─────────────────────────
+
+export interface OverviewTokenTile {
+  label: string;
+  value: string;
+  sub: string | null;
+  /** % change vs the previous window — Total, Generated and Prompt only. */
+  deltaPct: number | null;
+  /** Points change vs the previous window — Cache hit only. */
+  deltaPts: number | null;
+}
+
+/** Neutral totals shape the Overview card consumes (the web's spark-fold
+ *  helper and the server fleet aggregate both map onto it). */
+export interface OverviewTokenTotals {
+  total: number;
+  generated: number;
+  prompt: number;
+  cached: number;
+}
+
+function pctDelta(cur: number, prev: number | null | undefined): number | null {
+  if (prev === null || prev === undefined || prev <= 0) return null;
+  return ((cur - prev) / prev) * 100;
+}
+
+function hitPctOf(t: OverviewTokenTotals | null): number | null {
+  return t === null || t.prompt <= 0 ? null : (t.cached / t.prompt) * 100;
+}
+
+/**
+ * The eight Overview token tiles: Total, Generated, Prompt (input), Cache
+ * hit, Output:input, Cost, Average per hour, Busiest hour/day. Deltas come
+ * from ONE previous-window fetch (Total/Generated/Prompt in %, Cache hit in
+ * points); the folds are client-side. `fleet === null` → coverage reasons,
+ * never dash-filled labels (owner rule). Cost is server-priced (IRI-072).
+ */
+export function overviewTokenTiles(
+  fleet: OverviewTokenTotals | null,
+  prev: OverviewTokenTotals | null,
+  costMinor: number | null,
+  costCurrency: string | null,
+  opts: { windowHours: number; busiest: { total: number; label: string } | null; dayBuckets: boolean },
+): OverviewTokenTile[] {
+  const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
+  const tile = (label: string, value: string, sub: string | null, deltaPct: number | null = null, deltaPts: number | null = null): OverviewTokenTile =>
+    ({ label, value, sub, deltaPct, deltaPts });
+  if (fleet === null) {
+    return [
+      tile("Total tokens", "no token counters in range", null),
+      tile("Generated", "—", null),
+      tile("Prompt (input)", "—", null),
+      tile("Cache hit", "—", null),
+      tile("Output : input", "—", null),
+      tile("Cost", costCurrency === null ? "Configure pricing" : "no data", null),
+      tile("Average per hour", "—", null),
+      tile(opts.dayBuckets ? "Busiest day" : "Busiest hour", "—", null),
+    ];
+  }
+  const sym = costCurrency === null ? "" : CURRENCY_SYMBOLS[costCurrency] ?? "";
+  const cost = costMinor === null
+    ? costCurrency === null ? "Configure pricing" : "no data"
+    : `≈ ${sym}${(costMinor / 100).toFixed(2)}`;
+  const hit = hitPctOf(fleet);
+  const prevHit = hitPctOf(prev);
+  const ratio = fleet.generated > 0 ? `1 : ${Math.max(1, Math.round(fleet.prompt / fleet.generated))}` : "—";
+  const avg = opts.windowHours > 0 ? fmtCount(fleet.total / opts.windowHours) : "—";
+  return [
+    tile("Total tokens", fmtCount(fleet.total), "generated plus prompt", pctDelta(fleet.total, prev?.total)),
+    tile("Generated", fmtCount(fleet.generated), null, pctDelta(fleet.generated, prev?.generated)),
+    tile(
+      "Prompt (input)",
+      fmtCount(fleet.prompt),
+      `${fmtCount(fleet.cached)} cached · ${fmtCount(Math.max(0, fleet.prompt - fleet.cached))} computed`,
+      pctDelta(fleet.prompt, prev?.prompt),
+    ),
+    tile(
+      "Cache hit",
+      fmtHitPct(hit),
+      hit === null ? null : `${fmtCount(fleet.cached)} prefill tokens saved`,
+      null,
+      hit !== null && prevHit !== null ? Math.round((hit - prevHit) * 10) / 10 : null,
+    ),
+    tile("Output : input", ratio, null),
+    tile("Cost", cost, "per-model pricing, server-side"),
+    tile("Average per hour", avg, opts.windowHours > 0 ? `over ${opts.windowHours} h tracked` : null),
+    tile(
+      opts.dayBuckets ? "Busiest day" : "Busiest hour",
+      opts.busiest === null ? "—" : fmtCount(opts.busiest.total),
+      opts.busiest === null ? null : opts.busiest.label,
+    ),
+  ];
+}

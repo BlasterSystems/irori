@@ -326,8 +326,14 @@ html[data-tier="small"] .bs-perf .bs-perf__sep--model { display: none; }
 /* ── Stats / data ──────────────────────────────────────────────────── */
 .statgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3) var(--space-4); }
 .statgrid--3 { grid-template-columns: repeat(3, 1fr); }
+.statgrid--4 { grid-template-columns: repeat(4, 1fr); }
 .statgrid--6 { grid-template-columns: repeat(6, 1fr); }
 .statgrid--7 { grid-template-columns: repeat(7, 1fr); }
+/* IR-224 S7: DS-calm delta lines — mono ink-2 with a direction glyph, never a
+ * coloured fill (no new colour roles). */
+.stat__delta { display: block; font-family: var(--font-mono); font-size: var(--fs-label-sm); letter-spacing: .02em; color: var(--muted); margin-top: 4px; }
+.stat__delta.up::before { content: "▲ "; font-size: 9px; }
+.stat__delta.down::before { content: "▼ "; font-size: 9px; }
 .stat__label { font-family: var(--font-mono); font-size: var(--fs-label-sm); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--faint); display: block; }
 .stat__value { font-family: var(--font-mono); font-size: var(--fs-stat); font-weight: 400; line-height: 1.2; margin-top: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /* IR-196: a statgrid item's default min-width:auto lets a nowrap value push
