@@ -30,6 +30,10 @@ it("App keeps the DS v1.1 shell: sidebar lockup, nav, topbar chrome", () => {
   for (const cls of ["bs-sidebar", "bs-lockup", "bs-lockup__glyph", "mark-node", "mark-line", "mark-square", "bs-lockup__name", "bs-lockup__endorse", "bs-nav", "bs-nav-item", "aria-current", "bs-sidebar__foot"]) {
     expect(appSource).toContain(cls);
   }
+  // IR-234: the endorse line is the short BLASTERSYSTEMS mark — the full
+  // "A BlasterSystems product" ran 24px under the collapse chevron.
+  expect(appSource).toContain('>BLASTERSYSTEMS</span>');
+  expect(appSource).not.toContain('A BlasterSystems product');
   expect(appSource).toContain("irori-theme");
   // IRI-025: no status chip while healthy; the warn OFFLINE chip is the only state.
   expect(appSource).toContain('v-if="!connected"');
