@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { createDbHandle, nodes, type Db, type DbHandle } from "@irori/db";
-import { breaches, metricValue } from "../src/health.js";
+import { breaches, diskOriginSuffix, metricValue } from "../src/health.js";
 import { renderPrometheus, type MetricsNode } from "../src/metrics.js";
 import { createHealthService } from "../src/health.js";
 import { createEventJournalService } from "../src/event-journal.js";
@@ -310,6 +310,37 @@ d("hub disk rule (IR-201, db integration)", () => {
     pct = 50;
     await health.sweep([], new Set(), new Map());
     expect((await health.findings()).filter((f) => f.metric === "hub_disk_pct")).toHaveLength(0);
+  });
+
+  it("labels NAS-sourced disk pressure and re-derives the mount at read time (IR-242)", async () => {
+    const nodeId = randomUUID();
+    await db.insert(nodes).values({ id: nodeId, name: "nasful", kind: "spark", role: "head", host: "nasful.local", agentTokenHash: "x".repeat(64), agentTokenEnc: "y".repeat(64) }).onConflictDoNothing();
+    const sink: { sseEvents: unknown[] } = { sseEvents: [] };
+    const health = makeService(sink, async () => null);
+    await health.ensureSeed();
+    const nas = makeSnapshot({ storage: [
+      { mount: "/", fs: "ext4", totalBytes: 1e12, usedBytes: 0.5e12, readBps: null, writeBps: null, device: null },
+      { mount: "/mnt/nas", fs: "cifs", totalBytes: 16e12, usedBytes: 14e12, readBps: null, writeBps: null, device: null },
+    ] });
+    await health.onSnapshot(nodeId, nas);
+    let open = (await health.findings()).filter((f) => f.metric === "disk_pct" && f.nodeId === nodeId);
+    expect(open).toHaveLength(1);
+    expect(open[0]!.summary).toContain("(NAS share /mnt/nas)");
+    const evt = sink.sseEvents.find((e) => (e as { metric?: string }).metric === "disk_pct") as { summary?: string } | undefined;
+    expect(evt?.summary).toContain("(NAS share /mnt/nas)");
+
+    // Local ext4 becomes the max: the label disappears without a reload.
+    const local = makeSnapshot({ storage: [{ mount: "/", fs: "ext4", totalBytes: 1e12, usedBytes: 0.9e12, readBps: null, writeBps: null, device: null }] });
+    await health.onSnapshot(nodeId, local);
+    open = (await health.findings()).filter((f) => f.metric === "disk_pct" && f.nodeId === nodeId);
+    expect(open[0]!.summary).not.toContain("NAS share");
+
+    // Pure helper: no measurable mounts and non-disk metrics carry no suffix.
+    expect(diskOriginSuffix("disk_pct", makeSnapshot())).toBe("");
+    expect(diskOriginSuffix("gpu_temp_c", nas)).toBe("");
+
+    await health.onSnapshot(nodeId, makeSnapshot({ storage: [{ mount: "/", fs: "ext4", totalBytes: 1e12, usedBytes: 0.1e12, readBps: null, writeBps: null, device: null }] }));
+    expect((await health.findings()).filter((f) => f.metric === "disk_pct" && f.nodeId === nodeId)).toHaveLength(0);
   });
 
   it("treats a failed gauge as not measurable and tolerates an absent dep", async () => {
