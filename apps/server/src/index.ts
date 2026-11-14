@@ -41,7 +41,7 @@ import { createSetupsService, type SetupsService } from "./setups-service.js";
 import { createBenchService, type BenchService } from "./bench-service.js";
 import { createAnalyticsService, type AnalyticsService } from "./analytics.js";
 import { createCleanupService, weeklySafePassParams, type CleanupService } from "./cleanup-service.js";
-import { createInventoryService, type InventoryService } from "./inventory-service.js";
+import { createInventoryService, inventoryStale, type InventoryService } from "./inventory-service.js";
 import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
 import { type CleanupEntry } from "./cleanup-service.js";
 import { createEnergyEngine } from "./energy.js";
@@ -590,6 +590,46 @@ async function boot(): Promise<void> {
     });
   }, 3_600_000);
   hygieneScheduler.unref();
+
+  // IR-243: daily models-inventory sweep — the Overview Updates panel reads
+  // the per-node report, and nothing re-collected it after the initial manual
+  // refresh (mutating job settles delete the row). Online nodes with a stale
+  // or missing report; a busy node's one-active-per-node 409 retries next
+  // tick. Same scriptPaths assembly as the POST /models/refresh route.
+  const INVENTORY_DAY_MS = 24 * 3_600_000;
+  const inventoryScheduler = setInterval(() => {
+    void dbHandle?.isHealthy().then(async (healthy) => {
+      if (!healthy || state.jobs === null || state.setups === null) return;
+      try {
+        let scriptPaths: string[] = [];
+        try {
+          const setups = await state.setups.list();
+          for (const s of setups) {
+            if (typeof s.scriptStart === "string") scriptPaths.push(s.scriptStart);
+            if (typeof s.scriptStop === "string") scriptPaths.push(s.scriptStop);
+          }
+          scriptPaths = [...new Set(scriptPaths)].slice(0, 50);
+        } catch {
+          scriptPaths = [];
+        }
+        for (const nodeId of hub?.online() ?? []) {
+          const inv = await state.inventory?.get(nodeId).catch(() => null);
+          if (!inventoryStale(inv, Date.now(), INVENTORY_DAY_MS)) continue;
+          try {
+            await jobsService.create(nodeId, "models-inventory", { scriptPaths });
+            log.info(`daily models-inventory dispatched to ${nodeId}`);
+          } catch (err) {
+            if (err instanceof JobBusyError) continue; // busy: retried next tick
+            if (err instanceof JobDispatchError) continue;
+            throw err;
+          }
+        }
+      } catch (err) {
+        log.error(`inventory scheduler failed (${err instanceof Error ? err.message : String(err)})`);
+      }
+    });
+  }, 3_600_000);
+  inventoryScheduler.unref();
 
   // Jobs die with their agent: any running job whose node is offline is
   // failed immediately (container-agent model — the process dies with it).

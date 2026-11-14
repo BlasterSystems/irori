@@ -1077,10 +1077,13 @@ export function createApp(deps: AppDeps): Express {
         if (u !== null && !u.aptPresent) posture = "update tooling absent";
         else if (u?.pendingReboot === true) posture = "pending reboot";
         else if (u !== null && baseline !== null) {
+          // IR-243: generic apt upgradable counts are NOT the posture — 125
+          // pending Ubuntu packages rendered every node permanently "behind".
+          // The posture compares DGX OS + driver against the hub baseline;
+          // the count keeps its own row in the NodeDetail Updates card.
           const behindDriver = baseline.driver !== null && u.nvidiaDriverVersion !== null && u.nvidiaDriverVersion !== baseline.driver;
           const behindOs = baseline.dgxOs !== null && u.dgxOsVersion !== null && u.dgxOsVersion !== baseline.dgxOs;
-          const behindCount = (u.upgradableCount ?? 0) > 0;
-          posture = behindDriver || behindOs || behindCount ? "behind" : "up to date";
+          posture = behindDriver || behindOs ? "behind" : "up to date";
         }
         return { nodeId: n.id, name: n.name, online: online.has(n.id), updates: u, posture };
       }),

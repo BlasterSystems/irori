@@ -17,6 +17,12 @@ export interface InventoryService {
   get(nodeId: string): Promise<InventoryEntry | null>;
 }
 
+/** IR-243/IR-248: a report is stale when older than maxAgeMs — the daily
+ *  sweep uses 24 h, the refresh short-circuit 60 s. */
+export function inventoryStale(entry: { updatedAt: string } | null, nowMs: number, maxAgeMs: number): boolean {
+  return entry === null || nowMs - Date.parse(entry.updatedAt) >= maxAgeMs;
+}
+
 export function createInventoryService(db: Db): InventoryService {
   return {
     async get(nodeId) {

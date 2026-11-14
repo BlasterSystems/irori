@@ -417,6 +417,7 @@ onMounted(() => {
   cardsTimer = setInterval(() => {
     void refreshCards();
     void refreshCharts();
+    void refreshUpdates(); // IR-243: the Updates panel is no longer mount-once
   }, 60_000);
 });
 onUnmounted(() => {
