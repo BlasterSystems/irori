@@ -22,7 +22,11 @@ export interface CommunitySourceDef {
 }
 
 export const COMMUNITY_SOURCES: CommunitySourceDef[] = [
-  { source: "forum:gb10-top", url: "https://forums.developer.nvidia.com/top.json?period=weekly", kind: "forum-top", intervalMs: 6 * 3_600_000 },
+  // IR-245: the category-scoped latest.json (sorted by bumped_at) replaced
+  // the site-wide weekly Top — the top-50 contained zero GB10 topics, and
+  // Top ranks by score, not last activity. Source id unchanged (the chip and
+  // list derive from it; no DB migration).
+  { source: "forum:gb10-top", url: "https://forums.developer.nvidia.com/c/accelerated-computing/dgx-spark-gb10/719/l/latest.json", kind: "forum-top", intervalMs: 3 * 3_600_000 },
   { source: "atom:sparkrun-releases", url: "https://github.com/spark-arena/sparkrun/releases.atom", kind: "atom", intervalMs: 6 * 3_600_000 },
   { source: "atom:sparkdash-releases", url: "https://github.com/MiaAI-Lab/sparkDash/releases.atom", kind: "atom", intervalMs: 6 * 3_600_000 },
   { source: "atom:tensorfold-releases", url: "https://github.com/ashhart/TensorFold/releases.atom", kind: "atom", intervalMs: 6 * 3_600_000 },
@@ -58,9 +62,12 @@ export interface CommunityItemInput {
   embedOnly?: boolean;
 }
 
-/** Discourse top.json → items (filtered by the caller to the GB10 category). */
-export function parseForumTop(json: string, source: string, categoryFilter?: number): CommunityItemInput[] {
-  let parsed: { topic_list?: { topics?: Array<{ id?: number; title?: string; slug?: string; posts_count?: number; like_count?: number; created_at?: string; category_id?: number; posters?: Array<{ user_id?: number }> }> } };
+/** Discourse latest.json/top.json → items (filtered by the caller to the GB10 subtree).
+ *  IR-245: the scoped endpoint lists subcategory topics tagged with their OWN
+ *  category_id — 719 is the parent of 721 (GB10) and 723 (Projects). */
+export function parseForumTop(json: string, source: string, categoryFilter?: number | number[]): CommunityItemInput[] {
+  const allowed = categoryFilter === undefined ? undefined : new Set(Array.isArray(categoryFilter) ? categoryFilter : [categoryFilter]);
+  let parsed: { topic_list?: { topics?: Array<{ id?: number; title?: string; slug?: string; posts_count?: number; like_count?: number; created_at?: string; bumped_at?: string; category_id?: number; posters?: Array<{ user_id?: number }> }> } };
   try {
     parsed = JSON.parse(json) as typeof parsed;
   } catch {
@@ -68,18 +75,23 @@ export function parseForumTop(json: string, source: string, categoryFilter?: num
   }
   const topics = parsed.topic_list?.topics ?? [];
   return topics
-    .filter((t) => categoryFilter === undefined || t.category_id === categoryFilter)
-    .map((t) => ({
-      source,
-      externalId: String(t.id ?? ""),
-      canonicalUrl: `https://forums.developer.nvidia.com/t/${t.slug ?? t.id}/${t.id ?? ""}`,
-      title: sanitizeText(t.title ?? ""),
-      summary: null,
-      author: null,
-      publishedAt: t.created_at === undefined ? null : new Date(t.created_at),
-      score: t.like_count ?? null,
-      embedOnly: false,
-    }))
+    .filter((t) => allowed === undefined || (t.category_id !== undefined && allowed.has(t.category_id)))
+    .map((t) => {
+      // IR-245: last ACTIVITY, not creation — a topic created weeks ago but
+      // bumped 3 hours ago must pass the client's period filter.
+      const activity = t.bumped_at ?? t.created_at;
+      return {
+        source,
+        externalId: String(t.id ?? ""),
+        canonicalUrl: `https://forums.developer.nvidia.com/t/${t.slug ?? t.id}/${t.id ?? ""}`,
+        title: sanitizeText(t.title ?? ""),
+        summary: null,
+        author: null,
+        publishedAt: activity === undefined ? null : new Date(activity),
+        score: t.like_count ?? null,
+        embedOnly: false,
+      };
+    })
     .filter((t) => t.externalId !== "" && t.title !== "");
 }
 
@@ -153,7 +165,7 @@ export async function pollSource(db: Db, def: CommunitySourceDef, fetchImpl: typ
     const etag = res.headers.get("etag");
     const body = await res.text();
     let items: CommunityItemInput[];
-    if (def.kind === "forum-top") items = parseForumTop(body, def.source, 719);
+    if (def.kind === "forum-top") items = parseForumTop(body, def.source, [719, 721, 723]);
     else items = parseAtom(body, def.source);
     let count = 0;
     for (const it of items) {
