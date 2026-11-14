@@ -445,7 +445,11 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   latest items, engine/recipe release watch, per-source poll health.
   Conditional-GET (etag) pollers run hub-side on jittered intervals with a
   shared UA and a circuit breaker (open after 5 consecutive failures; a dead
-  source shows a warn chip and never blocks the panel).
+  source shows a warn chip and never blocks the panel). The GB10 forum source
+  (`forum:gb10-top`) polls the category-scoped
+  `…/dgx-spark-gb10/719/l/latest.json` — the GB10 subtree (719 parent, 721
+  GB10, 723 Projects) — and stamps topics with their last activity
+  (`bumped_at`), so the client period filter reflects recent posts (IR-245).
 - `POST /api/v1/community/:id` - owner curation `{hidden?, pinned?, seen?}`.
 - X posture: identity-only rows (post id + author handle + canonical URL +
   first-seen); bodies hydrate at view time; the allowlist is owner config,
