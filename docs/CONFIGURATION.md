@@ -99,3 +99,16 @@ is always optional; when unset, modelctl runs without `HF_TOKEN` and the
 quants listing sends no Authorization header. The modal's fields (HF token,
 snapshot cadence, energy cost, token cost) are unchanged by the v1.1
 restyle — only the surface (underline fields, ink actions) moved.
+
+### Alarm webhooks (runtime, IR-241)
+
+Per-rule push alarms live in the same surface (topbar gear → Hub settings →
+Alarm webhooks): each health rule takes an optional webhook URL via the
+existing `PUT /api/v1/health/rules/:id` (`{ "webhookUrl": "https://…" }`
+sets, `null` clears; any other PUT body fields are optional partial patches).
+The URL is stored encrypted in `secrets` (`health:webhook:<ruleId>`) with an
+`alert_channels` row — the wire form `GET /api/v1/health/rules` exposes only
+a boolean `hasWebhook`, never the URL. On a rule transition the hub POSTs
+`{ rule, metric, severity, state, nodeId, summary, observed, at }` to the
+URL (appear is cooldown-bounded; clear is always sent). Setting/clearing is
+audited as `health.rule.put`.
