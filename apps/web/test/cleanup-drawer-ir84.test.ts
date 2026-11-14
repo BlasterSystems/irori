@@ -120,7 +120,9 @@ describe("CleanupDrawer", () => {
   it("history tab shows the empty state", async () => {
     const w = await mountDrawer();
     await w.findAll("button").find((b) => b.text() === "History")!.trigger("click");
-    expect(w.text()).not.toContain("never audited");
+    // IR-224 S5: the audit-freshness hint lives in the fixed head (both tabs);
+    // the history tab's own empty state is the honest no-history line.
+    expect(w.text()).toContain("no cleanup history — last 20 runs show here (kept 90 d)");
     w.unmount();
   });
 
