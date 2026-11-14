@@ -262,12 +262,16 @@ const busiestBucket = computed(() => {
 });
 const tokenTiles = computed(() =>
   overviewTokenTiles(
-    {
-      total: tokenSum.value.input + tokenSum.value.generated,
-      generated: tokenSum.value.generated,
-      prompt: tokenSum.value.input,
-      cached: tokenSum.value.cached,
-    },
+    // No series at all = the ledger is unreachable — the coverage state, never
+    // dash-filled or zero-filled labels (owner rule).
+    rawTokens.value.length === 0
+      ? null
+      : {
+          total: tokenSum.value.input + tokenSum.value.generated,
+          generated: tokenSum.value.generated,
+          prompt: tokenSum.value.input,
+          cached: tokenSum.value.cached,
+        },
     prevTokens.value.length === 0
       ? null
       : {
