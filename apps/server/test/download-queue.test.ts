@@ -189,6 +189,36 @@ d("download queue (db integration)", () => {
     expect(sent.some((s) => s.msg.type === "catalog-request")).toBe(true);
   });
 
+  it("attributes preflight refusals to each queue row (IR-244, real output shape)", async () => {
+    const busy = await jobsService.create(NAS_ID, "sync-local", { name: "x" });
+    const a = await queue.enqueue({ source: "0xSero/Inkling-2-Small-EXL3-4bpw", jobs: 4 });
+    const b = await queue.enqueue({ source: "brandonmusic/Inkling-2-Small-NVFP4-CSF-Flare", jobs: 4 });
+    expect(a.status).toBe("pending");
+    expect(b.status).toBe("pending");
+    await jobsService.cancel(busy.id);
+    await jobsService.onDone(NAS_ID, busy.id, "canceled", null);
+    await queue.dispatchIfIdle();
+    const rowA0 = await rowFor(a.id);
+    expect(rowA0?.status).toBe("running");
+    const jobId = rowA0!.jobId!;
+    expect((await rowFor(b.id))?.jobId).toBe(jobId);
+    // The batch died in preflight — no [i/n] lines, no results doc; the
+    // refusal names each entry on an indented line (job f7d4e3ae, 2026-11-14).
+    await db.insert(jobOutput).values([
+      { jobId, seq: 1, line: "modelctl: queue preflight failed:" },
+      { jobId, seq: 2, line: "  entry 1 (Inkling-2-Small-EXL3-4bpw): ManifestError: cannot infer a runtime: repository has no safetensors, bin, or GGUF weights" },
+      { jobId, seq: 3, line: "  entry 2 (Inkling-2-Small-NVFP4-CSF-Flare): ManifestError: cannot infer a runtime: repository has no safetensors, bin, or GGUF weights" },
+      { jobId, seq: 4, line: "preflight: validating store and 2 queue entries" },
+    ]);
+    await settle(rowA0!, "failed", 1);
+    const ra = await rowFor(a.id);
+    const rb = await rowFor(b.id);
+    for (const row of [ra, rb]) {
+      expect(row?.status).toBe("failed");
+      expect(row?.error).toBe("ManifestError: cannot infer a runtime: repository has no safetensors, bin, or GGUF weights");
+    }
+  });
+
   it("marks rows canceled when the batch job is canceled", async () => {
     const a = await queue.enqueue({ source: "org/theta", jobs: 4 });
     expect(a.status).toBe("running");
