@@ -69,6 +69,13 @@ serving heroes and the Token stats card; the power card is pinned to the
 collapse persists under `irori.sidebar.collapsed`. Neither is a server
 setting; both degrade to session-only when localStorage is unavailable.
 
+The Disk hygiene drawer is a fixed-head/body/foot panel: it fits desktop
+viewport heights without scrolling (audited-but-empty categories render as
+one-line rows), and data taller than the drawer scrolls inside the body
+behind a hairline scrollbar — the panel itself never scrolls. All overlay
+scrims (drawers and modals) layer above the sticky topbar; nothing
+here is server-configured.
+
 ### Usage capture matching (IRI-055)
 
 The capture proxy records `POST` requests whose path is one of
