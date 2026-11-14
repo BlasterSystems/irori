@@ -8,6 +8,24 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **Round-8 shell controls + Overview token stats** (epic IR-224): the
+  range control and the Add node CTA live in the sidebar menu (hamburger
+  ≤900; the collapsed 68px icon rail shows an Add node icon plus a
+  JS-positioned range popover) with vendored lucide-style nav icons — no
+  CDN; the topbar gains an inference-server performance chip (live decode
+  plus fleet watts) on every route except the Overview, whose serving
+  heroes carry the same data. The range is one persisted store
+  (`irori.range`, default 24h) driving the serving heroes and the new
+  Token stats card, while the power card is pinned to the 24h window and
+  Fleet now plus the per-node barrows read live snapshots (minute-fresh at
+  every range). The Token stats card sits directly below the NAS card —
+  eight tiles, per-stat deltas from one prev-window fetch, all-nodes fleet
+  scope, the NAS token block folded away. The cleanup drawer never scrolls
+  as a panel (fixed head, scrolling body, always-visible typed-confirm
+  foot, collapsed staging/quarantine section), and the ≤720 drawer
+  visibility gate is gone (five drawers were statically invisible on
+  phones).
+
 - **BlasterSystems DS v1.1 across the web UI** (ADR-0018, epic IR-214):
   oklch tokens verbatim (dark paper `#0e1217`), a 232px paper-2 sidebar
   shell with topbar chrome and a 900px hamburger menu (IR-217), ink action
