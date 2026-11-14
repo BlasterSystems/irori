@@ -39,15 +39,24 @@ it("NodeCard and NodeDetail render the importance-ordered rows with the hot-valu
 
 it("CleanupDrawer keeps the shared drawer chrome, the DS table class and the reclaimable total", () => {
   for (const token of [
-    'class="drawer is-open"', // mobile body .drawer { visibility: hidden } contract
+    'class="drawer drawer--hy is-open"', // mobile full-bleed contract; the --hy panel never scrolls (IR-224 S5)
     'class="table"', // DS table vocabulary (replaces the unstyled .tbl)
     "{{ fmtBytes(totalReclaimable) }} reclaimable",
     "care rows are opt-in",
     "never audited — run an audit to estimate reclaimable space",
+    // IR-224 S5: fixed head / body scroll / fixed typed-confirm foot + dialog a11y.
+    'class="drawer__head row row--between"',
+    'class="drawer__body"',
+    'class="drawer__foot"',
+    'aria-modal="true"',
+    "v-dialog=\"() => emit('close')\"",
+    'class="hy-acc__btn"',
   ]) {
     expect(cleanupDrawerSource).toContain(token);
   }
   expect(cleanupDrawerSource).not.toContain('class="tbl"');
+  // The gate rides the fixed foot now — no sticky-position confirm (IR-224 S5).
+  expect(cleanupDrawerSource).not.toContain("position: sticky;");
 });
 
 it("NodeDetail describes what the hygiene CTA does", () => {
