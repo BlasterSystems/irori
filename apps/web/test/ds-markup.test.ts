@@ -110,6 +110,14 @@ it("App pins the v1.1 shell geometry: sidebar column, sticky paper-2 topbar", ()
   // IR-224 S4: the collapsed rail narrows the shell via html[data-nav]; the
   // perf chip is the topbar's away-pages inference summary.
   expect(cssSource).toContain('html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }');
+  // IR-238: the collapsed rail centers on one 34px axis — the brand is a real
+  // flex column (glyph + chevron stack), the chevron loses the inert auto
+  // margin, the range-popover trigger centers via flex, and the foot status
+  // keeps mockup parity.
+  expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__brand { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; }');
+  expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0; transform: rotate(180deg); }');
+  expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: flex; justify-content: center; }');
+  expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__status { align-items: center; }');
   expect(cssSource).toContain(".bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;");
 });
 
