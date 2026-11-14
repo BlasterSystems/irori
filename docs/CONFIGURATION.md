@@ -59,6 +59,16 @@ its refresh with a visible failure until they are updated.
 
 No runtime configuration; built static assets are served by the server.
 
+### Shell menu, range store and Overview cards (IR-224)
+
+The Overview range control and the Add node CTA live in the sidebar menu
+(hamburger ≤900; the collapsed rail shows a range popover). The pick
+persists in the browser under `irori.range` (default 24h) and drives the
+serving heroes and the Token stats card; the power card is pinned to the
+24h window and the Fleet now surfaces read live snapshots. The sidebar
+collapse persists under `irori.sidebar.collapsed`. Neither is a server
+setting; both degrade to session-only when localStorage is unavailable.
+
 ### Usage capture matching (IRI-055)
 
 The capture proxy records `POST` requests whose path is one of
