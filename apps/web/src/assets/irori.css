@@ -410,14 +410,23 @@ html[data-tier="small"] .bs-perf .bs-perf__sep--model { display: none; }
 /* ── Drawers / pick rows (shared chrome; CleanupDrawer has no scoped styles —
    ServeView/ModelsView keep narrower scoped overrides). v1.1 surface: card,
    rule-2 border, 4px radius, no shadow; scrim is paper at 72%. ── */
+/* IR-229 follow-up: overlay scrims sit ABOVE the sticky topbar (z 20), the
+   rangeseg popover (25) and rowpop/tips (30) — the old z 10 let the topbar
+   paint over the first ~28px of a tall drawer. Docks stay at 8. */
 .drawer-scrim { position: fixed; inset: 0; background: var(--overlay);
-  display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+  display: flex; align-items: flex-end; justify-content: center; z-index: 40; }
 .drawer { width: min(560px, 100%); max-height: 88vh; overflow: auto; padding: 14px;
   background: var(--surface); border: 1px solid var(--rule-2); border-radius: var(--radius-panel); }
 /* IR-224 S5: shared body-scroll region for drawers that opt into the
  * fixed-head structure (CleanupDrawer's .drawer--hy) — that panel itself
- * never scrolls; every other .drawer keeps the panel-scroll contract above. */
-.drawer__body { min-height: 0; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+ * never scrolls; every other .drawer keeps the panel-scroll contract above.
+ * The body scrollbar is a fallback for data taller than the drawer — hairline
+ * so it never reads as page scroll. */
+.drawer__body { min-height: 0; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin; scrollbar-color: var(--rule-2) transparent; }
+.drawer__body::-webkit-scrollbar { width: 6px; }
+.drawer__body::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 3px; }
+.drawer__body::-webkit-scrollbar-track { background: transparent; }
 @media (min-width: 721px) { .drawer-scrim { align-items: center; } }
 .pick { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px;
   border: 1px solid var(--border); border-radius: var(--radius-panel); cursor: pointer; flex-wrap: wrap; }

@@ -312,7 +312,7 @@ function catLabel(category: string): string {
       </div>
 
       <div class="drawer__body">
-      <div class="tabs" style="margin-bottom: 12px" role="tablist" aria-label="Cleanup tabs">
+      <div class="tabs" style="margin-bottom: 8px" role="tablist" aria-label="Cleanup tabs">
         <button role="tab" :aria-selected="tab === 'audit'" :class="{ 'is-active': tab === 'audit' }" @click="tab = 'audit'">Audit</button>
         <button role="tab" :aria-selected="tab === 'history'" :class="{ 'is-active': tab === 'history' }" @click="tab = 'history'">History</button>
       </div>
@@ -320,16 +320,14 @@ function catLabel(category: string): string {
       <p v-if="error" class="banner banner--warn">{{ error }}</p>
       <p v-else-if="loading" class="muted">loading…</p>
 
-      <p class="stat__sub" style="margin-bottom: 10px;">
-        Reclaims caches, journal, /tmp and stale artifacts — protected models and in-use
-        images are never touched; care rows are opt-in. The audit is read-only: nothing
-        is deleted until you type the node name and run the clean.
+      <p class="stat__sub" style="margin-bottom: 8px;">
+        Read-only audit — protected models and in-use images are never touched.
       </p>
 
       <template v-if="tab === 'audit'">
         <!-- IR-224 S5 (mockup): weekly prevention leads the body; the audit
              timestamp moved to the fixed head. -->
-        <div class="stack" style="gap: 6px; margin-bottom: 12px">
+        <div class="stack" style="gap: 6px; margin-bottom: 8px">
           <label class="pick" :class="{ 'is-on': cleanup?.prevention.weeklySafePass === true }">
             <input type="checkbox" :disabled="preventionBusy" :checked="cleanup?.prevention.weeklySafePass === true" @change="toggleWeekly" />
             <span>
@@ -337,27 +335,31 @@ function catLabel(category: string): string {
               <div class="stat__sub">build cache, compiler/pkg caches, tmp, journal — nothing else</div>
             </span>
           </label>
-          <div class="row row--between">
-            <span class="stat__sub">docker log rotation (max-size 10m, max-file 3)</span>
-            <button class="btn btn--secondary btn--sm" :disabled="preventionBusy || cleanup?.prevention.logRotationApplied === true" @click="applyLogRotation">
-              {{ cleanup?.prevention.logRotationApplied === true ? "applied ✓" : "Apply log rotation" }}
+        </div>
+
+        <div class="row row--between" style="margin-bottom: 8px">
+          <span class="stat__sub" style="flex: 1; min-width: 0">safe categories pre-checked · care rows are opt-in</span>
+          <span class="row" style="gap: 8px">
+            <button
+              v-if="cleanup?.prevention.logRotationApplied !== true"
+              class="btn btn--secondary btn--sm"
+              :disabled="preventionBusy"
+              title="docker daemon.json: max-size 10m, max-file 3"
+              @click="applyLogRotation"
+            >Apply log rotation</button>
+            <span v-else class="stat__sub faint">docker log rotation applied ✓</span>
+            <button class="btn btn--secondary btn--sm" :disabled="phase === 'busy' || phase === 'running'" @click="runAudit">
+              {{ phase === "busy" ? "auditing…" : cleanup?.latestAudit ? "Re-audit" : "Run audit" }}
             </button>
-          </div>
+          </span>
         </div>
 
-        <div class="row row--between" style="margin-bottom: 10px">
-          <span class="stat__sub">safe categories pre-checked · care rows are opt-in</span>
-          <button class="btn btn--secondary btn--sm" :disabled="phase === 'busy' || phase === 'running'" @click="runAudit">
-            {{ phase === "busy" ? "auditing…" : cleanup?.latestAudit ? "Re-audit" : "Run audit" }}
-          </button>
-        </div>
-
-        <div class="stack" style="gap: 6px">
+        <div class="stack" style="gap: 4px">
           <label
             v-for="row in auditRows"
             :key="row.category"
             class="pick"
-            :class="{ 'is-on': checked.has(row.category), 'is-disabled': row.reclaimableBytes === 0 }"
+            :class="{ 'is-on': checked.has(row.category), 'is-disabled': row.reclaimableBytes === 0, 'is-empty': row.reclaimableBytes === 0 && row.itemCount === 0 }"
           >
             <input
               type="checkbox"
@@ -377,17 +379,24 @@ function catLabel(category: string): string {
                   <span class="mono">{{ fmtBytes(row.reclaimableBytes) }}</span>
                 </span>
               </span>
-              <span class="stat__sub">{{ row.rationale }}</span>
-              <span v-if="row.category === 'modelctl-staging'" class="stat__sub faint">frees space on the store volume</span>
-              <ul v-if="row.details.length > 0" class="hy-details">
-                <li v-for="detail in row.details" :key="`${detail.label}:${detail.path ?? ''}`" class="stat__sub">
-                  <span class="mono">{{ detail.label }}</span>
-                  <span v-if="detail.items > 1" class="faint"> · {{ detail.items }} items</span>
-                  <span class="mono"> · {{ fmtBytes(detail.bytes) }}</span>
-                  <span v-if="detail.path !== null" class="faint mono hy-path" :title="detail.path"> · {{ detail.path }}</span>
-                </li>
-              </ul>
-              <span class="bar"><span class="bar__fill" :style="{ width: `${Math.round((row.reclaimableBytes / maxReclaimable) * 100)}%` }"></span></span>
+              <!-- IR-229 follow-up: categories with nothing auditable collapse to
+                   their one name line — rationale, breakdown and weight bar only
+                   earn space when there is something to reclaim. The checkbox
+                   contract is untouched (empty rows stay disabled-and-checked
+                   no-ops exactly as before). -->
+              <template v-if="row.reclaimableBytes > 0 || row.itemCount > 0">
+                <span class="stat__sub">{{ row.rationale }}</span>
+                <span v-if="row.category === 'modelctl-staging'" class="stat__sub faint">frees space on the store volume</span>
+                <ul v-if="row.details.some((d) => d.bytes > 0)" class="hy-details">
+                  <li v-for="detail in row.details.filter((d) => d.bytes > 0)" :key="`${detail.label}:${detail.path ?? ''}`" class="stat__sub">
+                    <span class="mono">{{ detail.label }}</span>
+                    <span v-if="detail.items > 1" class="faint"> · {{ detail.items }} items</span>
+                    <span class="mono"> · {{ fmtBytes(detail.bytes) }}</span>
+                    <span v-if="detail.path !== null" class="faint mono hy-path" :title="detail.path"> · {{ detail.path }}</span>
+                  </li>
+                </ul>
+                <span class="bar"><span class="bar__fill" :style="{ width: `${Math.round((row.reclaimableBytes / maxReclaimable) * 100)}%` }"></span></span>
+              </template>
             </span>
           </label>
         </div>
@@ -395,7 +404,7 @@ function catLabel(category: string): string {
         <!-- IR-211: hidden staging debris (quarantine trees staging-audit cannot see) —
              IR-224 S5: collapsed into an accordion so the default view fits the
              body without scrolling; arming stays typed and per tree. -->
-        <div class="hy-acc" style="margin-top: 12px">
+        <div class="hy-acc" style="margin-top: 8px">
           <button class="hy-acc__btn" type="button" :aria-expanded="acc.staging ? 'true' : 'false'" @click="acc.staging = !acc.staging">
             <span>Staging &amp; quarantine trees <span class="faint mono">· arm per tree</span></span>
             <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
@@ -553,10 +562,14 @@ function catLabel(category: string): string {
 /* IR-224 S5: the cleanup drawer is the one panel that never scrolls —
    fixed head, scrolling body (shared .drawer__body chrome), fixed confirm
    foot. Every other .drawer keeps its panel-scroll contract. */
-.drawer--hy { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.drawer--hy { display: flex; flex-direction: column; padding: 0; overflow: hidden; max-height: 92vh; }
 .drawer--hy .drawer__head { flex: none; padding: 14px 14px 0; }
 .drawer--hy .drawer__body { flex: 1 1 auto; padding: 0 14px 14px; }
 .drawer--hy .drawer__foot { flex: none; padding: 10px 14px 14px; border-top: 1px solid var(--border); background: var(--surface); }
+/* IR-229 follow-up: category rows tighten to mockup density — full cards for
+   rows with reclaimables, one-line micro rows for audited-but-empty ones. */
+.drawer--hy .pick { padding: 6px 12px; }
+.drawer--hy .pick.is-empty { padding: 2px 12px; }
 .hy-details {
   list-style: none;
   margin: 2px 0 0;
@@ -574,7 +587,7 @@ function catLabel(category: string): string {
    off aria-expanded (the same idiom as the ServeView drawers). */
 .hy-acc { border: 1px solid var(--border); border-radius: var(--radius-control); }
 .hy-acc + .hy-acc { margin-top: 8px; }
-.hy-acc__btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px;
+.hy-acc__btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 36px;
   padding: 0 12px; border: 0; background: none; font: 500 var(--fs-ui)/1.3 var(--font-sans); color: var(--fg); cursor: pointer; text-align: left; }
 .hy-acc__btn:hover { background: var(--surface-2); }
 .hy-acc__btn .chev { flex: none; width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.5;

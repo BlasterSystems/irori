@@ -1787,7 +1787,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  z-index: 10;
+  z-index: 40;
 }
 .drawer {
   width: min(760px, 100%);
