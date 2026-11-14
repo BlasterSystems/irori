@@ -297,6 +297,21 @@ d("hub disk rule (IR-201, db integration)", () => {
     expect((await bare.findings()).filter((f) => f.metric === "hub_disk_pct")).toHaveLength(0);
   });
 
+  it("updates the open finding's observed value on re-evaluation (IR-240)", async () => {
+    let pct: number | null = 85;
+    const health = makeService({ sseEvents: [] }, async () => pct);
+    await health.ensureSeed();
+    await health.sweep([], new Set(), new Map());
+    pct = 88.4;
+    await health.sweep([], new Set(), new Map());
+    const open = (await health.findings()).filter((f) => f.metric === "hub_disk_pct");
+    expect(open).toHaveLength(1);
+    expect(open[0]!.summary).toContain("88.4"); // live pct, not appear-time 85
+    pct = 50;
+    await health.sweep([], new Set(), new Map());
+    expect((await health.findings()).filter((f) => f.metric === "hub_disk_pct")).toHaveLength(0);
+  });
+
   it("treats a failed gauge as not measurable and tolerates an absent dep", async () => {
     let calls = 0;
     const health = makeService({ sseEvents: [] }, async () => {

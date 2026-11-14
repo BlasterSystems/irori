@@ -268,6 +268,12 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       ref.url = await webhookUrlFor(rule.id);
       await transition(ref, nodeId, "appear", value);
     } else if (breach && open.length > 0) {
+      // IR-240: keep the open finding's observed value current so refetches
+      // show the live reading, not the appear-time one. A no-op write is
+      // skipped — the snapshot cadence re-evaluates constantly.
+      if (open[0]!.observedValue !== value) {
+        await db.update(healthFindings).set({ observedValue: value }).where(eq(healthFindings.id, open[0]!.id));
+      }
       const last = open[0]!.lastNotifiedAt?.getTime() ?? 0;
       if (now() - last > rule.cooldownSec * 1000) {
         ref.url = await webhookUrlFor(rule.id);
