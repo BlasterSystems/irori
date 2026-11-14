@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from "vue";
 import { live } from "./live";
 import NodeDetail from "./components/NodeDetail.vue";
 import ModelsView from "./components/ModelsView.vue";
@@ -15,6 +15,8 @@ import LogsView from "./components/LogsView.vue";
 import HubSettingsModal from "./components/HubSettingsModal.vue";
 import TelemetryDrawer from "./components/TelemetryDrawer.vue";
 import TransfersDock from "./components/TransfersDock.vue";
+import BsIcon from "./components/BsIcon.vue";
+import NodeModal from "./components/NodeModal.vue";
 import { parseHash, chatsHash, usageHash, type Route } from "./router";
 import { tier } from "./tiers";
 import { loadServerVersion, serverCadenceMs, serverTag, serverVersion } from "./version";
@@ -22,7 +24,9 @@ import { loadCostSettings } from "./cost-settings";
 import { fetchModelsPage } from "./models";
 import { fetchSetups } from "./serve";
 import { DEFAULT_BASE_OVERHEAD_W, GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
-import { fmtWatts } from "./analytics";
+import { fmtTps, fmtWatts } from "./analytics";
+import { OVERVIEW_RANGES, pickPrimaryPort } from "./overview";
+import { overviewRange, setOverviewRange } from "./range";
 
 const { connected } = live;
 
@@ -85,6 +89,7 @@ function closeNav(): void {
 function onDocPointerDown(e: Event): void {
   const target = e.target as Node;
   if (navOpen.value && !navMenuEl.value?.contains(target) && !navToggleBtn.value?.contains(target)) closeNav();
+  if (railRangeOpen.value && !railRangeSeg.value?.contains(target) && !railRangeBtn.value?.contains(target)) railRangeOpen.value = false;
 }
 function onDocKeydown(e: KeyboardEvent): void {
   if (e.key !== "Escape" || !navOpen.value) return;
@@ -95,6 +100,7 @@ watch(
   () => route.value.view,
   () => {
     closeNav();
+    railRangeOpen.value = false;
     void refreshNavCounts();
   },
 );
@@ -127,6 +133,65 @@ const isDark = ref(
   typeof document !== "undefined" &&
     document.documentElement.dataset.theme === "dark",
 );
+
+// ─── IR-224 S4: collapsible sidebar, menu Add node, collapsed-rail popover ──
+const navCollapsed = ref(
+  (() => {
+    try {
+      return localStorage.getItem("irori.sidebar.collapsed") === "1";
+    } catch {
+      return false;
+    }
+  })(),
+);
+watchEffect(() => {
+  // The mockup contract keys the collapsed rail off html[data-nav]; the pick
+  // persists (try/catch like irori-theme) and survives reloads.
+  if (navCollapsed.value) document.documentElement.dataset.nav = "collapsed";
+  else delete document.documentElement.dataset.nav;
+  try {
+    localStorage.setItem("irori.sidebar.collapsed", navCollapsed.value ? "1" : "0");
+  } catch {
+    /* storage unavailable — the pick still applies for this visit */
+  }
+});
+function toggleCollapse(): void {
+  navCollapsed.value = !navCollapsed.value;
+}
+
+/** Add node is reachable from any route via the menu (ghost/secondary chip). */
+const addNodeOpen = ref(false);
+
+/** Collapsed-rail range popover: position:fixed anchored to the toggle's
+ *  rect — it must escape the rail's overflow-x clip (mockup-verified). */
+const railRangeOpen = ref(false);
+const railRangeBtn = ref<HTMLButtonElement | null>(null);
+const railRangeSeg = ref<HTMLElement | null>(null);
+function toggleRailRange(): void {
+  railRangeOpen.value = !railRangeOpen.value;
+  if (!railRangeOpen.value) return;
+  void nextTick(() => {
+    const btn = railRangeBtn.value;
+    const seg = railRangeSeg.value;
+    if (btn === null || seg === null) return;
+    const r = btn.getBoundingClientRect();
+    seg.style.left = `${Math.round(r.right + 8)}px`;
+    seg.style.top = `${Math.max(8, Math.round(r.top))}px`;
+  });
+}
+
+/** IR-224 S4: the topbar perf chip — the busiest serving port (probe truth)
+ *  plus fleet watts; hidden on the Overview, whose heroes carry the data. */
+const perfChip = computed(() => {
+  if (!connected.value) return null;
+  for (const node of live.sortedNodes.value) {
+    const port = pickPrimaryPort(live.getLlm(node.id)?.ports ?? null);
+    if (port !== null && port.model !== null && port.decodeTps !== null) {
+      return { model: port.model, decode: fmtTps(port.decodeTps) };
+    }
+  }
+  return null;
+});
 
 function toggleTheme(): void {
   const dark = !isDark.value;
@@ -167,19 +232,39 @@ onUnmounted(() => {
             <span class="bs-lockup__endorse">A BlasterSystems product</span>
           </span>
         </a>
+        <button class="bs-sidebar__collapse" type="button" :aria-expanded="navCollapsed ? 'false' : 'true'" :aria-label="navCollapsed ? 'Expand menu' : 'Collapse menu'" @click="toggleCollapse">
+          <BsIcon name="chevron-left" />
+        </button>
       </div>
       <nav class="bs-nav" aria-label="Primary">
-        <a class="bs-nav-item" href="#/" :aria-current="route.view === 'overview' ? 'page' : undefined"><span class="bs-nav-item__label">Overview</span><span v-if="live.nodes.size > 0" class="bs-nav-item__count">{{ live.nodes.size }}</span></a>
-        <a class="bs-nav-item" href="#/models" :aria-current="route.view === 'models' ? 'page' : undefined"><span class="bs-nav-item__label">Models</span><span v-if="modelsTotal !== null" class="bs-nav-item__count">{{ modelsTotal }}</span></a>
-        <a class="bs-nav-item" href="#/serve" :aria-current="route.view === 'serve' ? 'page' : undefined"><span class="bs-nav-item__label">Serve</span><span v-if="setupsTotal !== null" class="bs-nav-item__count">{{ setupsTotal }}</span></a>
-        <a class="bs-nav-item" href="#/analytics" :aria-current="route.view === 'analytics' ? 'page' : undefined"><span class="bs-nav-item__label">Analytics</span></a>
-        <a class="bs-nav-item" :href="usageHash()" :aria-current="route.view === 'usage' ? 'page' : undefined"><span class="bs-nav-item__label">Usage</span></a>
-        <a class="bs-nav-item" :href="chatsHash()" :aria-current="route.view === 'chats' ? 'page' : undefined"><span class="bs-nav-item__label">Chats</span></a>
-        <a class="bs-nav-item" href="#/benchmarks" :aria-current="route.view === 'benchmarks' ? 'page' : undefined"><span class="bs-nav-item__label">Benchmarks</span></a>
-        <a class="bs-nav-item" href="#/audit" :aria-current="route.view === 'audit' ? 'page' : undefined"><span class="bs-nav-item__label">Audit</span></a>
-        <a class="bs-nav-item" href="#/logs" :aria-current="route.view === 'logs' ? 'page' : undefined"><span class="bs-nav-item__label">Logs</span></a>
-        <a class="bs-nav-item" href="#/community" :aria-current="route.view === 'community' ? 'page' : undefined"><span class="bs-nav-item__label">Community</span></a>
+        <a class="bs-nav-item" href="#/" :aria-current="route.view === 'overview' ? 'page' : undefined"><BsIcon name="overview" /><span class="bs-nav-item__label">Overview</span><span v-if="live.nodes.size > 0" class="bs-nav-item__count">{{ live.nodes.size }}</span></a>
+        <a class="bs-nav-item" href="#/models" :aria-current="route.view === 'models' ? 'page' : undefined"><BsIcon name="models" /><span class="bs-nav-item__label">Models</span><span v-if="modelsTotal !== null" class="bs-nav-item__count">{{ modelsTotal }}</span></a>
+        <a class="bs-nav-item" href="#/serve" :aria-current="route.view === 'serve' ? 'page' : undefined"><BsIcon name="serve" /><span class="bs-nav-item__label">Serve</span><span v-if="setupsTotal !== null" class="bs-nav-item__count">{{ setupsTotal }}</span></a>
+        <a class="bs-nav-item" href="#/analytics" :aria-current="route.view === 'analytics' ? 'page' : undefined"><BsIcon name="analytics" /><span class="bs-nav-item__label">Analytics</span></a>
+        <a class="bs-nav-item" :href="usageHash()" :aria-current="route.view === 'usage' ? 'page' : undefined"><BsIcon name="usage" /><span class="bs-nav-item__label">Usage</span></a>
+        <a class="bs-nav-item" :href="chatsHash()" :aria-current="route.view === 'chats' ? 'page' : undefined"><BsIcon name="chats" /><span class="bs-nav-item__label">Chats</span></a>
+        <a class="bs-nav-item" href="#/benchmarks" :aria-current="route.view === 'benchmarks' ? 'page' : undefined"><BsIcon name="benchmarks" /><span class="bs-nav-item__label">Benchmarks</span></a>
+        <a class="bs-nav-item" href="#/audit" :aria-current="route.view === 'audit' ? 'page' : undefined"><BsIcon name="audit" /><span class="bs-nav-item__label">Audit</span></a>
+        <a class="bs-nav-item" href="#/logs" :aria-current="route.view === 'logs' ? 'page' : undefined"><BsIcon name="logs" /><span class="bs-nav-item__label">Logs</span></a>
+        <a class="bs-nav-item" href="#/community" :aria-current="route.view === 'community' ? 'page' : undefined"><BsIcon name="community" /><span class="bs-nav-item__label">Community</span></a>
       </nav>
+      <div class="bs-sidebar__tools">
+        <span class="tools-label">Range</span>
+        <div class="rangeseg" role="group" aria-label="History range">
+          <button v-for="r in OVERVIEW_RANGES" :key="r.value" type="button" :class="{ 'is-active': overviewRange === r.value }" :aria-pressed="overviewRange === r.value ? 'true' : 'false'" @click="setOverviewRange(r.value)">{{ r.label }}</button>
+        </div>
+        <div class="rangeseg-pop" :class="{ 'is-open': railRangeOpen }">
+          <button ref="railRangeBtn" class="iconbtn" type="button" aria-label="History range" :aria-expanded="railRangeOpen ? 'true' : 'false'" @click.stop="toggleRailRange">
+            <BsIcon name="clock" />
+          </button>
+          <div ref="railRangeSeg" class="rangeseg" role="group" aria-label="History range">
+            <button v-for="r in OVERVIEW_RANGES" :key="r.value" type="button" :class="{ 'is-active': overviewRange === r.value }" :aria-pressed="overviewRange === r.value ? 'true' : 'false'" @click="setOverviewRange(r.value)">{{ r.label }}</button>
+          </div>
+        </div>
+        <button class="btn btn--secondary btn--sm" type="button" title="Register a node and install the agent" @click="addNodeOpen = true">
+          <BsIcon name="plus" /><span class="tools-cta-label">Add node</span>
+        </button>
+      </div>
       <div class="bs-sidebar__foot">
         <span class="bs-sidebar__status">
           <span><span v-if="connected" class="pulse" aria-hidden="true"></span>&nbsp;{{ liveStatusText }}</span>
@@ -206,6 +291,14 @@ onUnmounted(() => {
           <span v-if="!connected" class="chip chip--warn"><span class="dot dot--warn" aria-hidden="true"></span> Offline</span>
         </div>
         <div class="row bs-topbar__group">
+          <a v-if="perfChip !== null && route.view !== 'overview'" class="bs-perf" href="#/serve" title="Inference server · live — open Serve">
+            <span class="pulse" aria-hidden="true"></span>
+            <span class="bs-perf__model">{{ perfChip.model }}</span>
+            <span class="bs-perf__sep bs-perf__sep--model">·</span>
+            {{ perfChip.decode }}
+            <span class="bs-perf__sep">·</span>
+            {{ wattsText ?? "—" }}
+          </a>
           <button class="btn btn--secondary btn--sm" aria-label="Open transfers" @click="transfersOpen = true">Transfers<span v-if="activeTransfers > 0" class="countbub">{{ activeTransfers }}</span></button>
           <button class="btn btn--secondary btn--sm" aria-label="Open live telemetry" @click="telemetryOpen = true">Telemetry</button>
           <button class="iconbtn" aria-label="Hub settings" title="Hub settings" @click="hubSettingsOpen = true">
@@ -224,6 +317,13 @@ onUnmounted(() => {
           <a class="bs-nav-item" href="#/audit" :aria-current="route.view === 'audit' ? 'page' : undefined"><span class="bs-nav-item__label">Audit</span></a>
           <a class="bs-nav-item" href="#/logs" :aria-current="route.view === 'logs' ? 'page' : undefined"><span class="bs-nav-item__label">Logs</span></a>
           <a class="bs-nav-item" href="#/community" :aria-current="route.view === 'community' ? 'page' : undefined"><span class="bs-nav-item__label">Community</span></a>
+          <div class="bs-sidebar__tools" style="padding-top: 8px">
+            <span class="tools-label">Range</span>
+            <div class="rangeseg" role="group" aria-label="History range">
+              <button v-for="r in OVERVIEW_RANGES" :key="r.value" type="button" :class="{ 'is-active': overviewRange === r.value }" :aria-pressed="overviewRange === r.value ? 'true' : 'false'" @click="setOverviewRange(r.value)">{{ r.label }}</button>
+            </div>
+            <button class="btn btn--secondary btn--sm" type="button" @click="addNodeOpen = true"><span class="tools-cta-label">Add node</span></button>
+          </div>
           <div class="bs-menu-foot">
             <span>deploy {{ serverTag ?? "unknown" }}</span>
             <span>{{ liveStatusText }}<template v-if="wattsText"> · {{ wattsText }}</template></span>
@@ -250,6 +350,7 @@ onUnmounted(() => {
   <HubSettingsModal v-if="hubSettingsOpen" @close="hubSettingsOpen = false" />
   <TelemetryDrawer v-if="telemetryOpen" @close="telemetryOpen = false" />
   <TransfersDock v-if="transfersOpen" @close="transfersOpen = false" />
+  <NodeModal v-if="addNodeOpen" mode="create" @close="addNodeOpen = false" />
 </template>
 
 <style scoped>
@@ -263,4 +364,6 @@ html[data-tier="medium"] .bs-topbar .bs-theme,
 html[data-tier="small"] .bs-topbar .bs-theme { width: 44px; height: 44px; }
 html[data-tier="medium"] .bs-topbar .btn,
 html[data-tier="small"] .bs-topbar .btn { min-height: 44px; }
+html[data-tier="medium"] .bs-topbar .bs-perf,
+html[data-tier="small"] .bs-topbar .bs-perf { min-height: 44px; }
 </style>
