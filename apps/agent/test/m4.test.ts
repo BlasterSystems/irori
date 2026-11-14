@@ -141,6 +141,23 @@ describe("buildCommand", () => {
     expect(() => buildCommand("sync-local", { name: "glm" }, brokenCtx)).toThrow(/no modelctl for cache user "operator"/);
   });
 
+  it("says no modelctl — not unknown — when the user has a passwd entry but no binary (IR-247)", () => {
+    const knownUserCtx = { ...ctx, agentUser: "root", resolveLocalUser: () => null, resolveCacheHome: () => "/home/operator" };
+    expect(() => buildCommand("sync-local", { name: "glm", user: "operator" }, knownUserCtx)).toThrow(
+      /sync-local: no modelctl for cache user "operator".*auto-installs/,
+    );
+    expect(() => buildCommand("delete-local", { name: "glm", user: "operator" }, knownUserCtx)).toThrow(
+      /delete-local: no modelctl for cache user "operator"/,
+    );
+    expect(() => buildCommand("register-local", { name: "m", user: "operator" }, knownUserCtx)).toThrow(
+      /register-local: no modelctl for cache user "operator"/,
+    );
+    // A ctx without the cache-home resolver (older harnesses) keeps "unknown".
+    expect(() => buildCommand("delete-local", { name: "glm", user: "ghost" }, { ...ctx, resolveLocalUser: () => null })).toThrow(
+      /delete-local: unknown local cache user "ghost"/,
+    );
+  });
+
   it("wraps push in runuser for the source node's cache user (IR-101)", () => {
     const cacheCtx = {
       ...ctx,

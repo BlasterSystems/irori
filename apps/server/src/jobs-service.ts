@@ -100,10 +100,12 @@ export async function reconcilePresenceFromInventory(db: Db, nodeId: string, rep
 /**
  * IR-105: after a succeeded models-inventory read, converge every cache user
  * whose reported modelctl is below the hub pin — dispatch the existing
- * version-gated `modelctl-install` job per user. Silent skips (unset pin,
- * busy node, offline agent) just wait for the next inventory read; the
- * install job itself skips without a transfer when the version satisfies the
- * gate, so a stale env pin can never downgrade a newer binary.
+ * version-gated `modelctl-install` job per user. IR-247: a MISSING binary
+ * (version null) is converged too — skipping it left the user permanently
+ * stuck ("unknown local cache user" on every per-user job). Silent skips
+ * (unset pin, busy node, offline agent) just wait for the next inventory
+ * read; the install job itself skips without a transfer when the version
+ * satisfies the gate, so a stale env pin can never downgrade a newer binary.
  */
 async function autoProvisionModelctl(
   create: (nodeId: string, kind: string, params: Record<string, unknown>) => Promise<JobRow>,
@@ -115,8 +117,8 @@ async function autoProvisionModelctl(
   if (pin === null) return;
   for (const cache of report.local) {
     const version = cache.modelctlVersion;
-    if (version === null || !/^\d+\.\d+\.\d+$/.test(version)) continue;
-    if (compareVersions(version, pin) >= 0) continue;
+    if (version !== null && !/^\d+\.\d+\.\d+$/.test(version)) continue;
+    if (version !== null && compareVersions(version, pin) >= 0) continue;
     try {
       await create(nodeId, "modelctl-install", { user: cache.user });
     } catch (err) {

@@ -25,6 +25,9 @@ export interface ModelctlCtx {
   agentUser?: string;
   /** IRI-028: resolves a cache owner for delete-local; null when unknown. */
   resolveLocalUser?: (user: string) => { home: string; binary: string } | null;
+  /** IR-247: resolves a cache owner's passwd home only — separates "no
+   *  passwd entry" (unknown) from "no per-user modelctl" (actionable). */
+  resolveCacheHome?: (user: string) => string | null;
   /** IR-101: the node's cache owner for transfers; null/absent = agent user. */
   cacheUser?: string | null;
   /** IR-207: download floor in bytes on the store's free space (0/absent disables);
@@ -220,6 +223,17 @@ export function buildCommand(kind: string, params: Record<string, unknown>, ctx:
   return { argv: [modelctl, ...built.argv] };
 }
 
+/** IR-247: the per-user job branches' null-resolution error. A passwd entry
+ *  without a per-user modelctl is NOT unknown — it gets the IR-101 actionable
+ *  wording (the hub auto-installs modelctl for that user after the next
+ *  inventory read); only a failed passwd lookup is genuinely unknown. */
+function cacheUserError(kind: string, user: string, ctx: ModelctlCtx): string {
+  if ((ctx.resolveCacheHome?.(user) ?? null) !== null) {
+    return `${kind}: no modelctl for cache user "${user}" — install it for that user (sudo -u ${user} uv tool install "modelctl") or clear the node's cache user setting; the hub auto-installs it after the next inventory read`;
+  }
+  return `${kind}: unknown local cache user "${user}"`;
+}
+
 function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: ModelctlCtx): { argv: string[]; shell?: string; raw?: boolean } {
   const str = (key: string): string | undefined => {
     const v = params[key];
@@ -322,7 +336,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       if (user === (ctx.agentUser ?? "root")) return { argv };
       const resolved = ctx.resolveLocalUser?.(user) ?? null;
       if (resolved === null) {
-        throw new CommandBuildError(`sync-local: unknown local cache user "${user}"`);
+        throw new CommandBuildError(cacheUserError("sync-local", user, ctx));
       }
       return {
         raw: true,
@@ -477,7 +491,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       // home/binary are resolved agent-side — the hub never sends paths.
       const resolved = ctx.resolveLocalUser?.(user) ?? null;
       if (resolved === null) {
-        throw new CommandBuildError(`delete-local: unknown local cache user "${user}"`);
+        throw new CommandBuildError(cacheUserError("delete-local", user, ctx));
       }
       return {
         raw: true,
@@ -503,7 +517,7 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       // invoking user's state dir, so a root agent runs it as the cache owner.
       const resolved = ctx.resolveLocalUser?.(user) ?? null;
       if (resolved === null) {
-        throw new CommandBuildError(`register-local: unknown local cache user "${user}"`);
+        throw new CommandBuildError(cacheUserError("register-local", user, ctx));
       }
       return {
         raw: true,
