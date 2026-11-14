@@ -13,7 +13,6 @@ import { capOptions, CPU_CLOCK_CAP_PRESETS, GPU_CLOCK_CAP_PRESETS } from "../det
 import { downloadBytesLine, downloadEntryEta, downloadProgressPct, downloadSpeedView, fetchDownloadQueue, fetchModelsPage, formatEta, type DownloadQueueEntry } from "../models";
 import { fetchSetups } from "../serve";
 import { serverCadenceMs } from "../version";
-import { fmtTokens } from "../usage";
 import { overviewTokenTiles } from "../tokens-data";
 import { energyCost, tokenCost } from "../cost-settings";
 import {
@@ -288,7 +287,7 @@ const tokenTiles = computed(() =>
         busiestBucket.value === null
           ? null
           : { total: busiestBucket.value.total, label: fmtBucket(busiestBucket.value.t, tokenGranularity.value) },
-      dayBuckets: tokenGranularity.value === "day",
+      granularity: tokenGranularity.value,
     },
   ),
 );
@@ -901,11 +900,6 @@ function heroStateView(p: HeroProcess): HeroStateView {
 .card--stale .barrow .val {
   opacity: 0.75;
 }
-.rule {
-  border: 0;
-  border-top: 1px solid var(--border);
-  margin: 14px 0;
-}
 /* ── Fleet temperatures (IR-129): small tier only ──────────────────────
    Medium and full drop the strip: every node card already shows GPU/CPU
    temperature with its bar, so the strip is duplicate information there. */
@@ -969,6 +963,7 @@ html[data-tier="small"] .card__head .row { flex-wrap: wrap; }
 html[data-tier="small"] .statgrid { gap: 7px 10px; }
 html[data-tier="small"] .statgrid,
 html[data-tier="small"] .statgrid--3,
+html[data-tier="small"] .statgrid--4,
 html[data-tier="small"] .statgrid--6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 html[data-tier="small"] .stat__label { font-size: 10px; letter-spacing: 0.07em; }
 html[data-tier="small"] .stat__value { font-size: 15px; line-height: 1.15; }
@@ -980,7 +975,6 @@ html[data-tier="small"] .barrow { font-size: 11px; grid-template-columns: 46px m
 html[data-tier="small"] .barrow + .barrow { margin-top: 6px; }
 html[data-tier="small"] .log { font-size: 11px; line-height: 1.5; padding: 8px 10px; }
 html[data-tier="small"] .feedlog { min-height: 96px; max-height: 118px; }
-html[data-tier="small"] .range-select { min-height: 44px; }
 /* IR-198: per-node fleet cap outcomes as touch-legible rows (was title-only chips). */
 .orow { display: flex; align-items: baseline; gap: 8px; font-family: var(--font-mono); font-size: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); }
 .orow:last-child { border-bottom: 0; }

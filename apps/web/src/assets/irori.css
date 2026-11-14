@@ -194,24 +194,29 @@ button { font: inherit; color: inherit; }
   background: var(--surface-2); border: 1px solid var(--rule-2); border-radius: var(--radius); }
 .rangeseg-pop.is-open .rangeseg { display: flex; }
 .rangeseg-pop > .iconbtn.is-active { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--fg); }
-html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }
-html[data-nav="collapsed"] .bs-sidebar { width: var(--sidebar-width-collapsed, 68px); padding-left: 0; padding-right: 0; }
-html[data-nav="collapsed"] .bs-sidebar__brand { justify-content: center; padding: 0; }
-html[data-nav="collapsed"] .bs-lockup__text { display: none; }
-html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0 auto; transform: rotate(180deg); }
-html[data-nav="collapsed"] .bs-nav { position: relative; }
-html[data-nav="collapsed"] .bs-nav-item { justify-content: center; padding: 0; gap: 0; }
-html[data-nav="collapsed"] .bs-nav-item::before { left: 5px; }
-html[data-nav="collapsed"] .bs-nav-item__label { display: none; }
-html[data-nav="collapsed"] .bs-nav-item__count { position: absolute; top: 6px; right: 8px; font-size: 10px; }
-html[data-nav="collapsed"] .bs-sidebar__tools { padding-left: 8px; padding-right: 8px; }
-html[data-nav="collapsed"] .bs-sidebar__tools > .rangeseg { display: none; }
-html[data-nav="collapsed"] .bs-sidebar__tools .tools-label { display: none; }
-html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: block; }
-html[data-nav="collapsed"] .bs-sidebar__tools .btn { justify-content: center; padding: 0; }
-html[data-nav="collapsed"] .bs-sidebar__tools .tools-cta-label { display: none; }
-html[data-nav="collapsed"] .bs-sidebar__foot { justify-content: center; padding-left: 8px; padding-right: 8px; }
-html[data-nav="collapsed"] .bs-sidebar__status span:not(:first-child) { display: none; }
+/* IR-224 S4: the collapsed rail is desktop-only — the ≤900 hamburger reuses
+ * the same classes, so the rules are media-scoped to keep the small tier's
+ * labels, range control and Add node intact. */
+@media (min-width: 901px) {
+  html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }
+  html[data-nav="collapsed"] .bs-sidebar { width: var(--sidebar-width-collapsed, 68px); padding-left: 0; padding-right: 0; }
+  html[data-nav="collapsed"] .bs-sidebar__brand { justify-content: center; padding: 0; }
+  html[data-nav="collapsed"] .bs-lockup__text { display: none; }
+  html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0 auto; transform: rotate(180deg); }
+  html[data-nav="collapsed"] .bs-nav { position: relative; }
+  html[data-nav="collapsed"] .bs-nav-item { justify-content: center; padding: 0; gap: 0; }
+  html[data-nav="collapsed"] .bs-nav-item::before { left: 5px; }
+  html[data-nav="collapsed"] .bs-nav-item__label { display: none; }
+  html[data-nav="collapsed"] .bs-nav-item__count { position: absolute; top: 6px; right: 8px; font-size: 10px; }
+  html[data-nav="collapsed"] .bs-sidebar__tools { padding-left: 8px; padding-right: 8px; }
+  html[data-nav="collapsed"] .bs-sidebar__tools > .rangeseg { display: none; }
+  html[data-nav="collapsed"] .bs-sidebar__tools .tools-label { display: none; }
+  html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: block; }
+  html[data-nav="collapsed"] .bs-sidebar__tools .btn { justify-content: center; padding: 0; }
+  html[data-nav="collapsed"] .bs-sidebar__tools .tools-cta-label { display: none; }
+  html[data-nav="collapsed"] .bs-sidebar__foot { justify-content: center; padding-left: 8px; padding-right: 8px; }
+  html[data-nav="collapsed"] .bs-sidebar__status span:not(:first-child) { display: none; }
+}
 .bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;
   border: 1px solid var(--rule-2); border-radius: var(--radius-control); background: transparent;
   font-family: var(--font-mono); font-size: var(--fs-data-sm); color: var(--muted); text-decoration: none; white-space: nowrap; }
@@ -535,7 +540,7 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   .card__head .row { flex-wrap: wrap; }
   .toolbar { flex-wrap: wrap; }
   .cols-2, .cols-3, .cols-4 { grid-template-columns: 1fr; }
-  .statgrid, .statgrid--3, .statgrid--6, .statgrid--7 { grid-template-columns: repeat(2, 1fr); }
+  .statgrid, .statgrid--3, .statgrid--4, .statgrid--6, .statgrid--7 { grid-template-columns: repeat(2, 1fr); }
   .stat__value { font-size: var(--fs-stat); }
   .statgrid .stat__sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
