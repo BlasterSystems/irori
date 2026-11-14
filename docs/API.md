@@ -461,6 +461,11 @@ guarantees callers rely on, kept current when behavior changes. Last updated
  install; MiaAI script recipes staged verbatim). Unpinned entries (offline
  boot) stay hidden until the pin pass lands. Seeds ship in-repo
  (`apps/server/src/recipe-seed.json`, versioned) and upsert on boot.
+  The MiaAI-Lab per-model recipe repos (IR-246) are seeded as `miaai-script`
+  entries — raw start.sh/stop.sh staged from the pinned commit at install
+  (sha256-verified by the agent), never vendored; AGPL repos are marked
+  `copyleft`. Per-repo commit feeds (`atom:miaai-*` community sources) watch
+  them for updates.
 - `POST /api/v1/recipes/:id/install` - stages the start/stop scripts onto the
  target node via a `recipe-install` job (sha256-verified by the agent; AGPL
  bodies pass through at install time and are never vendored into the bundle).
