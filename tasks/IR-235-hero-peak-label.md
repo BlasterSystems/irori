@@ -36,7 +36,7 @@ The hero "peak" sub-label must stop contradicting the instant hero value: at the
 - [x] Architecture impact: none (no ADR)
 - [x] Implement helper + wiring
 - [x] Unit tests
-- [ ] Validate + browser-verify
+- [x] Validate + browser-verify
 
 ## Architecture impact
 
@@ -45,10 +45,11 @@ The hero "peak" sub-label must stop contradicting the instant hero value: at the
 
 ## Validation evidence
 
-- Configuration validation: pending
-- Tests: pending
-- Build: pending
-- Documentation check: pending
+- Configuration validation: passed (`.agentic/bin/validate`)
+- Tests: workspace green (see IR-234 record); `overview.test.ts` pins all three granularities ("peak hour 86", "peak minute 106", "peak day 45")
+- Build: clean (`pnpm build`)
+- Documentation check: passed
+- Browser: live data — 24h shows "peak hour 85" (current 32 tok/s, no contradiction); switching the menu range to 30m shows "peak minute 113"; label tracks the response granularity
 
 ## Review
 

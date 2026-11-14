@@ -38,7 +38,7 @@ The sidebar's collapse chevron must clear the brand lockup. Owner decision (gate
 - [x] Implement the text change (chevron untouched)
 - [x] Update tests
 - [x] Update SPEC.md
-- [ ] Validate + browser-verify
+- [x] Validate + browser-verify
 
 ## Architecture impact
 
@@ -47,10 +47,11 @@ The sidebar's collapse chevron must clear the brand lockup. Owner decision (gate
 
 ## Validation evidence
 
-- Configuration validation: pending
-- Tests: pending
-- Build: pending
-- Documentation check: pending
+- Configuration validation: passed (`.agentic/bin/validate`)
+- Tests: workspace green — web 514, server 237 (+171 db-gated skipped), agent 309, core 111, proxy 24, db 8; ds-markup pins the new text and rejects the old
+- Build: clean (`pnpm build`)
+- Documentation check: passed (`.agentic/bin/docs-check`, no heuristic gaps)
+- Browser: endorse "BLASTERSYSTEMS", collapse-button gap +41.6px at 1280 and 1568 (was −24.4px); collapsed rail unchanged (68px, centered rotated chevron); ≤900 hamburger tier unchanged; overflow 0 at 390/1280/1568
 
 ## Review
 

@@ -38,7 +38,7 @@ The Token stats card must stop wasting half its row and shed its two low-value t
 - [x] Architecture impact: none (no ADR)
 - [x] Implement wrapper + tiles + cleanup
 - [x] Update tests
-- [ ] Validate + browser-verify
+- [x] Validate + browser-verify
 
 ## Architecture impact
 
@@ -47,10 +47,11 @@ The Token stats card must stop wasting half its row and shed its two low-value t
 
 ## Validation evidence
 
-- Configuration validation: pending
-- Tests: pending
-- Build: pending
-- Documentation check: pending
+- Configuration validation: passed (`.agentic/bin/validate`)
+- Tests: workspace green (see IR-234 record); `tokens-data.test.ts` — 6 tiles in both fleet and coverage paths, Average/Busiest asserted absent
+- Build: clean (`pnpm build`)
+- Documentation check: passed
+- Browser: token card full-width (1272 of 1336 content px at 1568; 984 of 1048 at 1280), `statgrid--3` with 6 tiles, small tier 2 cols, overflow 0 at 390/1280/1568
 
 ## Review
 
