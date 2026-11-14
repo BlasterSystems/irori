@@ -767,6 +767,29 @@ export function createApp(deps: AppDeps): Express {
     res.json(await build(id, range));
   });
 
+  // IRI-073 / IRI-071: concrete analytics routes. These MUST be registered
+  // before the /api/v1/analytics/:lens catch-all below — Express matches in
+  // registration order, and the catch-all would otherwise shadow both with
+  // 400 "unknown lens" (defect recorded in tasks/IRI-131-overflow-sweep.md).
+  app.get("/api/v1/analytics/efficiency", async (req, res) => {
+    const analytics = deps.getAnalytics();
+    if (analytics === null) return res.status(503).json({ error: "database unavailable" });
+    const range = analyticsRangeSchema.safeParse(req.query.range ?? "24h");
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const groupBy = req.query.groupBy === "model" ? "model" : "node";
+    res.json(await analytics.efficiency({ range: range.data, groupBy }));
+  });
+
+  app.get("/api/v1/analytics/token-reconciliation", async (req, res) => {
+    const analytics = deps.getAnalytics();
+    if (analytics === null) return res.status(503).json({ error: "database unavailable" });
+    const range = analyticsRangeSchema.safeParse(req.query.range ?? "4h");
+    if (!range.success) return res.status(400).json({ error: "unknown range" });
+    const nodeIdRaw = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
+    const nodeId = nodeIdRaw !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeIdRaw) ? nodeIdRaw : undefined;
+    res.json(await analytics.reconciliation({ range: range.data, nodeId }));
+  });
+
   // ---- M7: analytics (SPEC §9) — five lenses over the rollup buckets ----
   app.get("/api/v1/analytics/:lens", async (req, res) => {
     const lens = analyticsLensSchema.safeParse(req.params.lens);
@@ -1522,16 +1545,6 @@ export function createApp(deps: AppDeps): Express {
     },
   );
 
-  // IRI-073: Wh-per-token efficiency (energy × ledger join, NAS excluded).
-  app.get("/api/v1/analytics/efficiency", async (req, res) => {
-    const analytics = deps.getAnalytics();
-    if (analytics === null) return res.status(503).json({ error: "database unavailable" });
-    const range = analyticsRangeSchema.safeParse(req.query.range ?? "24h");
-    if (!range.success) return res.status(400).json({ error: "unknown range" });
-    const groupBy = req.query.groupBy === "model" ? "model" : "node";
-    res.json(await analytics.efficiency({ range: range.data, groupBy }));
-  });
-
   // IRI-079: normalized span tree for the request drawer's Trace tab.
   app.get("/api/v1/usage/requests/:id/trace", async (req, res) => {
     const usage = requireUsage(res);
@@ -1551,17 +1564,6 @@ export function createApp(deps: AppDeps): Express {
     if (!range.success) return res.status(400).json({ error: "unknown range" });
     const nodeId = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
     res.json(await usage.retries({ range: range.data, nodeId }));
-  });
-
-  // IRI-071: ledger (engine counters) vs capture (requests) reconciliation.
-  app.get("/api/v1/analytics/token-reconciliation", async (req, res) => {
-    const analytics = deps.getAnalytics();
-    if (analytics === null) return res.status(503).json({ error: "database unavailable" });
-    const range = analyticsRangeSchema.safeParse(req.query.range ?? "4h");
-    if (!range.success) return res.status(400).json({ error: "unknown range" });
-    const nodeIdRaw = typeof req.query.nodeId === "string" ? req.query.nodeId : undefined;
-    const nodeId = nodeIdRaw !== undefined && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nodeIdRaw) ? nodeIdRaw : undefined;
-    res.json(await analytics.reconciliation({ range: range.data, nodeId }));
   });
 
   // ---- IRI-069: health rules, findings, thresholds, prometheus ----
