@@ -72,6 +72,9 @@ async function copyHubRunbook(): Promise<void> {
 const reclaim = ref<Map<string, number>>(new Map());
 async function refreshReclaim(): Promise<void> {
   for (const row of nodeDiskFindings.value) {
+    // IR-242: a NAS-sourced finding gets no cleanup CTA — don't fetch a
+    // reclaim est. that local cleanup can never reclaim.
+    if (row.summary.includes("NAS share")) continue;
     reclaim.value.set(row.nodeId, 0);
     void fetchCleanup(row.nodeId)
       .then((state) => {
@@ -140,6 +143,7 @@ function closeCleanup(): void {
         <span class="stat__sub">{{ f.summary }}</span>
       </span>
       <button
+        v-if="!f.summary.includes('NAS share')"
         class="btn btn--secondary btn--sm health-banner__cta"
         :title="'Audit and reclaim disk space — nothing deleted without a typed confirm'"
         @click="openCleanup(f.nodeId)"

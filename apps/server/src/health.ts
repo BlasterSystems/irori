@@ -70,6 +70,20 @@ export function metricValue(metric: string, snapshot: HardwareSnapshot): number 
   }
 }
 
+/** Filesystem types whose space a node-local cleanup cannot reclaim. */
+const REMOTE_FS_TYPES = new Set(["cifs", "smbfs", "smb2", "nfs", "nfs4", "ncp", "virtiofs"]);
+
+/** IR-242: which mount produced the disk_pct max — " (NAS share <mount>)"
+ *  when the fullest mount is on a remote filesystem, "" for local ext4 and
+ *  every other metric (ext4 summaries stay byte-identical). */
+export function diskOriginSuffix(metric: string, snapshot: HardwareSnapshot): string {
+  if (metric !== "disk_pct") return "";
+  const mounts = snapshot.storage.filter((s) => s.totalBytes > 0);
+  if (mounts.length === 0) return "";
+  const max = mounts.reduce((a, b) => (b.usedBytes / b.totalBytes > a.usedBytes / a.totalBytes ? b : a));
+  return REMOTE_FS_TYPES.has(max.fs.toLowerCase()) ? ` (NAS share ${max.mount})` : "";
+}
+
 /** op comparison; null operand never breaches. */
 export function breaches(op: string, value: number | null, threshold: number): boolean {
   if (value === null) return false;
@@ -210,8 +224,9 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
     nodeId: string | null,
     kind: "appear" | "clear",
     value: number | null,
+    suffix = "",
   ): Promise<void> {
-    const summary = kind === "appear" ? summaryFor(rule, value, hubDiskSuffix(opts, rule.metric)) : `${rule.name}: cleared`;
+    const summary = kind === "appear" ? summaryFor(rule, value, hubDiskSuffix(opts, rule.metric) + suffix) : `${rule.name}: cleared`;
     await emit({ type: "health", serverTimeMs: now(), nodeId, ruleId: rule.id, ruleName: rule.name, metric: rule.metric, severity: rule.severity, state: kind === "appear" ? "open" : "clear", summary });
     // Cooldown applies to appear notifications only (a clear is always sent).
     if (kind === "appear" && rule.url !== null) {
@@ -240,7 +255,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
    * hub itself, IR-201) — the lookup must use IS NULL, `eq(col, null)` never
    * matches.
    */
-  async function evaluate(rule: RuleRow, nodeId: string | null, value: number): Promise<void> {
+  async function evaluate(rule: RuleRow, nodeId: string | null, value: number, suffix = ""): Promise<void> {
     const breach = breaches(rule.op, value, rule.threshold ?? 0);
     const open = await db
       .select()
@@ -266,7 +281,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
     if (breach && open.length === 0) {
       await db.insert(healthFindings).values({ ruleId: rule.id, nodeId, observedValue: value, lastNotifiedAt: new Date(now()) });
       ref.url = await webhookUrlFor(rule.id);
-      await transition(ref, nodeId, "appear", value);
+      await transition(ref, nodeId, "appear", value, suffix);
     } else if (breach && open.length > 0) {
       // IR-240: keep the open finding's observed value current so refetches
       // show the live reading, not the appear-time one. A no-op write is
@@ -279,7 +294,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         ref.url = await webhookUrlFor(rule.id);
         if (ref.url !== null) {
           await db.update(healthFindings).set({ lastNotifiedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
-          await notify(ref, nodeId, "appear", summaryFor(ref, value, hubDiskSuffix(opts, ref.metric)), value);
+          await notify(ref, nodeId, "appear", summaryFor(ref, value, hubDiskSuffix(opts, ref.metric) + suffix), value);
         }
       }
     } else if (!breach && open.length > 0) {
@@ -365,7 +380,9 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       for (const row of rules) {
         const value = metricValue(row.metric, snapshot);
         if (value === null) continue;
-        await evaluate(row, nodeId, value);
+        // IR-242: disk_pct findings name the mount that produced the max so a
+        // NAS-sourced pressure is not offered a node-local cleanup CTA.
+        await evaluate(row, nodeId, value, diskOriginSuffix(row.metric, snapshot));
       }
     },
     async sweep(nodes, onlineIds, lastSeen) {
@@ -427,14 +444,21 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         .where(isNull(healthFindings.clearedAt))
         .orderBy(desc(healthFindings.since))
         .limit(200);
-      return rows.map(({ f, rule }) => ({
+      return rows.map(({ f, rule }) => {
+        // IR-242: the summary is rebuilt per read — re-derive the mount origin
+        // from the node's latest snapshot so the banner can drop the cleanup
+        // CTA for NAS-sourced pressure without a schema change.
+        const snap = f.nodeId !== null ? latest.get(f.nodeId) : undefined;
+        const origin = snap !== undefined ? diskOriginSuffix(rule.metric, snap) : "";
+        return {
         nodeId: f.nodeId ?? "",
         ruleId: rule.id,
         metric: rule.metric as HealthFinding["metric"],
         severity: rule.severity as HealthFinding["severity"],
-        summary: summaryFor(rule, f.observedValue, hubDiskSuffix(opts, rule.metric)),
+        summary: summaryFor(rule, f.observedValue, hubDiskSuffix(opts, rule.metric) + origin),
         since: f.since.toISOString(),
-      }));
+        };
+      });
     },
     async metricsEnabled() {
       const rows = await db.select().from(settings).where(eq(settings.key, "metrics_enabled")).limit(1);
