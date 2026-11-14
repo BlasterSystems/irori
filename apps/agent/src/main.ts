@@ -185,6 +185,9 @@ async function run(): Promise<void> {
       minStoreFreeBytes: config.minStoreFreeBytes,
       unscoopedRunningSetups: () => driver.unscoopedRunningSetups(),
       resolveLocalUser: (user) => resolveLocalUser(user, { agentUser, modelctlPath: config.modelctlPath }),
+      // IR-247: separates "no passwd entry" from "no per-user modelctl" in
+      // the per-user job error wording.
+      resolveCacheHome: (user) => resolveCacheHome(user, { agentUser }),
     }),
     {
       onOutput: (jobId, seq, line) => {

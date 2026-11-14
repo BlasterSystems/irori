@@ -301,6 +301,29 @@ d("job settle events (db integration)", () => {
     await withPin.onDone(nodeId, installs[0]!.id, "succeeded", 0);
   });
 
+  it("auto-provisions a cache user whose modelctl is MISSING, not just below-pin (IR-247)", async () => {
+    const withPin = createJobsService(db, () => true, (e) => settled.push(e), undefined, async () => "0.23.0");
+    const report = {
+      generatedAtMs: Date.now(),
+      store: null,
+      local: [
+        { user: "root", home: "/root", cacheDir: "/root/.cache/huggingface/hub", modelctlVersion: "0.23.0", error: null, models: [], orphans: [] },
+        { user: "piresbruno", home: "/home/piresbruno", cacheDir: "/home/piresbruno/.cache/huggingface/hub", modelctlVersion: null, error: "modelctl is not installed for this user", models: [], orphans: [] },
+      ],
+    };
+    const inv = await withPin.create(nodeId, "models-inventory", {});
+    await db.insert(jobOutput).values({ jobId: inv.id, seq: 1, line: JSON.stringify(report) });
+    await withPin.onDone(nodeId, inv.id, "succeeded", 0);
+    const rows = await db.select().from(jobs).where(eq(jobs.nodeId, nodeId));
+    const active = (j: (typeof rows)[number]) => j.status === "queued" || j.status === "running";
+    const installs = rows.filter((j) => j.kind === "modelctl-install" && active(j));
+    // The null-version (missing binary) user gets the install job; the
+    // satisfied root is skipped.
+    expect(installs).toHaveLength(1);
+    expect(installs[0]!.params).toEqual({ user: "piresbruno" });
+    await withPin.onDone(nodeId, installs[0]!.id, "succeeded", 0);
+  });
+
   it("does not auto-provision when the pin is unset (IR-105)", async () => {
     const withoutPin = createJobsService(db, () => true, (e) => settled.push(e));
     const report = {
