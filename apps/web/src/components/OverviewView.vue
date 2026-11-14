@@ -245,24 +245,8 @@ const energyKwh = computed(() => fleetEnergyKwh(fleetPoints.value, granularityMs
 // node with ledger rows; the old NAS fold was spark-only (documented change).
 const allNodeIds = computed(() => new Set(sortedNodes.value.map((n) => n.id)));
 const tokenSum = computed(() => tokenTotals(rawTokens.value, allNodeIds.value));
-const tokenGranularity = ref<"minute" | "hour" | "day">("hour");
 const prevTokens = ref<AnalyticsSeries[]>([]);
 const prevTokenSum = computed(() => tokenTotals(prevTokens.value, allNodeIds.value));
-const tokenBuckets = computed(() => {
-  const map = new Map<number, number>();
-  for (const s of rawTokens.value) {
-    for (const p of s.points) {
-      const total = (p.generated ?? 0) + (p.prompt ?? 0);
-      map.set(p.t, (map.get(p.t) ?? 0) + total);
-    }
-  }
-  return [...map.entries()].map(([t, total]) => ({ t, total }));
-});
-const busiestBucket = computed(() => {
-  let best: { t: number; total: number } | null = null;
-  for (const b of tokenBuckets.value) if (best === null || b.total > best.total) best = b;
-  return best;
-});
 const tokenTiles = computed(() =>
   overviewTokenTiles(
     // No series at all = the ledger is unreachable — the coverage state, never
@@ -285,14 +269,6 @@ const tokenTiles = computed(() =>
         },
     tokenCostMinor.value,
     tokenCostCurrency.value,
-    {
-      windowHours: analyticsRangeMs(range.value) / 3_600_000,
-      busiest:
-        busiestBucket.value === null
-          ? null
-          : { total: busiestBucket.value.total, label: fmtBucket(busiestBucket.value.t, tokenGranularity.value) },
-      granularity: tokenGranularity.value,
-    },
   ),
 );
 // IRI-072: server-priced; the web formats only.
@@ -380,7 +356,6 @@ async function refreshCards(): Promise<void> {
   try {
     const res = await fetchAnalytics("tokens", range.value, "node");
     rawTokens.value = res.series;
-    tokenGranularity.value = res.granularity;
     // IRI-072: cost is computed server-side (per-model pricing) — the web
     // only formats.
     tokenCostMinor.value = res.costMinor;
@@ -756,25 +731,24 @@ function heroStateView(p: HeroProcess): HeroStateView {
     </article>
   </section>
 
-  <!-- IR-224 S7 (IR-231): Token stats — own row directly below the NAS card
-       (owner second pass); the NAS keeps models/store. All-nodes fleet scope
-       (documented change from the spark-only fold); deltas come from one
+  <!-- IR-224 S7 (IR-231) + IR-236: Token stats — own FULL-WIDTH row directly
+       below the NAS card (the 2-col hero-grid left the card half-empty);
+       six tiles in a 3-col grid — Average-per-hour and Busiest tiles dropped
+       (owner round 9). All-nodes fleet scope; deltas come from one
        prev-window fetch; the card follows the menu range. -->
-  <section class="hero-grid section-gap">
-    <article class="card">
-      <div class="card__head"><h3>Token stats</h3><span class="chip">■ recorded · token ledger · last {{ rangeLabel }}</span></div>
-      <div class="card__body" style="padding-top: 12px;">
-        <div class="statgrid statgrid--4">
-          <div v-for="t in tokenTiles" :key="t.label" class="stat">
-            <span class="stat__label">{{ t.label }}<Tip v-if="t.label === 'Cost' && tokenCost !== null" :text="tokenCostTip" /></span>
-            <span class="stat__value">{{ t.value }}</span>
-            <span v-if="t.sub !== null" class="stat__sub">{{ t.sub }}</span>
-            <span v-if="t.deltaPct !== null" class="stat__delta" :class="t.deltaPct >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPct * 10) / 10) }}% vs prev. {{ rangeLabel }}</span>
-            <span v-else-if="t.deltaPts !== null" class="stat__delta" :class="t.deltaPts >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPts * 10) / 10) }} pts vs prev. {{ rangeLabel }}</span>
-          </div>
+  <section class="card section-gap">
+    <div class="card__head"><h3>Token stats</h3><span class="chip">■ recorded · token ledger · last {{ rangeLabel }}</span></div>
+    <div class="card__body" style="padding-top: 12px;">
+      <div class="statgrid statgrid--3">
+        <div v-for="t in tokenTiles" :key="t.label" class="stat">
+          <span class="stat__label">{{ t.label }}<Tip v-if="t.label === 'Cost' && tokenCost !== null" :text="tokenCostTip" /></span>
+          <span class="stat__value">{{ t.value }}</span>
+          <span v-if="t.sub !== null" class="stat__sub">{{ t.sub }}</span>
+          <span v-if="t.deltaPct !== null" class="stat__delta" :class="t.deltaPct >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPct * 10) / 10) }}% vs prev. {{ rangeLabel }}</span>
+          <span v-else-if="t.deltaPts !== null" class="stat__delta" :class="t.deltaPts >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPts * 10) / 10) }} pts vs prev. {{ rangeLabel }}</span>
         </div>
       </div>
-    </article>
+    </div>
   </section>
 
   <!-- ── IR-189/IR-198: fleet-wide clock caps — one action fans out to every

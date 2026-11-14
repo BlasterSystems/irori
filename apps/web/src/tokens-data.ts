@@ -158,23 +158,21 @@ function hitPctOf(t: OverviewTokenTotals | null): number | null {
 }
 
 /**
- * The eight Overview token tiles: Total, Generated, Prompt (input), Cache
- * hit, Output:input, Cost, Average per hour, Busiest hour/day. Deltas come
- * from ONE previous-window fetch (Total/Generated/Prompt in %, Cache hit in
- * points); the folds are client-side. `fleet === null` → coverage reasons,
- * never dash-filled labels (owner rule). Cost is server-priced (IRI-072).
+ * The six Overview token tiles (IR-236): Total, Generated, Prompt (input),
+ * Cache hit, Output:input, Cost. Deltas come from ONE previous-window fetch
+ * (Total/Generated/Prompt in %, Cache hit in points); the folds are
+ * client-side. `fleet === null` → coverage reasons, never dash-filled labels
+ * (owner rule). Cost is server-priced (IRI-072).
  */
 export function overviewTokenTiles(
   fleet: OverviewTokenTotals | null,
   prev: OverviewTokenTotals | null,
   costMinor: number | null,
   costCurrency: string | null,
-  opts: { windowHours: number; busiest: { total: number; label: string } | null; granularity: "minute" | "hour" | "day" },
 ): OverviewTokenTile[] {
   const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
   const tile = (label: string, value: string, sub: string | null, deltaPct: number | null = null, deltaPts: number | null = null): OverviewTokenTile =>
     ({ label, value, sub, deltaPct, deltaPts });
-  const busiestLabel = `Busiest ${opts.granularity === "day" ? "day" : opts.granularity === "hour" ? "hour" : "minute"}`;
   if (fleet === null) {
     return [
       tile("Total tokens", "no token counters in range", null),
@@ -183,8 +181,6 @@ export function overviewTokenTiles(
       tile("Cache hit", "—", null),
       tile("Output : input", "—", null),
       tile("Cost", costCurrency === null ? "Configure pricing" : "no data", null),
-      tile("Average per hour", "—", null),
-      tile(busiestLabel, "—", null),
     ];
   }
   const sym = costCurrency === null ? "" : CURRENCY_SYMBOLS[costCurrency] ?? "";
@@ -194,7 +190,6 @@ export function overviewTokenTiles(
   const hit = hitPctOf(fleet);
   const prevHit = hitPctOf(prev);
   const ratio = fleet.generated > 0 ? `1 : ${Math.max(1, Math.round(fleet.prompt / fleet.generated))}` : "—";
-  const avg = opts.windowHours > 0 ? fmtCount(fleet.total / opts.windowHours) : "—";
   return [
     tile("Total tokens", fmtCount(fleet.total), "generated plus prompt", pctDelta(fleet.total, prev?.total)),
     tile("Generated", fmtCount(fleet.generated), null, pctDelta(fleet.generated, prev?.generated)),
@@ -213,11 +208,5 @@ export function overviewTokenTiles(
     ),
     tile("Output : input", ratio, null),
     tile("Cost", cost, "per-model pricing, server-side"),
-    tile("Average per hour", avg, opts.windowHours > 0 ? `over ${opts.windowHours} h tracked` : null),
-    tile(
-      busiestLabel,
-      opts.busiest === null ? "—" : fmtCount(opts.busiest.total),
-      opts.busiest === null ? null : opts.busiest.label,
-    ),
   ];
 }
