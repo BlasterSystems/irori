@@ -241,11 +241,12 @@ d("hub disk rule (IR-201, db integration)", () => {
     await handle.close();
   });
 
-  function makeService(sink: { sseEvents: unknown[] }, gauge: () => Promise<number | null>) {
+  function makeService(sink: { sseEvents: unknown[] }, gauge: () => Promise<number | null>, hubDiskPath?: string) {
     return createHealthService(db, "a".repeat(64), {
       sse: (e) => sink.sseEvents.push(e),
       journal: async () => {},
       hubDiskPct: gauge,
+      hubDiskPath,
       now: () => Date.now(),
     });
   }
@@ -271,6 +272,29 @@ d("hub disk rule (IR-201, db integration)", () => {
     pct = 50;
     await health.sweep([], new Set(), new Map());
     expect((await health.findings()).filter((f) => f.metric === "hub_disk_pct")).toHaveLength(0);
+  });
+
+  it("names the measured filesystem and configured path in the summary (IR-239)", async () => {
+    let pct: number | null = 81;
+    const sink: { sseEvents: unknown[] } = { sseEvents: [] };
+    const health = makeService(sink, async () => pct, "/hubfs");
+    await health.ensureSeed();
+    await health.sweep([], new Set(), new Map());
+    const open = (await health.findings()).filter((f) => f.metric === "hub_disk_pct");
+    expect(open).toHaveLength(1);
+    expect(open[0]!.summary).toBe("Hub disk warn: 81 ≥ 80 (hub VM filesystem, HUB_DISK_PATH=/hubfs)");
+    const event = sink.sseEvents.find((e) => (e as { metric?: string }).metric === "hub_disk_pct") as { summary?: string } | undefined;
+    expect(event?.summary).toBe("Hub disk warn: 81 ≥ 80 (hub VM filesystem, HUB_DISK_PATH=/hubfs)");
+
+    // Older harness (no hubDiskPath wired): same row, summary carries no suffix.
+    const bare = makeService({ sseEvents: [] }, async () => pct);
+    const bareOpen = (await bare.findings()).filter((f) => f.metric === "hub_disk_pct");
+    expect(bareOpen).toHaveLength(1);
+    expect(bareOpen[0]!.summary).not.toContain("HUB_DISK_PATH");
+
+    pct = 50;
+    await bare.sweep([], new Set(), new Map());
+    expect((await bare.findings()).filter((f) => f.metric === "hub_disk_pct")).toHaveLength(0);
   });
 
   it("treats a failed gauge as not measurable and tolerates an absent dep", async () => {

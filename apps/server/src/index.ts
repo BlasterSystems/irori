@@ -308,6 +308,9 @@ async function boot(): Promise<void> {
       const s = await statfs(config.hubDiskPath);
       return s.blocks > 0 ? ((s.blocks - s.bfree) / s.blocks) * 100 : null;
     },
+    // IR-239: the finding summary names the measured filesystem so the banner
+    // can attribute pressure to the hub VM disk and expose HUB_DISK_PATH.
+    hubDiskPath: config.hubDiskPath,
     // IR-202: the database rule reuses the existing dbHealthy dep (the same
     // boolean /healthz reports) — 0 = reachable, 1 = unreachable, once per
     // sweep. isHealthy() resolves false while the DB is down, so degraded
