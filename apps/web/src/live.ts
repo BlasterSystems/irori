@@ -379,6 +379,9 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       es.onopen = () => {
         connected.value = true;
         void refreshNodes().catch(() => {});
+        // IR-240: reconcile findings on reconnect — a health frame lost while
+        // the stream was down would otherwise keep the stale pct until reload.
+        void refreshFindings().catch(() => {});
       };
       es.onmessage = (msg) => ingest(msg.data);
       es.onerror = () => {

@@ -684,9 +684,11 @@ const CAPACITY_RE = /needs \d+ bytes, only \d+ free/;
 const capacityRows = computed(() => (placementRows.value ?? []).filter((p) => p.action === "unavailable" && p.reason !== null && CAPACITY_RE.test(p.reason)));
 const hygieneOffers = ref<Map<string, number>>(new Map());
 const hygieneNode = ref<{ id: string; name: string } | null>(null);
-watch(capacityRows, (rows) => {
-  for (const row of rows) {
-    if (hygieneOffers.value.has(row.node.id)) continue;
+/** IR-240: refetch per capacityRows change (no once-per-node guard) and on
+ *  drawer close — a hygiene-clean never writes an audit row, so the stale
+ *  map must be re-pulled after the fresh audit the drawer now follows with. */
+async function refreshHygieneOffers(): Promise<void> {
+  for (const row of capacityRows.value) {
     void fetchCleanup(row.node.id)
       .then((state) => {
         const report = state.latestAudit?.report;
@@ -697,7 +699,14 @@ watch(capacityRows, (rows) => {
       })
       .catch(() => hygieneOffers.value.set(row.node.id, 0));
   }
+}
+watch(capacityRows, () => {
+  void refreshHygieneOffers();
 });
+function closeHygiene(): void {
+  hygieneNode.value = null;
+  void refreshHygieneOffers();
+}
 function openHygiene(nodeId: string, name: string): void {
   hygieneNode.value = { id: nodeId, name };
 }
@@ -1322,7 +1331,7 @@ function fmtGiB(bytes: number | null): string {
     </div>
   </div>
 
-  <CleanupDrawer v-if="hygieneNode !== null" :node-id="hygieneNode.id" :node-name="hygieneNode.name" @close="hygieneNode = null" />
+  <CleanupDrawer v-if="hygieneNode !== null" :node-id="hygieneNode.id" :node-name="hygieneNode.name" @close="closeHygiene" />
 </template>
 
 
