@@ -6,12 +6,16 @@ import { fmtBytes } from "../analytics";
 import { thresholds } from "../thresholds";
 import { HYGIENE_CATEGORY_LABELS, HYGIENE_SAFE_CATEGORIES, type HygieneCategory } from "@irori/core";
 import { vScrimClose } from "../scrim";
+import { vDialog } from "../dialog";
 
 const props = defineProps<{ nodeId: string; nodeName: string }>();
 const emit = defineEmits<{ close: [] }>();
 
 type Tab = "audit" | "history";
 const tab = ref<Tab>("audit");
+/** IR-224 S5: secondary sections collapse into accordions so the default
+ *  view fits the body without scrolling; arming states live inside them. */
+const acc = ref<{ staging: boolean }>({ staging: false });
 const cleanup = ref<CleanupState | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -291,16 +295,23 @@ function catLabel(category: string): string {
 
 <template>
   <div class="drawer-scrim" v-scrim-close="() => emit('close')">
-    <aside class="drawer is-open" role="dialog" aria-label="Disk hygiene">
-      <div class="row row--between" style="margin-bottom: 10px">
-        <div class="row">
-          <h3 style="font-size: 17px">Disk hygiene — {{ nodeName }}</h3>
-          <span v-if="diskPct !== null" class="chip" :class="diskChipCls">Disk {{ diskPct }}%</span>
-          <span v-if="totalReclaimable !== null" class="chip chip--accent">{{ fmtBytes(totalReclaimable) }} reclaimable</span>
+    <aside class="drawer drawer--hy is-open" role="dialog" aria-modal="true" aria-label="Disk hygiene" v-dialog="() => emit('close')">
+      <div class="drawer__head row row--between">
+        <div style="min-width: 0">
+          <div class="row">
+            <h3 style="font-size: 17px">Disk hygiene — {{ nodeName }}</h3>
+            <span v-if="diskPct !== null" class="chip" :class="diskChipCls">Disk {{ diskPct }}%</span>
+            <span v-if="totalReclaimable !== null" class="chip chip--accent">{{ fmtBytes(totalReclaimable) }} reclaimable</span>
+          </div>
+          <p class="stat__sub">
+            <template v-if="cleanup?.latestAudit">audited {{ auditReport === null ? 'recently' : new Date(auditReport.generatedAtMs).toLocaleTimeString() }} · cached ~5 min</template>
+            <template v-else>never audited — run an audit to estimate reclaimable space</template>
+          </p>
         </div>
         <button class="iconbtn" aria-label="Close disk hygiene" @click="emit('close')">✕</button>
       </div>
 
+      <div class="drawer__body">
       <div class="tabs" style="margin-bottom: 12px" role="tablist" aria-label="Cleanup tabs">
         <button role="tab" :aria-selected="tab === 'audit'" :class="{ 'is-active': tab === 'audit' }" @click="tab = 'audit'">Audit</button>
         <button role="tab" :aria-selected="tab === 'history'" :class="{ 'is-active': tab === 'history' }" @click="tab = 'history'">History</button>
@@ -316,11 +327,26 @@ function catLabel(category: string): string {
       </p>
 
       <template v-if="tab === 'audit'">
+        <!-- IR-224 S5 (mockup): weekly prevention leads the body; the audit
+             timestamp moved to the fixed head. -->
+        <div class="stack" style="gap: 6px; margin-bottom: 12px">
+          <label class="pick" :class="{ 'is-on': cleanup?.prevention.weeklySafePass === true }">
+            <input type="checkbox" :disabled="preventionBusy" :checked="cleanup?.prevention.weeklySafePass === true" @change="toggleWeekly" />
+            <span>
+              <strong>Weekly always-safe pass</strong>
+              <div class="stat__sub">build cache, compiler/pkg caches, tmp, journal — nothing else</div>
+            </span>
+          </label>
+          <div class="row row--between">
+            <span class="stat__sub">docker log rotation (max-size 10m, max-file 3)</span>
+            <button class="btn btn--secondary btn--sm" :disabled="preventionBusy || cleanup?.prevention.logRotationApplied === true" @click="applyLogRotation">
+              {{ cleanup?.prevention.logRotationApplied === true ? "applied ✓" : "Apply log rotation" }}
+            </button>
+          </div>
+        </div>
+
         <div class="row row--between" style="margin-bottom: 10px">
-          <span class="stat__sub">
-            <template v-if="cleanup?.latestAudit">audited {{ auditReport === null ? 'recently' : new Date(auditReport.generatedAtMs).toLocaleTimeString() }} · cached ~5 min</template>
-            <template v-else>never audited — run an audit to estimate reclaimable space</template>
-          </span>
+          <span class="stat__sub">safe categories pre-checked · care rows are opt-in</span>
           <button class="btn btn--secondary btn--sm" :disabled="phase === 'busy' || phase === 'running'" @click="runAudit">
             {{ phase === "busy" ? "auditing…" : cleanup?.latestAudit ? "Re-audit" : "Run audit" }}
           </button>
@@ -366,37 +392,16 @@ function catLabel(category: string): string {
           </label>
         </div>
 
-        <div class="row row--between" style="margin-top: 12px">
-          <span class="stat__sub">safe categories pre-checked · care rows are opt-in</span>
-        </div>
-
-        <!-- Typed node-name confirm (SPEC §11.6) — the only destructive gate.
-             Sticky (IRI-042): stays pinned above the scrollable category rows. -->
-        <div class="hy-confirm stack" style="gap: 6px; margin-top: 8px">
+        <!-- IR-211: hidden staging debris (quarantine trees staging-audit cannot see) —
+             IR-224 S5: collapsed into an accordion so the default view fits the
+             body without scrolling; arming stays typed and per tree. -->
+        <div class="hy-acc" style="margin-top: 12px">
+          <button class="hy-acc__btn" type="button" :aria-expanded="acc.staging ? 'true' : 'false'" @click="acc.staging = !acc.staging">
+            <span>Staging &amp; quarantine trees <span class="faint mono">· arm per tree</span></span>
+            <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
+          <div v-show="acc.staging" class="hy-acc__panel">
           <div class="row row--between">
-            <label class="stat__sub">type the node name to confirm: <strong>{{ nodeName }}</strong></label>
-            <span class="stat__sub">{{ selectedCategories.length }} selected · {{ fmtBytes(selectedReclaimable) }}</span>
-          </div>
-          <div class="row" style="gap: 8px">
-            <input
-              v-model="confirmName"
-              class="select"
-              :placeholder="nodeName"
-              aria-label="Type the node name to confirm the clean"
-              style="flex: 1; min-width: 0;"
-            />
-            <button
-              class="btn btn--sm"
-              :disabled="phase === 'busy' || phase === 'running' || selectedCategories.length === 0 || confirmName !== nodeName"
-              @click="runClean"
-            >{{ phase === "running" ? "cleaning…" : `Clean ${selectedCategories.length} categories` }}</button>
-          </div>
-        </div>
-
-        <!-- IR-211: hidden staging debris (quarantine trees staging-audit cannot see) -->
-        <div class="stack" style="gap: 6px; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px">
-          <div class="row row--between">
-            <strong class="stat__sub">Staging &amp; quarantine trees</strong>
             <button class="btn btn--secondary btn--sm" :disabled="stagingBusy || phase === 'busy' || phase === 'running'" @click="auditStaging">
               {{ stagingBusy ? "working…" : "Audit staging trees" }}
             </button>
@@ -467,6 +472,7 @@ function catLabel(category: string): string {
               <span v-if="pruneSummary.freedBytes !== null">· freed {{ fmtBytes(pruneSummary.freedBytes) }}</span>
             </p>
           </template>
+          </div>
         </div>
 
         <!-- Staged streamed run -->
@@ -490,23 +496,6 @@ function catLabel(category: string): string {
           </div>
         </div>
 
-        <!-- Prevention (opt-in, drawer bottom) -->
-        <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 10px">
-          <h4 style="margin-bottom: 6px">Prevention</h4>
-          <label class="pick" :class="{ 'is-on': cleanup?.prevention.weeklySafePass === true }">
-            <input type="checkbox" :disabled="preventionBusy" :checked="cleanup?.prevention.weeklySafePass === true" @change="toggleWeekly" />
-            <span>
-              <strong>Weekly always-safe pass</strong>
-              <div class="stat__sub">build cache, compiler/pkg caches, tmp, journal — nothing else</div>
-            </span>
-          </label>
-          <div class="row row--between" style="margin-top: 8px">
-            <span class="stat__sub">docker log rotation (max-size 10m, max-file 3)</span>
-            <button class="btn btn--secondary btn--sm" :disabled="preventionBusy || cleanup?.prevention.logRotationApplied === true" @click="applyLogRotation">
-              {{ cleanup?.prevention.logRotationApplied === true ? "applied ✓" : "Apply log rotation" }}
-            </button>
-          </div>
-        </div>
       </template>
 
       <template v-else>
@@ -529,11 +518,45 @@ function catLabel(category: string): string {
         </table>
         <p v-else class="muted">no cleanup history — last 20 runs show here (kept 90 d)</p>
       </template>
+      </div>
+
+      <!-- Typed node-name confirm (SPEC §11.6) — the only destructive gate.
+           IR-224 S5: the foot is flex-fixed, so the gate is always visible —
+           the body scrolls, the panel never does. -->
+      <div class="drawer__foot">
+        <div class="hy-confirm stack" style="gap: 6px">
+          <div class="row row--between">
+            <label class="stat__sub">type the node name to confirm: <strong>{{ nodeName }}</strong></label>
+            <span class="stat__sub">{{ selectedCategories.length }} selected · {{ fmtBytes(selectedReclaimable) }}</span>
+          </div>
+          <div class="row" style="gap: 8px">
+            <input
+              v-model="confirmName"
+              class="select"
+              :placeholder="nodeName"
+              aria-label="Type the node name to confirm the clean"
+              style="flex: 1; min-width: 0;"
+            />
+            <button
+              class="btn btn--sm"
+              :disabled="phase === 'busy' || phase === 'running' || selectedCategories.length === 0 || confirmName !== nodeName"
+              @click="runClean"
+            >{{ phase === "running" ? "cleaning…" : `Clean ${selectedCategories.length} categories` }}</button>
+          </div>
+        </div>
+      </div>
     </aside>
   </div>
 </template>
 
 <style scoped>
+/* IR-224 S5: the cleanup drawer is the one panel that never scrolls —
+   fixed head, scrolling body (shared .drawer__body chrome), fixed confirm
+   foot. Every other .drawer keeps its panel-scroll contract. */
+.drawer--hy { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.drawer--hy .drawer__head { flex: none; padding: 14px 14px 0; }
+.drawer--hy .drawer__body { flex: 1 1 auto; padding: 0 14px 14px; }
+.drawer--hy .drawer__foot { flex: none; padding: 10px 14px 14px; border-top: 1px solid var(--border); background: var(--surface); }
 .hy-details {
   list-style: none;
   margin: 2px 0 0;
@@ -547,14 +570,20 @@ function catLabel(category: string): string {
 .hy-path {
   overflow-wrap: anywhere;
 }
-/* IRI-042: the destructive gate rides the drawer's scroll container, so it
- * pins to the visible bottom until its natural position scrolls into view. */
+/* Secondary sections (IR-224 S5): collapsed by default, chevron state keyed
+   off aria-expanded (the same idiom as the ServeView drawers). */
+.hy-acc { border: 1px solid var(--border); border-radius: var(--radius-control); }
+.hy-acc + .hy-acc { margin-top: 8px; }
+.hy-acc__btn { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px;
+  padding: 0 12px; border: 0; background: none; font: 500 var(--fs-ui)/1.3 var(--font-sans); color: var(--fg); cursor: pointer; text-align: left; }
+.hy-acc__btn:hover { background: var(--surface-2); }
+.hy-acc__btn .chev { flex: none; width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.5;
+  transition: transform var(--dur-press) var(--ease-out); }
+.hy-acc__btn[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.hy-acc__panel { padding: 10px 12px 12px; border-top: 1px solid var(--border); }
+/* The destructive gate rides the fixed foot (was position:sticky inside the
+ * whole-panel scroll, IRI-042) — always visible while the body scrolls. */
 .hy-confirm {
-  position: sticky;
-  bottom: 0;
   z-index: 2;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
 }
 </style>

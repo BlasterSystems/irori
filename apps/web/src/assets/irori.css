@@ -403,6 +403,10 @@ html[data-tier="small"] .bs-perf .bs-perf__sep--model { display: none; }
   display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
 .drawer { width: min(560px, 100%); max-height: 88vh; overflow: auto; padding: 14px;
   background: var(--surface); border: 1px solid var(--rule-2); border-radius: var(--radius-panel); }
+/* IR-224 S5: shared body-scroll region for drawers that opt into the
+ * fixed-head structure (CleanupDrawer's .drawer--hy) — that panel itself
+ * never scrolls; every other .drawer keeps the panel-scroll contract above. */
+.drawer__body { min-height: 0; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 @media (min-width: 721px) { .drawer-scrim { align-items: center; } }
 .pick { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px;
   border: 1px solid var(--border); border-radius: var(--radius-panel); cursor: pointer; flex-wrap: wrap; }
@@ -537,15 +541,17 @@ svg[role="img"] path, svg[role="img"] line, svg[role="img"] polyline { vector-ef
   .iconbtn { width: 44px; height: 44px; }
   input[type="checkbox"] { width: 22px; height: 22px; }
   body .drawer, body .modal__panel, body .wizard { width: 100%; max-width: 100%; min-width: 0; }
-  body .drawer { border-left: 0; visibility: hidden; }
-  body .drawer.is-open { visibility: visible; }
+  /* IR-224 S5: the visibility gate is gone — every drawer lives in a
+     v-if'd .drawer-scrim (or is mounted only while open), so closed drawers
+     never paint; the old rule statically hid the five drawers that never
+     render is-open, making them invisible on phones. */
+  body .drawer { border-left: 0; }
   body .modal__panel { min-height: 100dvh; border-radius: 0; display: flex; flex-direction: column; }
   body .backdrop { padding: 0; align-items: stretch; }
   body .wizard { min-height: 100dvh; border: 0; border-radius: 0; display: flex; flex-direction: column; }
   body .wizard .row { flex-wrap: wrap; }
   body .steps { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
   body .wizard > .wizard__foot { margin-top: auto; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
-  .drawer__body { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
   .card__body--flush { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .card__body--flush .table { min-width: 640px; }
   .card__body--flush th:first-child, .card__body--flush td:first-child { position: sticky; left: 0; background: var(--surface); }
