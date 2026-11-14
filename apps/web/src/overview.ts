@@ -76,6 +76,14 @@ export function peakDecode(points: LlmHistoryPoint[]): number | null {
   return values.length === 0 ? null : Math.max(...values);
 }
 
+/** IR-235: the hero peak sub-label names the bucket granularity the peak was
+ *  computed over — an hour-bucket "peak" is a bucket average, never the
+ *  instant hero value, so a bare "peak N" reads as a contradiction. */
+export function peakSubLabel(granularity: string, peak: number): string {
+  const word = granularity === "minute" ? "minute" : granularity === "day" ? "day" : "hour";
+  return `peak ${word} ${Math.round(peak)}`;
+}
+
 /** AnalyticsPoint with every lens key nulled except the given patch — the
  *  hero chart reuses lensChart geometry over llm-history buckets. */
 function heroPoint(t: number, patch: Partial<AnalyticsPoint>): AnalyticsPoint {

@@ -29,6 +29,7 @@ import {
   heroSpark,
   OVERVIEW_RANGES,
   peakDecode,
+  peakSubLabel,
   powerBarSlot,
   relativeTime,
   snapshotNodeWatts,
@@ -183,7 +184,7 @@ const heroProcesses = computed<HeroProcess[]>(() => {
 
 // ─── per-process 30m charts (one history fetch per distinct serving node) ────
 
-const charts = ref<Map<string, { chart: LensChart; peak: number | null }>>(new Map());
+const charts = ref<Map<string, { chart: LensChart; peak: number | null; granularity: string }>>(new Map());
 let chartSeq = 0;
 
 async function refreshCharts(): Promise<void> {
@@ -197,8 +198,11 @@ async function refreshCharts(): Promise<void> {
   const next = new Map(charts.value); // failed nodes keep their last chart
   for (const [nodeId, ports] of perNode) {
     let series: Array<{ port: number; points: LlmHistoryPoint[] }> = [];
+    let granularity = "hour";
     try {
-      series = (await fetchLlmHistory(nodeId, range.value)).series;
+      const hist = await fetchLlmHistory(nodeId, range.value);
+      series = hist.series;
+      granularity = hist.granularity;
     } catch {
       continue; // history unavailable — this node's chart stays as-is
     }
@@ -208,7 +212,7 @@ async function refreshCharts(): Promise<void> {
       if (points === undefined) continue;
       const process = heroProcesses.value.find((p) => p.nodeId === nodeId && p.hero.port === port);
       if (process === undefined) continue;
-      next.set(process.key, { chart: heroSpark(points, rangeLabel.value), peak: peakDecode(points) });
+      next.set(process.key, { chart: heroSpark(points, rangeLabel.value), peak: peakDecode(points), granularity });
     }
   }
   if (seq === chartSeq) charts.value = next;
@@ -636,7 +640,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
       </div>
       <div class="card__body">
         <div :class="heroGridClass(p.hero)">
-          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">{{ fmtTps(p.hero.decodeTps) }}</span><span v-if="charts.get(p.key)?.peak != null" class="stat__sub">peak {{ Math.round(charts.get(p.key)!.peak!) }}</span></div>
+          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">{{ fmtTps(p.hero.decodeTps) }}</span><span v-if="charts.get(p.key)?.peak != null" class="stat__sub">{{ peakSubLabel(charts.get(p.key)!.granularity, charts.get(p.key)!.peak!) }}</span></div>
           <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">{{ fmtTps(p.hero.prefillTps) }}</span><span v-if="p.hero.cacheHitPct !== null" class="stat__sub">cache hit {{ Math.round(p.hero.cacheHitPct) }}%</span></div>
           <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">{{ queueValue(p.hero) }}</span><span class="stat__sub">{{ queueSub(p.hero) }}</span></div>
           <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">{{ num(p.hero.kvCachePct === null ? null : Math.round(p.hero.kvCachePct)) }}<template v-if="p.hero.kvCachePct !== null">%</template></span><div v-if="p.hero.kvCachePct !== null" class="bar" style="margin-top: 6px;"><div class="bar__fill" :style="{ width: p.hero.kvCachePct + '%' }"></div></div></div>
