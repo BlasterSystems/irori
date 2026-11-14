@@ -4,6 +4,8 @@ import {
   type EfficiencyResponse,
   type EfficiencyRow,
   type HealthFinding,
+  type HealthRule,
+  type HealthRulePut,
   type UsageRetriesResponse,
   type UsageTrace,
   usageRetriesResponseSchema,
@@ -492,6 +494,32 @@ export async function fetchHealthFindings(): Promise<HealthFinding[]> {
     throw new Error("GET /api/v1/health/findings: expected {findings: []}");
   }
   return (body as { findings: HealthFinding[] }).findings;
+}
+
+/** IRI-069: per-rule alarm channels (IR-241). `hasWebhook` never exposes the
+ *  encrypted URL; the PUT takes a plaintext webhookUrl (null clears). */
+export async function fetchHealthRules(): Promise<HealthRule[]> {
+  const res = await fetch("/api/v1/health/rules");
+  if (!res.ok) throw new Error(`GET /api/v1/health/rules failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || !Array.isArray((body as { rules?: unknown }).rules)) {
+    throw new Error("GET /api/v1/health/rules: expected {rules: []}");
+  }
+  return (body as { rules: HealthRule[] }).rules;
+}
+
+export async function putHealthRule(id: string, patch: HealthRulePut): Promise<HealthRule> {
+  const res = await fetch(`/api/v1/health/rules/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`PUT /api/v1/health/rules/${id} failed: HTTP ${res.status}`);
+  const body: unknown = await res.json();
+  if (typeof body !== "object" || body === null || (body as { rule?: unknown }).rule === undefined) {
+    throw new Error(`PUT /api/v1/health/rules/${id}: expected {rule}`);
+  }
+  return (body as { rule: HealthRule }).rule;
 }
 
 /** Rotate a node's agent token. The old token fails at the agent's next hello. */

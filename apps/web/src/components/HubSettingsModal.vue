@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { fetchCadenceMs, fetchEnergyCost, fetchHfTokenStatus, fetchTokenCost, putCadenceMs, putEnergyCost, putHfToken, putTokenCost } from "../api";
+import { fetchCadenceMs, fetchEnergyCost, fetchHealthRules, fetchHfTokenStatus, fetchTokenCost, putCadenceMs, putEnergyCost, putHealthRule, putHfToken, putTokenCost } from "../api";
 import { serverCadenceMs } from "../version";
 import { auditDomainHash } from "../audit-data";
 import { energyCost, tokenCost } from "../cost-settings";
-import { CURRENCIES, type Currency, type EnergyCost, type TokenCost } from "@irori/core";
+import { CURRENCIES, type Currency, type EnergyCost, type HealthRule, type TokenCost } from "@irori/core";
 import { vScrimClose } from "../scrim";
 
 const emit = defineEmits<{ close: [] }>();
@@ -129,6 +129,49 @@ async function saveTokenCost(): Promise<void> {
   }
 }
 
+// ─── Alarm webhooks (IR-241) ────────────────────────────────────────────────
+// Per-rule POST channels via the existing PUT /api/v1/health/rules/:id. The
+// plaintext URL is write-only (stored encrypted; the wire never returns it) —
+// the row shows only the hasWebhook state.
+
+const rules = ref<HealthRule[]>([]);
+const ruleUrls = ref<Record<string, string>>({});
+const ruleBusy = ref<Record<string, boolean>>({});
+const ruleOk = ref<Record<string, boolean>>({});
+const ruleError = ref<string | null>(null);
+
+async function refreshRules(): Promise<void> {
+  ruleError.value = null;
+  try {
+    rules.value = await fetchHealthRules();
+  } catch (err) {
+    // Older hub without the route or DB down — the section stays empty.
+    ruleError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function saveRuleUrl(rule: HealthRule, clear = false): Promise<void> {
+  if (ruleBusy.value[rule.id]) return;
+  const url = clear ? null : (ruleUrls.value[rule.id] ?? "").trim();
+  if (!clear && url === "") return;
+  ruleBusy.value[rule.id] = true;
+  ruleError.value = null;
+  try {
+    const next = await putHealthRule(rule.id, clear ? { webhookUrl: null } : { webhookUrl: url });
+    const i = rules.value.findIndex((r) => r.id === rule.id);
+    if (i >= 0) rules.value.splice(i, 1, next);
+    if (!clear) {
+      ruleUrls.value[rule.id] = "";
+      ruleOk.value[rule.id] = true;
+      setTimeout(() => (ruleOk.value[rule.id] = false), 2000);
+    }
+  } catch (err) {
+    ruleError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    ruleBusy.value[rule.id] = false;
+  }
+}
+
 onMounted(async () => {
   try {
     configured.value = await fetchHfTokenStatus();
@@ -165,6 +208,7 @@ onMounted(async () => {
   } catch {
     // Older hub — sections stay empty until saved.
   }
+  void refreshRules();
 });
 </script>
 
@@ -279,6 +323,33 @@ onMounted(async () => {
               {{ tokenBusy ? "working…" : tokenCostOk ? "saved" : "Save prices" }}
             </button>
           </div>
+        </section>
+
+        <section class="setsec">
+          <h4>Alarm webhooks <span class="faint">(optional)</span></h4>
+          <p v-if="ruleError" class="banner banner--warn" style="margin-bottom: 8px">{{ ruleError }}</p>
+          <div v-for="rule in rules" :key="rule.id" class="row" style="align-items: center; gap: 8px; margin-bottom: 6px">
+            <span class="stat__sub" style="width: 200px; flex: none">{{ rule.name }}</span>
+            <span class="chip" :class="rule.hasWebhook ? 'chip--ok' : 'chip--muted'" style="flex: none">{{ rule.hasWebhook ? "webhook on" : "no webhook" }}</span>
+            <input
+              :id="'rule-url-' + rule.id"
+              v-model="ruleUrls[rule.id]"
+              type="url"
+              spellcheck="false"
+              class="bs-field__input"
+              style="flex: 1; min-width: 0"
+              :placeholder="'https://… — POSTs on ' + rule.name.toLowerCase() + ' transitions'"
+            />
+            <button class="btn btn--secondary btn--sm" style="flex: none" :disabled="ruleBusy[rule.id] || !(ruleUrls[rule.id] ?? '').trim()" @click="saveRuleUrl(rule)">
+              {{ ruleOk[rule.id] ? "saved" : "Set" }}
+            </button>
+            <button v-if="rule.hasWebhook" class="bs-link bs-link--thread" style="flex: none" :disabled="ruleBusy[rule.id]" @click="saveRuleUrl(rule, true)">Clear</button>
+          </div>
+          <p class="stat__sub">
+            POSTs <code>{&nbsp;rule, metric, severity, state, nodeId, summary, observed, at&nbsp;}</code> to the URL when a
+            rule opens (and always on clear), cooldown-bounded. Stored encrypted on the hub; the URL is never echoed
+            back — the row shows only whether a channel is set. Out of scope by design: test-fire, multiple channels.
+          </p>
         </section>
 
         <div class="setsec setsec--foot row row--between">
