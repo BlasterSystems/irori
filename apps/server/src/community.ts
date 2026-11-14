@@ -32,6 +32,15 @@ export const COMMUNITY_SOURCES: CommunitySourceDef[] = [
   { source: "atom:tensorfold-releases", url: "https://github.com/ashhart/TensorFold/releases.atom", kind: "atom", intervalMs: 6 * 3_600_000 },
   { source: "atom:spark-vllm-releases", url: "https://github.com/eugr/spark-vllm-docker/releases.atom", kind: "atom", intervalMs: 6 * 3_600_000 },
   { source: "atom:recipe-registry-commits", url: "https://github.com/spark-arena/recipe-registry/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  // IR-246: per-repo commit watch for the seeded MiaAI-Lab recipe repos (the
+  // whole github.com/MiaAI-Lab.atom feed would flood Releases with ~50
+  // HTML-gallery repos). These land in Releases + a chip automatically.
+  { source: "atom:miaai-glm53-exl3-2x-tf", url: "https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks-TensorFold/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  { source: "atom:miaai-glm53-exl3-2x-vllm", url: "https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  { source: "atom:miaai-dsv41-4x-tf", url: "https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-1017-4x-DGX-Sparks-TensorFold/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  { source: "atom:miaai-dsv41-3x-sglang", url: "https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-DGX-Sparks/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  { source: "atom:miaai-nemotron-bolt", url: "https://github.com/MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  { source: "atom:miaai-qwen38-dual", url: "https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Dual-DGX-Sparks/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
   { source: "feed:nvidia-blog", url: "https://developer.nvidia.com/blog/tag/dgx-spark/feed/", kind: "feed", intervalMs: 12 * 3_600_000 },
 ];
 
