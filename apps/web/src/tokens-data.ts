@@ -151,7 +151,10 @@ function pctDelta(cur: number, prev: number | null | undefined): number | null {
 }
 
 function hitPctOf(t: OverviewTokenTotals | null): number | null {
-  return t === null || t.prompt <= 0 ? null : (t.cached / t.prompt) * 100;
+  // IR-220: cache reads can be logged without a prompt row (capture gaps) —
+  // clamp cached to prompt so the ratio and its delta stay ≤ 100%.
+  if (t === null || t.prompt <= 0) return null;
+  return (Math.min(t.cached, t.prompt) / t.prompt) * 100;
 }
 
 /**
@@ -166,11 +169,12 @@ export function overviewTokenTiles(
   prev: OverviewTokenTotals | null,
   costMinor: number | null,
   costCurrency: string | null,
-  opts: { windowHours: number; busiest: { total: number; label: string } | null; dayBuckets: boolean },
+  opts: { windowHours: number; busiest: { total: number; label: string } | null; granularity: "minute" | "hour" | "day" },
 ): OverviewTokenTile[] {
   const CURRENCY_SYMBOLS: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
   const tile = (label: string, value: string, sub: string | null, deltaPct: number | null = null, deltaPts: number | null = null): OverviewTokenTile =>
     ({ label, value, sub, deltaPct, deltaPts });
+  const busiestLabel = `Busiest ${opts.granularity === "day" ? "day" : opts.granularity === "hour" ? "hour" : "minute"}`;
   if (fleet === null) {
     return [
       tile("Total tokens", "no token counters in range", null),
@@ -180,7 +184,7 @@ export function overviewTokenTiles(
       tile("Output : input", "—", null),
       tile("Cost", costCurrency === null ? "Configure pricing" : "no data", null),
       tile("Average per hour", "—", null),
-      tile(opts.dayBuckets ? "Busiest day" : "Busiest hour", "—", null),
+      tile(busiestLabel, "—", null),
     ];
   }
   const sym = costCurrency === null ? "" : CURRENCY_SYMBOLS[costCurrency] ?? "";
@@ -203,7 +207,7 @@ export function overviewTokenTiles(
     tile(
       "Cache hit",
       fmtHitPct(hit),
-      hit === null ? null : `${fmtCount(fleet.cached)} prefill tokens saved`,
+      hit === null ? null : `${fmtCount(Math.min(fleet.cached, fleet.prompt))} prefill tokens saved`,
       null,
       hit !== null && prevHit !== null ? Math.round((hit - prevHit) * 10) / 10 : null,
     ),
@@ -211,7 +215,7 @@ export function overviewTokenTiles(
     tile("Cost", cost, "per-model pricing, server-side"),
     tile("Average per hour", avg, opts.windowHours > 0 ? `over ${opts.windowHours} h tracked` : null),
     tile(
-      opts.dayBuckets ? "Busiest day" : "Busiest hour",
+      busiestLabel,
       opts.busiest === null ? "—" : fmtCount(opts.busiest.total),
       opts.busiest === null ? null : opts.busiest.label,
     ),

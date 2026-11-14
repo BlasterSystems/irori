@@ -179,17 +179,19 @@ function toggleRailRange(): void {
   });
 }
 
-/** IR-224 S4: the topbar perf chip — the busiest serving port (probe truth)
+/** IR-224 S4: the topbar perf chip — the fleet's BUSIEST serving port (probe
+ *  truth, online nodes only — live.ts keeps the llm entry after node-offline)
  *  plus fleet watts; hidden on the Overview, whose heroes carry the data. */
 const perfChip = computed(() => {
   if (!connected.value) return null;
+  let best: { model: string; decodeTps: number } | null = null;
   for (const node of live.sortedNodes.value) {
+    if (!node.online) continue;
     const port = pickPrimaryPort(live.getLlm(node.id)?.ports ?? null);
-    if (port !== null && port.model !== null && port.decodeTps !== null) {
-      return { model: port.model, decode: fmtTps(port.decodeTps) };
-    }
+    if (port === null || port.model === null || port.decodeTps === null) continue;
+    if (best === null || port.decodeTps > best.decodeTps) best = { model: port.model, decodeTps: port.decodeTps };
   }
-  return null;
+  return best === null ? null : { model: best.model, decode: fmtTps(best.decodeTps) };
 });
 
 function toggleTheme(): void {

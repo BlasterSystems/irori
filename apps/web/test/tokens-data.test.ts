@@ -98,7 +98,7 @@ describe("overview token tiles (IR-224 S7 / IR-231)", () => {
   const prev = { total: 400, generated: 100, prompt: 300, cached: 150 };
 
   it("names which tiles carry deltas: pct on Total/Generated/Prompt, points on Cache hit", () => {
-    const tiles = overviewTokenTiles(fleet, prev, 1234, "EUR", { windowHours: 24, busiest: { total: 200, label: "today, 09:00" }, dayBuckets: false });
+    const tiles = overviewTokenTiles(fleet, prev, 1234, "EUR", { windowHours: 24, busiest: { total: 200, label: "today, 09:00" }, granularity: "hour" });
     const byLabel = Object.fromEntries(tiles.map((t) => [t.label, t]));
     expect(byLabel["Total tokens"]).toMatchObject({ value: "445", deltaPct: 11.25, deltaPts: null });
     expect(byLabel["Generated"]).toMatchObject({ value: "145", deltaPct: 45, deltaPts: null });
@@ -109,28 +109,31 @@ describe("overview token tiles (IR-224 S7 / IR-231)", () => {
   });
 
   it("folds Output:input, Average per hour and the granularity-aware Busiest hour", () => {
-    const tiles = overviewTokenTiles(fleet, null, null, null, { windowHours: 24, busiest: { total: 200, label: "today, 09:00" }, dayBuckets: false });
+    const tiles = overviewTokenTiles(fleet, null, null, null, { windowHours: 24, busiest: { total: 200, label: "today, 09:00" }, granularity: "hour" });
     const byLabel = Object.fromEntries(tiles.map((t) => [t.label, t]));
     expect(byLabel["Output : input"]).toMatchObject({ value: "1 : 2" });
     expect(byLabel["Average per hour"]).toMatchObject({ value: "19", sub: "over 24 h tracked" });
     expect(byLabel["Busiest hour"]).toMatchObject({ value: "200", sub: "today, 09:00" });
+    // minute buckets are labelled honestly, never passed off as hours
+    const minuteTiles = overviewTokenTiles(fleet, null, null, null, { windowHours: 0.5, busiest: { total: 9, label: "21:58" }, granularity: "minute" });
+    expect(minuteTiles.find((t) => t.label === "Busiest minute")).toMatchObject({ value: "9", sub: "21:58" });
   });
 
   it("relabels Busiest hour to Busiest day on day buckets", () => {
-    const tiles = overviewTokenTiles(fleet, null, null, null, { windowHours: 720, busiest: { total: 900, label: "Nov 13" }, dayBuckets: true });
+    const tiles = overviewTokenTiles(fleet, null, null, null, { windowHours: 720, busiest: { total: 900, label: "Nov 13" }, granularity: "day" });
     expect(tiles.find((t) => t.label === "Busiest day")).toMatchObject({ value: "900", sub: "Nov 13" });
     expect(tiles.find((t) => t.label === "Busiest hour")).toBeUndefined();
   });
 
   it("renders coverage reasons for an empty fleet, never dash-filled labels", () => {
-    const tiles = overviewTokenTiles(null, null, null, null, { windowHours: 24, busiest: null, dayBuckets: false });
+    const tiles = overviewTokenTiles(null, null, null, null, { windowHours: 24, busiest: null, granularity: "hour" });
     expect(tiles[0]).toMatchObject({ label: "Total tokens", value: "no token counters in range" });
     expect(tiles.every((t) => t.deltaPct === null && t.deltaPts === null)).toBe(true);
     expect(tiles.find((t) => t.label === "Cost")?.value).toBe("Configure pricing");
   });
 
   it("formats the server-priced cost in minor units", () => {
-    const tiles = overviewTokenTiles(fleet, null, 184, "EUR", { windowHours: 24, busiest: null, dayBuckets: false });
+    const tiles = overviewTokenTiles(fleet, null, 184, "EUR", { windowHours: 24, busiest: null, granularity: "hour" });
     expect(tiles.find((t) => t.label === "Cost")).toMatchObject({ value: "≈ €1.84" });
   });
 });
