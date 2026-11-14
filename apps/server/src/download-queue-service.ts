@@ -277,7 +277,16 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
         continue;
       }
       m = /^\[\d+\/\d+\] failed: (.+?): /.exec(line);
-      if (m) failedMsgs.set(m[1]!, line);
+      if (m) {
+        failedMsgs.set(m[1]!, line);
+        continue;
+      }
+      // IR-244: preflight refusals name each entry on its own line — the
+      // batch died before any transfer, so there are no [i/n] lines and no
+      // results doc. The typed reason is the text after "entry N (name):";
+      // the "preflight: validating …" summary line matches neither shape.
+      m = /^\s*entry \d+ \((.+)\): (.+)$/.exec(line);
+      if (m && !failedMsgs.has(m[1]!)) failedMsgs.set(m[1]!, m[2]!);
     }
     for (const row of rows) {
       if (completed.has(row.name)) {

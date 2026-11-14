@@ -379,7 +379,16 @@ async function refreshCards(): Promise<void> {
 
 // ─── feed ───────────────────────────────────────────────────────────────────
 
-const feed = computed(() => feedLines(live.events.value, (id) => live.nodes.get(id)?.name ?? "node", 120, (jobId) => live.jobs.get(jobId)));
+const feed = computed(() =>
+  feedLines(
+    live.events.value,
+    (id) => live.nodes.get(id)?.name ?? "node",
+    120,
+    (jobId) => live.jobs.get(jobId),
+    // IR-244: failed download-queue terminal lines carry the queue row's reason.
+    (name) => downloads.value.find((d) => d.name === name)?.error ?? null,
+  ),
+);
 
 // IR-109: the feed is newest-last in a scrolling box — keep the latest line in
 // view by scrolling to the bottom whenever a line is added (owner ask).
