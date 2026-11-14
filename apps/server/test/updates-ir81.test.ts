@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { inventoryStale } from "../src/inventory-service.js";
 import { parseBaselineHtml } from "../src/updates-baseline.js";
 
 /**
@@ -35,5 +36,13 @@ describe("parseBaselineHtml", () => {
 
   it("returns null for garbage (caller keeps last-known-good)", () => {
     expect(parseBaselineHtml("<html>nothing here</html>")).toBeNull();
+  });
+});
+
+describe("inventoryStale (IR-243 daily sweep / IR-248 short-circuit)", () => {
+  it("null entry and aged entries are stale; fresh ones are not", () => {
+    expect(inventoryStale(null, 1_000, 60_000)).toBe(true);
+    expect(inventoryStale({ updatedAt: new Date(30_000).toISOString() }, 90_000, 60_000)).toBe(true);
+    expect(inventoryStale({ updatedAt: new Date(30_000).toISOString() }, 89_999, 60_000)).toBe(false);
   });
 });

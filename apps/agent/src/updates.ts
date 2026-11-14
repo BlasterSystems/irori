@@ -51,13 +51,20 @@ export async function readOsPrettyName(osReleasePath = "/etc/os-release"): Promi
   }
 }
 
-/** The DGX OS version: /etc/dgx-release (5.x style) or apt dgx-os meta. */
-export async function readDgxOsVersion(): Promise<string | null> {
-  for (const path of ["/etc/dgx-release", "/etc/nvidia-release"]) {
+/** The DGX OS version: /etc/dgx-release (5.x style) or apt dgx-os meta.
+ *  IR-243: prefer the DGX_OS_VERSION key — the old regex returned the FIRST
+ *  line verbatim, which on DGX Spark is `DGX_NAME="DGX Spark"`. */
+export async function readDgxOsVersion(paths: string[] = ["/etc/dgx-release", "/etc/nvidia-release"]): Promise<string | null> {
+  for (const path of paths) {
     try {
       const raw = await fs.readFile(path, "utf8");
-      const m = /^(?:DGX_OS|VERSION)?[=\s]*(.+)$/m.exec(raw.trim());
-      if (m !== null) return m[1]!.trim();
+      const kv = /^DGX_OS_VERSION[=\s]+"?([^"\n]+)"?$/m.exec(raw);
+      if (kv !== null) return kv[1]!.trim();
+      const line = /^DGX_OS_LINE[=\s]+"?([^"\n]+)"?$/m.exec(raw);
+      if (line !== null) return line[1]!.trim();
+      // 5.x style: a single bare version line, no KEY= pairs at all.
+      const bare = firstLine(raw);
+      if (bare !== null && !/^DGX_[A-Z_]+[=\s]/.test(bare) && !bare.includes("=")) return bare;
     } catch {
       /* next */
     }
