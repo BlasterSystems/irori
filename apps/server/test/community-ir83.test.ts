@@ -43,6 +43,34 @@ describe("parseForumTop", () => {
     expect(items.every((i) => i.title.length > 0)).toBe(true);
   });
 
+  it("uses bumped_at (last activity) with created_at fallback (IR-245)", () => {
+    const json = JSON.stringify({
+      topic_list: {
+        topics: [
+          { id: 201, title: "Old thread, active today", slug: "old-active", created_at: "2026-11-04T10:00:00Z", bumped_at: "2026-11-14T09:00:00Z", category_id: 719 },
+          { id: 202, title: "No bump field", slug: "no-bump", created_at: "2026-11-10T10:00:00Z", category_id: 719 },
+        ],
+      },
+    });
+    const items = parseForumTop(json, "forum:gb10-top", 719);
+    expect(items[0]!.publishedAt).toEqual(new Date("2026-11-14T09:00:00Z"));
+    expect(items[1]!.publishedAt).toEqual(new Date("2026-11-10T10:00:00Z"));
+  });
+
+  it("keeps subcategory topics (721 GB10 / 723 Projects) and drops foreign ones (IR-245)", () => {
+    const json = JSON.stringify({
+      topic_list: {
+        topics: [
+          { id: 301, title: "Main GB10 subcategory", slug: "main", created_at: "2026-11-13T10:00:00Z", category_id: 721 },
+          { id: 302, title: "Projects subcategory", slug: "proj", created_at: "2026-11-13T10:00:00Z", category_id: 723 },
+          { id: 303, title: "Unrelated CUDA thread", slug: "other", created_at: "2026-11-13T10:00:00Z", category_id: 100 },
+        ],
+      },
+    });
+    const items = parseForumTop(json, "forum:gb10-top", [719, 721, 723]);
+    expect(items.map((i) => i.externalId)).toEqual(["301", "302"]);
+  });
+
   it("returns empty for malformed JSON", () => {
     expect(parseForumTop("not json", "s")).toEqual([]);
   });
