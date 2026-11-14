@@ -219,7 +219,7 @@ async function copyToken(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  z-index: 40;
   padding: 16px;
 }
 .modal__panel {

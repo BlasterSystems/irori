@@ -6,6 +6,19 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cleanup drawer fits without scrolling at desktop heights, and overlay
+  scrims no longer lose to the topbar** (IR-229 follow-up): the drawer body
+  is compressed to mockup density (audited-but-empty categories collapse to
+  one-line micro rows — rationale, breakdown and weight bar only render
+  when a category has something to reclaim; the checkbox contract is
+  unchanged), the hygiene drawer caps at 92vh like the mockup, and the
+  body scrollbar is a hairline fallback for data taller than the drawer.
+  All overlay scrims (drawers, NodeModal, HubSettingsModal, ModelsView)
+  rise from z-index 10 to 40 — the sticky topbar (z 20) was painting over
+  the first ~28px of any tall drawer, clipping its title row.
+
 ### Added
 
 - **Round-8 shell controls + Overview token stats** (epic IR-224): the
