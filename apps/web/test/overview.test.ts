@@ -17,6 +17,7 @@ import {
   heroSpark,
   OVERVIEW_RANGES,
   peakDecode,
+  peakSubLabel,
   pickPrimaryPort,
   powerBarSlot,
   relativeTime,
@@ -79,6 +80,12 @@ describe("hero spark + peak", () => {
   it("peaks at the highest decode sample", () => {
     expect(peakDecode(HIST)).toBe(168);
     expect(peakDecode([{ t: 1, decodeTps: null, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, samples: 0 }])).toBeNull();
+  });
+
+  it("IR-235: the peak sub-label names its bucket granularity", () => {
+    expect(peakSubLabel("hour", 86.4)).toBe("peak hour 86");
+    expect(peakSubLabel("minute", 105.6)).toBe("peak minute 106");
+    expect(peakSubLabel("day", 45)).toBe("peak day 45");
   });
 
   it("charts decode and prefill as two series with independent zero-floored scales", () => {
