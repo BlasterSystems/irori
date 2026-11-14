@@ -51,6 +51,19 @@ it("App keeps the DS v1.1 shell: sidebar lockup, nav, topbar chrome", () => {
   // Transfers stay reachable from page chrome with the live count bubble.
   expect(appSource).toContain('aria-label="Open transfers"');
   expect(appSource).toContain("countbub");
+  // IR-224 S4: the menu owns the range + Add node (sidebar tools; hamburger
+  // ≤900; collapsed-rail popover); the collapsed pick persists; the perf chip
+  // renders on every route but the Overview and the NodeModal is shell-level.
+  expect(appSource).toContain("bs-sidebar__collapse");
+  expect(appSource).toContain("irori.sidebar.collapsed");
+  expect(appSource).toContain("bs-sidebar__tools");
+  expect(appSource).toContain("rangeseg-pop");
+  expect(appSource).toContain('aria-label="History range"');
+  expect(appSource).toContain("setOverviewRange");
+  expect(appSource).toContain("bs-perf");
+  expect(appSource).toContain("route.view !== 'overview'");
+  expect(appSource).toContain('<NodeModal v-if="addNodeOpen" mode="create"');
+  expect(appSource).toContain("BsIcon");
 });
 
 it("UsageView keeps the DS section vocabulary (M8)", () => {
@@ -87,6 +100,10 @@ it("App pins the v1.1 shell geometry: sidebar column, sticky paper-2 topbar", ()
   }
   // IR-197 B1: the deploy tag's committed home is the mobile menu footer.
   expect(cssSource).toContain(".bs-menu-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 12px 22px 4px; border-top: 1px solid var(--rule);");
+  // IR-224 S4: the collapsed rail narrows the shell via html[data-nav]; the
+  // perf chip is the topbar's away-pages inference summary.
+  expect(cssSource).toContain('html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }');
+  expect(cssSource).toContain(".bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;");
 });
 
 it("NodeDetail keeps the DS drill-down vocabulary", () => {

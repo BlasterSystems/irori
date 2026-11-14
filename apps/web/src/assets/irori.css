@@ -167,6 +167,60 @@ button { font: inherit; color: inherit; }
 .bs-menu-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; padding: 12px 22px 4px; border-top: 1px solid var(--rule);
   font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 
+/* ── IR-224 S4: menu tools (range + Add node), collapsible rail, perf chip ──
+   Range + Add node live in the MENU (sidebar tools; the hamburger carries
+   them ≤900; the collapsed rail shows an Add node icon plus a JS-positioned
+   range popover that escapes the rail's overflow-x clip). The topbar gains
+   an inference-server performance chip, hidden on the Overview (its serving
+   heroes carry the same data) and shown on every other route. */
+.bs-icon { flex: none; width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.5;
+  stroke-linecap: round; stroke-linejoin: round; }
+.bs-sidebar__collapse { position: absolute; right: 10px; top: 30px; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--faint); cursor: pointer; }
+.bs-sidebar__collapse:hover { color: var(--fg); background: var(--surface-2); }
+.bs-sidebar__tools { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 0 22px; }
+.bs-sidebar__tools .tools-label { font-family: var(--font-mono); font-size: var(--fs-label-sm); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--faint); }
+.bs-sidebar__tools .btn { justify-content: flex-start; }
+.rangeseg { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.rangeseg button { min-height: 34px; padding: 0 10px; border: 0; border-radius: var(--radius-control); background: transparent;
+  font: 400 var(--fs-ui)/1.2 var(--font-sans); color: var(--muted); cursor: pointer;
+  transition: box-shadow var(--dur-press), color var(--dur-press); }
+.rangeseg button:hover { box-shadow: inset 0 0 0 1px var(--rule-2); color: var(--fg); }
+.rangeseg button.is-active { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--fg); }
+/* Collapsed-rail popover: position:fixed escapes the sidebar overflow-x clip;
+   coordinates are set from the toggle's rect on open. */
+.rangeseg-pop { display: none; position: relative; }
+.rangeseg-pop .rangeseg { display: none; position: fixed; z-index: 25; padding: 6px;
+  background: var(--surface-2); border: 1px solid var(--rule-2); border-radius: var(--radius); }
+.rangeseg-pop.is-open .rangeseg { display: flex; }
+.rangeseg-pop > .iconbtn.is-active { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--fg); }
+html[data-nav="collapsed"] .shell { grid-template-columns: var(--sidebar-width-collapsed, 68px) minmax(0, 1fr); }
+html[data-nav="collapsed"] .bs-sidebar { width: var(--sidebar-width-collapsed, 68px); padding-left: 0; padding-right: 0; }
+html[data-nav="collapsed"] .bs-sidebar__brand { justify-content: center; padding: 0; }
+html[data-nav="collapsed"] .bs-lockup__text { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0 auto; transform: rotate(180deg); }
+html[data-nav="collapsed"] .bs-nav { position: relative; }
+html[data-nav="collapsed"] .bs-nav-item { justify-content: center; padding: 0; gap: 0; }
+html[data-nav="collapsed"] .bs-nav-item::before { left: 5px; }
+html[data-nav="collapsed"] .bs-nav-item__label { display: none; }
+html[data-nav="collapsed"] .bs-nav-item__count { position: absolute; top: 6px; right: 8px; font-size: 10px; }
+html[data-nav="collapsed"] .bs-sidebar__tools { padding-left: 8px; padding-right: 8px; }
+html[data-nav="collapsed"] .bs-sidebar__tools > .rangeseg { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__tools .tools-label { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: block; }
+html[data-nav="collapsed"] .bs-sidebar__tools .btn { justify-content: center; padding: 0; }
+html[data-nav="collapsed"] .bs-sidebar__tools .tools-cta-label { display: none; }
+html[data-nav="collapsed"] .bs-sidebar__foot { justify-content: center; padding-left: 8px; padding-right: 8px; }
+html[data-nav="collapsed"] .bs-sidebar__status span:not(:first-child) { display: none; }
+.bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;
+  border: 1px solid var(--rule-2); border-radius: var(--radius-control); background: transparent;
+  font-family: var(--font-mono); font-size: var(--fs-data-sm); color: var(--muted); text-decoration: none; white-space: nowrap; }
+.bs-perf:hover { border-color: var(--ink); color: var(--fg); text-decoration: none; }
+.bs-perf .bs-perf__model { color: var(--fg); }
+.bs-perf .bs-perf__sep { color: var(--faint); }
+html[data-tier="small"] .bs-perf .bs-perf__model,
+html[data-tier="small"] .bs-perf .bs-perf__sep--model { display: none; }
+
 .bs-theme { flex: none; width: 36px; height: 36px; display: grid; place-items: center; padding: 0;
   border: 1px solid var(--rule-2); border-radius: var(--radius-control); background: transparent; color: var(--ink); cursor: pointer; }
 .bs-theme:hover { border-color: var(--ink); }
