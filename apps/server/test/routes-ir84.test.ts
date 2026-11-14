@@ -195,6 +195,20 @@ describe("GET /api/v1/updates", () => {
     expect((res.body as { nodes: Array<{ posture: string }> }).nodes[0]!.posture).toBe("pending reboot");
   });
 
+  it("does not count generic apt upgradables as behind (IR-243)", async () => {
+    const { app, fake } = makeApp({ inventory: { get: async () => ({ report: { updates: { dgxOsVersion: "7.6.0", nvidiaDriverVersion: "580.178.04", pendingReboot: false, upgradableCount: 125, aptPresent: true } } }) }, baseline: { dgxOs: "7.6.0", driver: "580.178.04", kernel: null, uefi: null, ec: null, soc: null, source: "live", fetchedAtMs: Date.now() } });
+    await seedNode(fake);
+    const res = await request(app).get("/api/v1/updates");
+    expect((res.body as { nodes: Array<{ posture: string }> }).nodes[0]!.posture).toBe("up to date");
+  });
+
+  it("flags behind only on a version mismatch with the baseline", async () => {
+    const { app, fake } = makeApp({ inventory: { get: async () => ({ report: { updates: { dgxOsVersion: "7.5.0", nvidiaDriverVersion: "580.178.04", pendingReboot: false, upgradableCount: 0, aptPresent: true } } }) }, baseline: { dgxOs: "7.6.0", driver: "580.178.04", kernel: null, uefi: null, ec: null, soc: null, source: "live", fetchedAtMs: Date.now() } });
+    await seedNode(fake);
+    const res = await request(app).get("/api/v1/updates");
+    expect((res.body as { nodes: Array<{ posture: string }> }).nodes[0]!.posture).toBe("behind");
+  });
+
   it("treats a missing updates block as unknown", async () => {
     const { app, fake } = makeApp({ inventory: { get: async () => ({ report: {} }) }, baseline: null });
     await seedNode(fake);

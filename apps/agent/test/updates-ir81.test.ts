@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   collectUpdateState,
+  readDgxOsVersion,
   readFirmwareUpdates,
   readOsPrettyName,
   readUnattendedUpgradesResult,
@@ -22,6 +23,33 @@ describe("readOsPrettyName", () => {
     await writeFile(join(dir, "os-release"), 'NAME="Ubuntu"\nPRETTY_NAME="Ubuntu 24.04.3 LTS"\n');
     expect(await readOsPrettyName(join(dir, "os-release"))).toBe("Ubuntu 24.04.3 LTS");
     expect(await readOsPrettyName(join(dir, "absent"))).toBeNull();
+  });
+});
+
+describe("readDgxOsVersion (IR-243)", () => {
+  it("parses DGX_OS_VERSION — never the DGX_NAME marketing line", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "irori-dgx-"));
+    const p = join(dir, "dgx-release");
+    await writeFile(p, 'DGX_NAME="DGX Spark"\nDGX_OS_VERSION="7.6.0"\nDGX_OS_LINE="DGX OS 7.6.0 (Ubuntu 24.04.3 LTS)"\n');
+    expect(await readDgxOsVersion([p])).toBe("7.6.0");
+  });
+
+  it("falls back to DGX_OS_LINE and bare 5.x-style lines", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "irori-dgx-"));
+    const p = join(dir, "dgx-release");
+    await writeFile(p, 'DGX_NAME="DGX Station"\nDGX_OS_LINE="DGX OS 5.5.0 (Ubuntu 20.04.4 LTS)"\n');
+    expect(await readDgxOsVersion([p])).toBe("DGX OS 5.5.0 (Ubuntu 20.04.4 LTS)");
+    const p2 = join(dir, "plain");
+    await writeFile(p2, "DGX OS 5.5.0\n");
+    expect(await readDgxOsVersion([p2])).toBe("DGX OS 5.5.0");
+  });
+
+  it("a keys-only file with no version and an absent file yield null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "irori-dgx-"));
+    const p = join(dir, "dgx-release");
+    await writeFile(p, 'DGX_NAME="DGX Spark"\n');
+    expect(await readDgxOsVersion([p])).toBeNull();
+    expect(await readDgxOsVersion([join(dir, "absent")])).toBeNull();
   });
 });
 
