@@ -4,6 +4,7 @@ import type { HealthFinding, NodeInfo } from "@irori/core";
 import { fetchCleanup } from "../api";
 import { fmtBytes } from "../analytics";
 import { nodeHash } from "../router";
+import { copyToClipboard } from "../clipboard";
 import CleanupDrawer from "./CleanupDrawer.vue";
 
 /**
@@ -41,6 +42,26 @@ function titleFor(f: HealthFinding): string {
 
 function nodeName(id: string): string {
   return props.nodes.find((n) => n.id === id)?.name ?? id.slice(0, 8);
+}
+
+/** IR-239: the hub-disk row's remedy is copyable, not prose — the runbook
+ *  commands land on the clipboard (works over the insecure http:// LAN
+ *  origin via the legacy fallback) next to a deep link into
+ *  docs/DEPLOYMENT.md. The phrase "hub VM filesystem" refutes the NAS
+ *  assumption in place. */
+const HUB_RUNBOOK_URL =
+  "https://github.com/BlasterSystems/irori/blob/main/docs/DEPLOYMENT.md#hub-disk-pressure-hub_disk_pct-fleet";
+const HUB_RUNBOOK_CMDS = [
+  "docker system df",
+  "docker builder prune -f",
+  "docker image prune -a -f  # only after confirming nothing running uses those images",
+].join("\n");
+const hubCmdsCopied = ref(false);
+async function copyHubRunbook(): Promise<void> {
+  if (await copyToClipboard(HUB_RUNBOOK_CMDS)) {
+    hubCmdsCopied.value = true;
+    setTimeout(() => (hubCmdsCopied.value = false), 2000);
+  }
 }
 
 /** IR-204: est. reclaim per disk-finding node — lazy, once per node, silent
@@ -90,6 +111,12 @@ function openCleanup(nodeId: string): void {
         <span class="health-banner__title">{{ titleFor(f) }}</span>
         <span class="stat__sub">{{ f.summary }}</span>
         <span v-if="hintFor(f.metric)" class="stat__sub faint">{{ hintFor(f.metric) }}</span>
+        <span v-if="f.metric === 'hub_disk_pct'" class="health-banner__remedy">
+          <button class="btn btn--secondary btn--sm" type="button" @click="copyHubRunbook">
+            {{ hubCmdsCopied ? "Copied ✓" : "Copy runbook commands" }}
+          </button>
+          <a class="health-banner__link stat__sub" :href="HUB_RUNBOOK_URL" target="_blank" rel="noreferrer">Runbook · docs/DEPLOYMENT.md</a>
+        </span>
       </span>
     </p>
     <p
@@ -159,6 +186,12 @@ function openCleanup(nodeId: string): void {
 }
 .health-banner__link {
   color: inherit;
+}
+.health-banner__remedy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
 }
 .health-banner__cta {
   grid-column: 3;

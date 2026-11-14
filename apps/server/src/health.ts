@@ -29,6 +29,12 @@ export interface HealthSinks {
    */
   hubDiskPct?: () => Promise<number | null>;
   /**
+   * IR-239: the filesystem path the hub-disk gauge measures, named in the
+   * finding summary so the banner can attribute the pressure to the hub VM
+   * filesystem (not the NAS) and surface the configured HUB_DISK_PATH.
+   */
+  hubDiskPath?: string;
+  /**
    * IR-202: database availability (true = reachable). The db client's
    * isHealthy() resolves false while the DB is down; a rejected promise is
    * treated as not measurable. Absence skips the rule (older harnesses).
@@ -83,9 +89,16 @@ export function breaches(op: string, value: number | null, threshold: number): b
   }
 }
 
-function summaryFor(rule: { name: string; metric: string; op: string; threshold: number }, value: number | null): string {
+function summaryFor(rule: { name: string; metric: string; op: string; threshold: number | null }, value: number | null, suffix = ""): string {
   const v = value === null ? "?" : Math.round(value * 10) / 10;
-  return `${rule.name}: ${v} ${opSymbol(rule.op)} ${rule.threshold}`;
+  const t = rule.threshold === null ? "?" : rule.threshold;
+  return `${rule.name}: ${v} ${opSymbol(rule.op)} ${t}${suffix}`;
+}
+
+/** IR-239: the hub-disk rule's summary names the measured filesystem so the
+ * banner refutes the NAS assumption in place. Other metrics have no suffix. */
+function hubDiskSuffix(opts: HealthSinks, metric: string): string {
+  return metric === "hub_disk_pct" && opts.hubDiskPath !== undefined ? ` (hub VM filesystem, HUB_DISK_PATH=${opts.hubDiskPath})` : "";
 }
 
 function opSymbol(op: string): string {
@@ -198,7 +211,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
     kind: "appear" | "clear",
     value: number | null,
   ): Promise<void> {
-    const summary = kind === "appear" ? summaryFor(rule, value) : `${rule.name}: cleared`;
+    const summary = kind === "appear" ? summaryFor(rule, value, hubDiskSuffix(opts, rule.metric)) : `${rule.name}: cleared`;
     await emit({ type: "health", serverTimeMs: now(), nodeId, ruleId: rule.id, ruleName: rule.name, metric: rule.metric, severity: rule.severity, state: kind === "appear" ? "open" : "clear", summary });
     // Cooldown applies to appear notifications only (a clear is always sent).
     if (kind === "appear" && rule.url !== null) {
@@ -260,7 +273,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         ref.url = await webhookUrlFor(rule.id);
         if (ref.url !== null) {
           await db.update(healthFindings).set({ lastNotifiedAt: new Date(now()) }).where(eq(healthFindings.id, open[0]!.id));
-          await notify(ref, nodeId, "appear", summaryFor(ref, value), value);
+          await notify(ref, nodeId, "appear", summaryFor(ref, value, hubDiskSuffix(opts, ref.metric)), value);
         }
       }
     } else if (!breach && open.length > 0) {
@@ -413,7 +426,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         ruleId: rule.id,
         metric: rule.metric as HealthFinding["metric"],
         severity: rule.severity as HealthFinding["severity"],
-        summary: `${rule.name}: ${f.observedValue === null ? "?" : Math.round(f.observedValue * 10) / 10} ${opSymbol(rule.op)} ${rule.threshold ?? "?"}`,
+        summary: summaryFor(rule, f.observedValue, hubDiskSuffix(opts, rule.metric)),
         since: f.since.toISOString(),
       }));
     },
