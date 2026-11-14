@@ -8,6 +8,14 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **Analytics tokens lens renders again** (defect found during IR-196
+  verification): the `/api/v1/analytics/:lens` catch-all was registered
+  before the concrete `/api/v1/analytics/efficiency` and
+  `/api/v1/analytics/token-reconciliation` routes and shadowed both with
+  400 "unknown lens", so the whole tokens-lens load failed and
+  reconciliation/efficiency never rendered from live data. The concrete
+  routes now precede the catch-all, pinned by a route-order regression test.
+
 - **Cleanup drawer fits without scrolling at desktop heights, and overlay
   scrims no longer lose to the topbar** (IR-229 follow-up): the drawer body
   is compressed to mockup density (audited-but-empty categories collapse to
