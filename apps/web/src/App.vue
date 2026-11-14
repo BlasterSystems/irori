@@ -230,7 +230,7 @@ onUnmounted(() => {
           <span class="bs-lockup__glyph" aria-hidden="true"><span class="mark-node"></span><span class="mark-line"></span><span class="mark-square"></span></span>
           <span class="bs-lockup__text">
             <span class="bs-lockup__name">Irori</span>
-            <span class="bs-lockup__endorse">A BlasterSystems product</span>
+            <span class="bs-lockup__endorse">BLASTERSYSTEMS</span>
           </span>
         </a>
         <button class="bs-sidebar__collapse" type="button" :aria-expanded="navCollapsed ? 'false' : 'true'" :aria-label="navCollapsed ? 'Expand menu' : 'Collapse menu'" @click="toggleCollapse">

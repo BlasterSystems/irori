@@ -34,8 +34,9 @@ Supersedes the four source projects it replaces: `sparkDash` (monitoring core),
 5. **Telemetry as a first-class citizen** — versioned snapshots, ring buffers,
    rollups, and an SSE stream are core architecture, not a feature bolt-on.
 6. **BlasterSystems design system** — same visual language and app structure as
-   `uptime-monitoring`: thread mark + product name + "A BlasterSystems product"
-   endorsement.
+   `uptime-monitoring`: thread mark + product name + "BLASTERSYSTEMS"
+   endorsement (shortened from the design system's "A BlasterSystems product"
+   in round 9, IR-234, so the sidebar collapse chevron clears the lockup).
 
 ### Non-goals (v1)
 
