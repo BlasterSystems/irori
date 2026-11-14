@@ -751,6 +751,27 @@ function askRegister(repo: string, user: string): void {
 // IR-133: a resumable orphan is a canceled/failed sync-local — the recovery is
 // re-dispatching sync-local for the same name + cache user. modelctl's
 // deterministic staging dir plus rsync --partial continue the transfer.
+/** IR-247: per-user modelctl install — the repair for a cache row reporting
+ *  the binary missing (modelctlVersion null). Non-destructive: dispatched
+ *  directly, no typed confirm; the version-gated install job skips when the
+ *  pin is already satisfied. */
+async function installModelctl(user: string): Promise<void> {
+  if (opBusy.value || nodeBusyJob !== null) return;
+  const epoch = nodeEpoch;
+  opBusy.value = true;
+  modelOpError.value = null;
+  jobError.value = null;
+  try {
+    const view = await createJob(props.nodeId, "modelctl-install", { user });
+    if (epoch !== nodeEpoch) return;
+    await openJob(view.id, epoch);
+  } catch (err) {
+    if (epoch !== nodeEpoch) return;
+    modelOpError.value = err instanceof Error ? err.message : String(err);
+    opBusy.value = false;
+  }
+}
+
 function askResume(repo: string, user: string): void {
   const copy = resumeCopy(repo);
   confirmAction({
@@ -1134,6 +1155,15 @@ onUnmounted(() => {
           <span class="mono faint model-root">{{ cache.cacheDir }}</span>
           <span v-if="cache.modelctlVersion" class="stat__sub faint">modelctl {{ cache.modelctlVersion }}</span>
           <span class="stat__sub">{{ inventorySummary(cache.models) }}</span>
+          <!-- IR-247: a missing per-user modelctl is repairable in place —
+               the delete would fail with the actionable error otherwise. -->
+          <button
+            v-if="cache.modelctlVersion === null && node?.online"
+            class="btn btn--secondary btn--sm"
+            :disabled="opBusy || nodeBusyJob !== null"
+            :title="nodeBusyLabel || undefined"
+            @click="installModelctl(cache.user)"
+          >Install modelctl for {{ cache.user }}</button>
         </div>
         <div class="card__body" style="padding-top: 12px;">
           <p v-if="cache.error" class="banner banner--warn">{{ cache.error }}</p>
@@ -1150,8 +1180,8 @@ onUnmounted(() => {
                 <td style="text-align: right;">
                   <button
                     class="btn btn--ghost btn--sm"
-                    :disabled="opBusy || nodeBusyJob !== null"
-                    :title="nodeBusyLabel || undefined"
+                    :disabled="opBusy || nodeBusyJob !== null || cache.modelctlVersion === null"
+                    :title="cache.modelctlVersion === null ? `modelctl is not installed for ${cache.user} — install it first` : nodeBusyLabel || undefined"
                     @click="askDelete({ scope: 'local', name: m.name, repository: m.repository, bytes: m.bytes, user: cache.user, cacheDir: cache.cacheDir })"
                   >Delete</button>
                 </td>
