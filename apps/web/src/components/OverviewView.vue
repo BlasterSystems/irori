@@ -386,7 +386,7 @@ const feed = computed(() =>
     120,
     (jobId) => live.jobs.get(jobId),
     // IR-244: failed download-queue terminal lines carry the queue row's reason.
-    (name) => downloads.value.find((d) => d.name === name)?.error ?? null,
+    (name) => (downloads.value ?? []).find((d) => d.name === name)?.error ?? null,
   ),
 );
 

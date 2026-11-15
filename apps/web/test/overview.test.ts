@@ -294,7 +294,7 @@ describe("feedLines", () => {
         status: "failed",
         durationMs: 1000,
         params: { downloads: [{ source: "brandonmusic/Inkling-2-Small-NVFP4-CSF-Flare", name: "Inkling-2-Small-NVFP4-CSF-Flare" }] },
-      } as SseEvent,
+      } as unknown as SseEvent,
     ];
     const reason = "ManifestError: cannot infer a runtime: repository has no safetensors, bin, or GGUF weights";
     const lines = feedLines(events, nodeName, 30, undefined, (n) => (n === "Inkling-2-Small-NVFP4-CSF-Flare" ? reason : null));
