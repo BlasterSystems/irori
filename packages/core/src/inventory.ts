@@ -115,6 +115,10 @@ export const nodeInventorySchema = z.object({
       pendingReboot: z.boolean(),
       unattendedUpgradesLastResult: z.string().nullable(),
       upgradableCount: z.number().int().nonnegative().nullable(),
+      /** IR-258: the DGX OTA channel subset (packages matching nvidia/dgx) of
+       *  the upgradable set. Optional so pre-0.7 reports keep parsing; null
+       *  when apt is absent on the node. */
+      nvidiaDgxPending: z.number().int().nonnegative().nullable().optional(),
       aptPresent: z.boolean(),
     })
     .nullable()

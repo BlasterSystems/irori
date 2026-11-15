@@ -34,6 +34,38 @@ describe("readDgxOsVersion (IR-243)", () => {
     expect(await readDgxOsVersion([p])).toBe("7.6.0");
   });
 
+  it("parses the REAL DGX Spark image shape via DGX_OTA_VERSION (IR-257)", async () => {
+    // Grounded: dgx3's /etc/dgx-release, 2026-11-15 — no DGX_OS_VERSION or
+    // DGX_OS_LINE anywhere; the OTA level is the baseline-comparable version.
+    const dir = await mkdtemp(join(tmpdir(), "irori-dgx-"));
+    const p = join(dir, "dgx-release");
+    await writeFile(p, [
+      'DGX_NAME="DGX Spark"',
+      'DGX_PRETTY_NAME="NVIDIA DGX Spark"',
+      'DGX_SWBUILD_DATE="2026-01-26-16-04-58"',
+      'DGX_SWBUILD_VERSION="7.4.0"',
+      'DGX_COMMIT_ID="6c74fd3"',
+      'DGX_PLATFORM="30KL000CBF"',
+      'DGX_SERIAL_NUMBER="MP30JSZD"',
+      "",
+      'DGX_OTA_VERSION="7.6.0"',
+      'DGX_OTA_DATE="Thu Oct 15 19:04:33 WEST 2026"',
+      "",
+    ].join("\n"));
+    expect(await readDgxOsVersion([p])).toBe("7.6.0");
+    // dgx1's shape: one OTA behind — must read 7.5.0, not the SWBUILD 7.4.0.
+    const p2 = join(dir, "dgx1");
+    await writeFile(p2, 'DGX_NAME="DGX Spark"\nDGX_SWBUILD_VERSION="7.4.0"\nDGX_OTA_VERSION="7.5.0"\n');
+    expect(await readDgxOsVersion([p2])).toBe("7.5.0");
+  });
+
+  it("prefers DGX_OTA_VERSION over DGX_OS_LINE when both exist (IR-257)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "irori-dgx-"));
+    const p = join(dir, "dgx-release");
+    await writeFile(p, 'DGX_OS_LINE="DGX OS 7.6.0 (Ubuntu 24.04.3 LTS)"\nDGX_OTA_VERSION="7.7.0"\n');
+    expect(await readDgxOsVersion([p])).toBe("7.7.0");
+  });
+
   it("falls back to DGX_OS_LINE and bare 5.x-style lines", async () => {
     const dir = await mkdtemp(join(tmpdir(), "irori-dgx-"));
     const p = join(dir, "dgx-release");
@@ -77,11 +109,23 @@ describe("readFirmwareUpdates", () => {
 describe("readUpgradableCount (apt-get -s upgrade)", () => {
   it("counts Inst lines only (Conf lines are not packages)", async () => {
     const sim = ["Reading package lists...", "Inst libssl (1.0 [upgradable])", "Conf libssl", "Inst cuda (2.0 [upgradable])"].join("\n");
-    expect(await readUpgradableCount(sim)).toEqual({ count: 2, aptPresent: true });
+    expect(await readUpgradableCount(sim)).toEqual({ count: 2, nvidiaDgxPending: 0, aptPresent: true });
+  });
+
+  it("counts the nvidia/dgx OTA subset separately (IR-258)", async () => {
+    const sim = [
+      "Inst libssl (1.0 [upgradable])",
+      "Inst dgx-dashboard (0.39.3-5) [upgradable from: 0.29.2-2]",
+      "Inst dgx-spark-ota-update-meta (26.09.3) [upgradable from: 26.09.2]",
+      "Conf libssl",
+      "Inst linux-headers-nvidia-hwe-24.04 (7.0.0-1025.26) [upgradable from: 7.0.0-1019.19]",
+      "Inst libnvidia-egl-wayland1 (1.1.23) [upgradable from: 1.1.21]",
+    ].join("\n");
+    expect(await readUpgradableCount(sim)).toEqual({ count: 5, nvidiaDgxPending: 4, aptPresent: true });
   });
 
   it("absent tooling → null count and aptPresent false", async () => {
-    expect(await readUpgradableCount(null)).toEqual({ count: null, aptPresent: false });
+    expect(await readUpgradableCount(null)).toEqual({ count: null, nvidiaDgxPending: null, aptPresent: false });
   });
 });
 
@@ -107,6 +151,7 @@ describe("collectUpdateState", () => {
     const state = await collectUpdateState({ dpkgQueryOut: null, aptGetSimOut: null, fwupdmgrOut: null });
     expect(state.aptPresent).toBe(false);
     expect(state.upgradableCount).toBeNull();
+    expect(state.nvidiaDgxPending).toBeNull();
     expect(state.firmwareUpdates).toEqual([]);
     expect(state.fwupdPresent).toBe(false);
     expect(typeof state.pendingReboot).toBe("boolean");
