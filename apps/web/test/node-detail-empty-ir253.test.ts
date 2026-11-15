@@ -80,6 +80,10 @@ describe("IR-253: contentless sections render nothing", () => {
     // Transient and actionable states stay.
     expect(text).toContain("waiting for first snapshot");
     expect(text).toContain("Install modelctl for operator");
+    // Positive anchor from INSIDE the loadState-ready section: proves the
+    // section rendered and the absences above are the rule, not a page that
+    // never reached its lower grid (Versions card row, data present).
+    expect(text).toContain("modelctl pin");
     w.unmount();
   });
 });

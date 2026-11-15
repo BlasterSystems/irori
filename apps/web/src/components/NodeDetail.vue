@@ -1628,11 +1628,6 @@ onUnmounted(() => {
 <style scoped>
 /* IRI-037: stacked inference panels in the shared Live/Inference row. */
 .inference-cell > .card + .card { margin-top: var(--space-3); }
-.detail-back {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-}
 
 /* IRI-124: the header row wraps (row--wrap) instead of squeezing the title —
    .chip/.btn are white-space nowrap, so the h1 used to absorb every pixel of
@@ -1726,9 +1721,6 @@ h1 {
 }
 
 @media (max-width: 720px) {
-  .detail-back {
-    min-height: 44px;
-  }
   .detail-range {
     width: 100%;
   }
