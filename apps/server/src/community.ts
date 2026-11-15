@@ -41,6 +41,8 @@ export const COMMUNITY_SOURCES: CommunitySourceDef[] = [
   { source: "atom:miaai-dsv41-3x-sglang", url: "https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-DGX-Sparks/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
   { source: "atom:miaai-nemotron-bolt", url: "https://github.com/MiaAI-Lab/Nemotron-3.5-Bolt-TensorFold-DGX-Spark/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
   { source: "atom:miaai-qwen38-dual", url: "https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Dual-DGX-Sparks/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
+  // The pre-existing single-node TensorFold seed (miaai-qwen3.8-flash-next-single-tensorfold) gets its watcher too (IR-237 review).
+  { source: "atom:miaai-qwen38-single", url: "https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark-TensorFold/commits/main.atom", kind: "atom", intervalMs: 3 * 3_600_000 },
   { source: "feed:nvidia-blog", url: "https://developer.nvidia.com/blog/tag/dgx-spark/feed/", kind: "feed", intervalMs: 12 * 3_600_000 },
 ];
 
@@ -123,6 +125,10 @@ export function parseAtom(xml: string, source: string): CommunityItemInput[] {
       link = lm === null ? null : lm[1]!;
     }
     if (id === null || title === "" || link === null) continue;
+    // IR-237 review hardening: third-party feed links become :href in the
+    // community view — only https URLs are accepted (all curated sources
+    // are https; a compromised upstream cannot pivot to javascript:).
+    if (!/^https:\/\//i.test(link)) continue;
     const updated = pick("updated") ?? pick("pubDate") ?? pick("published");
     entries.push({
       source,
