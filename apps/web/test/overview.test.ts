@@ -8,6 +8,7 @@ import {
   binFleetPower,
   computeNasData,
   computePower,
+  feedLineText,
   feedLines,
   fleetEnergyKwh,
   fleetPowerSeries,
@@ -273,6 +274,14 @@ describe("feedLines", () => {
     ];
     const lines = feedLines(events, nodeName);
     expect(lines.map((l) => l.text)).toEqual(["spark1 · download-queue 2 models started"]);
+  });
+
+  it("summarizes payload-JSON lines in the feed and keeps short progress lines (IR-248)", () => {
+    const report = JSON.stringify({ report: { local: [], store: { models: [] } }, generatedAtMs: 1 }).padEnd(11_624, "x");
+    expect(feedLineText("models-inventory", report)).toBe("models-inventory: report written · 11.4 KB");
+    expect(feedLineText("hygiene-clean", '{"outcomes":[]}')).toBe("hygiene-clean: report written");
+    expect(feedLineText("sync-local", "  163.6G 79%  111 MB/s  0:05:19")).toBe("  163.6G 79%  111 MB/s  0:05:19");
+    expect(feedLineText(undefined, report)).toBe("job: report written · 11.4 KB");
   });
 
   it("appends the queue row's reason to a failed download-queue batch (IR-244)", () => {

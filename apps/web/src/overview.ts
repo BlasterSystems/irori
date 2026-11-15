@@ -384,6 +384,26 @@ function fmtDuration(ms: number | null): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** IR-248: product-report jobs (models-inventory, hygiene-*, staging-tree-audit,
+ *  quarantine-prune, nas-delete-batch, …) stream their whole JSON payload as
+ *  ONE final line — the feed renders a short summary instead (the job sheet
+ *  keeps the raw output). Anything long or JSON-shaped is treated as payload. */
+export function feedLineText(kind: string | undefined, line: string): string {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return line;
+  if (trimmed.length > 400) {
+    return `${kind ?? "job"}: report written${trimmed.length >= 1024 ? ` · ${(trimmed.length / 1024).toFixed(1)} KB` : ""}`;
+  }
+  // Short but brace-shaped: only a real JSON document counts as payload.
+  if (!/^\s*[[{]/.test(line)) return line;
+  try {
+    JSON.parse(trimmed);
+  } catch {
+    return line;
+  }
+  return `${kind ?? "job"}: report written`;
+}
+
 function pct(n: number | null | undefined): string {
   return typeof n === "number" ? ` · ${Math.round(n)}%` : "";
 }
@@ -423,7 +443,8 @@ export function feedLines(
         // gives node and kind, falling back to the frame's node id.
         const job = jobById?.(event.jobId);
         const label = job !== undefined ? `${nodeName(job.nodeId)} · ${job.kind}${jobLabel(job.params)}: ` : `${node} · `;
-        lines.push({ t: event.serverTimeMs, text: `${label}${event.line}` });
+        // IR-248: a full JSON payload line renders as a one-line summary.
+        lines.push({ t: event.serverTimeMs, text: `${label}${feedLineText(job?.kind, event.line)}` });
         break;
       }
       case "thermal":
