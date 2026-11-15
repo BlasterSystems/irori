@@ -476,6 +476,25 @@ guarantees callers rely on, kept current when behavior changes. Last updated
  SHA; hide a card. Recipe caveats render verbatim on every card (core
  `RECIPE_CAVEATS`: IR-151 status demotion + capture endpoint pattern).
 
+## Update posture (IRI-081, IR-243, IR-255)
+
+- `GET /api/v1/updates` - the fleet matrix: `baseline` (scraped DGX Spark
+ release notes, cached in settings, refreshed at most daily; `source` is
+ `live` or `cache`) plus per-node rows `{nodeId, name, online, posture,
+ reportAt, updates}`. `posture` is `up to date`, `behind` (DGX OS or driver
+ differs from the baseline — IR-243 keeps generic apt upgradable counts
+ informational), `pending reboot`, `update tooling absent`, or `unknown`.
+ `reportAt` (IR-255) is when the node's inventory report was collected
+ (null = no report); the node-page Updates card renders its age. `updates`
+ mirrors the agent's read-only probe: OS, kernel, DGX OS, NVIDIA driver,
+ firmware updates via fwupd (`fwupdPresent` false = fwupdmgr produced
+ nothing — IR-256), NVIDIA OTA packages, pending reboot, unattended-upgrades
+ last result, apt upgradable count, apt presence. Irori never installs or
+ reboots.
+- A confirmed `agent-update` settle voids the node's cached inventory report
+ (IR-255): the old report was collected by the previous bundle, so the next
+ node-detail read re-collects with the new agent. Failed updates keep it.
+
 ## Trace inspector (IRI-079)
 - `llm_requests` carries typed timing columns parsed from the TensorFold
   engineMeta at ingest (`prefill_ms`, `decode_ms`, `spec_rounds`,
