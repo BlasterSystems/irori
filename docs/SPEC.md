@@ -164,11 +164,16 @@ flowchart LR
   request). A failed gauge resolves to not-measurable and skips the rule.
   Open/clear transitions emit `health` SSE frames (transition pointers — the
   findings GET is the single source), journal rows, and one webhook POST per
-  cooldown window per rule. The Overview carries a global banner for open
+  cooldown window per rule. Per-rule webhook URLs are set/cleared from the
+  hub settings surface (encrypted at rest; the wire exposes only
+  `hasWebhook`) — IR-241. The Overview carries a global banner for open
   infra findings: fleet rows (database unavailable with a stale-data note,
-  hub disk with the runbook hint — `docs/DEPLOYMENT.md`, "Signal runbook")
-  and node-disk rows with a deep link plus the "Clean up disk — est. +N GB"
-  CTA (read-only: dispatch happens only inside the per-node cleanup drawer).
+  hub disk naming its measured filesystem with a copyable runbook —
+  `docs/DEPLOYMENT.md`) and node-disk rows with a deep link plus the
+  "Clean up disk — est. +N GB" CTA (read-only: dispatch happens only inside
+  the per-node cleanup drawer); a NAS-origin row (summary marked
+  `NAS share <mount>`) carries no cleanup CTA — local cleanup cannot
+  reclaim a remote mount (IR-242).
 
 ## 5. Inference monitoring
 
