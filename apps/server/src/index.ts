@@ -613,7 +613,7 @@ async function boot(): Promise<void> {
           scriptPaths = [];
         }
         for (const nodeId of hub?.online() ?? []) {
-          const inv = await state.inventory?.get(nodeId).catch(() => null);
+          const inv = (await state.inventory?.get(nodeId).catch(() => null)) ?? null;
           if (!inventoryStale(inv, Date.now(), INVENTORY_DAY_MS)) continue;
           try {
             await jobsService.create(nodeId, "models-inventory", { scriptPaths });
