@@ -156,8 +156,15 @@ async function previewDebris(): Promise<void> {
   }
 }
 
+/** IR-237 review: covers the auto-audit that follows a clean — the audit
+ *  actions must not bump seq during it (their 409 would also stale the
+ *  post-audit refresh). */
+const auditBusy = ref(false);
+
 async function runAudit(): Promise<void> {
+  if (auditBusy.value || phase.value === "running") return;
   const mySeq = ++seq;
+  auditBusy.value = true;
   phase.value = "busy";
   error.value = null;
   try {
@@ -170,6 +177,7 @@ async function runAudit(): Promise<void> {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     if (mySeq === seq) phase.value = "idle";
+    auditBusy.value = false;
   }
 }
 
@@ -197,7 +205,13 @@ async function runClean(): Promise<void> {
       // IR-240: a hygiene-clean never writes an audit row — follow the clean
       // with a fresh audit (the agent's audit cache is already invalidated)
       // so rows/chips show post-clean values without a manual Re-audit.
-      await runJob("hygiene-audit", {}).catch(() => null);
+      // auditBusy keeps the audit actions from bumping seq mid-audit.
+      auditBusy.value = true;
+      try {
+        await runJob("hygiene-audit", {}).catch(() => null);
+      } finally {
+        auditBusy.value = false;
+      }
     }
     if (mySeq === seq) await refresh();
   } catch (err) {
@@ -354,8 +368,8 @@ function catLabel(category: string): string {
               @click="applyLogRotation"
             >Apply log rotation</button>
             <span v-else class="stat__sub faint">docker log rotation applied ✓</span>
-            <button class="btn btn--secondary btn--sm" :disabled="phase === 'busy' || phase === 'running'" @click="runAudit">
-              {{ phase === "busy" ? "auditing…" : cleanup?.latestAudit ? "Re-audit" : "Run audit" }}
+            <button class="btn btn--secondary btn--sm" :disabled="auditBusy || phase === 'busy' || phase === 'running'" @click="runAudit">
+              {{ phase === "busy" || auditBusy ? "auditing…" : cleanup?.latestAudit ? "Re-audit" : "Run audit" }}
             </button>
           </span>
         </div>
@@ -554,7 +568,7 @@ function catLabel(category: string): string {
             />
             <button
               class="btn btn--sm"
-              :disabled="phase === 'busy' || phase === 'running' || selectedCategories.length === 0 || confirmName !== nodeName"
+              :disabled="auditBusy || phase === 'busy' || phase === 'running' || selectedCategories.length === 0 || confirmName !== nodeName"
               @click="runClean"
             >{{ phase === "running" ? "cleaning…" : `Clean ${selectedCategories.length} categories` }}</button>
           </div>
