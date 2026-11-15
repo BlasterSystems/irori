@@ -77,6 +77,17 @@ describe("parseForumTop", () => {
 });
 
 describe("parseAtom", () => {
+  it("drops entries whose link is not https (review hardening)", () => {
+    const xml = `<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><id>tag:x,1</id><link href="javascript:alert(1)"/><title>evil</title><updated>2026-11-14T10:00:00Z</updated></entry>
+      <entry><id>tag:x,2</id><link href="http://insecure.example/a"/><title>insecure</title><updated>2026-11-14T10:00:00Z</updated></entry>
+      <entry><id>tag:x,3</id><link href="https://github.com/MiaAI-Lab/x/commit/1"/><title>ok</title><updated>2026-11-14T10:00:00Z</updated></entry>
+    </feed>`;
+    const items = parseAtom(xml, "atom:test");
+    expect(items).toHaveLength(1);
+    expect(items[0]!.canonicalUrl).toBe("https://github.com/MiaAI-Lab/x/commit/1");
+  });
+
   it("extracts entries with sanitized titles and links", () => {
     const items = parseAtom(ATOM_FIXTURE, "atom:sparkrun-releases");
     expect(items).toHaveLength(2);
