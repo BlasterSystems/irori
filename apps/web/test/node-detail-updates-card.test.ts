@@ -103,10 +103,12 @@ describe("Updates card", () => {
   });
 
   it("renders the NVIDIA/DGX pending row when the agent reports it (IR-258)", async () => {
-    const { w, card } = await mountWith({ nodeId: UUID, name: "DGX-3", online: true, posture: "behind", reportAt: new Date().toISOString(), updates: { ...baseUpdates, firmwareUpdates: [], nvidiaDgxPending: 17 } });
+    // 42 is a sentinel absent from baseUpdates — "17" would also match the
+    // driver row's 580.178.04, so the count assertion needs its own number.
+    const { w, card } = await mountWith({ nodeId: UUID, name: "DGX-3", online: true, posture: "behind", reportAt: new Date().toISOString(), updates: { ...baseUpdates, firmwareUpdates: [], nvidiaDgxPending: 42 } });
     expect(card).toBeDefined();
     expect(card!.text()).toContain("NVIDIA/DGX pending packages");
-    expect(card!.text()).toContain("17");
+    expect(card!.text()).toContain("42");
     w.unmount();
   });
 
