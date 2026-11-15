@@ -8,6 +8,30 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **Node page feedback round 14** (epic IR-250): the "Install modelctl for
+  …" button actually dispatches again — a computed ref used without
+  `.value` in script made the guard always true and every click silently
+  no-op (IR-251). The agent no longer refuses that install for a cache user
+  without a modelctl: it resolves the passwd home (IRI-045 resolver)
+  instead of demanding the per-user binary the install creates — the
+  catch-22 behind the guaranteed `no modelctl for cache user` failure that
+  also broke the IR-247 auto-install (IR-251). Contentless sections render
+  nothing: the Inference cell,
+  the Updates card, and every chart card hide when they have no data, the
+  permanent "store catalog renders on the store node" filler is gone, and
+  transient/actionable states stay (IR-253). A confirmed `agent-update`
+  voids the node's cached inventory report (the old report is the old
+  bundle's truth — the `DGX_NAME="DGX Spark"` garbage outlived the update),
+  and the Updates card shows the report's age so a stale row cannot pose as
+  fresh (IR-255). Firmware updates render as device rows with an explicit
+  `fwupdPresent` signal instead of a tooltip chip (IR-256). The
+  clock-cap-drift finding reads in plain language — "stored cap not in
+  effect ~N min" — and its tooltip explains the goal and the remedy
+  (IR-254). The header is restructured: the Nodes breadcrumb is the back
+  link, identity details demote to one muted meta line, and everything but
+  Wake/Shut down folds into a single "Node actions" menu (IR-252,
+  mockup-approved `mockups/node-head.html`).
+
 - **UI feedback rounds 10–12** (epic IR-237): the collapsed 68px rail centers
   on one 34px axis (the three inert centering rules are real flex now,
   mirrored into the round-8 mockup) — IR-238. The hub-disk banner names its
