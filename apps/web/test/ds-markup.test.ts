@@ -131,13 +131,21 @@ it("NodeDetail keeps the DS drill-down vocabulary", () => {
   expect(nodeDetailSource).toContain("aria-label=\"History range\"");
   expect(nodeDetailSource).toContain("HISTORY_RANGES");
   expect(nodeDetailSource).toContain("waiting for first snapshot");
-  expect(nodeDetailSource).toContain("no data yet");
+  // IR-254: the drift chip explains itself in the tooltip.
+  expect(nodeDetailSource).toContain(`:title="findingTitle(f)"`);
+  expect(nodeDetailSource).toContain("Re-apply it from the Clock cap controls below");
+  // IR-253: contentless sections render nothing — cards gate on their data.
+  expect(nodeDetailSource).toContain(`v-if="detail.cpu.current"`);
+  expect(nodeDetailSource).toContain(`v-if="storageRows.length > 0"`);
+  expect(nodeDetailSource).toContain(`v-if="updateState?.updates"`);
+  expect(nodeDetailSource).toContain(`v-if="versionsState !== 'error' && versions !== null"`);
   expect(nodeDetailSource).toContain("href=\"#/\"");
 });
 
 it("NodeDetail keeps the M3 inference section vocabulary", () => {
   expect(nodeDetailSource).toContain(">Inference</h2>");
-  expect(nodeDetailSource).toContain("no LLM ports configured");
+  // IR-253: the whole section renders nothing when no ports are configured.
+  expect(nodeDetailSource).toContain(`v-if="llmPanels.length > 0"`);
   expect(nodeDetailSource).toContain("<LlmPanel");
   expect(nodeDetailSource).toContain("inference history unavailable");
 });
@@ -145,7 +153,9 @@ it("NodeDetail keeps the M3 inference section vocabulary", () => {
 it("NodeDetail gates the store catalog to the store node and renders cpu clock notes (IRI-034)", () => {
   expect(nodeDetailSource).toContain(`inventory.store && node?.kind === 'nas'`);
   expect(nodeDetailSource).toContain(`v-for="note in detail.cpu.notes"`);
-  expect(nodeDetailSource).toContain("store catalog renders on the store node");
+  // IR-253: the permanent filler is gone; busy state and report age remain.
+  expect(nodeDetailSource).toContain(`v-if="inventoryBusy"`);
+  expect(nodeDetailSource).toContain(`v-else-if="inventoryReadLabel"`);
 });
 
 it("LlmPanel keeps the DS per-port panel vocabulary", () => {
