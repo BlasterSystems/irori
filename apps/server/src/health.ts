@@ -288,7 +288,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       // summary's display precision — the column is float4, so a raw !==
       // against a full-precision gauge would never skip (float4 round-trip).
       const display = Math.round(value * 10) / 10;
-      if (Math.round(open[0]!.observedValue * 10) / 10 !== display) {
+      if (Math.round((open[0]!.observedValue ?? 0) * 10) / 10 !== display) {
         await db.update(healthFindings).set({ observedValue: display }).where(eq(healthFindings.id, open[0]!.id));
       }
       const last = open[0]!.lastNotifiedAt?.getTime() ?? 0;
