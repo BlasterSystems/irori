@@ -215,4 +215,23 @@ describe("GET /api/v1/updates", () => {
     const res = await request(app).get("/api/v1/updates");
     expect((res.body as { nodes: Array<{ posture: string }> }).nodes[0]!.posture).toBe("unknown");
   });
+
+  it("carries the report's collection time for the age label (IR-255)", async () => {
+    const { app, fake } = makeApp({
+      inventory: { get: async () => ({ report: { updates: { dgxOsVersion: "7.6.0", nvidiaDriverVersion: "580.178.04", pendingReboot: false, upgradableCount: 0, aptPresent: true } }, updatedAt: "2026-11-15T10:00:00.000Z" }) },
+      baseline: { dgxOs: "7.6.0", driver: "580.178.04", kernel: null, uefi: null, ec: null, soc: null, source: "live", fetchedAtMs: Date.now() },
+    });
+    await seedNode(fake);
+    const res = await request(app).get("/api/v1/updates");
+    expect(res.status).toBe(200);
+    expect((res.body as { nodes: Array<{ reportAt: string | null }> }).nodes[0]!.reportAt).toBe("2026-11-15T10:00:00.000Z");
+  });
+
+  it("nulls reportAt when the node has no inventory row (IR-255)", async () => {
+    const { app, fake } = makeApp({ inventory: { get: async () => null }, baseline: null });
+    await seedNode(fake);
+    const res = await request(app).get("/api/v1/updates");
+    expect(res.status).toBe(200);
+    expect((res.body as { nodes: Array<{ reportAt: string | null }> }).nodes[0]!.reportAt).toBeNull();
+  });
 });

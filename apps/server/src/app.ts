@@ -1085,7 +1085,9 @@ export function createApp(deps: AppDeps): Express {
           const behindOs = baseline.dgxOs !== null && u.dgxOsVersion !== null && u.dgxOsVersion !== baseline.dgxOs;
           posture = behindDriver || behindOs ? "behind" : "up to date";
         }
-        return { nodeId: n.id, name: n.name, online: online.has(n.id), updates: u, posture };
+        // IR-255: the report's collection time — the Updates card renders the
+        // age so a stale row cannot pose as fresh.
+        return { nodeId: n.id, name: n.name, online: online.has(n.id), updates: u, posture, reportAt: entry?.updatedAt ?? null };
       }),
     );
     res.json({ baseline, nodes: matrix });
