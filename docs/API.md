@@ -484,6 +484,9 @@ guarantees callers rely on, kept current when behavior changes. Last updated
  reportAt, updates}`. `posture` is `up to date`, `behind` (DGX OS or driver
  differs from the baseline — IR-243 keeps generic apt upgradable counts
  informational), `pending reboot`, `update tooling absent`, or `unknown`.
+ A pending NVIDIA/DGX package subset (`nvidiaDgxPending` — the DGX OTA
+ channel, what the DGX dashboard's update banner reads) is verdict-bearing:
+ more than zero flips the posture to `behind` (IR-258).
  `reportAt` (IR-255) is when the node's inventory report was collected
  (null = no report); the node-page Updates card renders its age. `updates`
  mirrors the agent's read-only probe: OS, kernel, DGX OS, NVIDIA driver,

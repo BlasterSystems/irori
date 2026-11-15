@@ -25,6 +25,9 @@ export interface UpdateState {
   pendingReboot: boolean;
   unattendedUpgradesLastResult: string | null;
   upgradableCount: number | null;
+  /** IR-258: the DGX OTA channel subset of the upgradable set (packages
+   *  matching nvidia/dgx). Null when apt is absent. */
+  nvidiaDgxPending: number | null;
   /** Tool absent → the posture is "update tooling absent", not "up to date". */
   aptPresent: boolean;
 }
@@ -56,13 +59,20 @@ export async function readOsPrettyName(osReleasePath = "/etc/os-release"): Promi
 
 /** The DGX OS version: /etc/dgx-release (5.x style) or apt dgx-os meta.
  *  IR-243: prefer the DGX_OS_VERSION key — the old regex returned the FIRST
- *  line verbatim, which on DGX Spark is `DGX_NAME="DGX Spark"`. */
+ *  line verbatim, which on DGX Spark is `DGX_NAME="DGX Spark"`.
+ *  IR-257: real DGX Spark images (dgx1/dgx3, 2026-11-15) carry neither
+ *  DGX_OS_VERSION nor DGX_OS_LINE — they use DGX_SWBUILD_VERSION (base build)
+ *  plus DGX_OTA_VERSION (the OTA level, the same level the scraped baseline
+ *  records). Prefer the OTA version for baseline comparability; without it
+ *  the posture's OS half was permanently blind (null is never behind). */
 export async function readDgxOsVersion(paths: string[] = ["/etc/dgx-release", "/etc/nvidia-release"]): Promise<string | null> {
   for (const path of paths) {
     try {
       const raw = await fs.readFile(path, "utf8");
       const kv = /^DGX_OS_VERSION[=\s]+"?([^"\n]+)"?$/m.exec(raw);
       if (kv !== null) return kv[1]!.trim();
+      const ota = /^DGX_OTA_VERSION[=\s]+"?([^"\n]+)"?$/m.exec(raw);
+      if (ota !== null) return ota[1]!.trim();
       const line = /^DGX_OS_LINE[=\s]+"?([^"\n]+)"?$/m.exec(raw);
       if (line !== null) return line[1]!.trim();
       // 5.x style: a single bare version line, no KEY= pairs at all.
@@ -120,19 +130,25 @@ export async function readUnattendedUpgradesResult(logDir = "/var/log/unattended
   }
 }
 
-/** Upgradable package count via `apt-get -s upgrade` (SIMULATE — read-only). */
-export async function readUpgradableCount(dryRunOut?: string | null): Promise<{ count: number | null; aptPresent: boolean }> {
+/** Upgradable package count via `apt-get -s upgrade` (SIMULATE — read-only).
+ *  IR-258: nvidiaDgxPending counts the DGX OTA channel subset (packages
+ *  matching nvidia/dgx) — what the DGX dashboard advertises as a system
+ *  update; generic counts are noise (IR-243), this subset is the signal. */
+export async function readUpgradableCount(dryRunOut?: string | null): Promise<{ count: number | null; nvidiaDgxPending: number | null; aptPresent: boolean }> {
   // null = explicit "tool absent" (deterministic in tests); undefined = run.
-  if (dryRunOut === null) return { count: null, aptPresent: false };
+  if (dryRunOut === null) return { count: null, nvidiaDgxPending: null, aptPresent: false };
   const raw = dryRunOut ?? (await run("apt-get", ["-s", "upgrade"], 20_000));
-  if (raw === null) return { count: null, aptPresent: false };
+  if (raw === null) return { count: null, nvidiaDgxPending: null, aptPresent: false };
   let count = 0;
+  let nvidiaDgxPending = 0;
   for (const line of raw.split("\n")) {
     if (/^(Inst|Conf)/.test(line.trim()) === false) continue;
     if (line.trim().startsWith("Conf")) continue; // only count Inst lines
     count += 1;
+    const pkg = /^Inst\s+(\S+)/.exec(line.trim())?.[1] ?? "";
+    if (/nvidia|^dgx/i.test(pkg)) nvidiaDgxPending += 1;
   }
-  return { count, aptPresent: true };
+  return { count, nvidiaDgxPending, aptPresent: true };
 }
 
 /** Full on-node collection. Never throws — a probe failure degrades to null. */
@@ -166,6 +182,7 @@ export async function collectUpdateState(
     pendingReboot,
     unattendedUpgradesLastResult: unattended,
     upgradableCount: upgradable.count,
+    nvidiaDgxPending: upgradable.nvidiaDgxPending,
     aptPresent: ota?.aptPresent ?? upgradable.aptPresent,
   };
 }

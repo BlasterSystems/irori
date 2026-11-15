@@ -372,7 +372,7 @@ export interface UpdatesResponse {
     posture: string;
     /** IR-255: when the node's update report was collected (null = no report). */
     reportAt: string | null;
-    updates: { osPrettyName: string | null; kernelVersion: string | null; dgxOsVersion: string | null; nvidiaDriverVersion: string | null; firmwareUpdates: Array<{ device: string; toVersion: string }>; fwupdPresent?: boolean; otaPackages: Array<{ name: string; version: string }>; pendingReboot: boolean; unattendedUpgradesLastResult: string | null; upgradableCount: number | null; aptPresent: boolean } | null;
+    updates: { osPrettyName: string | null; kernelVersion: string | null; dgxOsVersion: string | null; nvidiaDriverVersion: string | null; firmwareUpdates: Array<{ device: string; toVersion: string }>; fwupdPresent?: boolean; nvidiaDgxPending?: number | null; otaPackages: Array<{ name: string; version: string }>; pendingReboot: boolean; unattendedUpgradesLastResult: string | null; upgradableCount: number | null; aptPresent: boolean } | null;
   }>;
 }
 

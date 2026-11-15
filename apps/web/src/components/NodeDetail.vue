@@ -1515,6 +1515,13 @@ onUnmounted(() => {
             <div class="barrow"><span>NVIDIA driver</span><span class="val mono">{{ updateState.updates.nvidiaDriverVersion ?? "unknown" }}</span></div>
             <div class="barrow"><span>Pending reboot</span><span class="val">{{ updateState.updates.pendingReboot ? "yes — reboot required" : "no" }}</span></div>
             <div class="barrow"><span>Upgradable packages</span><span class="val">{{ updateState.updates.upgradableCount ?? "tooling absent" }}</span></div>
+            <!-- IR-258: the DGX OTA channel subset — what the dashboard's
+                 "System Update Available" banner reads. Informational row; the
+                 posture flips behind on it server-side. Old agents omit it. -->
+            <div v-if="typeof updateState.updates.nvidiaDgxPending === 'number'" class="barrow">
+              <span>NVIDIA/DGX pending packages</span>
+              <span class="val">{{ updateState.updates.nvidiaDgxPending }}</span>
+            </div>
             <!-- IR-256: firmware updates are rows, not a tooltip chip; the
                  absence is explicit when fwupd reported at all (old agents
                  omit the flag → no row, list still renders if non-empty). -->
