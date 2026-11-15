@@ -107,6 +107,10 @@ export const nodeInventorySchema = z.object({
       dgxOsVersion: z.string().nullable(),
       nvidiaDriverVersion: z.string().nullable(),
       firmwareUpdates: z.array(z.object({ device: z.string(), toVersion: z.string() })),
+      /** IR-256: false = fwupdmgr produced nothing on the node. Optional so
+       *  pre-0.7 reports (and old cached rows) keep parsing — the UI then
+       *  renders no absence row instead of implying an up-to-date firmware. */
+      fwupdPresent: z.boolean().optional(),
       otaPackages: z.array(z.object({ name: z.string(), version: z.string() })),
       pendingReboot: z.boolean(),
       unattendedUpgradesLastResult: z.string().nullable(),

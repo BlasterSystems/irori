@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDbHandle, jobs, nodes, type Db } from "@irori/db";
+import { createDbHandle, jobs, nodeInventory, nodes, type Db } from "@irori/db";
 import { AGENT_UPDATE_GRACE_MS, createJobsService } from "../src/jobs-service.js";
 
 /**
@@ -65,14 +65,21 @@ d("agent-update jobs (db integration)", () => {
 
   it("settles on hello: match succeeds, mismatch stays pending, idle is none", async () => {
     const good = await service.create(nodeId, "agent-update", { expectedVersion: "0.3.0" });
+    // IR-255: a confirmed update voids the cached report — it was collected by
+    // the previous bundle; the next read re-collects with the new agent.
+    await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 1, store: null, local: [] } });
     await expect(service.settleAgentUpdate(nodeId, "0.3.0")).resolves.toBe("succeeded");
     const done = await service.get(good.id);
     expect(done!.status).toBe("succeeded");
     expect(done!.output.at(-1)!.line).toContain("update confirmed");
+    expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
 
     const bad = await service.create(nodeId, "agent-update", { expectedVersion: "0.3.0" });
+    await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 2, store: null, local: [] } });
     await expect(service.settleAgentUpdate(nodeId, "0.2.0")).resolves.toBe("pending");
     expect((await service.get(bad.id))!.status).toBe("running");
+    // A pending/unconfirmed update changes nothing — the old report stays.
+    expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(1);
     await db.delete(jobs).where(eq(jobs.id, bad.id));
 
     // A newer-than-expected report proves the update took (the fleet may run

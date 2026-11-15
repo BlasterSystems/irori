@@ -794,6 +794,12 @@ export function createJobsService(
         .set({ status: "succeeded", exitCode: 0, finishedAt })
         .where(and(eq(jobs.id, row.id), inArray(jobs.status, [...ACTIVE])));
       await db.insert(jobOutput).values({ jobId: row.id, seq: MAX_OUTPUT_LINES, line: `update confirmed: agent reports ${agentVersion}` });
+      // IR-255: the update changed the agent — the cached inventory report was
+      // collected by the previous bundle, so its parsing and counts are the old
+      // agent's truth. Void it; the next node-detail read auto-dispatches a
+      // fresh models-inventory on the new agent. Failure paths keep the report:
+      // the agent (and its parsing) did not change.
+      await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
       onSettled?.({
         nodeId,
         jobId: row.id,

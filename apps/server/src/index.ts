@@ -19,7 +19,7 @@ import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
 import { createModelctlPinService, type ModelctlPinService } from "./modelctl-pin.js";
-import { createHealthService, type HealthService } from "./health.js";
+import { createHealthService, HEALTH_SWEEP_MS, type HealthService } from "./health.js";
 import { createClockCapService, type ClockCapService } from "./clock-caps.js";
 import { getUpdateBaseline, BASELINE_TTL_MS, type UpdateBaseline } from "./updates-baseline.js";
 import { createRecipesService, seedRecipes, type RecipeService } from "./recipes.js";
@@ -342,7 +342,8 @@ async function boot(): Promise<void> {
       const lastSeen = new Map(nodes.map((n) => [n.id, n.lastSeenAt?.getTime() ?? Date.now()]));
       await health.sweep(nodes, online, lastSeen);
     })().catch(() => {});
-  }, 30_000);
+    // IR-254: HEALTH_SWEEP_MS is shared with the drift summary's math.
+  }, HEALTH_SWEEP_MS);
 
   // IRI-014: download-queue batch settles reconcile the queue rows; the
   // mutable hook is filled in once the queue service exists (it needs jobs).

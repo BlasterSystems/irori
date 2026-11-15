@@ -115,6 +115,19 @@ function hubDiskSuffix(opts: HealthSinks, metric: string): string {
   return metric === "hub_disk_pct" && opts.hubDiskPath !== undefined ? ` (hub VM filesystem, HUB_DISK_PATH=${opts.hubDiskPath})` : "";
 }
 
+/** IR-254: the health sweep interval — shared by the index.ts scheduler and
+ *  the clock-cap-drift summary, so the streak-to-minutes math cannot drift. */
+export const HEALTH_SWEEP_MS = 30_000;
+
+/** IR-254: the clock-cap-drift summary gains the "so what": the stored cap is
+ *  not what the driver reports, and has not been for roughly this long
+ *  (consecutive 30 s sweeps). Floors at one minute so short drifts still
+ *  read as time, not sweeps. */
+function clockDriftSuffix(value: number): string {
+  const minutes = Math.max(1, Math.round((value * HEALTH_SWEEP_MS) / 60_000));
+  return ` — stored cap not in effect ~${minutes} min`;
+}
+
 function opSymbol(op: string): string {
   return { gt: ">", gte: "≥", lt: "<", lte: "≤", eq: "=" }[op] ?? op;
 }
@@ -417,7 +430,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
           if (!onlineIds.has(node.id)) continue;
           const value = await opts.clockDrift(node.id).catch(() => null);
           if (value === null) continue;
-          await evaluate(driftRule, node.id, value);
+          await evaluate(driftRule, node.id, value, clockDriftSuffix(value));
         }
       }
       // IR-201: the hub-disk rule reads the hub's own filesystem once per
@@ -452,12 +465,13 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         // CTA for NAS-sourced pressure without a schema change.
         const snap = f.nodeId !== null ? latest.get(f.nodeId) : undefined;
         const origin = snap !== undefined ? diskOriginSuffix(rule.metric, snap) : "";
+        const drift = rule.metric === "clock_cap_drift" && f.observedValue !== null ? clockDriftSuffix(f.observedValue) : "";
         return {
         nodeId: f.nodeId ?? "",
         ruleId: rule.id,
         metric: rule.metric as HealthFinding["metric"],
         severity: rule.severity as HealthFinding["severity"],
-        summary: summaryFor(rule, f.observedValue, hubDiskSuffix(opts, rule.metric) + origin),
+        summary: summaryFor(rule, f.observedValue, hubDiskSuffix(opts, rule.metric) + origin + drift),
         since: f.since.toISOString(),
         };
       });
