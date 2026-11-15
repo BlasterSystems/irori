@@ -799,6 +799,10 @@ export function createJobsService(
       // agent's truth. Void it; the next node-detail read auto-dispatches a
       // fresh models-inventory on the new agent. Failure paths keep the report:
       // the agent (and its parsing) did not change.
+      // Edge (accepted): a job created via the generic endpoint with a
+      // non-drift expectedVersion confirms on the first hello and voids a
+      // report the unchanged agent just collected — one spurious re-dispatch;
+      // the UI's dedicated endpoint is drift-gated, so this is rare.
       await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
       onSettled?.({
         nodeId,
