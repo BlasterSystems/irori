@@ -101,4 +101,19 @@ describe("Updates card", () => {
     expect(card!.text()).not.toContain("Firmware");
     w.unmount();
   });
+
+  it("renders the NVIDIA/DGX pending row when the agent reports it (IR-258)", async () => {
+    const { w, card } = await mountWith({ nodeId: UUID, name: "DGX-3", online: true, posture: "behind", reportAt: new Date().toISOString(), updates: { ...baseUpdates, firmwareUpdates: [], nvidiaDgxPending: 17 } });
+    expect(card).toBeDefined();
+    expect(card!.text()).toContain("NVIDIA/DGX pending packages");
+    expect(card!.text()).toContain("17");
+    w.unmount();
+  });
+
+  it("renders no NVIDIA/DGX row for old agents that omit the count (IR-258)", async () => {
+    const { w, card } = await mountWith({ nodeId: UUID, name: "DGX-3", online: true, posture: "up to date", reportAt: new Date().toISOString(), updates: { ...baseUpdates, firmwareUpdates: [] } });
+    expect(card).toBeDefined();
+    expect(card!.text()).not.toContain("NVIDIA/DGX pending packages");
+    w.unmount();
+  });
 });

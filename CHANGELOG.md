@@ -8,6 +8,18 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **DGX OTA visibility** (round 15, IR-257/IR-258): real DGX Spark images
+  carry `DGX_SWBUILD_VERSION`/`DGX_OTA_VERSION` in `/etc/dgx-release` (no
+  `DGX_OS_VERSION`/`DGX_OS_LINE`), so the OS half of the update posture was
+  permanently blind — the parser now prefers `DGX_OTA_VERSION`, and a node
+  one OTA behind the baseline (dgx1: 7.5.0 vs 7.6.0) correctly reads
+  "behind" — IR-257. Pending NVIDIA/DGX packages (the DGX OTA channel — what
+  the DGX dashboard's "System Update Available" banner reads) are counted
+  from the same read-only apt simulation, shown as their own Updates-card
+  row, and flip the posture to "behind"; IR-243's non-verdict rule stays for
+  generic Ubuntu counts — IR-258. Both reach the fleet on the next agent
+  rollout.
+
 - **Node page feedback round 14** (epic IR-250): the "Install modelctl for
   …" button actually dispatches again — a computed ref used without
   `.value` in script made the guard always true and every click silently

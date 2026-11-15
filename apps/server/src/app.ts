@@ -1071,12 +1071,17 @@ export function createApp(deps: AppDeps): Express {
     const matrix = await Promise.all(
       nodeRows.map(async (n) => {
         const entry = await inventory.get(n.id).catch(() => null);
-        const report = (entry?.report ?? null) as { updates?: { dgxOsVersion: string | null; nvidiaDriverVersion: string | null; pendingReboot: boolean; upgradableCount: number | null; aptPresent: boolean } } | null;
+        const report = (entry?.report ?? null) as { updates?: { dgxOsVersion: string | null; nvidiaDriverVersion: string | null; pendingReboot: boolean; upgradableCount: number | null; nvidiaDgxPending?: number | null; aptPresent: boolean } } | null;
         const u = report?.updates ?? null;
         let posture: "unknown" | "up to date" | "behind" | "pending reboot" | "update tooling absent" = "unknown";
         if (u !== null && !u.aptPresent) posture = "update tooling absent";
         else if (u?.pendingReboot === true) posture = "pending reboot";
-        else if (u !== null && baseline !== null) {
+        else if (u !== null && (u.nvidiaDgxPending ?? 0) > 0) {
+          // IR-258: pending NVIDIA/DGX packages are the DGX OTA channel — the
+          // exact signal the DGX dashboard advertises as a system update.
+          // Unlike generic apt counts (IR-243) this subset is verdict-bearing.
+          posture = "behind";
+        } else if (u !== null && baseline !== null) {
           // IR-243: generic apt upgradable counts are NOT the posture — 125
           // pending Ubuntu packages rendered every node permanently "behind".
           // The posture compares DGX OS + driver against the hub baseline;
