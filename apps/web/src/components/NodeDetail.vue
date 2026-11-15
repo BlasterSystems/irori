@@ -403,6 +403,18 @@ const storageRows = computed(() => snapshot.value?.storage ?? []);
 /** IRI-069: open health findings for this node (severity chips in the header). */
 const findings = ref<HealthFinding[]>([]);
 
+/** IR-254: per-metric plain-language help for the header chips — the raw
+ *  metric-vs-threshold summary says what tripped, the help says what it
+ *  means and what to do about it. */
+const FINDING_HELP: Record<string, string> = {
+  clock_cap_drift:
+    "the clock cap saved for this node is not what the driver reports (consecutive 30 s sweeps with a mismatch). Re-apply it from the Clock cap controls below, or clear the cap if the change was intentional.",
+};
+function findingTitle(f: HealthFinding): string {
+  const help = FINDING_HELP[f.metric];
+  return `${f.severity.toUpperCase()} · ${f.summary} · since ${new Date(f.since).toLocaleTimeString()}${help === undefined ? "" : ` — ${help}`}`;
+}
+
 /* ── IRI-080: version provenance + drift ──────────────────────────────────── */
 const versions = ref<NodeVersionsResponse | null>(null);
 const versionsState = ref<"loading" | "ready" | "error">("loading");
@@ -440,6 +452,15 @@ const postureChip = computed(() => {
   if (p === "up to date") return "chip--ok";
   if (p === "behind" || p === "pending reboot") return "chip--warn";
   return "chip--muted";
+});
+/** IR-255: the update report's age — a stale row must not pose as fresh
+ *  (same IR-106 semantics as the Models read label). */
+const updatesReadLabel = computed(() => {
+  const at = updateState.value?.reportAt ?? null;
+  if (at === null) return null;
+  const d = new Date(at);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay ? d.toLocaleTimeString() : `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
 });
 watch(
   () => props.nodeId,
@@ -764,7 +785,11 @@ function askRegister(repo: string, user: string): void {
  *  directly, no typed confirm; the version-gated install job skips when the
  *  pin is already satisfied. */
 async function installModelctl(user: string): Promise<void> {
-  if (opBusy.value || nodeBusyJob !== null) return;
+  // IR-251: nodeBusyJob is a computed — it must be .value here (script does
+  // not unwrap), otherwise the guard is always true and every click silently
+  // no-ops (the template's disabled state unwraps correctly, so the button
+  // looks alive while dispatch never happens).
+  if (opBusy.value || nodeBusyJob.value !== null) return;
   const epoch = nodeEpoch;
   opBusy.value = true;
   modelOpError.value = null;
@@ -906,6 +931,36 @@ const deleteError = ref<string | null>(null);
 const armedDelete = ref(false);
 let deleteTimer: ReturnType<typeof setTimeout> | undefined;
 
+/** IR-252: the Node actions menu — outside press and Escape close it (the
+ *  IR-222 rowpop contract). */
+const actionsOpen = ref(false);
+function onDocForActions(e: MouseEvent): void {
+  const t = e.target as HTMLElement | null;
+  if (t !== null && t.closest(".node-actions-anchor") === null) actionsOpen.value = false;
+}
+function onKeyForActions(e: KeyboardEvent): void {
+  if (e.key === "Escape") actionsOpen.value = false;
+}
+/** Menu items close the menu, then act — except Delete, which keeps the menu
+ *  open so its armed "Confirm delete" state stays visible (4 s window). */
+function runMenuAction(fn: () => void | Promise<void>): void {
+  actionsOpen.value = false;
+  void fn();
+}
+watch(actionsOpen, (open) => {
+  if (open) {
+    document.addEventListener("click", onDocForActions);
+    document.addEventListener("keydown", onKeyForActions);
+  } else {
+    document.removeEventListener("click", onDocForActions);
+    document.removeEventListener("keydown", onKeyForActions);
+  }
+});
+onUnmounted(() => {
+  document.removeEventListener("click", onDocForActions);
+  document.removeEventListener("keydown", onKeyForActions);
+});
+
 async function onRemove(): Promise<void> {
   if (!armedDelete.value) {
     armedDelete.value = true;
@@ -933,6 +988,7 @@ watch(
   () => props.nodeId,
   () => {
     armedDelete.value = false;
+    actionsOpen.value = false;
     deleteError.value = null;
     clearTimeout(deleteTimer);
   },
@@ -949,23 +1005,20 @@ onUnmounted(() => {
   <div>
     <div class="pagehead">
       <div>
-        <p class="label" style="margin: 0 0 4px;">Nodes / {{ node?.name ?? "…" }}</p>
+        <!-- IR-252: the breadcrumb IS the back link — no separate ← Overview chip. -->
+        <p class="label" style="margin: 0 0 4px;"><a href="#/" style="color: inherit;">Nodes</a> / {{ node?.name ?? "…" }}</p>
         <div class="row row--wrap">
           <h1 :title="node?.name ?? nodeId">{{ node?.name ?? nodeId }}</h1>
           <template v-if="card">
-            <span v-if="card.role !== 'standalone'" class="chip chip--accent">{{ card.role }}</span>
-            <span class="chip">{{ card.kind }}</span>
             <span class="chip" :class="statusChipClass">
               <span class="dot" :class="card.dotClass" aria-hidden="true"></span>{{ card.statusText }}
             </span>
-            <span class="chip">{{ node?.host }}</span>
-            <span v-if="card.agentVersion" class="chip">Agent {{ card.agentVersion }}</span>
             <span v-if="drift" class="chip chip--warn">update available</span>
             <span
               v-for="f in findings"
               :key="f.ruleId"
               class="chip chip--warn"
-              :title="`${f.severity.toUpperCase()} · ${f.summary} · since ${new Date(f.since).toLocaleTimeString()}`"
+              :title="findingTitle(f)"
             >{{ f.severity === "critical" ? "▪" : "◇" }} {{ f.summary }}</span>
             <span
               v-if="kernelWarn"
@@ -985,25 +1038,43 @@ onUnmounted(() => {
               :title="armedShutdown ? 'click again to confirm — 10 s grace, then poweroff' : 'arm a node shutdown'"
               @click="onShutdown"
             >{{ armedShutdown ? "Confirm shutdown" : "Shut down" }}</button>
-            <button class="btn btn--ghost btn--sm" @click="editOpen = true">Edit</button>
-            <button class="btn btn--ghost btn--sm" @click="rotateOpen = true">Rotate token</button>
-            <a class="btn btn--ghost btn--sm" :href="auditTargetHash(nodeId)" title="Audited actions for this node">Audit</a>
-            <button
-              v-if="drift"
-              class="btn btn--secondary btn--sm"
-              :disabled="updateBusy || node.online !== true"
-              title="Restarts the agent — running setups and benches on this node stop"
-              @click="updateAgent"
-            >{{ updateLabel }}</button>
-            <button class="btn btn--ghost btn--sm" @click="onRemove">{{ armedDelete ? "Confirm delete" : "Delete" }}</button>
+            <!-- IR-252: one menu, one shape — everything but power folds in
+                 here; the agent-update item only appears when an update is
+                 offered. Delete keeps the menu open so its armed state stays
+                 visible (4 s window). -->
+            <div class="node-actions-anchor">
+              <button
+                class="btn btn--secondary btn--sm"
+                aria-haspopup="true"
+                :aria-expanded="actionsOpen"
+                @click="actionsOpen = !actionsOpen"
+              >Node actions ▾</button>
+              <div v-if="actionsOpen" class="node-actions-menu" role="menu" aria-label="Node actions">
+                <button class="menu-item" role="menuitem" type="button" @click="runMenuAction(() => { editOpen = true; })">Edit…</button>
+                <button class="menu-item" role="menuitem" type="button" @click="runMenuAction(() => { rotateOpen = true; })">Rotate token…</button>
+                <a class="menu-item" role="menuitem" :href="auditTargetHash(nodeId)" title="Audited actions for this node">Audit</a>
+                <button class="menu-item" role="menuitem" type="button" title="Audit and reclaim disk space — caches, journal, /tmp; dry-run plan first, nothing deleted without a typed confirm" @click="runMenuAction(() => { cleanupOpen = true; })">Disk hygiene…</button>
+                <button
+                  v-if="drift"
+                  class="menu-item"
+                  role="menuitem"
+                  type="button"
+                  :disabled="updateBusy || node.online !== true"
+                  title="Restarts the agent — running setups and benches on this node stop"
+                  @click="runMenuAction(updateAgent)"
+                >{{ updateLabel }}</button>
+                <button
+                  class="menu-item menu-item--thread"
+                  role="menuitem"
+                  type="button"
+                  @click="onRemove"
+                >{{ armedDelete ? "Confirm delete" : "Delete…" }}</button>
+              </div>
+            </div>
           </template>
-          <button
-            class="btn btn--secondary btn--sm"
-            title="Audit and reclaim disk space — caches, journal, /tmp; dry-run plan first, nothing deleted without a typed confirm"
-            @click="cleanupOpen = true"
-          >Disk hygiene</button>
-          <a class="chip detail-back" href="#/">← Overview</a>
         </div>
+        <!-- IR-252: identity details demoted out of the chip row. -->
+        <p v-if="card" class="stat__sub faint" style="margin: 4px 0 0;">{{ [card.role, card.kind, node?.host, card.agentVersion == null ? null : `agent ${card.agentVersion}`].filter((part) => part !== null && part !== "").join(" · ") }}</p>
         <p v-if="updateMsg" class="stat__sub" style="margin-top: 8px;">{{ updateMsg }}</p>
         <p v-if="shutdownMsg" class="stat__sub" style="margin-top: 8px;">{{ shutdownMsg }}</p>
         <p v-if="shutdownError" class="banner banner--warn" style="margin-top: 8px;">{{ shutdownError }}</p>
@@ -1016,8 +1087,10 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- IRI-037: sensors and inference share one row; each cell carries its heading. -->
-    <section class="cols cols-2" style="margin-bottom: 12px;">
+    <!-- IRI-037: sensors and inference share one row; each cell carries its
+         heading. IR-253: with no inference the cell renders nothing and the
+         Live card spans the row. -->
+    <section :class="llmPanels.length > 0 ? 'cols cols-2' : 'cols'" style="margin-bottom: 12px;">
       <div>
         <h2 style="margin-bottom: 10px;">Live</h2>
         <article class="card">
@@ -1037,9 +1110,8 @@ onUnmounted(() => {
           </div>
         </article>
       </div>
-      <div class="inference-cell">
+      <div v-if="llmPanels.length > 0" class="inference-cell">
         <h2 style="margin-bottom: 10px;">Inference</h2>
-        <p v-if="llmPanels.length === 0" class="muted" style="margin: 0;">no LLM ports configured</p>
         <LlmPanel
           v-for="panel in llmPanels"
           :key="panel.view.port"
@@ -1076,10 +1148,9 @@ onUnmounted(() => {
       <!-- IRI-034: the store card carries the Refresh affordance on the store
            node; every other case still needs one in reach. -->
       <div v-if="!(inventory.store && node?.kind === 'nas')" class="row row--between" style="margin-bottom: 12px;">
-        <span class="muted">
-          {{ inventoryBusy ? "reading the node's caches…" : inventory.store ? "store catalog renders on the store node" : "local caches" }}
-          <span v-if="inventoryReadLabel && !inventoryBusy" class="stat__sub faint">— read {{ inventoryReadLabel }}</span>
-        </span>
+        <!-- IR-253: the permanent filler is gone; busy state and report age stay. -->
+        <span v-if="inventoryBusy" class="muted">reading the node's caches…</span>
+        <span v-else-if="inventoryReadLabel" class="stat__sub faint">read {{ inventoryReadLabel }}</span>
         <button class="btn btn--secondary btn--sm" :disabled="inventoryBusy || node?.online !== true || nodeBusyJob !== null" :title="nodeBusyLabel || undefined" @click="refreshInventory">
           {{ inventoryBusy ? "reading…" : nodeBusyJob !== null ? "Busy" : "Refresh" }}
         </button>
@@ -1232,7 +1303,7 @@ onUnmounted(() => {
           </template>
         </div>
       </article>
-      <p v-if="inventory.local.length === 0" class="muted" style="margin-bottom: 12px;">no HF cache found for any user on this node</p>
+      <!-- IR-253: no caches and no action here — nothing to list. -->
     </template>
 
     <!-- IRI-044: compact dispatch/progress handle. The job sheet auto-opens
@@ -1286,7 +1357,8 @@ onUnmounted(() => {
     </div>
 
     <section v-if="loadState === 'ready'" class="cols cols-2">
-      <article class="card">
+      <!-- IR-253: no snapshot yet, no card. -->
+      <article v-if="detail.cpu.current" class="card">
         <div class="card__head"><h3>CPU</h3><span class="mono faint">{{ detail.cpu.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.cpu.current">
@@ -1331,11 +1403,10 @@ onUnmounted(() => {
             <p v-if="detail.cpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.cpu.sub }}</p>
             <p v-for="note in detail.cpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
-          <p v-else class="muted">no data yet</p>
         </div>
       </article>
 
-      <article class="card">
+      <article v-if="detail.memory.current" class="card">
         <div class="card__head"><h3>Memory</h3><span class="mono faint">{{ detail.memory.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.memory.current">
@@ -1349,11 +1420,10 @@ onUnmounted(() => {
             <p v-if="detail.memory.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.memory.sub }}</p>
             <p v-for="note in detail.memory.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
-          <p v-else class="muted">no data yet</p>
         </div>
       </article>
 
-      <article class="card">
+      <article v-if="detail.gpu.current" class="card">
         <div class="card__head"><h3>GPU</h3><span class="mono faint">{{ detail.gpu.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.gpu.current">
@@ -1390,19 +1460,17 @@ onUnmounted(() => {
             <p v-if="detail.gpu.sub" class="stat__sub" style="margin-top: 8px;">{{ detail.gpu.sub }}</p>
             <p v-for="note in detail.gpu.notes" :key="note" class="stat__sub">{{ note }}</p>
           </template>
-          <p v-else class="muted">no data yet</p>
         </div>
       </article>
 
       <!-- IRI-080: version provenance — pin vs actual, catalog freshness,
            missing recipe scripts (the Serve stale chip lives here too). -->
-      <article v-if="versionsState !== 'error'" class="card">
+      <article v-if="versionsState !== 'error' && versions !== null" class="card">
         <div class="card__head">
           <h3>Versions</h3>
           <span class="mono faint">{{ versions?.updatedAt !== null ? `read ${new Date(versions?.updatedAt ?? 0).toLocaleTimeString()}` : "" }}</span>
         </div>
         <div class="card__body" style="padding-top: 12px;">
-          <template v-if="versions !== null">
             <div class="barrow"><span>Agent</span><span class="val">{{ versions.agentVersion ?? "unknown" }}</span></div>
             <div class="barrow"><span>Node runtime</span><span class="val">{{ versions.versions?.nodeRuntime ?? "unknown" }}</span></div>
             <div class="barrow"><span>uv</span><span class="val">{{ versions.versions?.uv ?? "missing" }}</span></div>
@@ -1430,47 +1498,53 @@ onUnmounted(() => {
             <p v-if="staleScripts.length > 0" class="row">
               <span class="chip chip--warn" :title="staleScripts.map((s) => s.path).join('\n')">◇ {{ staleScripts.length }} stale recipe script{{ staleScripts.length === 1 ? "" : "s" }} — start would fail</span>
             </p>
-          </template>
-          <p v-else class="muted">no inventory report yet — run Models → Refresh</p>
         </div>
       </article>
 
-      <article class="card">
+      <!-- IR-253: no report, no card — the "unknown" posture chip is noise. -->
+      <article v-if="updateState?.updates" class="card">
         <div class="card__head">
           <h3>Updates</h3>
-          <span class="chip" :class="postureChip">{{ updateState?.posture ?? "unknown" }}</span>
+          <span v-if="updatesReadLabel" class="mono faint">read {{ updatesReadLabel }}</span>
+          <span class="chip" :class="postureChip">{{ updateState.posture }}</span>
         </div>
         <div class="card__body" style="padding-top: 12px;">
-          <template v-if="updateState?.updates">
             <div class="barrow"><span>OS</span><span class="val">{{ updateState.updates.osPrettyName ?? "unknown" }}</span></div>
             <div class="barrow"><span>Kernel</span><span class="val mono">{{ updateState.updates.kernelVersion ?? "unknown" }}</span></div>
             <div class="barrow"><span>DGX OS</span><span class="val mono">{{ updateState.updates.dgxOsVersion ?? "unknown" }}</span></div>
             <div class="barrow"><span>NVIDIA driver</span><span class="val mono">{{ updateState.updates.nvidiaDriverVersion ?? "unknown" }}</span></div>
             <div class="barrow"><span>Pending reboot</span><span class="val">{{ updateState.updates.pendingReboot ? "yes — reboot required" : "no" }}</span></div>
             <div class="barrow"><span>Upgradable packages</span><span class="val">{{ updateState.updates.upgradableCount ?? "tooling absent" }}</span></div>
-            <p v-if="updateState.updates.firmwareUpdates.length > 0" class="row">
-              <span class="chip chip--warn" :title="updateState.updates.firmwareUpdates.map((f) => f.device + ' → ' + f.toVersion).join('\n')">◇ {{ updateState.updates.firmwareUpdates.length }} firmware update{{ updateState.updates.firmwareUpdates.length === 1 ? "" : "s" }} pending</span>
-            </p>
+            <!-- IR-256: firmware updates are rows, not a tooltip chip; the
+                 absence is explicit when fwupd reported at all (old agents
+                 omit the flag → no row, list still renders if non-empty). -->
+            <div v-for="f in updateState.updates.firmwareUpdates" :key="f.device" class="barrow">
+              <span>Firmware · {{ f.device }}</span>
+              <span class="val">{{ f.toVersion }}</span>
+            </div>
+            <div v-if="updateState.updates.fwupdPresent === false" class="barrow">
+              <span>Firmware</span>
+              <span class="val">fwupd unavailable — no firmware checks</span>
+            </div>
+            <div v-else-if="updateState.updates.fwupdPresent === true && updateState.updates.firmwareUpdates.length === 0" class="barrow">
+              <span>Firmware</span>
+              <span class="val">up to date</span>
+            </div>
             <p v-if="updateState.updates.unattendedUpgradesLastResult" class="muted">unattended-upgrades: {{ updateState.updates.unattendedUpgradesLastResult }}</p>
-          </template>
-          <p v-else class="muted">no update report yet — run Models → Refresh (informational only: Irori never installs or reboots)</p>
         </div>
       </article>
 
-      <article class="card">
+      <article v-if="storageRows.length > 0" class="card">
         <div class="card__head"><h3>Storage</h3><span class="mono faint">{{ storageRows.length }} mounts</span></div>
         <div class="card__body" style="padding-top: 12px;">
-          <template v-if="storageRows.length > 0">
-            <div v-for="s in storageRows" :key="s.mount" class="barrow">
-              <span :title="`${s.fs} · ${s.mount}`">{{ s.mount }}</span>
-              <span class="val">{{ storageRowLabel(s) }}</span>
-            </div>
-          </template>
-          <p v-else class="muted">no data yet</p>
+          <div v-for="s in storageRows" :key="s.mount" class="barrow">
+            <span :title="`${s.fs} · ${s.mount}`">{{ s.mount }}</span>
+            <span class="val">{{ storageRowLabel(s) }}</span>
+          </div>
         </div>
       </article>
 
-      <article class="card">
+      <article v-if="detail.network.current" class="card">
         <div class="card__head"><h3>Network</h3><span class="mono faint">{{ detail.network.current }}</span></div>
         <div class="card__body" style="padding-top: 12px;">
           <template v-if="detail.network.current">
@@ -1489,7 +1563,6 @@ onUnmounted(() => {
               <span class="val">{{ linkLabel(n.speedMbps) }} · {{ n.operState ?? "?" }}<template v-if="n.addrs.length > 0"> · {{ n.addrs.join(", ") }}</template></span>
             </div>
           </template>
-          <p v-else class="muted">no data yet</p>
         </div>
       </article>
     </section>
@@ -1662,5 +1735,50 @@ h1 {
   .detail-range .seg button {
     min-height: 44px;
   }
+}
+/* IR-252: the header Node actions menu — anchored popover in the rowpop
+   vocabulary (one shape for every action but power; DS 4px panel radius). */
+.node-actions-anchor {
+  position: relative;
+}
+.node-actions-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: 200px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+}
+.node-actions-menu .menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: 400 var(--fs-ui)/1.3 var(--font-sans);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.node-actions-menu .menu-item:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.node-actions-menu .menu-item--thread {
+  color: var(--thread-ink);
+}
+.node-actions-menu .menu-item--thread:hover {
+  background: none;
+  color: var(--thread-ink);
+  text-decoration: underline;
+}
+.node-actions-menu .menu-item:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 </style>

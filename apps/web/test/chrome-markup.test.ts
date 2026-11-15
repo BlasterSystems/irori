@@ -75,9 +75,9 @@ it("CleanupDrawer scopes staging cleanup to the store node (IRI-047)", () => {
 });
 
 it("NodeDetail puts the Sensors card and the inference panels side by side (IRI-037)", () => {
-  // One shared cols-2 row carries both cells (was: two half-width rows).
-  const sections = nodeDetailSource.match(/<section class="cols cols-2"/g) ?? [];
-  expect(sections.length).toBe(1); // History's grid has a v-if before the class
+  // One shared cols-2 row carries both cells — dynamic since IR-253: the row
+  // collapses to a single column when no inference is configured.
+  expect(nodeDetailSource).toContain(`:class="llmPanels.length > 0 ? 'cols cols-2' : 'cols'"`);
   expect(nodeDetailSource).toContain('class="inference-cell"');
   expect(nodeDetailSource).toContain(".inference-cell > .card + .card");
 });
