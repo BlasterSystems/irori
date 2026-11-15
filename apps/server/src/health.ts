@@ -284,10 +284,12 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
       await transition(ref, nodeId, "appear", value, suffix);
     } else if (breach && open.length > 0) {
       // IR-240: keep the open finding's observed value current so refetches
-      // show the live reading, not the appear-time one. A no-op write is
-      // skipped — the snapshot cadence re-evaluates constantly.
-      if (open[0]!.observedValue !== value) {
-        await db.update(healthFindings).set({ observedValue: value }).where(eq(healthFindings.id, open[0]!.id));
+      // show the live reading, not the appear-time one. Compared at the
+      // summary's display precision — the column is float4, so a raw !==
+      // against a full-precision gauge would never skip (float4 round-trip).
+      const display = Math.round(value * 10) / 10;
+      if (Math.round(open[0]!.observedValue * 10) / 10 !== display) {
+        await db.update(healthFindings).set({ observedValue: display }).where(eq(healthFindings.id, open[0]!.id));
       }
       const last = open[0]!.lastNotifiedAt?.getTime() ?? 0;
       if (now() - last > rule.cooldownSec * 1000) {
