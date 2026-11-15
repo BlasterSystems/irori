@@ -8,6 +8,33 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **UI feedback rounds 10–12** (epic IR-237): the collapsed 68px rail centers
+  on one 34px axis (the three inert centering rules are real flex now,
+  mirrored into the round-8 mockup) — IR-238. The hub-disk banner names its
+  measured filesystem (`hub VM filesystem, HUB_DISK_PATH=…`) and offers a
+  copyable runbook instead of prose, refuting the NAS assumption in place —
+  IR-239. Cleanup apply refreshes the UI without a reload: a settled
+  hygiene-clean auto-follows with a fresh audit, the banner/ServeView
+  reclaim estimates refetch on findings changes and drawer close, open
+  findings update their observed value at each evaluation, and a reconnect
+  reconciles findings — IR-240. Download failures say why: modelctl
+  preflight refusals land in the queue rows, the Overview feed terminal
+  line and the table (visible text, tooltip keeps the full message) —
+  IR-244. The Community GB10 source polls the category-scoped latest feed
+  (the site-wide weekly Top contained zero GB10 topics) ranked by last
+  activity — IR-245. Per-user model jobs report `no modelctl for cache
+  user … — install it …` instead of `unknown local cache user` when the
+  passwd entry exists, a missing modelctl is auto-installed after the next
+  inventory read, and the inventory UI offers the install action — IR-247.
+  The activity feed summarizes full-payload JSON lines instead of dumping
+  11 KB reports, and a refresh within 60 s reuses the report instead of
+  dispatching a second identical job — IR-248. The Overview Updates panel
+  populates: a daily `models-inventory` sweep re-collects for online nodes
+  with stale/missing reports, the cards timer refreshes the panel,
+  `/etc/dgx-release` parses `DGX_OS_VERSION` (was returning
+  `DGX_NAME="DGX Spark"`), and generic apt upgradable counts no longer
+  force the posture to "behind" — IR-243.
+
 - **Analytics tokens lens renders again** (defect found during IR-196
   verification): the `/api/v1/analytics/:lens` catch-all was registered
   before the concrete `/api/v1/analytics/efficiency` and
@@ -28,6 +55,17 @@ All notable changes to Irori are recorded here. Format follows
   the first ~28px of any tall drawer, clipping its title row.
 
 ### Added
+
+- **Alarm webhooks, NAS-origin labeling and MiaAI-Lab recipes** (epic
+  IR-237): per-rule alarm webhooks are configurable from the hub settings
+  surface (set/clear via the existing `PUT /api/v1/health/rules/:id`;
+  stored encrypted, `hasWebhook` chip only) — IR-241. `disk_pct` findings
+  whose max mount is a remote filesystem carry ` (NAS share <mount>)` and
+  the banner drops the node-local cleanup CTA for them — IR-242. Six
+  verified MiaAI-Lab DGX Spark recipe repos joined the catalog as
+  `miaai-script` entries (raw start/stop staged from the pinned commit at
+  install, sha256-verified, never vendored; AGPL repos marked copyleft)
+  with per-repo commit watchers in the community feed — IR-246.
 
 - **Round-8 shell controls + Overview token stats** (epic IR-224): the
   range control and the Add node CTA live in the sidebar menu (hamburger
