@@ -35,6 +35,7 @@ import {
 import { fmtBytes } from "../analytics";
 import { nodeLlmPorts, shapeLlmPort, type LlmPortView } from "../llm-data";
 import { cancelJob, createJob, fetchJob, jobStatusChip, startAgentUpdate, type JobDetail } from "../models";
+import { feedLineText } from "../overview";
 import { activeJobFor, blockingJobLabel } from "../jobs";
 import { auditTargetHash } from "../audit-data";
 import {
@@ -530,8 +531,14 @@ async function refreshInventory(): Promise<void> {
   inventoryBusy.value = true;
   inventoryError.value = null;
   try {
-    const job = await refreshNodeInventory(props.nodeId);
-    const detail = await pollJob(job.id, undefined, 30 * 60_000, () => epoch === nodeEpoch);
+    const result = await refreshNodeInventory(props.nodeId);
+    if ("reused" in result) {
+      // IR-248: the server reused a fresh (< 60 s) report — no job ran.
+      if (epoch !== nodeEpoch) return;
+      await loadInventory();
+      return;
+    }
+    const detail = await pollJob(result.job.id, undefined, 30 * 60_000, () => epoch === nodeEpoch);
     if (epoch !== nodeEpoch) return;
     if (detail.job.status !== "succeeded") {
       const line = detail.output.at(-1)?.line ?? `inventory job ${detail.job.status}`;
@@ -616,8 +623,9 @@ let jobSeq = 0;
 const jobRunning = computed(
   () => job.value !== null && (job.value.job.status === "queued" || job.value.job.status === "running"),
 );
-/** The compact bar shows progress without opening the sheet. */
-const jobLastLine = computed(() => job.value?.output.at(-1)?.line ?? "");
+/** The compact bar shows progress without opening the sheet. Payload-JSON
+ *  final lines render as a summary (IR-248); the sheet keeps the raw. */
+const jobLastLine = computed(() => feedLineText(job.value?.job.kind, job.value?.output.at(-1)?.line ?? ""));
 
 function openSheet(): void {
   sheetVisible.value = true;

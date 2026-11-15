@@ -10,7 +10,7 @@ import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
 import { type AnalyticsService } from "./analytics.js";
 import { type CleanupService } from "./cleanup-service.js";
-import { type InventoryService } from "./inventory-service.js";
+import { inventoryStale, type InventoryService } from "./inventory-service.js";
 import { analyticsLensSchema, analyticsRangeSchema, usageCostGroupBySchema, usageRangeSchema, type UsageRange } from "@irori/core";
 import { energyCostPutSchema, tokenCostPutSchema, modelPricePutSchema, modelctlPinPutSchema, type EnergyCost, type TokenCost, type ModelctlPinResponse, type ModelPricesResponse } from "@irori/core";
 import type { CostService } from "./cost.js";
@@ -1187,6 +1187,16 @@ export function createApp(deps: AppDeps): Express {
     const store = requireStore(res);
     if (!store) return;
     if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    // IR-248: a non-null report younger than 60 s is reused instead of
+    // dispatching — the double-click / auto-try + manual-click pair that
+    // produced two byte-identical jobs 19.7 s apart (DGX-3, 2026-11-14).
+    const inventory = deps.getInventory?.() ?? null;
+    if (inventory !== null) {
+      const entry = await inventory.get(id).catch(() => null);
+      if (entry !== null && !inventoryStale(entry, Date.now(), 60_000)) {
+        return res.json({ reused: true, report: entry.report, updatedAt: entry.updatedAt });
+      }
+    }
     try {
       // IRI-080: the agent stats the setups' recipe scripts for the stale
       // chip — collected here so the agent never learns db shape.
