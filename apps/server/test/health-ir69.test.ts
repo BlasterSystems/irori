@@ -465,6 +465,10 @@ d("clock-cap drift rule (IR-189, db integration)", () => {
     streak = 4;
     await health.sweep(nodesArg, online, seen);
     expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(1);
+    // IR-254: the summary carries the "so what" in plain language — 4 sweeps
+    // of 30 s each is about two minutes of a cap not being in effect.
+    const driftFinding = (await health.findings()).find((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift");
+    expect(driftFinding?.summary).toContain("not in effect ~2 min");
 
     streak = 0;
     await health.sweep(nodesArg, online, seen);
