@@ -265,15 +265,20 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       }
       const installUser = str("user");
       // The agent's own user (named or implied) runs the plain script; any
-      // other cache user is wrapped in runuser and must resolve.
+      // other cache user is wrapped in runuser and must resolve to a passwd
+      // home. IR-251: the install's whole point is a user WITHOUT a modelctl
+      // yet — resolve the passwd home only (IRI-045 resolver). resolveLocalUser
+      // demands the per-user binary we are about to create, which turned the
+      // IR-247 auto-install and the node-page button into a guaranteed
+      // "no modelctl for cache user …" failure for exactly the target case.
       const ownUser = installUser === undefined || installUser === (ctx.agentUser ?? "root");
-      const resolved = ownUser ? null : ctx.resolveLocalUser?.(installUser) ?? null;
-      if (!ownUser && resolved === null) {
+      const installHome = ownUser ? null : ctx.resolveCacheHome?.(installUser) ?? null;
+      if (!ownUser && installHome === null) {
         throw new CommandBuildError(
-          `modelctl-install: no modelctl for cache user "${installUser}" — install it for that user (sudo -u ${installUser} uv tool install "modelctl") or clear the node's cache user setting`,
+          `modelctl-install: no passwd entry for cache user "${installUser}" — clear the node's cache user setting`,
         );
       }
-      const homeBin = resolved === null ? "/root/.local/bin" : `${resolved.home}/.local/bin`;
+      const homeBin = installHome === null ? "/root/.local/bin" : `${installHome}/.local/bin`;
       const script = [
         "set -e",
         `export PATH="${homeBin}:$PATH"`,
@@ -299,8 +304,8 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
         `[ "$LOWEST" = "${ctx.pin}" ] || { echo "modelctl $INSTALLED is older than required ${ctx.pin}"; exit 1; }`,
         `echo "modelctl $INSTALLED satisfies the ${ctx.pin} gate"`,
       ].join("\n");
-      if (resolved === null) return { argv: ["bash", "-c", script], shell: "bash" };
-      return { raw: true, argv: runuserScript(installUser!, resolved, script) };
+      if (installHome === null) return { argv: ["bash", "-c", script], shell: "bash" };
+      return { raw: true, argv: runuserWrap(installUser!, installHome, {}, ["bash", "-c", script]) };
     }
     case "download-queue": {
       const entries = params.downloads;

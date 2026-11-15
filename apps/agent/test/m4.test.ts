@@ -322,10 +322,9 @@ describe("buildCommand", () => {
   });
 
   it("provisions a cache user's modelctl via runuser (IR-105)", () => {
-    const resolved = { home: "/home/operator", binary: "/home/operator/.local/bin/modelctl" };
-    const built = buildCommand("modelctl-install", { user: "operator" }, { ...ctx, resolveLocalUser: () => resolved });
+    const built = buildCommand("modelctl-install", { user: "operator" }, { ...ctx, resolveCacheHome: () => "/home/operator" });
     expect(built.raw).toBe(true);
-    expect(built.argv!.slice(0, 13)).toEqual([
+    expect(built.argv!.slice(0, 12)).toEqual([
       "runuser",
       "-u",
       "operator",
@@ -338,13 +337,25 @@ describe("buildCommand", () => {
       "-u",
       "HF_HUB_CACHE",
       "HOME=/home/operator",
-      "PATH=/home/operator/.local/bin:/usr/local/bin:/usr/bin:/bin",
     ]);
-    expect(built.argv![13]).toBe("bash");
-    expect(built.argv![15]).toContain('export PATH="/home/operator/.local/bin:$PATH"');
+    // No PATH env pin: the script exports its own homeBin PATH (IR-251).
+    expect(built.argv![12]).toBe("bash");
+    expect(built.argv![14]).toContain('export PATH="/home/operator/.local/bin:$PATH"');
     expect(() =>
-      buildCommand("modelctl-install", { user: "ghost" }, { ...ctx, resolveLocalUser: () => null }),
-    ).toThrow(/no modelctl for cache user "ghost"/);
+      buildCommand("modelctl-install", { user: "ghost" }, { ...ctx, resolveCacheHome: () => null }),
+    ).toThrow(/no passwd entry for cache user "ghost"/);
+  });
+
+  it("installs for a cache user with NO modelctl yet via the passwd home (IR-251)", () => {
+    // The catch-22: resolveLocalUser demands the binary the install creates,
+    // so the IR-247 auto-install and the node-page button always failed with
+    // "no modelctl for cache user". The resolver is the passwd home; the
+    // runuser env carries no PATH pin (the script exports homeBin itself).
+    const built = buildCommand("modelctl-install", { user: "operator" }, { ...ctx, resolveCacheHome: () => "/home/operator", resolveLocalUser: () => null });
+    expect(built.raw).toBe(true);
+    expect(built.argv).toContain("HOME=/home/operator");
+    expect(built.argv!.at(-1)).toContain('export PATH="/home/operator/.local/bin:$PATH"');
+    expect(JSON.stringify(built.argv)).not.toContain("PATH=/home/operator");
   });
 
   it("provisions the agent's own user by name without runuser (IR-105)", () => {
