@@ -332,6 +332,40 @@ describe("node model inventory + activity routes (IRI-028)", () => {
     expect((await request(busy.app).post(`/api/v1/nodes/${id}/models/refresh`)).status).toBe(409);
   });
 
+  it("reuses a fresh inventory report instead of dispatching (IR-248)", async () => {
+    const created: unknown[] = [];
+    const jobs = {
+      create: async (...args: unknown[]) => {
+        created.push(args);
+        throw new Error("should not dispatch for a fresh report");
+      },
+    };
+    const report = { generatedAtMs: 1, store: null, local: [] };
+    const fresh = makeApp({ jobs, inventory: { get: async () => ({ report, updatedAt: new Date().toISOString() }) } });
+    const { id } = await fresh.fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const res = await request(fresh.app).post(`/api/v1/nodes/${id}/models/refresh`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ reused: true });
+    expect(created).toEqual([]);
+
+    // A report older than the 60 s guard dispatches normally.
+    let stale = true;
+    const dispatching = {
+      create: async (nodeId: string, kind: string) => {
+        created.push({ nodeId, kind });
+        return { id, nodeId, kind, status: "running", params: {}, exitCode: null, createdAt: new Date(), startedAt: null, finishedAt: null };
+      },
+    };
+    const older = makeApp({
+      jobs: dispatching,
+      store: fresh.fake.store,
+      inventory: { get: async () => ({ report, updatedAt: new Date(stale ? Date.now() - 61_000 : Date.now()).toISOString() }) },
+    });
+    const res2 = await request(older.app).post(`/api/v1/nodes/${id}/models/refresh`);
+    expect(res2.status).toBe(202);
+    expect(res2.body.job).toMatchObject({ kind: "models-inventory" });
+  });
+
   it("lists recent jobs across nodes with the last output line", async () => {
     const jobs = {
       listAll: async (limit: number) => {

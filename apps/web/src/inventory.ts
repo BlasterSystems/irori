@@ -35,8 +35,12 @@ export async function fetchNodeInventory(nodeId: string, signal?: AbortSignal): 
   };
 }
 
-/** Dispatches the read-only inventory job; 409 while the node is busy. */
-export async function refreshNodeInventory(nodeId: string): Promise<JobView> {
+/** Dispatches the read-only inventory job; 409 while the node is busy.
+ *  IR-248: a fresh report (< 60 s) short-circuits server-side — the response
+ *  carries `{reused: true, report, updatedAt}` and no job is dispatched. */
+export type InventoryRefreshResult = { job: JobView } | { reused: true; report: NodeInventoryState };
+
+export async function refreshNodeInventory(nodeId: string): Promise<InventoryRefreshResult> {
   const res = await fetch(`/api/v1/nodes/${encodeURIComponent(nodeId)}/models/refresh`, {
     method: "POST",
     headers: { accept: "application/json" },
@@ -49,10 +53,15 @@ export async function refreshNodeInventory(nodeId: string): Promise<JobView> {
     throw new Error(message);
   }
   const body: unknown = await res.json();
-  const job = typeof body === "object" && body !== null ? (body as { job?: unknown }).job : null;
+  const o = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  if (o.reused === true) {
+    const parsed = nodeInventorySchema.safeParse(o.report);
+    return { reused: true, report: { report: parsed.success ? parsed.data : null, updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : null } };
+  }
+  const job = o.job;
   const parsed = jobInfoSchema.safeParse(job);
   if (!parsed.success) throw new Error("malformed job response");
-  return parsed.data;
+  return { job: parsed.data };
 }
 
 /** Which storage class a row belongs to (drives the delete verb). */
