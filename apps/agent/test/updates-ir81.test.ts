@@ -54,7 +54,7 @@ describe("readDgxOsVersion (IR-243)", () => {
 });
 
 describe("readFirmwareUpdates", () => {
-  it("parses fwupdmgr get-updates --json devices with pending versions", async () => {
+  it("parses fwupdmgr get-updates --json devices with pending versions", () => {
     const json = JSON.stringify({
       Devices: [
         { Name: "UEFI dbx", UpdateVersion: "371" },
@@ -62,15 +62,15 @@ describe("readFirmwareUpdates", () => {
         { Name: "EC", UpdateVersion: null }, // no pending update — skipped
       ],
     });
-    expect(await readFirmwareUpdates(json)).toEqual([
+    expect(readFirmwareUpdates(json)).toEqual([
       { device: "UEFI dbx", toVersion: "371" },
       { device: "GPU", toVersion: "580.178.04" },
     ]);
   });
 
-  it("returns empty for absent tooling and malformed output", async () => {
-    expect(await readFirmwareUpdates(undefined)).toEqual([]);
-    expect(await readFirmwareUpdates("not json")).toEqual([]);
+  it("returns empty for absent tooling and malformed output", () => {
+    expect(readFirmwareUpdates(null)).toEqual([]);
+    expect(readFirmwareUpdates("not json")).toEqual([]);
   });
 });
 
@@ -108,6 +108,17 @@ describe("collectUpdateState", () => {
     expect(state.aptPresent).toBe(false);
     expect(state.upgradableCount).toBeNull();
     expect(state.firmwareUpdates).toEqual([]);
+    expect(state.fwupdPresent).toBe(false);
     expect(typeof state.pendingReboot).toBe("boolean");
+  });
+
+  it("reports fwupd present when the probe ran (IR-256)", async () => {
+    const state = await collectUpdateState({
+      dpkgQueryOut: null,
+      aptGetSimOut: null,
+      fwupdmgrOut: JSON.stringify({ Devices: [{ Name: "UEFI dbx", UpdateVersion: "371" }] }),
+    });
+    expect(state.fwupdPresent).toBe(true);
+    expect(state.firmwareUpdates).toEqual([{ device: "UEFI dbx", toVersion: "371" }]);
   });
 });
