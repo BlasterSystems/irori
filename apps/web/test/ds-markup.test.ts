@@ -117,6 +117,9 @@ it("App pins the v1.1 shell geometry: sidebar column, sticky paper-2 topbar", ()
   expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__brand { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 0; }');
   expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__collapse { position: static; margin: 0; transform: rotate(180deg); }');
   expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__tools .rangeseg-pop { display: flex; justify-content: center; }');
+  // IR-249: the Add node button caps to the control square (align-self:center
+  // un-stretches the flex-column item) so it pairs with the 36px range trigger.
+  expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__tools .btn { width: var(--control-sm); padding: 0; justify-content: center; align-self: center; }');
   expect(cssSource).toContain('html[data-nav="collapsed"] .bs-sidebar__status { align-items: center; }');
   expect(cssSource).toContain(".bs-perf { display: inline-flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px;");
 });
