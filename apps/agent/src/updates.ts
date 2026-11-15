@@ -17,6 +17,9 @@ export interface UpdateState {
   nvidiaDriverVersion: string | null;
   /** fwupdmgr get-updates --json: device → version pairs that are updatable. */
   firmwareUpdates: Array<{ device: string; toVersion: string }>;
+  /** IR-256: false when fwupdmgr produced nothing (absent or failing) — the
+   *  UI then says so instead of implying an up-to-date firmware. */
+  fwupdPresent: boolean;
   /** Installed NVIDIA OTA packages (dpkg -l), with their versions. */
   otaPackages: Array<{ name: string; version: string }>;
   pendingReboot: boolean;
@@ -89,14 +92,12 @@ export async function readOtaPackages(dpkgQueryOut?: string | null): Promise<{ o
   return { otaPackages, aptPresent: true };
 }
 
-/** fwupdmgr get-updates --json (fallback: null when the tool is absent). */
-export async function readFirmwareUpdates(fwupdmgrOut?: string | null): Promise<Array<{ device: string; toVersion: string }>> {
-  // null = explicit "tool absent" (deterministic in tests); undefined = run.
+/** IR-256: parse `fwupdmgr get-updates --json`. `null` = the tool produced
+ *  nothing (absent or failed) — an empty list; the caller reports presence. */
+export function readFirmwareUpdates(fwupdmgrOut: string | null): Array<{ device: string; toVersion: string }> {
   if (fwupdmgrOut === null) return [];
-  const raw = fwupdmgrOut ?? (await run("fwupdmgr", ["get-updates", "--json"], 15_000));
-  if (raw === null) return [];
   try {
-    const parsed = JSON.parse(raw) as { Devices?: Array<{ Name?: string; UpdateVersion?: string }> };
+    const parsed = JSON.parse(fwupdmgrOut) as { Devices?: Array<{ Name?: string; UpdateVersion?: string }> };
     const devices = parsed.Devices ?? [];
     return devices
       .filter((d) => typeof d.UpdateVersion === "string" && d.UpdateVersion.length > 0)
@@ -138,7 +139,7 @@ export async function readUpgradableCount(dryRunOut?: string | null): Promise<{ 
 export async function collectUpdateState(
   opts: { fwupdmgrOut?: string | null; aptGetSimOut?: string | null; dpkgQueryOut?: string | null; unattendedDir?: string } = {},
 ): Promise<UpdateState> {
-  const [unameOut, driverOut, osPrettyName, dgxOsVersion, ota, pendingReboot, unattended, upgradable] = await Promise.all([
+  const [unameOut, driverOut, osPrettyName, dgxOsVersion, ota, pendingReboot, unattended, upgradable, fwupdOut] = await Promise.all([
     run("uname", ["-r"]),
     run("nvidia-smi", ["--query-gpu=driver_version", "--format=csv,noheader"]),
     readOsPrettyName(),
@@ -150,14 +151,17 @@ export async function collectUpdateState(
       .catch(() => false),
     readUnattendedUpgradesResult(opts.unattendedDir),
     readUpgradableCount(opts.aptGetSimOut),
+    // undefined = run the probe; null = explicitly absent (tests).
+    opts.fwupdmgrOut === undefined ? run("fwupdmgr", ["get-updates", "--json"], 15_000) : opts.fwupdmgrOut,
   ]);
-  const firmwareUpdates = await readFirmwareUpdates(opts.fwupdmgrOut);
+  const firmwareUpdates = readFirmwareUpdates(fwupdOut);
   return {
     osPrettyName,
     kernelVersion: firstLine(unameOut ?? ""),
     dgxOsVersion,
     nvidiaDriverVersion: firstLine(driverOut ?? ""),
     firmwareUpdates,
+    fwupdPresent: fwupdOut !== null,
     otaPackages: ota?.otaPackages ?? [],
     pendingReboot,
     unattendedUpgradesLastResult: unattended,
