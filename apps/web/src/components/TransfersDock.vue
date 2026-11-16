@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { live } from "../live";
 import { cancelJob } from "../models";
-import { jobElapsed, jobLabel, jobStreams, type JobLive } from "../jobs";
+import { clearJobs, jobElapsed, jobLabel, jobStreams, type JobLive } from "../jobs";
 import { formatEta } from "../models";
 import { fmtBytes } from "../analytics";
 
@@ -28,6 +28,20 @@ const recent = computed(() =>
     .sort((a, b) => Date.parse(b.finishedAt ?? b.createdAt) - Date.parse(a.finishedAt ?? a.createdAt))
     .slice(0, 12),
 );
+
+const clearing = ref(false);
+/** IR-262: one-click clear of the settled history — the dock re-seeds from
+ *  GET /api/v1/jobs, which now returns only queued/running rows. */
+async function clearHistory(): Promise<void> {
+  if (clearing.value) return;
+  clearing.value = true;
+  try {
+    await clearJobs();
+    await live.refreshJobs();
+  } finally {
+    clearing.value = false;
+  }
+}
 
 const now = ref(Date.now());
 const tick = setInterval(() => {
@@ -152,6 +166,7 @@ async function runCancel(job: JobLive): Promise<void> {
     </div>
     <div class="dock-foot">
       <span class="stat__sub faint">updates live · survives navigation & reload</span>
+      <button v-if="recent.length > 0" class="bs-link" :disabled="clearing" aria-label="Clear transfer history" @click="clearHistory">Clear history</button>
     </div>
   </aside>
 </template>
@@ -251,6 +266,10 @@ async function runCancel(job: JobLive): Promise<void> {
   padding: 8px 10px;
 }
 .dock-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border-top: 1px solid var(--rule);
   padding: 8px 14px;
 }

@@ -1794,6 +1794,20 @@ export function createApp(deps: AppDeps): Express {
     return res.status(409).json({ error: messages[result.reason] });
   });
 
+  // IR-262: clear the transfers dock's history — every settled job row
+  // (succeeded/failed/canceled). Queued/running rows and the active slot are
+  // untouched; job_output cascades and download_queue/cleanup_runs references
+  // go NULL (schema FKs). Audited like job.cancel.
+  app.delete(
+    "/api/v1/jobs",
+    audit({ action: "jobs.clear-history", targetType: "jobs", targetId: () => null }, getAudit),
+    async (_req, res) => {
+      const jobs = deps.getJobs();
+      if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+      return res.json({ deleted: await jobs.clearHistory() });
+    },
+  );
+
   // ---- IRI-014: server-side download queue ----
   // Adding a download ALWAYS queues; the server picks the store node
   // (NAS-preferred) and drains pending entries as one download-queue batch

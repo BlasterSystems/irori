@@ -130,6 +130,13 @@ export async function fetchRecentJobs(limit = 20, signal?: AbortSignal): Promise
   return jobs;
 }
 
+/** IR-262: clear the transfers dock's history — every settled job row. The
+ *  dock re-seeds via live.refreshJobs() afterwards. */
+export async function clearJobs(): Promise<void> {
+  const res = await fetch("/api/v1/jobs", { method: "DELETE", headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`DELETE /api/v1/jobs failed: HTTP ${res.status}`);
+}
+
 /** "12s" / "3m 4s" / "1h 02m" — elapsed for a job row. */
 export function jobElapsed(job: Pick<JobLive, "createdAt" | "startedAt" | "finishedAt" | "status">, now: number): string {
   const start = Date.parse(job.startedAt ?? job.createdAt);

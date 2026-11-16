@@ -20,6 +20,7 @@ export const liveMock: {
   sortedNodes: { value: MockNode[] };
   getLlm: (nodeId: string) => unknown;
   refreshNodes: () => Promise<void>;
+  refreshJobs: () => Promise<void>;
   refreshFindings: () => Promise<void>;
   on: () => () => void;
   off: () => void;
@@ -41,6 +42,7 @@ export const liveMock: {
   ),
   getLlm: (nodeId: string) => liveMock.llm.get(nodeId),
   refreshNodes: async () => {},
+  refreshJobs: async () => {},
   refreshFindings: async () => {},
   on: () => () => {},
   off: () => {},

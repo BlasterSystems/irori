@@ -203,6 +203,10 @@ export interface JobsService {
   list(nodeId: string, limit?: number): Promise<JobRow[]>;
   /** Recent jobs across every node, newest first, with their last output line. */
   listAll(limit?: number): Promise<JobSummary[]>;
+  /** IR-262: delete every settled job row (succeeded/failed/canceled) and
+   *  return the count. Queued/running rows and the active slot are untouched
+   *  (job_output cascades; download_queue/cleanup_runs references go NULL). */
+  clearHistory(): Promise<number>;
   /** IR-131: request cancel — marks `canceling` and frames the agent; the row
    *  settles canceled on the agent's ack or job-done, never speculatively. */
   cancel(id: string): Promise<CancelResult>;
@@ -445,6 +449,14 @@ export function createJobsService(
         finishedAt: row.finishedAt === null ? null : new Date(row.finishedAt),
         cancelRequestedAt: row.cancelRequestedAt === null ? null : new Date(row.cancelRequestedAt),
       }));
+    },
+
+    async clearHistory() {
+      const deleted = await db
+        .delete(jobs)
+        .where(inArray(jobs.status, ["succeeded", "failed", "canceled"]))
+        .returning({ id: jobs.id });
+      return deleted.length;
     },
 
     async cancel(id): Promise<CancelResult> {
