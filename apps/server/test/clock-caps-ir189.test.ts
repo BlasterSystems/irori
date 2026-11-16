@@ -43,9 +43,15 @@ describe("clockDrift (pure)", () => {
     expect(clockDrift({ gpu: 2000, cpu: 2800 }, r)).toEqual([]);
   });
 
-  it("reports a GPU drift when the application clock reverted to default", () => {
-    const r = reading({ gpus: [gpu(null)] });
-    expect(clockDrift({ gpu: 2000, cpu: null }, r)).toEqual([{ side: "gpu", stored: 2000, observed: null }]);
+  it("reports a GPU drift when the ceiling reverted to a different real value", () => {
+    const r = reading({ gpus: [gpu(3003)] });
+    expect(clockDrift({ gpu: 2000, cpu: null }, r)).toEqual([{ side: "gpu", stored: 2000, observed: 3003 }]);
+  });
+
+  it("treats an all-null GPU read-back as unmeasurable, not drift (IR-259)", () => {
+    // GB10 rejects clocks.applications.sm: cards are visible but no cap is
+    // expressible — the same contract as an empty gpus array.
+    expect(clockDrift({ gpu: 2000, cpu: null }, reading({ gpus: [gpu(null)] }))).toEqual([]);
   });
 
   it("reports a GPU drift when only one card lost the cap", () => {
@@ -99,7 +105,7 @@ describe("clock cap service", () => {
   it("re-applies a drifted cap without touching persistence", async () => {
     const { service, applied } = makeService({
       caps: { gpu: 2000, cpu: null },
-      reading: reading({ gpus: [gpu(null)] }),
+      reading: reading({ gpus: [gpu(3003)] }),
     });
     expect(await service.reassert("n1")).toEqual({ checked: true, applied: ["gpu"] });
     // persist=false: the registry already holds the desired state.
@@ -118,14 +124,14 @@ describe("clock cap service", () => {
   it("reports a failed re-apply as not applied", async () => {
     const { service } = makeService({
       caps: { gpu: 2000, cpu: null },
-      reading: reading({ gpus: [gpu(null)] }),
+      reading: reading({ gpus: [gpu(3003)] }),
       setOk: false,
     });
     expect(await service.reassert("n1")).toEqual({ checked: true, applied: [] });
   });
 
   it("counts consecutive drifting sweeps and resets on a match", async () => {
-    let current = reading({ gpus: [gpu(null)] });
+    let current = reading({ gpus: [gpu(3003)] });
     const service = createClockCapService({
       store: { get: async () => ({ gpuClockCapMHz: 2000, cpuClockCapMHz: null }) },
       hub: () => ({ clocks: async () => current, setClocks: async () => ({ ok: true, error: null }) }),
@@ -134,7 +140,7 @@ describe("clock cap service", () => {
     expect(await service.driftStreak("n1")).toBe(2);
     current = reading({ gpus: [gpu(2000)] });
     expect(await service.driftStreak("n1")).toBe(0);
-    current = reading({ gpus: [gpu(null)] });
+    current = reading({ gpus: [gpu(3003)] });
     expect(await service.driftStreak("n1")).toBe(1);
   });
 
@@ -144,6 +150,16 @@ describe("clock cap service", () => {
 
     const offline = makeService({ caps: { gpu: 2000, cpu: null }, reading: null });
     expect(await offline.service.driftStreak("n1")).toBeNull();
+  });
+
+  it("treats an all-null GPU read-back as unmeasurable: no re-apply, no streak (IR-259)", async () => {
+    const { service, applied } = makeService({
+      caps: { gpu: 2000, cpu: null },
+      reading: reading({ gpus: [gpu(null)] }),
+    });
+    expect(await service.reassert("n1")).toEqual({ checked: true, applied: [] });
+    expect(applied).toHaveLength(0);
+    expect(await service.driftStreak("n1")).toBe(0);
   });
 });
 

@@ -128,6 +128,15 @@ function clockDriftSuffix(value: number): string {
   return ` — stored cap not in effect ~${minutes} min`;
 }
 
+/** IR-259: the durable findings rebuild derives the window from the finding's
+ * `since` (wall time) instead of the in-memory streak — a hub restart resets
+ * the streak and an offline node freezes it, both under-reporting a drift
+ * that `since` still measures. Same wording, independent floor. */
+function clockDriftSinceSuffix(since: Date, at: number): string {
+  const minutes = Math.max(1, Math.round((at - since.getTime()) / 60_000));
+  return ` — stored cap not in effect ~${minutes} min`;
+}
+
 function opSymbol(op: string): string {
   return { gt: ">", gte: "≥", lt: "<", lte: "≤", eq: "=" }[op] ?? op;
 }
@@ -465,7 +474,7 @@ export function createHealthService(db: Db, encryptionKey: string, opts: HealthS
         // CTA for NAS-sourced pressure without a schema change.
         const snap = f.nodeId !== null ? latest.get(f.nodeId) : undefined;
         const origin = snap !== undefined ? diskOriginSuffix(rule.metric, snap) : "";
-        const drift = rule.metric === "clock_cap_drift" && f.observedValue !== null ? clockDriftSuffix(f.observedValue) : "";
+        const drift = rule.metric === "clock_cap_drift" && f.observedValue !== null ? clockDriftSinceSuffix(f.since, now()) : "";
         return {
         nodeId: f.nodeId ?? "",
         ruleId: rule.id,
