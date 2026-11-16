@@ -414,7 +414,8 @@ node**, with time ranges backed by rollups:
   `clock_cap_drift` rule whose value is the number of consecutive sweeps that
   observed a mismatch; the seed threshold of 4 means "drifted for two
   minutes". Offline nodes and unreadable readings are not measurable and never
-  breach.
+  breach — an all-null GPU `smCapMHz` read-back (GB10 cannot report
+  application clocks) is unreadable, not drift.
 - **Fleet-wide apply (IR-189):** `POST /api/v1/clock-cap` fans the same
   per-side contract out to every enabled spark node (NAS hosts are skipped)
   and returns per-node results — 200 all applied, 207 partial, 502 none. The

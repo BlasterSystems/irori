@@ -414,7 +414,9 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   side with the applied ceiling (`gpus[].smCapMHz`, `cpu.capMHz`), and
   re-applies only the drifted sides. Persistence is never touched. A side is
   compared only when a cap is stored and the reading can express it (an agent
-  without the `cpu` block, or an empty `gpus` array, is not measurable). The
+  without the `cpu` block, an empty `gpus` array, or an all-null `smCapMHz`
+  read-back — GB10 cannot report application clocks — is not measurable; one
+  real reading among the cards still compares). The
   health sweep evaluates a `clock_cap_drift` rule whose value is the number of
   consecutive 30 s sweeps that observed a mismatch (seed threshold 4 = two
   minutes).

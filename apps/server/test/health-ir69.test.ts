@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
-import { createDbHandle, nodes, type Db, type DbHandle } from "@irori/db";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { createDbHandle, healthFindings, nodes, type Db, type DbHandle } from "@irori/db";
 import { breaches, diskOriginSuffix, metricValue } from "../src/health.js";
 import { renderPrometheus, type MetricsNode } from "../src/metrics.js";
 import { createHealthService } from "../src/health.js";
@@ -444,8 +444,9 @@ d("clock-cap drift rule (IR-189, db integration)", () => {
     const nodeId = randomUUID();
     await db.insert(nodes).values({ id: nodeId, name: "drifty", kind: "spark", role: "head", host: "drifty.local", agentTokenHash: "x".repeat(64), agentTokenEnc: "y".repeat(64) }).onConflictDoNothing();
     let streak = 1;
+    const sseEvents: Array<{ metric?: string; state?: string; summary?: string }> = [];
     const health = createHealthService(db, "a".repeat(64), {
-      sse: () => {},
+      sse: (e) => sseEvents.push(e),
       journal: async () => {},
       clockDrift: async () => streak,
       now: () => Date.now(),
@@ -465,14 +466,40 @@ d("clock-cap drift rule (IR-189, db integration)", () => {
     streak = 4;
     await health.sweep(nodesArg, online, seen);
     expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(1);
-    // IR-254: the summary carries the "so what" in plain language — 4 sweeps
-    // of 30 s each is about two minutes of a cap not being in effect.
+    // IR-254: the appear transition carries the streak-derived "so what" —
+    // 4 sweeps of 30 s each is about two minutes of a cap not being in effect.
+    const appear = sseEvents.find((e) => e.metric === "clock_cap_drift" && e.state === "open");
+    expect(appear?.summary).toContain("not in effect ~2 min");
+    // IR-259: the durable summary derives its window from the finding's
+    // `since` — a finding that just opened reads ~1 min even though the
+    // streak had already reached 4.
     const driftFinding = (await health.findings()).find((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift");
-    expect(driftFinding?.summary).toContain("not in effect ~2 min");
+    expect(driftFinding?.summary).toContain("not in effect ~1 min");
 
     streak = 0;
     await health.sweep(nodesArg, online, seen);
     expect((await health.findings()).filter((f) => f.nodeId === nodeId && f.metric === "clock_cap_drift")).toHaveLength(0);
+  });
+
+  it("derives the durable not-in-effect window from since, not the streak (IR-259)", async () => {
+    const nodeId = randomUUID();
+    await db.insert(nodes).values({ id: nodeId, name: "drifty2", kind: "spark", role: "head", host: "drifty2.local", agentTokenHash: "x".repeat(64), agentTokenEnc: "y".repeat(64) }).onConflictDoNothing();
+    const health = createHealthService(db, "a".repeat(64), {
+      sse: () => {},
+      journal: async () => {},
+      clockDrift: async () => 4,
+      now: () => Date.now(),
+    });
+    await health.ensureSeed();
+    await health.sweep([{ id: nodeId, name: "drifty2" }], new Set([nodeId]), new Map([[nodeId, Date.now()]]));
+    // Backdate the open finding: the frozen streak (observedValue 4) would
+    // read "~2 min" forever; the wall-time window must keep counting instead.
+    await db
+      .update(healthFindings)
+      .set({ since: new Date(Date.now() - 10 * 60_000) })
+      .where(and(eq(healthFindings.nodeId, nodeId), isNull(healthFindings.clearedAt)));
+    const f = (await health.findings()).find((x) => x.nodeId === nodeId && x.metric === "clock_cap_drift");
+    expect(f?.summary).toContain("not in effect ~10 min");
   });
 
   it("skips offline nodes and unmeasurable readings", async () => {
