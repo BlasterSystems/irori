@@ -101,7 +101,7 @@ it("App pins the v1.1 shell geometry: sidebar column, sticky paper-2 topbar", ()
     "background: var(--paper-2); border-right: 1px solid var(--rule);",
     ".bs-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between;",
     "backdrop-filter: blur(12px); border-bottom: 1px solid var(--rule); }",
-    ".content { padding: 28px 32px 48px; min-width: 0; max-width: var(--content-max); }",
+    ".content { padding: 28px 32px 48px; min-width: 0; max-width: var(--content-max); margin-inline: auto; }",
   ]) {
     expect(cssSource).toContain(rule);
   }

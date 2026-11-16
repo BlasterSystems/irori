@@ -148,3 +148,11 @@ svg .gridline { stroke: var(--rule); vector-effect: non-scaling-stroke; }
   background: none; font: inherit; color: var(--ink-2); cursor: pointer; }
 .mock-bar button[aria-pressed="true"] { box-shadow: inset 0 0 0 1.5px var(--ink); color: var(--ink); }
 body.has-mockbar { padding-bottom: 46px; }
+
+/* ── IR-261: re-center the content column on ultra-wide screens ────── */
+/* The v1.1 shell caps .content at --content-max (1360px) with no auto
+   margins, so above ~1692px viewport width the column sits flush after the
+   sidebar with a large empty right area. Owner decision 2026-11-16:
+   re-center. Below the cap this is a no-op — the column already fills the
+   grid track. */
+.content { margin-inline: auto; }
