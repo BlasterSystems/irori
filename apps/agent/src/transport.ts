@@ -90,6 +90,9 @@ export interface AgentTransportOptions {
   /** ADR-0017: host truth reported in hello — the agent isolates setups in
    *  systemd scope units. Set after the driver exists (lazy, pre-connect). */
   getScopeIsolation?: () => boolean;
+  /** IR-260: sha256 of the running bundle file; null = not reportable (dev
+   *  run from sources, unreadable file). */
+  bundleSha256?: string | null;
   maxBufferedSnapshots?: number;
   pingIntervalMs?: number;
   /** Base reconnect delay before jitter; doubles per failed attempt up to 30 s. */
@@ -135,6 +138,9 @@ export class AgentTransport {
   private readonly onReconnect?: () => void;
   private readonly getActiveJobIds?: () => Array<{ jobId: string; kind: string }>;
   private readonly getScopeIsolation?: () => boolean;
+  /** IR-260: sha256 of the running bundle file; null = not reportable (dev
+   *  run from sources, unreadable file). */
+  private readonly bundleSha256: string | null;
   private readonly maxBufferedSnapshots: number;
   private readonly pingIntervalMs: number;
   private readonly reconnectBaseMs: number;
@@ -196,6 +202,7 @@ export class AgentTransport {
     this.onReconnect = options.onReconnect;
     this.getActiveJobIds = options.getActiveJobIds;
     this.getScopeIsolation = options.getScopeIsolation;
+    this.bundleSha256 = options.bundleSha256 ?? null;
     this.maxBufferedSnapshots = options.maxBufferedSnapshots ?? MAX_BUFFERED_SNAPSHOTS;
     this.pingIntervalMs = options.pingIntervalMs ?? DEFAULT_PING_INTERVAL_MS;
     this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS;
@@ -389,6 +396,9 @@ export class AgentTransport {
         // ADR-0017: host truth — evaluated lazily at hello time (the driver
         // is constructed after the transport; see the main.ts TDZ note).
         ...(this.getScopeIsolation?.() ? { scopeIsolation: true } : {}),
+        // IR-260: the running bundle's hash — absent on dev runs from
+        // sources and on unreadable files; the hub then renders "unknown".
+        ...(this.bundleSha256 !== null ? { bundleSha256: this.bundleSha256 } : {}),
       });
     } catch {
       // handleClose takes over; nothing else to do here.

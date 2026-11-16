@@ -103,6 +103,15 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **Agent bundle generation is visible per node** (IR-260): a node can run a
+  pre-fix bundle generation while reporting the current semver (this masked
+  the IR-251 install catch-22 on dgx3). The agent hello now self-reports the
+  sha256 of its own bundle file; the hub diffs it against the artifact it
+  serves and every node payload carries `bundle: current | behind (running …,
+  expected …) | unknown` — the node page's identity meta line renders it, and
+  pre-IR-260 agents (and dev runs from sources) show "unknown", never a
+  verdict. Nodes table gains a nullable `bundle_sha256` (migration 0028).
+
 - **Alarm webhooks, NAS-origin labeling and MiaAI-Lab recipes** (epic
   IR-237): per-rule alarm webhooks are configurable from the hub settings
   surface (set/clear via the existing `PUT /api/v1/health/rules/:id`;

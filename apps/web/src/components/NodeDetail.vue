@@ -73,6 +73,17 @@ const card = computed(() =>
 /** Registry loaded but the id is unknown → real "not found", not "loading". */
 const notFound = computed(() => node.value === null && live.nodes.size > 0);
 
+/** IR-260: bundle generation state for the identity meta line — "unknown"
+ *  until both the agent report and the served artifact exist (old agents
+ *  render unknown, never a verdict). */
+const bundleLabel = computed(() => {
+  const b = node.value?.bundle;
+  if (b === undefined) return "bundle: unknown";
+  if (b.state === "current") return "bundle: current";
+  if (b.state === "behind") return `bundle: behind (running ${b.running?.slice(0, 8) ?? "none"}, expected ${b.expected?.slice(0, 8) ?? "?"})`;
+  return "bundle: unknown";
+});
+
 /** Hover tooltip formatters (units included); wrappers absorb the null side
  *  of the shared formatters' domains — series values are already non-null. */
 const tipPct = (v: number): string => formatPct(v) ?? "";
@@ -1074,7 +1085,7 @@ onUnmounted(() => {
           </template>
         </div>
         <!-- IR-252: identity details demoted out of the chip row. -->
-        <p v-if="card" class="stat__sub faint" style="margin: 4px 0 0;">{{ [card.role, card.kind, node?.host, card.agentVersion == null ? null : `agent ${card.agentVersion}`].filter((part) => part !== null && part !== "").join(" · ") }}</p>
+        <p v-if="card" class="stat__sub faint" style="margin: 4px 0 0;">{{ [card.role, card.kind, node?.host, card.agentVersion == null ? null : `agent ${card.agentVersion}`, bundleLabel].filter((part) => part !== null && part !== "").join(" · ") }}</p>
         <p v-if="updateMsg" class="stat__sub" style="margin-top: 8px;">{{ updateMsg }}</p>
         <p v-if="shutdownMsg" class="stat__sub" style="margin-top: 8px;">{{ shutdownMsg }}</p>
         <p v-if="shutdownError" class="banner banner--warn" style="margin-top: 8px;">{{ shutdownError }}</p>

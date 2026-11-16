@@ -42,11 +42,31 @@ export const nodeInfoSchema = z.object({
   cpuClockCapMHz: z.number().int().min(300).max(4000).nullable().default(null),
   /** IRI-124: CPU cap is re-applied at boot by a transient systemd unit. */
   cpuClockCapPersistent: z.boolean().default(false),
+  /** IR-260: bundle generation state — the hub diffs the agent-reported
+   *  sha256 of its own bundle file against the artifact it serves. */
+  bundle: z
+    .object({
+      running: z.string().nullable(),
+      expected: z.string().nullable(),
+      state: z.enum(["current", "behind", "unknown"]),
+    })
+    .default({ running: null, expected: null, state: "unknown" }),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true }),
 });
 
 export type NodeInfo = z.infer<typeof nodeInfoSchema>;
+
+/** IR-260: classify the agent-reported bundle hash against the served
+ *  artifact. Either side unknown → "unknown" (old agents, or a hub with no
+ *  artifact to compare — never a verdict). */
+export function bundleState(
+  running: string | null,
+  expected: string | null,
+): { running: string | null; expected: string | null; state: "current" | "behind" | "unknown" } {
+  if (running === null || expected === null) return { running, expected, state: "unknown" };
+  return { running, expected, state: running === expected ? "current" : "behind" };
+}
 
 /** Payload for POST /api/v1/nodes. */
 export const nodeCreateSchema = nodeInfoSchema

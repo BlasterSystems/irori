@@ -42,6 +42,9 @@ export const nodes = pgTable(
     /** AES-256-GCM ciphertext of the current agent token (ADR-0002). */
     agentTokenEnc: text("agent_token_enc").notNull(),
     agentVersion: text("agent_version"),
+    /** IR-260: sha256 of the agent bundle file the process runs (self-reported
+     *  in hello); null = unknown (pre-IR-260 agent or not reportable). */
+    bundleSha256: text("bundle_sha256"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     sortOrder: integer("sort_order").notNull().default(0),
     /** LLM ports this node serves (agent probes them; M3). */
