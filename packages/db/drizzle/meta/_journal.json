@@ -170,6 +170,13 @@
       "when": 1793830225003,
       "tag": "0023_thick_dust",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794841200000,
+      "tag": "0028_bundle_sha256",
+      "breakpoints": true
     }
   ]
 }

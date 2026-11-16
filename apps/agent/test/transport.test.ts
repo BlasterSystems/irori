@@ -176,6 +176,27 @@ it("reports scopeIsolation in the hello when the host supports scopes (ADR-0017)
   expect(server.hellos[0]!.scopeIsolation).toBe(true);
 });
 
+it("reports the running bundle hash in the hello (IR-260)", async () => {
+  const server = await startFakeServer(30);
+  teardown.push(server.close);
+  const transport = makeTransport({ bundleSha256: "a".repeat(64) });
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+  await vi.waitFor(() => expect(server.hellos).toHaveLength(1));
+  expect(server.hellos[0]!.bundleSha256).toBe("a".repeat(64));
+});
+
+it("omits the bundle hash when it is not reportable (IR-260)", async () => {
+  const server = await startFakeServer(30);
+  teardown.push(server.close);
+  const transport = makeTransport();
+  transport.connect(server.url);
+  teardown.push(() => transport.stop());
+  await vi.waitFor(() => expect(server.hellos).toHaveLength(1));
+  // Dev runs from sources and unreadable files send no field at all.
+  expect(server.hellos[0]!.bundleSha256).toBeUndefined();
+});
+
 it("performs the hello handshake, then sends schema-valid snapshots at the negotiated cadence", async () => {
   const server = await startFakeServer(30);
   teardown.push(server.close);

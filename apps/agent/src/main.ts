@@ -22,6 +22,7 @@ import { emitUsageSpan, initOtel, shutdownOtel } from "./otel.js";
 import { DEFAULT_LLM_CADENCE_MS, loadConfig, type LlmTarget } from "./config.js";
 import { LlmPortProbe } from "./llm-probe.js";
 import { AgentTransport, type LlmRuntimeConfig } from "./transport.js";
+import { selfBundleSha256Sync } from "./bundle.js";
 import { AGENT_VERSION } from "./version.js";
 import { log, logger } from "./logger.js";
 
@@ -368,6 +369,8 @@ async function run(): Promise<void> {
     hostname: os.hostname(),
     agentVersion: AGENT_VERSION,
     schemaVersion: SCHEMA_VERSION,
+    // IR-260: self-report the running bundle; null on dev runs from sources.
+    bundleSha256: selfBundleSha256Sync(),
     cadenceMs: config.cadenceMs,
     collect: async () => {
       const snapshot = await collect();

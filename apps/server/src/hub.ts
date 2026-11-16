@@ -335,7 +335,11 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         // Hello is once per connection: record the version immediately (the
         // update gate and drift views read it). Snapshots stay throttled.
         lastMarkedAt.set(id, Date.now());
-        deps.store.markSeen(id, msg.agentVersion).catch(() => lastMarkedAt.delete(id));
+        // IR-260: the hello carries the running bundle's hash (absent on old
+        // agents) — explicit null clears a hash a downgraded agent can no
+        // longer report. The throttled snapshot flushes pass undefined and
+        // never touch it.
+        deps.store.markSeen(id, msg.agentVersion, msg.bundleSha256 ?? null).catch(() => lastMarkedAt.delete(id));
         sendMsg({ type: "hello-ok", nodeId: id, cadenceMs: deps.getCadenceMs(), serverVersion: deps.serverVersion });
         // Probe assignments + role-derived cadence. A worker's role may change
         // without a reconnect only via a later config-update; hello covers boot.
