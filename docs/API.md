@@ -284,6 +284,11 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   across every node, newest first (limit 1–100, default 20). Rows carry
   `progress` (parsed transfer progress, see below) and
   `cancelRequestedAt` (ISO timestamp when a cancel is in flight).
+- `DELETE /api/v1/jobs` (IR-262) → `{deleted: n}` — clears the transfers
+  dock's history: every settled row (succeeded/failed/canceled) is deleted,
+  queued/running rows and the one-active slot are untouched, `job_output`
+  cascades and `download_queue`/`cleanup_runs` references go NULL. Audited
+  (`jobs.clear-history`). `503` while the database is unavailable.
 - SSE `job` frames now also fire on dispatch with `status: "running"`
   (`exitCode`/`durationMs` null); terminal frames are unchanged.
 - SSE `job-progress` `{nodeId, jobId, seq, line}` carries at most one output

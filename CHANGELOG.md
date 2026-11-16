@@ -103,6 +103,14 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **Transfers dock: Clear history** (IR-262): the dock's Earlier list is the
+  hub's settled-jobs feed and could only grow — no route, UI, or retention
+  existed for it (rows left only via the node-deletion cascade). A
+  `DELETE /api/v1/jobs` clears every settled job row (queued/running rows and
+  the one-active slot untouched; job output cascades,
+  download_queue/cleanup_runs references go NULL), the dock footer carries a
+  one-click Clear history that re-seeds afterwards, and the clear is audited.
+
 - **Agent bundle generation is visible per node** (IR-260): a node can run a
   pre-fix bundle generation while reporting the current semver (this masked
   the IR-251 install catch-22 on dgx3). The agent hello now self-reports the
