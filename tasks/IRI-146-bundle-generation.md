@@ -50,7 +50,7 @@ artifact it serves; the node page renders the verdict.
 
 ## Architecture impact
 
-- **ADR required:** No — additive nullable column + optional wire field following the established ADR-0017/IR-131 patterns; no boundary change. (docs-check prints its heuristic architecture warning for the schema/migration touch; the decision is recorded here.)
+- **ADR required:** Yes — data-model + wire-contract change; recorded as [ADR-0019](../docs/adr/0019-self-reported-agent-bundle-generation.md) (Accepted 2026-11-16 — the owner decision from the round-15 research gate). Additive patterns per ADR-0017/IR-131; unknown-never-a-verdict per IR-243.
 
 ## Validation evidence
 
