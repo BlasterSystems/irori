@@ -19,7 +19,7 @@ export interface NodeStore {
   rotateToken(id: string): Promise<CreatedNode>;
   /** Node id for a presented agent token, or null (disabled nodes never match). */
   verifyToken(token: string): Promise<string | null>;
-  markSeen(nodeId: string, agentVersion: string): Promise<void>;
+  markSeen(nodeId: string, agentVersion: string, bundleSha256?: string | null): Promise<void>;
   /**
    * IRI-068: record the GPU clock cap the node is now running with. Separate
    * from patch() because it is a consequence of a dispatched action (the
@@ -44,6 +44,7 @@ const nodeRecordColumns = {
   host: nodes.host,
   enabled: nodes.enabled,
   agentVersion: nodes.agentVersion,
+  bundleSha256: nodes.bundleSha256,
   lastSeenAt: nodes.lastSeenAt,
   sortOrder: nodes.sortOrder,
   llmPorts: nodes.llmPorts,
@@ -151,11 +152,17 @@ export function createNodeStore(db: Db, encryptionKey: string): NodeStore {
       return row?.id ?? null;
     },
 
-    async markSeen(nodeId, agentVersion) {
-      await db
-        .update(nodes)
-        .set({ agentVersion, lastSeenAt: new Date(), updatedAt: new Date() })
-        .where(eq(nodes.id, nodeId));
+    async markSeen(nodeId, agentVersion, bundleSha256) {
+      const patch: Partial<typeof nodes.$inferInsert> = {
+        agentVersion,
+        lastSeenAt: new Date(),
+        updatedAt: new Date(),
+      };
+      // IR-260: undefined = don't touch (the throttled snapshot flushes);
+      // null = clear (a hello without the field); a string records the hash
+      // of the bundle the agent reports it is running.
+      if (bundleSha256 !== undefined) patch.bundleSha256 = bundleSha256;
+      await db.update(nodes).set(patch).where(eq(nodes.id, nodeId));
     },
 
     async setGpuClockCap(nodeId, capMHz, persistent) {

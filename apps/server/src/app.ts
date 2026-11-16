@@ -1,10 +1,10 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
 import { broadcastForLanIp, normalizeMac, sendWol } from "./wol.js";
-import { benchTypeSchema, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type HardwareSnapshot, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
+import { benchTypeSchema, bundleState, cadencePutSchema, nodeCreateSchema, nodeInfoSchema, nodePatchSchema, setupCreateSchema, setupPatchSchema, compareVersions, AGENT_UPDATE_MIN_VERSION, hfTokenPutSchema, auditQuerySchema, logQuerySchema, type HardwareSnapshot, type NodeInfo, type SetupInfo, type SseEvent } from "@irori/core";
 import type { NodeRecord, NodeStore } from "@irori/db";
 import type { CadenceService } from "./cadence.js";
 import { isHistoryRange, type HistoryResponse, type HistoryRange } from "./history.js";
@@ -285,6 +285,26 @@ export function createApp(deps: AppDeps): Express {
     res.json({ ok: true, db: await deps.dbHealthy(), version: deps.version });
   });
 
+  // IR-260: sha256 of the artifact the hub serves, cached by mtime so the
+  // node payloads do not re-read a 2 MB bundle per request. A missing or
+  // unreadable artifact → null; the node's bundle state renders "unknown".
+  const bundleHash = { path: "", mtimeMs: -1, sha: null as string | null };
+  function expectedBundleSha256(): string | null {
+    const path = deps.agentArtifacts?.bundle;
+    if (path === undefined) return null;
+    try {
+      const st = statSync(path);
+      if (path !== bundleHash.path || st.mtimeMs !== bundleHash.mtimeMs) {
+        bundleHash.path = path;
+        bundleHash.mtimeMs = st.mtimeMs;
+        bundleHash.sha = createHash("sha256").update(readFileSync(path)).digest("hex");
+      }
+      return bundleHash.sha;
+    } catch {
+      return null;
+    }
+  }
+
   // ---- IRI-011 (ADR-0007): hub-served agent artifacts ----
   // Root-level GETs; registered before the static/SPA fallback below so they
   // are not swallowed by it. No secrets are embedded — the token is supplied
@@ -553,7 +573,7 @@ export function createApp(deps: AppDeps): Express {
     const store = requireStore(res);
     if (!store) return;
     const online = onlineSet();
-    res.json((await store.list()).map((row) => toNodeDto(row, online.has(row.id))));
+    res.json((await store.list()).map((row) => toNodeDto(row, online.has(row.id), expectedBundleSha256())));
   });
 
   app.post(
@@ -636,7 +656,7 @@ export function createApp(deps: AppDeps): Express {
     }
     const row = await store.get(id);
     if (row === null) return res.status(404).json({ error: "node not found" });
-    res.json({ node: toNodeDto(row, onlineSet().has(id)) });
+    res.json({ node: toNodeDto(row, onlineSet().has(id), expectedBundleSha256()) });
   });
 
   app.delete(
@@ -2306,7 +2326,7 @@ export function createApp(deps: AppDeps): Express {
   return app;
 }
 
-function toNodeDto(row: NodeRecord, online: boolean): NodeInfo {
+function toNodeDto(row: NodeRecord, online: boolean, expectedBundleSha256: string | null = null): NodeInfo {
   return nodeInfoSchema.parse({
     id: row.id,
     name: row.name,
@@ -2327,6 +2347,8 @@ function toNodeDto(row: NodeRecord, online: boolean): NodeInfo {
     gpuClockCapPersistent: row.gpuClockCapPersistent,
     cpuClockCapMHz: row.cpuClockCapMHz,
     cpuClockCapPersistent: row.cpuClockCapPersistent,
+    // IR-260: bundle generation state — running = agent-reported hash.
+    bundle: bundleState(row.bundleSha256 ?? null, expectedBundleSha256),
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   });

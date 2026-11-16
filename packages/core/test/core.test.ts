@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentMsgSchema, hardwareSnapshotSchema, nodeCreateSchema, sseEventSchema, jobKindSchema, AGENT_UPDATE_MIN_VERSION } from "../src/index.ts";
+import { agentMsgSchema, bundleState, hardwareSnapshotSchema, nodeCreateSchema, sseEventSchema, jobKindSchema, AGENT_UPDATE_MIN_VERSION } from "../src/index.ts";
 import { compareVersions, isAgentSupported } from "../src/version.ts";
 
 const validSnapshot = {
@@ -79,6 +79,27 @@ describe("agent messages", () => {
 
   it("parses a snapshot envelope", () => {
     expect(agentMsgSchema.parse({ type: "snapshot", snapshot: validSnapshot })).toMatchObject({ type: "snapshot" });
+  });
+
+  it("IR-260: parses a hello carrying the bundle hash and tolerates old hellos", () => {
+    const sha = "a".repeat(64);
+    expect(
+      agentMsgSchema.parse({ type: "hello", schemaVersion: 1, agentVersion: "0.1.0", token: "t", hostname: "h", bundleSha256: sha }),
+    ).toMatchObject({ bundleSha256: sha });
+    // Pre-IR-260 agents omit the field entirely.
+    expect(
+      agentMsgSchema.parse({ type: "hello", schemaVersion: 1, agentVersion: "0.1.0", token: "t", hostname: "h" }),
+    ).not.toHaveProperty("bundleSha256");
+    expect(() =>
+      agentMsgSchema.parse({ type: "hello", schemaVersion: 1, agentVersion: "0.1.0", token: "t", hostname: "h", bundleSha256: "nothex" }),
+    ).toThrow();
+  });
+
+  it("IR-260: bundleState classifies only when both sides are known", () => {
+    expect(bundleState(null, "a".repeat(64))).toMatchObject({ state: "unknown" });
+    expect(bundleState("a".repeat(64), null)).toMatchObject({ state: "unknown" });
+    expect(bundleState("a".repeat(64), "a".repeat(64)).state).toBe("current");
+    expect(bundleState("a".repeat(64), "b".repeat(64)).state).toBe("behind");
   });
 });
 

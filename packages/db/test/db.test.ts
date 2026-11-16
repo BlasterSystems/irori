@@ -62,6 +62,19 @@ d("db integration", () => {
     expect((await store.get(id))?.cacheUser).toBeNull();
   });
 
+  it("persists, keeps and clears the reported bundle hash (IR-260)", async () => {
+    const store = createNodeStore(h.db, "a".repeat(64));
+    const { id } = await store.create({ name: "bundlehash", kind: "spark", role: "worker", host: "bh.lan" });
+    await store.markSeen(id, "0.7.0", "a".repeat(64));
+    expect((await store.get(id))?.bundleSha256).toBe("a".repeat(64));
+    // The throttled snapshot flush passes no hash — it must not clobber.
+    await store.markSeen(id, "0.7.0");
+    expect((await store.get(id))?.bundleSha256).toBe("a".repeat(64));
+    // A hello without the field (old agent) clears it.
+    await store.markSeen(id, "0.6.0", null);
+    expect((await store.get(id))?.bundleSha256).toBeNull();
+  });
+
   it("snapshots insert, count and prune", async () => {
     const store = createNodeStore(h.db, "a".repeat(64));
     const { id } = await store.create({ name: "spark2", kind: "spark", role: "worker", host: "spark2.lan" });

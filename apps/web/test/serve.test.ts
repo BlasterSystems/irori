@@ -86,6 +86,7 @@ function node(id: string, name: string, online: boolean): NodeInfo {
     gpuClockCapPersistent: false,
     cpuClockCapMHz: null,
     cpuClockCapPersistent: false,
+    bundle: { running: null, expected: null, state: "unknown" },
     createdAt: "2026-10-18T00:00:00.000Z",
     updatedAt: "2026-10-18T00:00:00.000Z",
   };

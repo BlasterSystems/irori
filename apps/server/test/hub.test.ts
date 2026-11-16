@@ -48,8 +48,16 @@ async function setup(overrides: Partial<AgentHubDeps> = {}) {
   return { fake, created, rings, events, hub, url };
 }
 
-const hello = (token: string, agentVersion = "0.1.0") =>
-  JSON.stringify({ type: "hello", schemaVersion: SCHEMA_VERSION, agentVersion, token, hostname: "spark1" });
+const hello = (token: string, agentVersion = "0.1.0", bundleSha256?: string) =>
+  JSON.stringify({
+    type: "hello",
+    schemaVersion: SCHEMA_VERSION,
+    agentVersion,
+    token,
+    hostname: "spark1",
+    // IR-260: pre-IR-260 agents omit the field entirely.
+    ...(bundleSha256 === undefined ? {} : { bundleSha256 }),
+  });
 
 it("carries the hub modelctl pin in the hello config-update (IR-105)", async () => {
   const { url, created } = await setup({ getModelctlPin: async () => "0.23.0" });
@@ -92,10 +100,10 @@ it("settles job-done only after the preceding job-output has landed (IR-106)", a
   ws.close();
 });
 
-async function authenticate(url: string, token: string) {
+async function authenticate(url: string, token: string, bundleSha256?: string) {
   const ws = new WebSocket(url);
   await opened(ws);
-  ws.send(hello(token));
+  ws.send(hello(token, "0.1.0", bundleSha256));
   // Attach both listeners before awaiting: hello-ok and config-update are sent
   // back-to-back and can land in one TCP segment.
   const reply = nextMessage(ws);
@@ -128,6 +136,25 @@ describe("agent hub", () => {
     ws.send(hello("token-1", "0.0.9"));
     expect(await nextMessage(ws)).toMatchObject({ type: "error", message: "unsupported agent version: 0.0.9" });
     await nextClose(ws);
+  });
+
+  it("records the hello's bundle hash and clears it for old agents (IR-260)", async () => {
+    const { url, created, fake } = await setup();
+    const seenHashes: Array<string | null | undefined> = [];
+    fake.store.markSeen = async (_nodeId: string, _agentVersion: string, bundleSha256?: string | null) => {
+      seenHashes.push(bundleSha256);
+    };
+    const ws = await authenticate(url, created.token, "a".repeat(64));
+    await waitUntil(() => seenHashes.length > 0);
+    expect(seenHashes[0]).toBe("a".repeat(64));
+    ws.close();
+
+    // A pre-IR-260 agent sends no field: the hub clears the stored hash
+    // instead of leaving a stale generation behind.
+    const ws2 = await authenticate(url, created.token);
+    await waitUntil(() => seenHashes.length > 1);
+    expect(seenHashes[1]).toBeNull();
+    ws2.close();
   });
 
   it("closes on an invalid first frame", async () => {

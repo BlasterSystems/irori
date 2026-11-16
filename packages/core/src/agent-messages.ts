@@ -28,6 +28,10 @@ export const helloMsgSchema = z.object({
    *  restart cannot kill a running engine. Absent = not capable (old
    *  agents) — the hub keeps the agent-update setup guard for them. */
   scopeIsolation: z.boolean().optional(),
+  /** IR-260: sha256 hex of the agent's own bundle file (argv[1]). Absent on
+   *  pre-IR-260 agents and when the bundle cannot be located — the hub then
+   *  reports the node's bundle state as unknown. */
+  bundleSha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 export const snapshotMsgSchema = z.object({
