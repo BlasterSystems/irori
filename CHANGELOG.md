@@ -8,6 +8,17 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **Clock-cap drift no longer warns on GPUs that cannot report application
+  clocks** (IR-259): on DGX Spark (GB10) the driver rejects
+  `clocks.applications.sm`, so the GPU cap read-back is always null and every
+  30 s sweep counted "null ≠ stored" as drift — permanently open warn
+  findings on all three spark nodes. An all-null read-back is now treated as
+  unmeasurable (the same contract as the CPU guard); the comparison stays on
+  when at least one card reports a real ceiling, so a genuinely reverted card
+  still warns. The finding's durable "~N min" window is derived from the
+  finding's `since` instead of the in-memory streak, which reset on every
+  hub restart.
+
 - **DGX OTA visibility** (round 15, IR-257/IR-258): real DGX Spark images
   carry `DGX_SWBUILD_VERSION`/`DGX_OTA_VERSION` in `/etc/dgx-release` (no
   `DGX_OS_VERSION`/`DGX_OS_LINE`), so the OS half of the update posture was

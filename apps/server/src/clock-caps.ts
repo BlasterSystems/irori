@@ -64,7 +64,11 @@ export function clockDrift(
   if (stored.gpu !== null && reading.gpus.length > 0) {
     // Every GPU must carry the cap; one reverted card is drift.
     const observed = reading.gpus.map((g) => g.smCapMHz);
-    if (observed.some((cap) => cap !== stored.gpu)) {
+    // IR-259: an all-null read-back means the driver cannot express
+    // application clocks at all (GB10 rejects clocks.applications.sm) — that
+    // is unmeasurable (the same contract as the CPU guard below), not drift.
+    // The comparison stays on when at least one card reports a real ceiling.
+    if (observed.some((cap) => cap !== null) && observed.some((cap) => cap !== stored.gpu)) {
       drift.push({ side: "gpu", stored: stored.gpu, observed: observed[0] ?? null });
     }
   }
