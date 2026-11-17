@@ -312,7 +312,7 @@ describe("buildCommand", () => {
     // Pinned release tag + PATH export + enforced minimum version.
     expect(script).toContain('export PATH="/root/.local/bin:$PATH"');
     expect(script).toContain('PIN="0.20.1"');
-    expect(script).toContain('UV_TOOL_BIN_DIR="/root/.local/bin" uv tool install --force "git+https://github.com/piresbruno/modelctl@v$PIN"');
+    expect(script).toContain('UV_TOOL_BIN_DIR="/root/.local/bin" uv tool install --force "git+https://github.com/BlasterSystems/modelctl@v$PIN"');
     expect(script).toContain("sort -V");
     // IR-105: the skip-if-newer pre-check runs before the install — a stale
     // env pin on the node must never downgrade a newer binary.

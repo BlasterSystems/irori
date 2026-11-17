@@ -19,26 +19,27 @@ Effort is indicative (single developer with LLM assistance). Task files live in
 | M8 | [IRI-009](../tasks/IRI-009-m8-usage-capture-telemetry.md) | LLM usage capture + telemetry (in-agent, 90 d retention) | Usage pages populated from live proxy traffic; replay + retention verified |
 | — | [IRI-013](../tasks/IRI-013-overview-v1.md) | Overview v1 — fleet landing page (lens, head hero, power, NAS, event feed) | Overview renders the round-3 mockup from live data; single all-in-one feed |
 
-Tracking lives on Jira (project [IR — Irori](https://blastersystems.atlassian.net/browse/IR)):
-each milestone is an epic sliced into deliverable-sized tickets. The CI/CD
+Tracking happened on an internal Jira (project IR — Irori); each milestone is
+an epic sliced into deliverable-sized tickets. The task files in `tasks/` and
+the research briefs in `docs/research/` are the public record. The CI/CD
 epic deploys the server container to the Proxmox docker VM following
 uptime-monitoring's `cd-dev.yml` pattern (`dev-*` tag → test gate → git-bundle
 deploy → 60×2s health gate → auto-rollback).
 
 | Milestone | Epic |
 |---|---|
-| M1 Walking skeleton | [IR-1](https://blastersystems.atlassian.net/browse/IR-1) |
-| CI/CD — GitHub Actions → Proxmox docker VM | [IR-10](https://blastersystems.atlassian.net/browse/IR-10) |
-| M2 Telemetry core | [IR-14](https://blastersystems.atlassian.net/browse/IR-14) |
-| M3 Inference monitoring | [IR-21](https://blastersystems.atlassian.net/browse/IR-21) |
-| M4 Model supply chain | [IR-24](https://blastersystems.atlassian.net/browse/IR-24) |
-| M5 Serving orchestration | [IR-29](https://blastersystems.atlassian.net/browse/IR-29) |
-| M6 Benchmarks | [IR-33](https://blastersystems.atlassian.net/browse/IR-33) |
-| M7 Analytics, hygiene & packaging | [IR-37](https://blastersystems.atlassian.net/browse/IR-37) |
-| M8 LLM usage capture & telemetry | [IR-42](https://blastersystems.atlassian.net/browse/IR-42) |
-| Usage phase 2 — attribution & reconstruction (deferred) | [IR-51](https://blastersystems.atlassian.net/browse/IR-51) |
-| Agent onboarding & hub-driven updates | [IR-57](https://blastersystems.atlassian.net/browse/IR-57), [IR-58](https://blastersystems.atlassian.net/browse/IR-58) |
-| Overview v1 — fleet landing page | [IR-59](https://blastersystems.atlassian.net/browse/IR-59) |
+| M1 Walking skeleton | IR-1 |
+| CI/CD — GitHub Actions → Proxmox docker VM | IR-10 |
+| M2 Telemetry core | IR-14 |
+| M3 Inference monitoring | IR-21 |
+| M4 Model supply chain | IR-24 |
+| M5 Serving orchestration | IR-29 |
+| M6 Benchmarks | IR-33 |
+| M7 Analytics, hygiene & packaging | IR-37 |
+| M8 LLM usage capture & telemetry | IR-42 |
+| Usage phase 2 — attribution & reconstruction (deferred) | IR-51 |
+| Agent onboarding & hub-driven updates | IR-57, IR-58 |
+| Overview v1 — fleet landing page | IR-59 |
 
 ## M0 — Governance & foundations ✅ (this task)
 

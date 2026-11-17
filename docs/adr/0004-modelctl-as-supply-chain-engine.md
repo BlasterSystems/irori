@@ -36,7 +36,7 @@ The agent requires `modelctl` on model-ops nodes (NAS + Sparks), pinned to a
 minimum version, with an install/upgrade job. **Provisioning** (supervised
 job, streamed output): check `uv` (install via the standalone installer if
 missing) → `uv tool install --force` from the pinned **GitHub release tag**
-(`piresbruno/modelctl`) → verify `modelctl --version` ≥ pin. Offline /
+(`BlasterSystems/modelctl`) → verify `modelctl --version` ≥ pin. Offline /
 private-repo fallback: the release wheel ships **inside the agent bundle**
 and installs from local file. `uv tool list`-style upgrades re-run the same
 job with a new pin. All mutations

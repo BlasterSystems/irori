@@ -15,7 +15,7 @@ script, and a folder of scripts with a single, coherent system.
   (NAS → head → workers over ConnectX-7), realtime inference monitoring,
   serving supervision, and disk hygiene.
 - One **NAS node** acting as the central LLM repository, fully compatible
-  with the [`modelctl`](https://github.com/piresbruno/modelctl) store layout —
+  with the [`modelctl`](https://github.com/BlasterSystems/modelctl) store layout —
   nothing on the NAS ever migrates.
 - Cluster serving from a **wizard**: model + nodes + your start/stop scripts,
   with placement checks and staged transfers.
@@ -79,9 +79,10 @@ What you can expect from the project:
   monitoring, alerting, PWAs, and request tracing are explicitly out of v1
   ([non-goals](docs/SPEC.md#1-goals)).
 
-Status and milestones: **[docs/PLAN.md](docs/PLAN.md)** — M0 governance is
-complete; implementation starts at M1 (walking skeleton). Screen mockups live
-in [`mockups/`](mockups/index.html) and are the approved UI reference.
+Status and milestones: **[docs/PLAN.md](docs/PLAN.md)** — M0–M8 shipped;
+v0.7.0 in development (latest release: [v0.6.0](releases/tag/v0.6.0)). Screen
+mockups live in [`mockups/`](mockups/index.html) and are the approved UI
+reference.
 
 ## Design guidelines
 
@@ -153,7 +154,7 @@ Irori replaces and absorbs the maintainer's own predecessor projects — see
 The notable runtime dependencies (everything else is standard: Node 24 +
 pnpm, Docker, rsync):
 
-- **[modelctl](https://github.com/piresbruno/modelctl)** — the model supply
+- **[modelctl](https://github.com/BlasterSystems/modelctl)** — the model supply
   chain engine. The agent provisions it per node (pinned GitHub release via
   `uv tool install`, wheel fallback bundled offline) and drives every NAS
   store mutation through it; catalog reads use the `catalog.json` contract
@@ -169,9 +170,9 @@ pnpm, Docker, rsync):
 .agentic/bin/docs-check
 ```
 
-Build/test/run commands arrive with M1: `pnpm build`, `pnpm test`,
-`pnpm dev` (pnpm/TypeScript monorepo — `apps/server`, `apps/web`,
-`apps/agent`, `packages/core`, `packages/db`).
+Build, test, and run: `pnpm build`, `pnpm test`, `pnpm dev`
+(pnpm/TypeScript monorepo — `apps/server`, `apps/web`, `apps/agent`,
+`packages/core`, `packages/db`).
 
 ## License
 

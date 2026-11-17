@@ -1,5 +1,6 @@
 <!--
-Task: IRI-xxx — tasks/… file or blastersystems.atlassian.net/browse/IRI-xxx
+Task: IRI-xxx — a `tasks/IRI-NNN-short-title.md` file (template:
+`tasks/task-template.md`)
 -->
 
 ## What

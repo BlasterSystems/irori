@@ -18,7 +18,7 @@ Do not open a public issue for a security problem.
 | `docker/`, `deploy/` | container build & deployment |
 
 Out of scope: your own homelab infrastructure (host OS, Docker, Postgres,
-NAS) and [modelctl](https://github.com/piresbruno/modelctl) — report those
+NAS) and [modelctl](https://github.com/BlasterSystems/modelctl) — report those
 upstream.
 
 ## Trust model
