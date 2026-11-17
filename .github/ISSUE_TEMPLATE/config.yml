@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/BlasterSystems/irori/tree/main/docs
+    about: SPEC.md, ARCHITECTURE.md, CONFIGURATION.md, DEPLOYMENT.md, and the ADRs.
+  - name: Security
+    url: https://github.com/BlasterSystems/irori/security/advisories/new
+    about: Report vulnerabilities privately — never in a public issue.

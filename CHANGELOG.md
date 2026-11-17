@@ -6,6 +6,20 @@ All notable changes to Irori are recorded here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Public-release preparation** (no IRI — owner request): completed the OSS
+  surface for making the repo public under Apache-2.0 — `NOTICE`,
+  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant),
+  `SECURITY.md` (private vulnerability reporting), bug/feature issue
+  templates + config, a PR template, and `dependabot.yml` (npm only;
+  `github-actions` deliberately omitted — Dependabot PRs would edit
+  manifest-owned `docs-check.yml` and fail `.agentic/bin/validate`). Every
+  workspace `package.json` gained `license` + `repository` metadata. The 129
+  stale `coverage/` build artifacts (tracked before `coverage/` was
+  gitignored, carrying absolute local paths) are out of git and disk —
+  `.gitignore` now actually holds.
+
 ### Fixed
 
 - **Clock-cap drift no longer warns on GPUs that cannot report application

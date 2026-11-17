@@ -1,0 +1,17 @@
+Irori — AI fleet platform for DGX Spark homelabs
+Copyright 2026 Bruno Pires (BlasterSystems)
+
+This product is licensed under the Apache License, Version 2.0; a copy is
+included as LICENSE. It is "A BlasterSystems product" — the thread mark and
+the endorsement follow the BlasterSystems design system brand rules.
+
+Third-party components and data included in this repository — and in the
+distributed container images (ghcr.io/blastersystems/irori*) and release
+artifacts — are documented in:
+
+  - THIRD_PARTY_NOTICES.md — GSM8K and MMLU benchmark samples (MIT)
+  - apps/agent/src/bench/data/NOTICE.md — bench data notices
+
+npm dependencies ship under their own permissive licenses (MIT, BSD,
+Apache-2.0, ISC); their license texts travel inside the container images via
+node_modules and are catalogued in pnpm-lock.yaml.

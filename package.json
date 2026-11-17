@@ -1,6 +1,11 @@
 {
   "name": "irori",
   "private": true,
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BlasterSystems/irori.git"
+  },
   "version": "0.7.0",
   "description": "Irori — AI fleet platform for DGX Spark homelabs",
   "packageManager": "pnpm@10.33.2",

@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in Irori is broken or wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect instead? Which screen, endpoint, or command?
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        Hub: image tag / commit, host OS. Nodes: kind (DGX Spark, NAS,
+        container), agent version. Only what is needed to reproduce — never
+        paste secrets or tokens.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant hub/agent log excerpts (redact tokens).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I redacted secrets/tokens from logs, screenshots, and config dumps
+          required: true

@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # The npm ecosystem covers the pnpm workspace (pnpm-lock.yaml).
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+  # NOTE: no `github-actions` ecosystem on purpose — .github/workflows/docs-check.yml
+  # is manifest-owned (.agentic/manifest.json) and a Dependabot PR editing it fails
+  # `.agentic/bin/validate`. Bump action pins manually.
