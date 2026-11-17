@@ -27,7 +27,7 @@
     "@opentelemetry/sdk-trace-base": "^2.12.0",
     "pino": "^10.4.0",
     "undici": "^7.16.0",
-    "ws": "^8.18.3"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

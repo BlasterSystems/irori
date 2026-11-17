@@ -30,7 +30,7 @@
     "drizzle-orm": "^0.45.2",
     "express": "^5.1.0",
     "pino": "^10.4.0",
-    "ws": "^8.18.3"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@irori/proxy": "workspace:*",
