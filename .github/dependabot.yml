@@ -5,6 +5,12 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    # Majors get manual evaluation — Dependabot proposed five at once right
+    # before the public release (all closed, all green at the time). Revisit
+    # after cutting the first post-public release.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   # NOTE: no `github-actions` ecosystem on purpose — .github/workflows/docs-check.yml
   # is manifest-owned (.agentic/manifest.json) and a Dependabot PR editing it fails
   # `.agentic/bin/validate`. Bump action pins manually.
