@@ -36,7 +36,7 @@
     "@types/node": "^24.0.0",
     "@typescript-eslint/eslint-plugin": "^8.44.0",
     "@typescript-eslint/parser": "^8.44.0",
-    "@vitest/coverage-v8": "^4.1.12",
+    "@vitest/coverage-v8": "^5.1.0",
     "eslint": "^9.35.0",
     "eslint-config-prettier": "^10.1.8",
     "happy-dom": "^21.0.4",
