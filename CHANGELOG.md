@@ -18,7 +18,11 @@ All notable changes to Irori are recorded here. Format follows
   workspace `package.json` gained `license` + `repository` metadata. The 129
   stale `coverage/` build artifacts (tracked before `coverage/` was
   gitignored, carrying absolute local paths) are out of git and disk —
-  `.gitignore` now actually holds.
+  `.gitignore` now actually holds. All git history was rewritten with
+  `git filter-repo` to remove internal hostnames, LAN addresses, and the LAN
+  username (genericized to `.lan` hostnames, documentation-range addresses,
+  and the `operator` user); public GitHub handles in attribution links are
+  preserved, as is the full diff between consecutive milestones.
 
 ### Fixed
 
