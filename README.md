@@ -29,6 +29,16 @@ script, and a folder of scripts with a single, coherent system.
 ○ — ■   The circle is what you can see. The square is on record.
 ```
 
+## Screenshots
+
+![Overview — fleet, serving, NAS, and live telemetry](docs/screenshots/overview.png)
+
+| | |
+|---|---|
+| ![Node detail — live sensors, inference, clock state](docs/screenshots/node-detail.png) | ![Models — the NAS-backed store](docs/screenshots/models.png) |
+| ![Serve — clusters and the serving wizard](docs/screenshots/serve.png) | ![Benchmarks — decode, prefill, quality, tool eval](docs/screenshots/benchmarks.png) |
+| ![Analytics — from precomputed rollups](docs/screenshots/analytics.png) | ![Transfers — staged jobs, live-tracked](docs/screenshots/transfers.png) |
+
 ## Goals
 
 1. **Inference first.** The head node's serving state is the primary object of

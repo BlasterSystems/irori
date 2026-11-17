@@ -46,3 +46,8 @@ pnpm typecheck
 
 Open PRs against `main` using the template. Small, single-purpose PRs with
 the task ID in the title (`feat(server): … (IRI-xxx)`) review fastest.
+
+CI runs on the maintainers' self-hosted infrastructure: the **first workflow
+run from an outside collaborator requires maintainer approval**, and later
+pushes to an open PR are re-reviewed before running. Expect a short delay
+before checks appear — this is deliberate, not a stuck runner.
