@@ -25,6 +25,18 @@ All generated configuration is project-scoped. Agents must not install skills, a
 - The planning-and-task-breakdown and create-tickets skills are documented but never generated or auto-installed; install them on demand per `docs/TASK_BREAKDOWN.md`.
 - Agent hooks (when selected) run only the project's configured test command and report the result.
 
+## Agent tooling configuration (refract v0.4.0)
+
+| Surface | File | Behavior |
+|---|---|---|
+| Claude Code hook | `.claude/settings.json` | `Stop` hook runs `pnpm test` at turn end (120 s timeout, one fix round via the `stop_hook_active` guard). No permissions policy is installed, so `.env` reads are not blocked |
+| omp hook | `.omp/hooks/post/refract-check.ts` | `agent_end` hook runs `pnpm test` (120 s) |
+| omp settings | `.omp/settings.json` | `autolearn` disabled — sessions never mint user-level skills |
+| omp rules | `.omp/RULES.md` | Sticky invariants loaded every turn (credentials, refract-gated setup changes, review process) |
+| MCP | `.mcp.json`, `.omp/mcp.json` | context7 docs server; omp reads both files, so it is declared twice. serena lives only in `.mcp.json` |
+| Subagents | `.claude/agents/`, `.omp/agents/` | read-only `architecture-reviewer` |
+| Legacy | `.agentic/` | previous agentic-bootstrap state; CI still runs `.agentic/bin/validate` and `.agentic/bin/docs-check` |
+
 ## Verification
 
 There are no automated contract tests. When a platform is upgraded, re-check its discovery paths and record the exact CLI versions and date used for instruction and skill discovery.

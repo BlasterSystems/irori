@@ -12,5 +12,6 @@ Read only the document relevant to the current task.
 ## When needed
 
 - [Platform support](PLATFORM_SUPPORT.md) — coding-agent capabilities and generated artifacts.
+- [Configuration](CONFIGURATION.md) — runtime configuration surfaces: server/agent env and agent tooling.
 - [Security audit](SECURITY_AUDIT.md) — optional security-audit skill: install, modes, triggers, and requirements.
 - [Releasing](RELEASING.md) — Semantic Versioning, release validation, and Git tags.

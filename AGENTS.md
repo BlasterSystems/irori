@@ -8,7 +8,7 @@
 - Build: `pnpm build`
 - Test: `pnpm test`
 - Run: `pnpm dev`
-- Task convention: Task identifiers use the `IRI-<number>` convention; task files in `tasks/`, research briefs in `docs/research/`; milestone epic: `docs/PLAN.md`.
+- Task convention: Task identifiers use the `IRI-<number>` convention; task files in `tasks/` (the research skill writes `tasks/research-<slug>.md`; older briefs live in `docs/research/`); milestone epic: `docs/PLAN.md`.
 
 Treat values marked “Not configured” or “Not detected” as unknown. Inspect project-owned configuration or ask the user instead of inventing an answer.
 
