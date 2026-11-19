@@ -112,3 +112,22 @@ a boolean `hasWebhook`, never the URL. On a rule transition the hub POSTs
 `{ rule, metric, severity, state, nodeId, summary, observed, at }` to the
 URL (appear is cooldown-bounded; clear is always sent). Setting/clearing is
 audited as `health.rule.put`.
+
+## Agent tooling (refract v0.4.0)
+
+The agent setup is recorded in `.refract.md` (facts, enabled features, and a
+SHA-256 for every file refract wrote). Re-run or upgrade it through the
+`refract` skill; do not hand-edit managed files outside that flow.
+
+| Surface | File | Behavior |
+|---|---|---|
+| Claude Code hook | `.claude/settings.json` | `Stop` hook runs `pnpm test` at turn end (120 s timeout, one fix round via the `stop_hook_active` guard). No permissions policy is installed, so `.env` reads are not blocked |
+| omp hook | `.omp/hooks/post/refract-check.ts` | `agent_end` hook runs `pnpm test` (120 s) |
+| omp settings | `.omp/settings.json` | `autolearn` disabled — sessions never mint user-level skills |
+| omp rules | `.omp/RULES.md` | Sticky invariants loaded every turn (credentials, refract-gated setup changes, review process) |
+| MCP | `.mcp.json`, `.omp/mcp.json` | context7 docs server; omp reads both files, so it is declared twice. serena lives only in `.mcp.json` |
+| Subagents | `.claude/agents/`, `.omp/agents/` | read-only `architecture-reviewer` |
+| Legacy | `.agentic/` | previous agentic-bootstrap state; CI still runs `.agentic/bin/validate` and `.agentic/bin/docs-check` |
+
+The end-of-turn test hooks fit the current suite (~90 s locally) inside the
+120 s timeout; raise the timeout or remove the hook if the suite outgrows it.
