@@ -2,16 +2,26 @@
 
 ## Purpose
 
-Use this workflow for changes to **irori**. Scale the ceremony to the risk and size of the task, but do not skip validation or explicit architectural decisions. The end-to-end executor is the **`implement`** skill (`.claude/skills/implement/SKILL.md`); material unknowns are settled first by the **`research`** skill (`.claude/skills/research/SKILL.md`), which writes a research brief. Both are adapted from the matterhorn-platform process.
+Use this workflow for changes to **irori**. Scale the ceremony to the risk and size of the task, but do not skip validation or explicit architectural decisions.
 
-## Skills
+## Skill workflow
 
-| Skill | Load when |
-|---|---|
-| `research` | A task has material unknowns (external behavior, store formats, hardware/driver quirks) — produces `docs/research/IRI-NNN-research-brief.md` with evidence and options |
-| `implement` | Executing an `IRI-NNN` task end to end — task record, decision-complete plan, smallest coherent change, tests, review |
-| `architecture-decision` | Creating an ADR |
-| `semantic-versioning` | Releases and version bumps |
+The portable project skills implement this process. Invoke them by name on any supported coding agent.
+
+| Stage | Skill | Output |
+|---|---|---|
+| Idea or epic, no code yet | `research` | `tasks/research-<slug>.md`; tracker tickets only after approval |
+| Readiness | `confidence-check` | Readiness result in the task file |
+| One ticket | `implement` | Task file, branch, tested change, pull request |
+| Security | `security-check` | CRITICAL / WARNING / INFO report |
+| Adversarial review | `quality-review` | Independent review that tries to break the change: verdict, verified findings, claims that survived |
+| Commit | `commit` | Conventional commit and updated branch document |
+| Deploy | `deploy-dev`, `deploy-prd` | Tag, pipeline result, verification evidence |
+| Emergency | `hotfix` | Minimal fix through the full checks |
+| Decisions | `architecture-decision` | Indexed ADR |
+| Release version | `semantic-versioning` | Release commit and annotated tag |
+
+Deploy skills act only on explicit request and only after the readiness check in `docs/DEPLOYMENT.md` passes.
 
 ## 1. Understand
 
@@ -22,12 +32,12 @@ Use this workflow for changes to **irori**. Scale the ceremony to the risk and s
 
 ## 2. Plan
 
-- Create or update a task file from `tasks/task-template.md` (`tasks/IRI-NNN-short-title.md`).
-- If unknowns are material, run the `research` skill and link the brief from the task file before planning further.
+- Create or update a task file from `tasks/task-template.md`.
 - Break work into independently verifiable steps.
+- For multi-step or ambiguous work, use the planning-and-task-breakdown skill; the task list target and tracker mapping are defined in `docs/TASK_BREAKDOWN.md`.
 - Record expected tests and documentation changes.
 - Decide whether the task has architectural impact.
-- For agent-guided bootstrap maintenance, follow `docs/AGENT_GUIDED.md`; the agent stops after preview and a human applies separately.
+- To re-run or upgrade the agent setup itself, use the `refract` skill.
 
 ## 3. Architecture Decision Check
 
@@ -55,12 +65,10 @@ Routine refactors and local implementation details do not require ADRs.
 
 Run applicable commands:
 
-```bash
-.agentic/bin/validate
-pnpm test
-pnpm build
-.agentic/bin/docs-check
-```
+1. The `process-check` skill.
+2. `pnpm test`
+3. `pnpm build`
+4. The `docs-check` skill.
 
 Skip commands marked “Not configured”; record the missing configuration instead of executing that text.
 
@@ -68,10 +76,39 @@ Skip commands marked “Not configured”; record the missing configuration inst
 
 Review the diff for correctness, security, compatibility, test coverage, documentation, and unnecessary complexity. Update the task file with evidence and residual risks.
 
-## 7. Complete
+Open a pull request for reviewable changes. **Every pull request gets an independent adversarial review before merge**, using the `quality-review` skill:
+- It runs in a fresh, read-only context that does not share the author's reasoning.
+- It assumes the change is wrong, and tries to disprove its correctness, security, compatibility, and scope claims.
+- It reports only findings it has verified.
+
+Scale the depth to the size and risk of the change, but never skip it. A self-review is not independent: if no fresh context is available, a human reviews before merge. Every `BLOCK` finding is resolved before merge.
+
+For security-sensitive changes or open vulnerability questions:
+- If the security-audit skill is installed, use it in guidance mode; see `docs/SECURITY_AUDIT.md`.
+- If it is not installed, rely on the `security-check` skill and the adversarial review, and record "no full security audit" in the task file's Review section. Don't stop to install it without asking.
+
+## 7. Deploy
+
+Deployments follow `docs/DEPLOYMENT.md`. Deploy-affecting changes name an artifact invariant and a functional probe before merge, and every deployment records both results as evidence. A configuration change made outside the pipeline is a deploy.
+
+## 8. Complete
 
 - Ensure acceptance criteria are met.
 - Ensure new or superseding ADRs are indexed and linked.
 - Confirm generated configuration still validates.
 - Provide a concise summary of changes, validation, and remaining risks.
+- Before tagging a release that touches security-relevant surfaces, run the scoped release-gate audit described in `docs/SECURITY_AUDIT.md`.
 - For a version bump or release, follow `docs/RELEASING.md` with the `semantic-versioning` skill; obtain explicit confirmation before creating the release commit or tag.
+
+## 9. Ticket lifecycle
+
+Work is tracked in the project's issue tracker: task identifiers use the `IRI-<number>` convention. **Status transitions are part of the definition of done: a ticket is never left in a state that contradicts the code.**
+
+1. **Fetch** the ticket (description + acceptance criteria) before implementing anything.
+2. **Before coding**: transition the ticket to "In Progress" and assign yourself; record the assignment in the ticket.
+3. **Plan** in `tasks/<TICKET>.md` from `tasks/task-template.md`; keep it updated with decisions, evidence, and residual risks as the work progresses.
+4. **Deliver — always via pull request**: push a branch and open a PR whose title references the ticket and whose body links the ticket and the task file. Direct pushes to the default branch are a process violation — including fixes, hotfixes, docs, and process changes themselves.
+5. **On merge — mandatory status update**: transition the ticket to "Done" and post an evidence comment (commands run + observed results). This step is blocking: merging without the status update is a process violation, not optional cleanup.
+6. **Multi-ticket changes**: a PR that covers several tickets (e.g. an epic landing its child stories) reconciles every covered ticket's status in the same pass — including epics and parents whose state the change completes. A ticket whose feature is only partially delivered stays "In Progress" with a comment naming the remainder.
+7. **Reconciliation**: when work lands at a coarser grain than the tickets describe (an epic PR implementing many stories), verify each covered ticket against the actual code before transitioning it; tickets whose feature is genuinely absent stay open and become the next work items, not silent "Done"s.
+

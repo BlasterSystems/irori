@@ -26,4 +26,3 @@ deploy/.env
 
 # Local artifacts (IR-178/179 cleanup)
 coverage/
-.omp/

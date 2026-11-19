@@ -30,12 +30,12 @@
       "mutable": false
     },
     ".agents/skills/architecture-decision/SKILL.md": {
-      "sha256": "5900634095efa33248ec470b7edb8d3cc1bfd9fa9c70fdf93297eaf898d472f6",
+      "sha256": "fea22442754c2cde6a6a1bf0eaa8e42c1e69e04529abe4c5f2284a41eb6990af",
       "executable": false,
       "mutable": false
     },
     ".agents/skills/docs-check/SKILL.md": {
-      "sha256": "5ee4f597f7c892832bb8b6144040e2b37d8dc4c50b0261a8f34b6a9971687235",
+      "sha256": "614903f7ae0aaae287cf36151f0336d3f1614189c7af52c79bcbb8e67642d6e7",
       "executable": false,
       "mutable": false
     },
@@ -55,12 +55,12 @@
       "mutable": false
     },
     ".claude/skills/architecture-decision/SKILL.md": {
-      "sha256": "5900634095efa33248ec470b7edb8d3cc1bfd9fa9c70fdf93297eaf898d472f6",
+      "sha256": "fea22442754c2cde6a6a1bf0eaa8e42c1e69e04529abe4c5f2284a41eb6990af",
       "executable": false,
       "mutable": false
     },
     ".claude/skills/docs-check/SKILL.md": {
-      "sha256": "5ee4f597f7c892832bb8b6144040e2b37d8dc4c50b0261a8f34b6a9971687235",
+      "sha256": "614903f7ae0aaae287cf36151f0336d3f1614189c7af52c79bcbb8e67642d6e7",
       "executable": false,
       "mutable": false
     },
@@ -125,7 +125,7 @@
       "mutable": true
     },
     "docs/PLATFORM_SUPPORT.md": {
-      "sha256": "24bd853bd0393c8ac470ecdcaa4d1b82814603efb3ce71d5fda96ccdd287e58a",
+      "sha256": "58f5a7f1ec5f4c1691b47def8b39db6da4bac501e96ebe7919fd53371a7f8ceb",
       "executable": false,
       "mutable": false
     },

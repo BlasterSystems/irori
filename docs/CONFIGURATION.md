@@ -112,3 +112,14 @@ a boolean `hasWebhook`, never the URL. On a rule transition the hub POSTs
 `{ rule, metric, severity, state, nodeId, summary, observed, at }` to the
 URL (appear is cooldown-bounded; clear is always sent). Setting/clearing is
 audited as `health.rule.put`.
+
+## Agent tooling (refract v0.4.0)
+
+The agent setup is recorded in `.refract.md` (facts, enabled features, and a
+SHA-256 for every file refract wrote). Re-run or upgrade it through the
+`refract` skill; do not hand-edit managed files outside that flow. The
+per-platform files (hooks, settings, MCP, subagents) are tabulated in
+[PLATFORM_SUPPORT.md](PLATFORM_SUPPORT.md#agent-tooling-configuration-refract-v040).
+
+The end-of-turn test hooks fit the current suite (~90 s locally) inside the
+120 s timeout; raise the timeout or remove the hook if the suite outgrows it.
