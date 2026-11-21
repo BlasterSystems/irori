@@ -47,29 +47,58 @@ export interface RunInvocation {
 
 const firstMatch = (segment: string, re: RegExp): string | undefined => re.exec(segment)?.[1];
 
+const BLOCK_TAG_RE = /^\/?(?:pre|code)$/i;
+const BREAK_TAG_RE = /^(?:br|\/p|\/div|\/li|\/tr|\/h\d)$/i;
+
+/**
+ * Drops markup in ONE linear left-to-right pass (no regex over tags, so
+ * nothing can backtrack on a run of `<` — IR-267 review F1). A `<` with no
+ * `>` before the next `<` is kept as text. Closing pre/code tags become a
+ * block-end marker and line-breaking tags become newlines. The output is only
+ * ever scanned for flags, never rendered as HTML.
+ */
+function stripTags(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf("<", i);
+    if (open === -1) {
+      out += text.slice(i);
+      break;
+    }
+    out += text.slice(i, open);
+    let close = open + 1;
+    while (close < text.length && text[close] !== ">" && text[close] !== "<") close += 1;
+    if (close >= text.length || text[close] === "<") {
+      out += "<"; // not a tag: keep the bracket, continue after it
+      i = open + 1;
+      continue;
+    }
+    const name = /^\/?[a-z0-9]+/i.exec(text.slice(open + 1, Math.min(close, open + 12)))?.[0] ?? "";
+    if (name.startsWith("/") && BLOCK_TAG_RE.test(name)) out += `\n${BLOCK_END}\n`;
+    else if (BREAK_TAG_RE.test(name)) out += "\n";
+    i = close + 1;
+  }
+  return out;
+}
+
 /**
  * Normalises README markdown or a docs HTML page into searchable text.
- * Every pattern here is linear on adversarial input (README text is
- * repo-author controlled): tag patterns use `[^<>]*`, so a run of `<`
- * without `>` can't backtrack quadratically (IR-267 review F1).
+ * Linear on adversarial input (README text is repo-author controlled).
  */
 export function toSearchableText(raw: string): string {
-  return (
-    raw
-      // Next.js/GitBook pages also embed the code as JSON-escaped strings.
-      .replace(/\\n/g, "\n")
-      .replace(/\\"/g, '"')
-      .replace(/<\/(?:pre|code)\s*>/gi, `\n${BLOCK_END}\n`)
-      .replace(/^[ \t]*(?:```|~~~)[^\n]*$/gm, BLOCK_END)
-      .replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h\d)\b[^<>]*>/gi, "\n")
-      .replace(/<[^<>]*>/g, "")
-      .replace(/&(?:quot|#34);/g, '"')
-      .replace(/&(?:#39|#x27|apos);/g, "'")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-  );
+  const unescaped = raw
+    // Next.js/GitBook pages also embed the code as JSON-escaped strings.
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"')
+    .replace(/^[ \t]*(?:```|~~~)[^\n]*$/gm, BLOCK_END);
+  return stripTags(unescaped)
+    .replace(/&(?:quot|#34);/g, '"')
+    .replace(/&(?:#39|#x27|apos);/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&");
 }
 
 /** Pure: every llama.cpp invocation's companion flags, in document order. */
