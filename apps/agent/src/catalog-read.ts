@@ -1,8 +1,17 @@
-import { readdir, readFile, readlink, lstat, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { constants as fsConstants } from "node:fs";
+import { open, readdir, readFile, readlink, lstat, realpath, stat } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { parseCatalog, CatalogFormatError, type Catalog, type ScannedModel } from "@irori/core";
+import {
+  parseCatalog,
+  storeCompanionsSchema,
+  COMPANIONS_UNREADABLE,
+  CatalogFormatError,
+  type Catalog,
+  type ScannedModel,
+  type StoreCompanionsState,
+} from "@irori/core";
 
 /**
  * Reads a modelctl store: trusted catalog.json (schema 3) when fresh/valid,
@@ -148,10 +157,211 @@ export async function scanStore(root: string): Promise<ScannedModel[]> {
 }
 
 /**
+ * IRI-155: installed companions (ADR-0020) come from the published object's
+ * metadata, `active/<name>/.modelctl.json`, never the manifest, which can be
+ * ahead of the installed object after a failed update.
+ */
+export const METADATA_FILE = ".modelctl.json";
+/** modelctl writes a few KiB; anything bigger is not object metadata. */
+export const METADATA_MAX_BYTES = 1024 * 1024;
+/** Parallel metadata reads per catalog: bounded so a slow CIFS mount stays bounded. */
+export const COMPANION_CONCURRENCY = 8;
+/**
+ * Overall budget for one catalog's companion reads (review F1). A degraded
+ * mount costs up to 2 x OP_TIMEOUT_MS per entry, so without it N models
+ * would hold the catalog frame for about N/8 x 4 s. Entries not read in time
+ * report unreadable, which is the truth: they could not be read.
+ */
+export const COMPANIONS_DEADLINE_MS = 10_000;
+
+/** Why an object's metadata could not be used. */
+export type MetadataFailure = "missing" | "timeout" | "unreadable" | "too-large" | "not-a-file" | "escape" | "malformed";
+
+export type Bounded<T> = { ok: true; value: T } | { ok: false; timeout: true } | { ok: false; timeout: false; error: unknown };
+
+/** Like boundedOrNull, but keeps a timeout apart from an error (and the error itself). */
+export async function boundedResult<T>(op: () => Promise<T>): Promise<Bounded<T>> {
+  const { promise: timerP, resolve } = Promise.withResolvers<Bounded<T>>();
+  const timer = setTimeout(() => resolve({ ok: false, timeout: true }), OP_TIMEOUT_MS);
+  timer.unref?.();
+  try {
+    return await Promise.race([op().then((value): Bounded<T> => ({ ok: true, value })), timerP]);
+  } catch (error) {
+    return { ok: false, timeout: false, error };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const errCode = (e: unknown): string | undefined => (e as NodeJS.ErrnoException | null)?.code;
+
+/** A store entry name is one path segment (it is joined under active/). */
+function isPlainName(name: string): boolean {
+  return name !== "" && name !== "." && name !== ".." && !/[/\\\0]/.test(name);
+}
+
+class MetadataError extends Error {
+  constructor(readonly reason: MetadataFailure) {
+    super(reason);
+  }
+}
+
+/**
+ * Reads `<object>/.modelctl.json` with store confinement: the object dir must
+ * resolve (realpath) inside the store root, and the file is opened without
+ * following a final symlink (O_NOFOLLOW) or blocking on a FIFO (O_NONBLOCK),
+ * must be a regular file, and is read with a hard byte cap.
+ */
+export async function readObjectMetadata(rootReal: string, root: string, name: string): Promise<{ ok: true; raw: unknown } | { ok: false; reason: MetadataFailure }> {
+  if (!isPlainName(name)) return { ok: false, reason: "escape" };
+  const resolved = await boundedResult(() => realpath(join(root, "active", name)));
+  if (!resolved.ok) {
+    if (resolved.timeout) return { ok: false, reason: "timeout" };
+    return { ok: false, reason: errCode(resolved.error) === "ENOENT" ? "missing" : "unreadable" };
+  }
+  const objectDir = resolved.value;
+  if (!objectDir.startsWith(rootReal + sep)) return { ok: false, reason: "escape" };
+
+  const text = await boundedResult(async () => {
+    let fh;
+    try {
+      fh = await open(join(objectDir, METADATA_FILE), fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+    } catch (e) {
+      const code = errCode(e);
+      throw new MetadataError(code === "ENOENT" ? "missing" : code === "ELOOP" ? "not-a-file" : "unreadable");
+    }
+    try {
+      const st = await fh.stat();
+      if (!st.isFile()) throw new MetadataError("not-a-file");
+      if (st.size > METADATA_MAX_BYTES) throw new MetadataError("too-large");
+      // Cap-sized, not fstat-sized: CIFS can report a stale size, and a buffer
+      // sized to it would truncate the file (re-review N1). allocUnsafe skips the
+      // zero fill (review F2); only the bytes actually read are ever decoded.
+      const buf = Buffer.allocUnsafe(METADATA_MAX_BYTES + 1);
+      let total = 0;
+      for (;;) {
+        const { bytesRead } = await fh.read(buf, total, buf.length - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+        if (total > METADATA_MAX_BYTES) throw new MetadataError("too-large"); // grew after fstat
+      }
+      return buf.subarray(0, total).toString("utf8");
+    } finally {
+      await fh.close().catch(() => {});
+    }
+  });
+  if (!text.ok) {
+    if (text.timeout) return { ok: false, reason: "timeout" };
+    return { ok: false, reason: text.error instanceof MetadataError ? text.error.reason : "unreadable" };
+  }
+  try {
+    return { ok: true, raw: JSON.parse(text.value) as unknown };
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
+}
+
+/**
+ * Object metadata (modelctl `validation.write_metadata`, schema 1) → the
+ * companions it records: null = none recorded; unreadable = not schema-1
+ * metadata, or a value that fails the shared wire schema (the hub drops a
+ * WHOLE catalog frame that fails its parse, so nothing unvalidated is sent).
+ */
+export function companionsFromMetadata(raw: unknown): StoreCompanionsState {
+  if (typeof raw !== "object" || raw === null) return COMPANIONS_UNREADABLE;
+  const meta = raw as Record<string, unknown>;
+  if (meta.schema !== 1 || !Array.isArray(meta.files)) return COMPANIONS_UNREADABLE;
+  const companions = typeof meta.companions === "object" && meta.companions !== null ? (meta.companions as Record<string, unknown>) : {};
+  const sizeOf = (path: string): number | null => {
+    for (const f of meta.files as unknown[]) {
+      if (typeof f !== "object" || f === null) continue;
+      const file = f as Record<string, unknown>;
+      if (file.path === path) return Number.isSafeInteger(file.size) && (file.size as number) >= 0 ? (file.size as number) : null;
+    }
+    return null;
+  };
+  const mmprojPath = typeof companions.mmproj === "string" ? companions.mmproj : null;
+  const draftPath = typeof companions.mtp === "string" ? companions.mtp : null;
+  if (mmprojPath === null && draftPath === null) return null;
+  const parsed = storeCompanionsSchema.safeParse({
+    mmproj: mmprojPath === null ? null : { path: mmprojPath, bytes: sizeOf(mmprojPath) },
+    draft:
+      draftPath === null
+        ? null
+        : { path: draftPath, bytes: sizeOf(draftPath), specType: typeof meta.draft_spec_type === "string" ? meta.draft_spec_type : null },
+  });
+  return parsed.success ? parsed.data : COMPANIONS_UNREADABLE;
+}
+
+/**
+ * What a metadata failure reports on the wire (owner decision, IRI-155).
+ * A missing file is an object modelctl recorded no metadata for (older
+ * downloads): known, none. Every other failure is "cannot read": the page
+ * shows an info marker instead of companions, replacing any earlier value.
+ */
+export function companionsOutcome(reason: MetadataFailure): StoreCompanionsState {
+  return reason === "missing" ? null : COMPANIONS_UNREADABLE;
+}
+
+/** Companions of one store entry; see companionsOutcome for failures. */
+export async function readCompanions(rootReal: string, root: string, name: string): Promise<StoreCompanionsState> {
+  const read = await readObjectMetadata(rootReal, root, name);
+  if (!read.ok) return companionsOutcome(read.reason);
+  return companionsFromMetadata(read.raw);
+}
+
+/** Order-preserving map with at most `limit` calls in flight. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** Adds `companions` to every entry within COMPANIONS_DEADLINE_MS; never fails, never drops an entry. */
+export async function withCompanions(root: string, entries: ScannedModel[], deadlineMs = COMPANIONS_DEADLINE_MS): Promise<ScannedModel[]> {
+  const rootReal = await boundedResult(() => realpath(root));
+  if (!rootReal.ok) return entries.map((entry) => ({ ...entry, companions: COMPANIONS_UNREADABLE }));
+  const { promise: expiredP, resolve: expire } = Promise.withResolvers<StoreCompanionsState>();
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    expire(COMPANIONS_UNREADABLE);
+  }, deadlineMs);
+  timer.unref?.();
+  try {
+    return await mapLimit(entries, COMPANION_CONCURRENCY, async (entry) => ({
+      ...entry,
+      companions: expired
+        ? COMPANIONS_UNREADABLE // past the budget: don't start more I/O
+        : await Promise.race([
+            readCompanions(rootReal.value, root, entry.name).catch((): StoreCompanionsState => COMPANIONS_UNREADABLE),
+            expiredP,
+          ]),
+    }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Reads the store with the ADR-0004 fallback ladder:
  * catalog.json parse → live scan. Never writes anything.
  */
-export async function readStore(root: string): Promise<StoreRead> {
+export async function readStore(root: string, opts: { companions?: boolean } = {}): Promise<StoreRead> {
+  const read = await readStoreEntries(root);
+  // Inventory has no use for companions and its own store deadline (review F1).
+  if (opts.companions === false) return read;
+  return { ...read, entries: await withCompanions(root, read.entries) };
+}
+
+async function readStoreEntries(root: string): Promise<StoreRead> {
   const catalogPath = join(root, "catalog.json");
   const catalogText = await boundedOrNull(() => readFile(catalogPath, "utf8"));
   if (catalogText !== null) {

@@ -8,6 +8,19 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **Installed draft and mmproj companions on the Models page** (IR-269 /
+  IRI-155, follow-up to IR-264). The agent reads each active model's
+  `.modelctl.json` when it reports the store catalog (store-confined,
+  no-follow, 1 MiB cap, 2 s per read, 8 in flight, a 10 s budget per catalog) and sends an optional
+  `companions` field. The hub merges it into `model_meta.meta` (no
+  migration), and a frame without it keeps the stored value. `GET
+  /api/v1/models` rows expose `companions`. The detail drawer shows
+  `projector` and `draft` rows (kind, file, size, effective `--spec-type`),
+  and list rows show `+draft` / `+mmproj` chips. When the metadata can't be
+  read, both show an ⓘ marker ("Cannot read the model's companion info from
+  the NAS") in place of any earlier value. Rows appear once a node's agent
+  runs this bundle.
+
 - **Speculative draft companions for GGUF repos** (IR-264 / IRI-150,
   ADR-0020). IR-266 / IRI-152: the hub's quant listing recognises DSpark,
   DFlash and DFlash2 drafts as well as MTP (prefix or directory), never lists
@@ -41,6 +54,11 @@ All notable changes to Irori are recorded here. Format follows
   username (genericized to `.lan` hostnames, documentation-range addresses,
   and the `operator` user); public GitHub handles in attribution links are
   preserved, as is the full diff between consecutive milestones.
+
+### Changed
+
+- **Models list: the Runtime column is gone** (IR-269 / IRI-155). Runtime
+  stays visible in the runtime filter chips and the drawer's header chip.
 
 ### Fixed
 

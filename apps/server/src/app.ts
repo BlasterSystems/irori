@@ -39,7 +39,7 @@ import {
 import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
 import { HfQuantsError, type HfQuantsService } from "./hf-quants.js";
 import type { HfTokenService } from "./hf-token.js";
-import { planPlacement } from "@irori/core";
+import { planPlacement, storeCompanionsStateSchema, type StoreCompanionsState } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import { EVENT_FEED_CAP } from "./events-feed.js";
@@ -56,6 +56,17 @@ const NO_NODES_ONLINE: ReadonlySet<string> = new Set();
 const MAX_LLM_PORTS = 32;
 /** Models-page page size (M1 Models v2 spec: 25/page). */
 const MODELS_PAGE_SIZE = 25;
+
+/**
+ * IRI-155: `model_meta.meta.companions` as the API exposes it. Re-validated
+ * on the way out: the column is agent-supplied JSON. undefined = never
+ * reported (or not a valid value).
+ */
+export function storedCompanions(meta: unknown): StoreCompanionsState | undefined {
+  if (typeof meta !== "object" || meta === null || !("companions" in meta)) return undefined;
+  const parsed = storeCompanionsStateSchema.safeParse((meta as { companions: unknown }).companions);
+  return parsed.success ? parsed.data : undefined;
+}
 /** Placement reserve: keep this much disk free beyond the model itself. */
 const DEFAULT_RESERVE_BYTES = 20 * 1024 ** 3;
 
@@ -1887,11 +1898,16 @@ export function createApp(deps: AppDeps): Express {
     const rows = sort === "name" ? await jobs.listModels() : await jobs.listModelsByRecent();
     const filtered = q.length === 0 ? rows : rows.filter((m) => m.name.toLowerCase().includes(q) || m.repository.toLowerCase().includes(q));
     const total = filtered.length;
-    const models = filtered.slice((page - 1) * MODELS_PAGE_SIZE, page * MODELS_PAGE_SIZE).map((m) => ({
-      ...m,
-      firstSeenAt: m.firstSeenAt instanceof Date ? m.firstSeenAt.toISOString() : String(m.firstSeenAt ?? ""),
-      updatedAt: m.updatedAt instanceof Date ? m.updatedAt.toISOString() : String(m.updatedAt ?? ""),
-    }));
+    const models = filtered.slice((page - 1) * MODELS_PAGE_SIZE, page * MODELS_PAGE_SIZE).map((m) => {
+      const companions = storedCompanions(m.meta);
+      return {
+        ...m,
+        firstSeenAt: m.firstSeenAt instanceof Date ? m.firstSeenAt.toISOString() : String(m.firstSeenAt ?? ""),
+        updatedAt: m.updatedAt instanceof Date ? m.updatedAt.toISOString() : String(m.updatedAt ?? ""),
+        // IRI-155: absent = unknown (no agent has reported it yet).
+        ...(companions === undefined ? {} : { companions }),
+      };
+    });
     res.json({ page, pageSize: MODELS_PAGE_SIZE, total, models });
   });
 

@@ -286,6 +286,9 @@ html[data-tier="small"] .bs-perf .bs-perf__sep--model { display: none; }
   background: var(--paper-2); color: var(--ink-2); border: 1px solid var(--rule-2); font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5;
   padding: 8px 10px; border-radius: var(--radius-sm); display: none; pointer-events: none; z-index: 30; text-transform: none; letter-spacing: 0; }
 .tip:hover::after { display: block; }
+/* IRI-155: a focusable tip (tabindex) shows its text on keyboard focus too. */
+.tip:focus-visible::after { display: block; }
+.tip:focus-visible { color: var(--fg); }
 
 /* ── Buttons ───────────────────────────────────────────────────────── */
 /* v1.1: ink action (44px), quiet secondary = transparent + inset rule-2 ring,

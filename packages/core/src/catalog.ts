@@ -39,8 +39,77 @@ export function parseCatalog(json: string): Catalog {
   return parsed.data;
 }
 
-/** A live-scan entry (agent-side scan of active/ + manifests), same shape as a catalog model. */
-export type ScannedModel = CatalogModel;
+/**
+ * IRI-155: a companion path as recorded in the object's `.modelctl.json`:
+ * relative to the object dir, never absolute, never `..`, no `\` or NUL.
+ */
+export const companionPathSchema = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((p) => !p.startsWith("/") && !/[\\\0]/.test(p) && !p.split("/").some((s) => s === ".." || s === "." || s === ""), {
+    message: "companion path must be a plain relative path",
+  });
+
+/** modelctl `drafts.validate_spec_type` (lowercase, digits, '-', at most 32 chars). */
+export const DRAFT_SPEC_TYPE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+export const storeCompanionFileSchema = z.object({
+  path: companionPathSchema,
+  /** From the object's `files[]`; null when not recorded. */
+  bytes: z.number().int().nonnegative().nullable(),
+});
+
+/**
+ * Installed companions of a store model (ADR-0020), read from the published
+ * object, not the manifest.
+ */
+export const storeCompanionsSchema = z.object({
+  mmproj: storeCompanionFileSchema.nullable(),
+  /** The `mtp` companion key: any speculative draft (MTP, DSpark, DFlash). */
+  draft: storeCompanionFileSchema
+    .extend({
+      /** The object's recorded `draft_spec_type`; null = modelctl's kind default applies. */
+      specType: z.string().regex(DRAFT_SPEC_TYPE_PATTERN).nullable(),
+    })
+    .nullable(),
+});
+
+export type StoreCompanions = z.infer<typeof storeCompanionsSchema>;
+
+/** The agent could not read the installed object's metadata (timeout, I/O error, corrupt, refused). */
+export const companionsUnreadableSchema = z.object({ unreadable: z.literal(true) });
+export const COMPANIONS_UNREADABLE = { unreadable: true } as const;
+
+/**
+ * What a store entry reports: the companions, `null` (known, none: no
+ * companions recorded, or no metadata file at all), or `{unreadable: true}`.
+ * Unreadable REPLACES a previously stored value (owner decision, IRI-155):
+ * the page never shows companions it could not confirm on the last read.
+ */
+export const storeCompanionsStateSchema = z.union([storeCompanionsSchema, companionsUnreadableSchema]).nullable();
+export type StoreCompanionsState = z.infer<typeof storeCompanionsStateSchema>;
+
+export function isCompanionsUnreadable(c: StoreCompanionsState | undefined): c is { unreadable: true } {
+  return typeof c === "object" && c !== null && "unreadable" in c && c.unreadable === true;
+}
+
+/**
+ * Agent → hub store entry: a catalog model and optional companions. Kept apart
+ * from `catalogModelSchema` (which parses modelctl's own catalog.json) so a
+ * future modelctl catalog field can never fail Irori's catalog parse.
+ */
+export const storeModelSchema = catalogModelSchema.extend({
+  /**
+   * Absent = unknown (an agent older than IRI-155): the hub keeps what it
+   * stored. A shape this build doesn't know (a future agent) also degrades to
+   * unknown instead of failing, and so dropping, the whole catalog frame.
+   */
+  companions: storeCompanionsStateSchema.optional().catch(undefined),
+});
+
+/** A store entry as the agent reports it (catalog.json or a live scan of active/). */
+export type ScannedModel = z.infer<typeof storeModelSchema>;
 
 /** Store-sourced entry with provenance (catalog vs live scan vs node-local registration). */
 export interface StoreModelEntry {

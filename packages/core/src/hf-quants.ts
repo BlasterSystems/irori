@@ -26,6 +26,34 @@ export const HF_DRAFT_KINDS = ["mtp", "dspark", "dflash", "dflash2"] as const;
 export const hfDraftKindSchema = z.enum(HF_DRAFT_KINDS);
 export type HfDraftKind = z.infer<typeof hfDraftKindSchema>;
 
+// IRI-152 (modelctl drafts.py): longest prefix first so `dflash2-` never reads as `dflash`.
+const DRAFT_PREFIXES: ReadonlyArray<readonly [string, HfDraftKind]> = [
+  ["dflash2-", "dflash2"],
+  ["dflash-", "dflash"],
+  ["dspark-", "dspark"],
+  ["mtp-", "mtp"],
+];
+const DRAFT_DIRS: ReadonlySet<string> = new Set<string>(HF_DRAFT_KINDS);
+
+/**
+ * Mirrors modelctl `draft_kind`: basename prefix, else the nearest draft-named
+ * parent dir; null for non-GGUF paths and unrecognised names. IRI-155 moved it
+ * here from the server so the web can label installed drafts.
+ */
+export function draftKind(path: string): HfDraftKind | null {
+  if (!path.toLowerCase().endsWith(".gguf")) return null;
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const base = path.slice(cut + 1).toLowerCase();
+  for (const [prefix, kind] of DRAFT_PREFIXES) if (base.startsWith(prefix)) return kind;
+  const slash = path.lastIndexOf("/");
+  const parents = slash === -1 ? [] : path.slice(0, slash).split("/").reverse();
+  for (const part of parents) {
+    const lower = part.toLowerCase();
+    if (DRAFT_DIRS.has(lower)) return lower as HfDraftKind;
+  }
+  return null;
+}
+
 export const hfCompanionCandidateSchema = z.object({
   path: z.string().min(1),
   bytes: z.number().nonnegative().nullable(),

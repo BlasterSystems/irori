@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CACHE_USER_PATTERN } from "./node.js";
+import { storeCompanionsStateSchema } from "./catalog.js";
 
 /** Models v2 + placement + jobs API payload contracts (M4). */
 
@@ -11,6 +12,12 @@ export const modelEntrySchema = z.object({
   /** When Irori first saw the model — drives the default "recently added" sort. */
   firstSeenAt: z.string().optional().default(""),
   updatedAt: z.string().optional().default(""),
+  /**
+   * IRI-155: installed companions, null (none) or {unreadable: true}; absent =
+   * never reported. An unknown shape (a newer hub) reads as absent instead of
+   * failing the whole page parse.
+   */
+  companions: storeCompanionsStateSchema.optional().catch(undefined),
 });
 
 export const modelsPageSchema = z.object({
