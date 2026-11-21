@@ -15,6 +15,7 @@ import { createAgentHub, type AgentHub } from "./hub.js";
 import { createJobsService, type JobSettledEvent, type JobsService, type PushBlockedEvent } from "./jobs-service.js";
 import { createDownloadQueueService, type DownloadQueueService } from "./download-queue-service.js";
 import { createHfQuantsService } from "./hf-quants.js";
+import { createCardHintsService } from "./hf-card-hints.js";
 import { createHfTokenService, type HfTokenService } from "./hf-token.js";
 import { createCadenceService, type CadenceService } from "./cadence.js";
 import { createCostService, type CostService } from "./cost.js";
@@ -209,7 +210,7 @@ const app = createApp({
   setCadenceMs: (ms) => {
     activeCadenceMs = ms;
   },
-  hfQuants: createHfQuantsService(),
+  hfQuants: createHfQuantsService({ hints: createCardHintsService() }),
   version,
   tag: gitTag,
   staticDir: existsSync(WEB_DIST) ? WEB_DIST : null,

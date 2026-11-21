@@ -306,6 +306,8 @@ export const downloadQueue = pgTable(
     quantization: text("quantization"),
     /** Explicit MTP/draft companion path (modelctl --mtp); null = modelctl auto-selects. */
     mtp: text("mtp"),
+    /** IRI-152: llama.cpp --spec-type for the draft (modelctl draft_spec_type); null = derived from the draft kind. */
+    draftSpecType: text("draft_spec_type"),
     /** IRI-017: per-entry manifest replace (modelctl queue force); default off. */
     force: boolean("force").notNull().default(false),
     /** IRI-017 live progress from modelctl progress events; null until reported. */

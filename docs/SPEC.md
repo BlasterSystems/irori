@@ -291,7 +291,13 @@ flowchart LR
   **Expand quants** flow lists a repo's quantizations from the hub
   (`GET /api/v1/hf-quants`, grouped like modelctl) and expands the row into
   one entry per selected quant (`{repo tail}-{TAG}` names); unselected
-  quantizations are never downloaded.
+  quantizations are never downloaded. Speculative drafts (IR-264, ADR-0020):
+  MTP, DSpark, DFlash and DFlash2 drafts are companions, never quants. The
+  Expand panel preselects the draft named by the repo's run instructions
+  (README or an allow-listed docs page), else modelctl's default (single
+  root draft, else the Q8_0 one), shows its kind and where it was detected,
+  and sends `draftSpecType` only when the hint differs from the kind
+  default.
 
 ## 7. Serving orchestration
 

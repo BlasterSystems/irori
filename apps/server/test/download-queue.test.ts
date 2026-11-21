@@ -322,6 +322,26 @@ d("download queue (db integration)", () => {
     await settle(retried, "succeeded");
   });
 
+  it("persists, dispatches and retries draftSpecType; omits it when null (IRI-152)", async () => {
+    const entries = await queue.enqueueBatch({
+      downloads: [
+        { source: "org/sierra", quantization: "UD-Q4_K_XL", mtp: "dflash-s.gguf", draftSpecType: "draft-dflash" },
+        { source: "org/tango", quantization: "Q8_0" },
+      ],
+      jobs: 1,
+    });
+    expect(entries.map((e) => e.draftSpecType)).toEqual(["draft-dflash", null]);
+    const job = await jobsService.get(entries[0]!.jobId!);
+    const downloads = (job?.params as { downloads: Array<Record<string, unknown>> }).downloads;
+    const byName = new Map(downloads.map((d) => [d.name, d]));
+    expect(byName.get("sierra-UD-Q4_K_XL")).toMatchObject({ mtp: "dflash-s.gguf", draftSpecType: "draft-dflash" });
+    expect(byName.get("tango-Q8_0")).not.toHaveProperty("draftSpecType");
+    await settle(entries[0]!, "failed");
+    const retried = await queue.retry(entries[0]!.id);
+    expect(retried.draftSpecType).toBe("draft-dflash");
+    await settle(retried, "succeeded");
+  });
+
   it("reconciles a failed batch from the modelctl queue --json results document", async () => {
     // Busy the node first so both entries land in ONE batch (idle dispatches
     // the first add immediately).

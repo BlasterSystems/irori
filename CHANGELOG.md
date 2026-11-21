@@ -8,6 +8,24 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **Speculative draft companions for GGUF repos** (IR-264 / IRI-150,
+  ADR-0020). IR-266 / IRI-152: the hub's quant listing recognises DSpark,
+  DFlash and DFlash2 drafts as well as MTP (prefix or directory), never lists
+  drafts or `*imatrix*` files as quants, defaults to the single root Q8_0
+  draft when a repo has several, and reports each draft's `kind`. Downloads
+  carry an optional `draftSpecType` end to end (API → `download_queue`
+  migration 0029 → agent queue YAML `draft_spec_type`, emitted only when
+  set). Needs modelctl ≥ 0.25.0 (IR-265) for DSpark/DFlash selection and the
+  queue field. IR-267 / IRI-153: `/api/v1/hf-quants` adds `hints` parsed from
+  `llama-server` snippets in the repo README or up to 3 allow-listed doc
+  pages (`IRORI_HF_DOC_HOSTS`). For example, Inkling-2-Mini's draft and
+  `draft-dspark` come from unsloth.ai/docs. Hints only name files in the
+  repo's listing. IR-268 / IRI-154: the download modal's Expand panel
+  preselects the hinted draft (else modelctl's default), labels each
+  candidate with its kind (MTP / DSpark / DFlash), shows where the choice
+  came from and the `--spec-type` it will serve with, notes when the model
+  card's projector differs from modelctl's pick, and sends `draftSpecType`
+  only when the hint differs from the kind default.
 - **Public-release preparation** (no IRI — owner request): completed the OSS
   surface for making the repo public under Apache-2.0 — `NOTICE`,
   `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant),

@@ -134,9 +134,24 @@ it("ModelsView always queues downloads and shows the queue panel (IRI-014/015/01
     "openExpand(row)",
     "expandAddable",
     "dl-drawer", // modal spacing fix (brief §7)
+    // IRI-154: draft preselection from run hints, kind badges, provenance, spec type.
+    "preselectDraft(listing)",
+    "draftSpecTypeToSend(listing, expandMtp.value)",
+    "draftKindLabel(c.kind)",
+    'data-testid="draft-provenance"',
+    ":href=\"safeHref(expandProvenance.url)!\"",
+    'rel="noopener noreferrer"',
+    "draftSpecType: r.draftSpecType || undefined",
+    "mmprojNote(expandListing)",
+    // Review F1: the hint label renders even when the URL is not linkable.
+    "<template v-else>{{ expandProvenance.label }}</template>",
+    // Review F2: a slower earlier listing never lands on a later row.
+    "if (request !== expandRequest) return;",
   ]) {
     expect(modelsViewSource).toContain(token);
   }
+  // IRI-154: the draft field is kind-neutral now.
+  expect(modelsViewSource).not.toContain("MTP draft (companion)");
   // The dead unstyled table class is gone; DS .table everywhere.
   expect(modelsViewSource).not.toContain("hytable");
   // The legacy immediate-start path must be gone.

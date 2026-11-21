@@ -177,6 +177,13 @@
       "when": 1794841200000,
       "tag": "0028_bundle_sha256",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795246361383,
+      "tag": "0029_download_draft_spec_type",
+      "breakpoints": true
     }
   ]
 }

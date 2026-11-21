@@ -46,6 +46,8 @@ export interface DownloadEntry {
   runtime?: "auto" | "vllm" | "llama.cpp";
   mmproj?: string;
   mtp?: string;
+  /** IRI-152: modelctl queue `draft_spec_type` (llama.cpp --spec-type for the draft). */
+  draftSpecType?: string;
   force?: boolean;
 }
 
@@ -73,6 +75,7 @@ export function buildQueueYaml(entries: DownloadEntry[]): string {
     opt("runtime", e.runtime);
     opt("mmproj", e.mmproj);
     opt("mtp", e.mtp);
+    opt("draft_spec_type", e.draftSpecType);
     if (e.force === true) lines.push("    force: true");
   }
   return lines.join("\n") + "\n";

@@ -8,7 +8,7 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 
 - **Operator:** a single homelab owner; no application auth (trust boundary = the LAN).
 - **Managed fleet:** NVIDIA DGX Spark (GB10) units in head/worker/standalone roles, discrete-GPU Linux hosts, and one NAS node that owns the `modelctl` model store.
-- **External systems:** `modelctl` CLI (store engine, subprocess), Hugging Face Hub (downloads), inference engines (vLLM, llama.cpp, SGLang, …) probed read-only, LLM engines' Prometheus `/metrics` where published.
+- **External systems:** `modelctl` CLI (store engine, subprocess), Hugging Face Hub (downloads; the hub reads repo listings and READMEs for the download modal), allow-listed model documentation hosts (`unsloth.ai`, `docs.unsloth.ai`, `huggingface.co`; read-only run-hint fetches, ADR-0020), inference engines (vLLM, llama.cpp, SGLang, …) probed read-only, LLM engines' Prometheus `/metrics` where published.
 - **Trust boundaries:** the agent runs as root on nodes and connects **out** to the server with a per-node token; the server holds SSH credentials (AES-256-GCM) used only for bootstrap/fallback.
 
 ## Components

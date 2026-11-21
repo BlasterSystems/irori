@@ -8,6 +8,7 @@ import { fetchSetups } from "../serve";
 import { fmtBytes } from "../analytics";
 import { computeNasData } from "../overview";
 import { thresholds } from "../thresholds";
+import { draftKindLabel, draftSpecTypeToSend, effectiveDraftSpecType, hintProvenance, mmprojNote, preselectDraft, safeHref } from "../draft-choice";
 import CleanupDrawer from "./CleanupDrawer.vue";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
 import {
@@ -295,6 +296,8 @@ interface DownloadRow {
   quantization: string;
   /** Explicit MTP/draft companion; "" = modelctl auto-selects. */
   mtp: string;
+  /** IRI-154: llama.cpp --spec-type override from a run hint; "" = modelctl's kind default. */
+  draftSpecType: string;
   /** IRI-017: replace an existing manifest with different settings (modelctl force). */
   force: boolean;
 }
@@ -314,7 +317,7 @@ function parsePaste(): void {
     if (seen.has(key)) continue;
     seen.add(key);
     rowIdCounter += 1;
-    downloadRows.value.push({ id: rowIdCounter, source: line, name: "", quantization: "", mtp: "", force: false });
+    downloadRows.value.push({ id: rowIdCounter, source: line, name: "", quantization: "", mtp: "", draftSpecType: "", force: false });
   }
   downloadPaste.value = "";
 }
@@ -332,7 +335,11 @@ const expandListing = ref<HfQuantsResult | null>(null);
 const expandSelected = ref<Set<string>>(new Set());
 const expandMtp = ref("");
 
+/** Bumped per openExpand; a slower earlier listing must not land on a later row (IR-268 review F2). */
+let expandRequest = 0;
+
 async function openExpand(row: DownloadRow): Promise<void> {
+  const request = (expandRequest += 1);
   expandRowId.value = row.id;
   expandLoading.value = true;
   expandError.value = null;
@@ -340,14 +347,16 @@ async function openExpand(row: DownloadRow): Promise<void> {
   expandSelected.value = new Set();
   expandMtp.value = "";
   try {
-    expandListing.value = await fetchHfQuants(row.source.trim());
-    // Preselect modelctl's auto-companions only when it can auto-select.
-    const mtp = expandListing.value.companions.mtp;
-    expandMtp.value = mtp.default ?? "";
+    const listing = await fetchHfQuants(row.source.trim());
+    if (request !== expandRequest) return; // another row was expanded meanwhile
+    expandListing.value = listing;
+    // IRI-154: the repo's run instructions win, then modelctl's auto-pick.
+    expandMtp.value = preselectDraft(listing).mtp;
   } catch (err) {
+    if (request !== expandRequest) return;
     expandError.value = err instanceof Error ? err.message : String(err);
   } finally {
-    expandLoading.value = false;
+    if (request === expandRequest) expandLoading.value = false;
   }
 }
 
@@ -357,6 +366,9 @@ function closeExpand(): void {
   expandError.value = null;
   expandSelected.value = new Set();
 }
+
+/** IRI-154: where the draft hint came from (README / docs host), or null. */
+const expandProvenance = computed(() => (expandListing.value === null ? null : hintProvenance(expandListing.value)));
 
 /** Selected, non-ambiguous rows the expansion would add. */
 const expandAddable = computed(() => {
@@ -388,7 +400,15 @@ function applyExpand(): void {
       break;
     }
     rowIdCounter += 1;
-    additions.push({ id: rowIdCounter, source: row.source, name: `${base}-${q.tag}`, quantization: q.tag, mtp: expandMtp.value, force: false });
+    additions.push({
+      id: rowIdCounter,
+      source: row.source,
+      name: `${base}-${q.tag}`,
+      quantization: q.tag,
+      mtp: expandMtp.value,
+      draftSpecType: draftSpecTypeToSend(listing, expandMtp.value) ?? "",
+      force: false,
+    });
   }
   downloadRows.value.splice(index, 1, ...additions);
   closeExpand();
@@ -396,7 +416,7 @@ function applyExpand(): void {
 
 async function submitDownload(): Promise<void> {
   const rows = downloadRows.value
-    .map((r) => ({ source: r.source.trim(), name: r.name.trim(), quantization: r.quantization.trim(), mtp: r.mtp.trim(), force: r.force }))
+    .map((r) => ({ source: r.source.trim(), name: r.name.trim(), quantization: r.quantization.trim(), mtp: r.mtp.trim(), draftSpecType: r.draftSpecType.trim(), force: r.force }))
     .filter((r) => r.source.length > 0);
   if (rows.length === 0) return;
   downloadBusy.value = true;
@@ -411,6 +431,7 @@ async function submitDownload(): Promise<void> {
           name: r.name || undefined,
           quantization: r.quantization || undefined,
           mtp: r.mtp || undefined,
+          draftSpecType: r.draftSpecType || undefined,
           force: r.force || undefined,
           jobs: downloadJobs.value,
         }),
@@ -422,6 +443,7 @@ async function submitDownload(): Promise<void> {
           name: r.name || undefined,
           quantization: r.quantization || undefined,
           mtp: r.mtp || undefined,
+          draftSpecType: r.draftSpecType || undefined,
           force: r.force || undefined,
         })),
         jobs: downloadJobs.value,
@@ -1662,14 +1684,29 @@ onBeforeUnmount(() => {
                           </label>
                         </div>
                         <div class="field expand-companion">
-                          <label for="dl-mtp">MTP draft (companion)</label>
+                          <label for="dl-mtp">Draft model</label>
                           <select id="dl-mtp" v-model="expandMtp" class="select">
                             <option value="">Auto (modelctl default)</option>
-                            <option v-for="c in expandListing.companions.mtp.candidates" :key="c.path" :value="c.path">{{ c.path }}</option>
+                            <option v-for="c in expandListing.companions.mtp.candidates" :key="c.path" :value="c.path">{{ draftKindLabel(c.kind) }} · {{ c.path }}</option>
                           </select>
-                          <span v-if="expandListing.companions.mtp.candidates.length > 1 && expandListing.companions.mtp.default === null" class="stat__sub faint">
-                            multiple MTP files — modelctl requires an explicit choice
+                          <span v-if="expandListing.companions.mtp.candidates.length === 0" class="stat__sub faint">no speculative draft in this repo</span>
+                          <span v-else-if="expandMtp !== ''" class="stat__sub" data-testid="draft-provenance">
+                            <template v-if="expandProvenance && expandMtp === expandListing.hints?.draft"
+                              >from <a
+                                v-if="safeHref(expandProvenance.url)"
+                                class="bs-link"
+                                :href="safeHref(expandProvenance.url)!"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >{{ expandProvenance.label }}</a
+                              ><template v-else>{{ expandProvenance.label }}</template></template
+                            ><template v-else-if="expandMtp === expandListing.companions.mtp.default">modelctl default</template><template v-else>manual choice</template>
+                            · serves with <span class="mono">{{ effectiveDraftSpecType(expandListing, expandMtp) ? `--spec-type ${effectiveDraftSpecType(expandListing, expandMtp)}` : "no --spec-type" }}</span>
                           </span>
+                          <span v-if="expandListing.companions.mtp.candidates.length > 1 && expandListing.companions.mtp.default === null && expandMtp === ''" class="stat__sub faint">
+                            multiple draft files — modelctl requires an explicit choice
+                          </span>
+                          <span v-if="mmprojNote(expandListing)" class="stat__sub faint">{{ mmprojNote(expandListing) }}</span>
                           <span v-if="expandListing.companions.mmproj.candidates.length > 1 && expandListing.companions.mmproj.default === null" class="stat__sub faint">
                             multiple mmproj files without an f16 default — modelctl will refuse this entry
                           </span>

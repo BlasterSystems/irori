@@ -77,6 +77,18 @@ describe("download create contract", () => {
     expect(downloadCreateSchema.safeParse({ source: "org/m" }).success).toBe(true);
   });
 
+  it("passes draftSpecType through both shapes and enforces modelctl's grammar (IRI-152)", () => {
+    expect(downloadCreateSchema.parse({ source: "org/m", mtp: "dflash-m.gguf", draftSpecType: " draft-dflash " }).draftSpecType).toBe("draft-dflash");
+    const batch = downloadBatchCreateSchema.parse({ downloads: [{ source: "org/m", draftSpecType: "draft-dspark" }, { source: "org/n" }] });
+    expect(batch.downloads[0]).toMatchObject({ draftSpecType: "draft-dspark" });
+    expect(batch.downloads[1]).not.toHaveProperty("draftSpecType");
+    for (const bad of ["Draft-MTP", "a b", "--host", "x;rm", "a".repeat(33), "  "]) {
+      expect(downloadCreateSchema.safeParse({ source: "org/m", draftSpecType: bad }).success).toBe(false);
+    }
+    // Pre-0029 hub responses (no field) still parse.
+    expect(downloadQueueEntrySchema.shape.draftSpecType.safeParse(undefined).success).toBe(true);
+  });
+
   it("suffixes quantization into derived store names (IRI-016)", () => {
     expect(deriveDownloadName("unsloth/flint-GGUF", "UD-Q4_K_XL")).toBe("flint-GGUF-UD-Q4_K_XL");
     expect(deriveDownloadName("unsloth/flint-GGUF", "  ")).toBe("flint-GGUF");

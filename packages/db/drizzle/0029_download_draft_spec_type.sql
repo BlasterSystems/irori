@@ -1,0 +1,1 @@
+ALTER TABLE "download_queue" ADD COLUMN "draft_spec_type" text;

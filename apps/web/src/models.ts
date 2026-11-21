@@ -132,7 +132,7 @@ async function errorFrom(res: Response): Promise<string> {
  * entries as one `download-queue` batch whenever that node is idle.
  */
 export async function enqueueDownload(
-  input: { source: string; name?: string; quantization?: string; mtp?: string; force?: boolean; jobs: number },
+  input: { source: string; name?: string; quantization?: string; mtp?: string; draftSpecType?: string; force?: boolean; jobs: number },
   signal?: AbortSignal,
 ): Promise<DownloadQueueEntry> {
   const res = await fetch("/api/v1/downloads", {
@@ -157,7 +157,7 @@ export async function fetchDownloadQueue(signal?: AbortSignal): Promise<Download
 
 /** IRI-015: queue N downloads in ONE atomic submission. */
 export async function enqueueDownloadsBatch(
-  input: { downloads: Array<{ source: string; name?: string; quantization?: string; mtp?: string; force?: boolean }>; jobs: number },
+  input: { downloads: Array<{ source: string; name?: string; quantization?: string; mtp?: string; draftSpecType?: string; force?: boolean }>; jobs: number },
   signal?: AbortSignal,
 ): Promise<DownloadQueueEntry[]> {
   const res = await fetch("/api/v1/downloads", {

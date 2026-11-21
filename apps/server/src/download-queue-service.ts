@@ -87,6 +87,7 @@ export function toDownloadDto(row: Row): DownloadQueueEntry {
     name: row.name,
     quantization: row.quantization,
     mtp: row.mtp,
+    draftSpecType: row.draftSpecType,
     force: row.force,
     bytesDone: row.bytesDone,
     bytesTotal: row.bytesTotal,
@@ -204,6 +205,8 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
           name: r.name,
           ...(r.quantization === null ? {} : { quantization: r.quantization }),
           ...(r.mtp === null ? {} : { mtp: r.mtp }),
+          // IRI-152: omitted when null so modelctl pins without the field never see it.
+          ...(r.draftSpecType === null ? {} : { draftSpecType: r.draftSpecType }),
           ...(r.force ? { force: true } : {}),
         })),
         jobs: batchJobs,
@@ -314,6 +317,7 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
           name,
           quantization: parsed.data.quantization,
           mtp: parsed.data.mtp,
+          draftSpecType: parsed.data.draftSpecType,
           force: parsed.data.force === true,
           jobs: parsed.data.jobs,
         })
@@ -339,6 +343,7 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
             name: e.name ?? deriveDownloadName(e.source, e.quantization),
             quantization: e.quantization,
             mtp: e.mtp,
+            draftSpecType: e.draftSpecType,
             force: e.force === true,
             jobs: parsed.data.jobs,
           })),

@@ -1,10 +1,12 @@
 import {
   hfModelInfoSchema,
+  type HfDraftKind,
   type HfFile,
   type HfQuantGroup,
   type HfQuantsResult,
   HfQuantsError,
 } from "@irori/core";
+import type { CardHintsService } from "./hf-card-hints.js";
 
 export { HfQuantsError };
 
@@ -15,7 +17,9 @@ export { HfQuantsError };
  * (shard regex, mmproj/MTP exclusions, (dir, base, count) keys), plus the
  * companion candidates modelctl's `_select_mmproj`/`_select_mtp` would
  * consider. The grouping port is pinned by fixture tests built from the real
- * unsloth/flint-GGUF and unsloth/gemma-4-31B-it-GGUF file lists.
+ * unsloth/flint-GGUF and unsloth/gemma-4-31B-it-GGUF file lists, and (IRI-152)
+ * Inkling-2-Mini (dspark), unsloth + bartowski gemma-4-26B (multi-draft,
+ * imatrix). Draft rules mirror modelctl `drafts.py`.
  */
 
 const SHARD_RE = /^(.+)-(\d{5})-of-(\d{5})\.gguf$/i;
@@ -27,19 +31,45 @@ const parentDir = (p: string): string => {
   return i === -1 ? "" : p.slice(0, i);
 };
 
-/** Mirrors modelctl generation.py `_is_mtp_artifact`: `mtp-` basename or a `mtp` parent dir. */
-export function isMtpArtifact(path: string): boolean {
-  if (!isGguf(path)) return false;
-  return (
-    baseName(path).toLowerCase().startsWith("mtp-") ||
-    parentDir(path)
-      .split("/")
-      .some((part) => part.toLowerCase() === "mtp")
-  );
+// IRI-152 (modelctl drafts.py): longest prefix first so `dflash2-` never reads as `dflash`.
+const DRAFT_PREFIXES: ReadonlyArray<readonly [string, HfDraftKind]> = [
+  ["dflash2-", "dflash2"],
+  ["dflash-", "dflash"],
+  ["dspark-", "dspark"],
+  ["mtp-", "mtp"],
+];
+const DRAFT_DIRS: ReadonlySet<string> = new Set<HfDraftKind>(["mtp", "dspark", "dflash", "dflash2"]);
+const Q8_0_RE = /(?:^|[-_.])q8_0(?:[-_.]|$)/;
+
+/** Mirrors modelctl `draft_kind`: basename prefix, else the nearest draft-named parent dir. */
+export function draftKind(path: string): HfDraftKind | null {
+  if (!isGguf(path)) return null;
+  const base = baseName(path).toLowerCase();
+  for (const [prefix, kind] of DRAFT_PREFIXES) if (base.startsWith(prefix)) return kind;
+  const parts = parentDir(path).split("/").reverse();
+  for (const part of parts) {
+    const lower = part.toLowerCase();
+    if (DRAFT_DIRS.has(lower)) return lower as HfDraftKind;
+  }
+  return null;
+}
+
+export function isDraftArtifact(path: string): boolean {
+  return draftKind(path) !== null;
+}
+
+/** Importance-matrix calibration data some repos ship as `*.gguf` (modelctl `is_imatrix_artifact`). */
+export function isImatrixArtifact(path: string): boolean {
+  return baseName(path).toLowerCase().includes("imatrix");
 }
 
 export function isMmprojArtifact(path: string): boolean {
   return isGguf(path) && baseName(path).toLowerCase().startsWith("mmproj");
+}
+
+/** Never a quantization group: projectors, drafts, imatrix calibration files. */
+function isQuantExcluded(path: string): boolean {
+  return isMmprojArtifact(path) || isDraftArtifact(path) || isImatrixArtifact(path);
 }
 
 interface RawGroup {
@@ -58,17 +88,25 @@ function companionInfo(
   preferF16: ((stem: string) => boolean) | null,
 ): HfQuantsResult["companions"]["mmproj"] {
   const list = candidates
-    .map((f) => ({ path: f.path, bytes: f.bytes }))
+    .map((f) => (preferF16 === null ? { path: f.path, bytes: f.bytes, kind: draftKind(f.path) } : { path: f.path, bytes: f.bytes }))
     .sort((a, b) => a.path.localeCompare(b.path));
   let fallback: string | null = null;
   if (preferF16 !== null) {
     const f16 = list.filter((c) => preferF16(baseName(c.path).replace(/\.gguf$/i, "")));
     if (f16.length === 1) fallback = f16[0]!.path;
   } else {
-    // modelctl `_select_mtp`: the single ROOT-LEVEL mtp-*.gguf is the default.
+    // modelctl `_select_mtp`: the single ROOT-LEVEL draft is the default;
+    // among several root drafts, the single Q8_0 one (IRI-152).
     const root = list.filter((c) => parentDir(c.path) === "");
     if (root.length === 1) fallback = root[0]!.path;
+    else if (root.length > 1) {
+      const q8 = root.filter((c) => Q8_0_RE.test(baseName(c.path).replace(/\.gguf$/i, "").toLowerCase()));
+      if (q8.length === 1) fallback = q8[0]!.path;
+    }
   }
+  // modelctl `_select_artifact`: a lone candidate is always auto-selected,
+  // even nested or non-f16 (IR-266 review F3).
+  if (fallback === null && list.length === 1) fallback = list[0]!.path;
   return { candidates: list, default: fallback };
 }
 
@@ -83,7 +121,7 @@ export function groupRepoFiles(repo: string, files: HfFile[]): HfQuantsResult {
   const groups: RawGroup[] = [];
   const byKey = new Map<string, RawGroup>();
   for (const file of ggufs) {
-    if (isMmprojArtifact(file.path) || isMtpArtifact(file.path)) continue;
+    if (isQuantExcluded(file.path)) continue;
     const dir = parentDir(file.path);
     const base = baseName(file.path);
     const shard = SHARD_RE.exec(base);
@@ -124,7 +162,7 @@ export function groupRepoFiles(repo: string, files: HfFile[]): HfQuantsResult {
   });
   const otherBasenames = (except: RawGroup): string[] =>
     ggufs
-      .filter((f) => !isMmprojArtifact(f.path) && !isMtpArtifact(f.path))
+      .filter((f) => !isQuantExcluded(f.path))
       .filter((f) => !except.files.some((g) => g.path === f.path))
       .map((f) => baseName(f.path).toLowerCase());
 
@@ -161,7 +199,7 @@ export function groupRepoFiles(repo: string, files: HfFile[]): HfQuantsResult {
         files.filter((f) => isMmprojArtifact(f.path)),
         (stem) => /(?:^|[-_.])f16(?:[-_.]|$)/.test(stem.toLowerCase()),
       ),
-      mtp: companionInfo(files.filter((f) => isMtpArtifact(f.path)), null),
+      mtp: companionInfo(files.filter((f) => isDraftArtifact(f.path)), null),
     },
   };
 }
@@ -174,7 +212,8 @@ export interface HfQuantsService {
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,94}\/[A-Za-z0-9][A-Za-z0-9._-]{0,94}$/;
 
 export function createHfQuantsService(
-  opts: { fetchImpl?: typeof fetch; hfBase?: string } = {},
+  /** IRI-153: `hints` adds README/doc run hints to GGUF listings; omitted = no hints (tests, degraded). */
+  opts: { fetchImpl?: typeof fetch; hfBase?: string; hints?: CardHintsService } = {},
 ): HfQuantsService {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const hfBase = opts.hfBase ?? "https://huggingface.co";
@@ -221,7 +260,10 @@ export function createHfQuantsService(
       if (files.length === 0) {
         throw new HfQuantsError(`repository ${repo} exposed no files`, 502);
       }
-      return groupRepoFiles(repo, files);
+      const result = groupRepoFiles(repo, files);
+      if (opts.hints === undefined || result.quants.length === 0) return result;
+      // Best effort by contract: the hints service never throws.
+      return { ...result, hints: await opts.hints.hints(repo, parsed.data.sha ?? "main", files, token) };
     },
   };
 }
