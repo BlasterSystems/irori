@@ -21,15 +21,22 @@ export const hfQuantGroupSchema = z.object({
 });
 export type HfQuantGroup = z.infer<typeof hfQuantGroupSchema>;
 
+/** IRI-152: speculative draft kinds (modelctl drafts.py `draft_kind`). */
+export const HF_DRAFT_KINDS = ["mtp", "dspark", "dflash", "dflash2"] as const;
+export const hfDraftKindSchema = z.enum(HF_DRAFT_KINDS);
+export type HfDraftKind = z.infer<typeof hfDraftKindSchema>;
+
 export const hfCompanionCandidateSchema = z.object({
   path: z.string().min(1),
   bytes: z.number().nonnegative().nullable(),
+  /** IRI-152: draft kind for `companions.mtp` candidates; absent for mmproj and on older hubs. */
+  kind: hfDraftKindSchema.nullish(),
 });
 export type HfCompanionCandidate = z.infer<typeof hfCompanionCandidateSchema>;
 
 export const hfCompanionInfoSchema = z.object({
   candidates: z.array(hfCompanionCandidateSchema),
-  /** modelctl's auto-pick (single f16 mmproj / single root mtp-*.gguf); null = must choose explicitly. */
+  /** modelctl's auto-pick (single f16 mmproj / single root draft, else the single root Q8_0 draft); null = must choose explicitly. */
   default: z.string().nullable(),
 });
 export type HfCompanionInfo = z.infer<typeof hfCompanionInfoSchema>;

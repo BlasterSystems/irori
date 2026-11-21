@@ -30,6 +30,15 @@ describe("buildQueueYaml", () => {
     expect(yaml).toContain('    mtp: "MTP/mtp-gemma-4-31B-it-Q8_0.gguf"');
   });
 
+  it("emits draft_spec_type only when set (IRI-152)", () => {
+    const yaml = buildQueueYaml([
+      { source: "org/m-GGUF", name: "m", mtp: "dflash-m.gguf", draftSpecType: "draft-dflash" },
+      { source: "org/n-GGUF", name: "n" },
+    ]);
+    expect(yaml).toContain('    draft_spec_type: "draft-dflash"');
+    expect(yaml.match(/draft_spec_type/g)).toHaveLength(1);
+  });
+
   it("quotes scalars so newlines cannot inject extra entries", () => {
     const yaml = buildQueueYaml([{ source: "x\n  - source: evil" }]);
     const parsed = yaml.split("\n").filter((l) => l.trim().startsWith("-"));

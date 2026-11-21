@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/** modelctl's draft spec-type grammar (drafts.py `_SPEC_TYPE_RE`). */
+export const DRAFT_SPEC_TYPE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
 /**
  * Download queue (IRI-014): adding a download from HF always forms a
  * server-side queue entry. Entries dispatch to the store node (NAS-preferred,
@@ -17,6 +20,11 @@ export const downloadCreateSchema = z.object({
   quantization: z.string().trim().min(1).max(64).optional(),
   /** Explicit MTP/draft companion path (modelctl --mtp); absent = modelctl auto-selects. */
   mtp: z.string().trim().min(1).max(255).optional(),
+  /**
+   * IRI-152: llama.cpp --spec-type for the draft (modelctl draft_spec_type);
+   * absent = modelctl derives it from the draft kind (mtp/dspark).
+   */
+  draftSpecType: z.string().trim().regex(DRAFT_SPEC_TYPE_RE, "draftSpecType must be lowercase letters, digits and '-' (max 32)").optional(),
   /** IRI-017: replace an existing manifest with different settings (modelctl per-entry force). */
   force: z.boolean().optional(),
   /** modelctl batch concurrency inside one dispatch (1–16). */
@@ -31,7 +39,7 @@ export const DOWNLOAD_BATCH_MAX_ENTRIES = 50;
 /** Bulk submission (IRI-015): N entries + one batch concurrency value. */
 export const downloadBatchCreateSchema = z.object({
   downloads: z
-    .array(downloadCreateSchema.pick({ source: true, name: true, quantization: true, mtp: true, force: true }))
+    .array(downloadCreateSchema.pick({ source: true, name: true, quantization: true, mtp: true, draftSpecType: true, force: true }))
     .min(1)
     .max(DOWNLOAD_BATCH_MAX_ENTRIES),
   jobs: z.number().int().min(1).max(16).default(4),
@@ -51,6 +59,8 @@ export const downloadQueueEntrySchema = z.object({
   // IRI-016: absent on pre-0015 server responses — nullish keeps old hubs parseable.
   quantization: z.string().nullish(),
   mtp: z.string().nullish(),
+  /** IRI-152: absent on pre-0029 server responses. */
+  draftSpecType: z.string().nullish(),
   /** IRI-017: per-entry manifest replace (modelctl force). */
   force: z.boolean().nullish(),
   /** IRI-017 progress (modelctl progress events; null until the pinned modelctl emits them). */

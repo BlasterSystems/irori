@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHfQuantsService, groupRepoFiles, isMtpArtifact } from "../src/hf-quants.js";
+import { createHfQuantsService, draftKind, groupRepoFiles, isDraftArtifact } from "../src/hf-quants.js";
 import { HfQuantsError } from "@irori/core";
 
 /**
@@ -88,7 +88,7 @@ describe("groupRepoFiles (gemma-4-31B-it-GGUF real layout)", () => {
     expect(tags).toHaveLength(4); // 3 root + BF16 set
     for (const q of result.quants) {
       for (const f of q.files) {
-        expect(isMtpArtifact(f)).toBe(false);
+        expect(isDraftArtifact(f)).toBe(false);
         expect(f.startsWith("mmproj")).toBe(false);
       }
     }
@@ -104,6 +104,121 @@ describe("groupRepoFiles (gemma-4-31B-it-GGUF real layout)", () => {
       "MTP/mtp-gemma-4-31B-it-F16.gguf",
       "MTP/mtp-gemma-4-31B-it-Q8_0.gguf",
     ]);
+  });
+});
+
+/**
+ * IRI-152: real layouts from the HF API (2026-11-21), mirrored 1:1 by the
+ * modelctl fixtures in tests/test_drafts.py so the two ports cannot drift.
+ */
+const INKLING_FILES = [
+  "README.md",
+  "Inkling-2-Mini-UD-IQ1_M.gguf",
+  "Inkling-2-Mini-UD-Q4_K_M.gguf",
+  "Inkling-2-Mini-UD-Q4_K_XL.gguf",
+  "Inkling-2-Mini-UD-Q8_K_XL.gguf",
+  "Mainline_Support/Inkling-2-Mini-UD-Q4_K_XL.gguf_file",
+  "Mainline_Support/README.md",
+  "dspark-Inkling-2-Mini-Q8_0.gguf",
+  "dspark/README.md",
+  "dspark/dspark-Inkling-2-Mini-BF16.gguf",
+  "mmproj-BF16.gguf",
+  "mmproj-F16.gguf",
+  "mmproj-F32.gguf",
+].map((path) => ({ path, bytes: null }));
+const UNSLOTH_GEMMA26_FILES = [
+  "BF16/gemma-4-26B-A4B-it-BF16-00001-of-00002.gguf",
+  "BF16/gemma-4-26B-A4B-it-BF16-00002-of-00002.gguf",
+  "MTP/mtp-gemma-4-26B-A4B-it-BF16.gguf",
+  "MTP/mtp-gemma-4-26B-A4B-it-F16.gguf",
+  "MTP/mtp-gemma-4-26B-A4B-it-Q8_0.gguf",
+  "gemma-4-26B-A4B-it-Q8_0.gguf",
+  "gemma-4-26B-A4B-it-UD-Q4_K_XL.gguf",
+  "imatrix_unsloth.gguf_file",
+  "mmproj-BF16.gguf",
+  "mmproj-F16.gguf",
+  "mmproj-F32.gguf",
+  "mtp-gemma-4-26B-A4B-it.gguf",
+].map((path) => ({ path, bytes: null }));
+const BARTOWSKI_GEMMA26_FILES = [
+  "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+  "google_gemma-4-26B-A4B-it-Q8_0.gguf",
+  "google_gemma-4-26B-A4B-it-bf16/google_gemma-4-26B-A4B-it-bf16-00001-of-00002.gguf",
+  "google_gemma-4-26B-A4B-it-bf16/google_gemma-4-26B-A4B-it-bf16-00002-of-00002.gguf",
+  "google_gemma-4-26B-A4B-it-imatrix.gguf",
+  "mmproj-google_gemma-4-26B-A4B-it-bf16.gguf",
+  "mmproj-google_gemma-4-26B-A4B-it-f16.gguf",
+  "mtp-google_gemma-4-26B-A4B-it-Q4_0.gguf",
+  "mtp-google_gemma-4-26B-A4B-it-Q8_0.gguf",
+].map((path) => ({ path, bytes: null }));
+
+describe("draftKind (modelctl drafts.py parity)", () => {
+  it.each([
+    ["mtp-gemma.gguf", "mtp"],
+    ["MTP/gemma-4-12B-it-MTP-Q8_0.gguf", "mtp"],
+    ["dspark-Inkling-2-Mini-Q8_0.gguf", "dspark"],
+    ["dspark/dspark-Inkling-2-Mini-BF16.gguf", "dspark"],
+    ["DSPARK-x.gguf", "dspark"],
+    ["dflash-Muse-Glimmer-30B-Q4_K_M.gguf", "dflash"],
+    ["dflash2-model-Q8_0.gguf", "dflash2"],
+    ["DFlash2/model-Q8_0.gguf", "dflash2"],
+    ["gemma-4-Q4_K_M.gguf", null],
+    ["dspark/README.md", null],
+    ["dsparkle-model.gguf", null],
+    ["BF16/model-BF16-00001-of-00002.gguf", null],
+  ])("%s → %s", (path, kind) => {
+    expect(draftKind(path)).toBe(kind);
+  });
+});
+
+describe("groupRepoFiles (IRI-152 draft companions, real layouts)", () => {
+  it("Inkling-2-Mini: dspark files are drafts, not quants; the root dspark is the default", () => {
+    const r = groupRepoFiles("unsloth/Inkling-2-Mini-GGUF", INKLING_FILES);
+    const tags = r.quants.map((q) => q.tag);
+    expect(tags).toEqual(["IQ1_M", "Q4_K_M", "Q4_K_XL", "Q8_K_XL"]);
+    for (const q of r.quants) for (const f of q.files) expect(isDraftArtifact(f)).toBe(false);
+    expect(r.companions.mtp.default).toBe("dspark-Inkling-2-Mini-Q8_0.gguf");
+    expect(r.companions.mtp.candidates).toEqual([
+      { path: "dspark-Inkling-2-Mini-Q8_0.gguf", bytes: null, kind: "dspark" },
+      { path: "dspark/dspark-Inkling-2-Mini-BF16.gguf", bytes: null, kind: "dspark" },
+    ]);
+    expect(r.companions.mmproj.default).toBe("mmproj-F16.gguf");
+    expect(r.companions.mmproj.candidates.every((c) => !("kind" in c))).toBe(true);
+  });
+
+  it("unsloth gemma-4-26B: unchanged — root mtp default, MTP/ variants explicit", () => {
+    const r = groupRepoFiles("unsloth/gemma-4-26B-A4B-it-GGUF", UNSLOTH_GEMMA26_FILES);
+    expect(r.quants.map((q) => q.tag).sort()).toEqual(["BF16", "Q4_K_XL", "Q8_0"]);
+    expect(r.companions.mtp.default).toBe("mtp-gemma-4-26B-A4B-it.gguf");
+    expect(r.companions.mtp.candidates.map((c) => c.kind)).toEqual(["mtp", "mtp", "mtp", "mtp"]);
+  });
+
+  it("bartowski gemma-4-26B: the single root Q8_0 draft wins; imatrix is not a quant", () => {
+    const r = groupRepoFiles("bartowski/google_gemma-4-26B-A4B-it-GGUF", BARTOWSKI_GEMMA26_FILES);
+    expect(r.companions.mtp.default).toBe("mtp-google_gemma-4-26B-A4B-it-Q8_0.gguf");
+    expect(r.companions.mmproj.default).toBe("mmproj-google_gemma-4-26B-A4B-it-f16.gguf");
+    for (const q of r.quants) for (const f of q.files) expect(f).not.toContain("imatrix");
+    expect(r.quants).toHaveLength(3); // Q4_K_M, Q8_0, bf16 set
+    expect(r.quants.every((q) => !q.ambiguous)).toBe(true);
+  });
+
+  it("a lone nested draft or non-f16 mmproj is still modelctl's auto-pick (review F3)", () => {
+    const r = groupRepoFiles("org/m-GGUF", [
+      { path: "m-Q4_K_M.gguf", bytes: null },
+      { path: "dspark/m-BF16.gguf", bytes: null },
+      { path: "mmproj-BF16.gguf", bytes: null },
+    ]);
+    expect(r.companions.mtp.default).toBe("dspark/m-BF16.gguf");
+    expect(r.companions.mmproj.default).toBe("mmproj-BF16.gguf");
+  });
+
+  it("several root drafts without a single Q8_0 leave the choice explicit", () => {
+    const r = groupRepoFiles("org/m-GGUF", [
+      { path: "m-Q4_K_M.gguf", bytes: null },
+      { path: "mtp-m-Q4_0.gguf", bytes: null },
+      { path: "mtp-m-F16.gguf", bytes: null },
+    ]);
+    expect(r.companions.mtp.default).toBeNull();
   });
 });
 

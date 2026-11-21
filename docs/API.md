@@ -42,20 +42,29 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 
 ## Download queue (IRI-014, ADR-0009)
 
-- `POST /api/v1/downloads` `{source, name?, quantization?, mtp?, force?,
-  jobs? (1–16, default 4)}` — **always queues**: `202 {entry}` with the row in
+- `POST /api/v1/downloads` `{source, name?, quantization?, mtp?,
+  draftSpecType?, force?, jobs? (1–16, default 4)}` — **always queues**: `202 {entry}` with the row in
   `pending` (or already `running` when the store node was idle and the batch
   dispatched immediately). Adding a download NEVER starts a one-off per-node
   job and never returns 409. Invalid payload → `400`; degraded DB → `503`.
   IRI-016: `quantization` is the modelctl `--quantization` substring (GGUF
   repos with several quants require it); `mtp` is an explicit draft
-  companion path (modelctl otherwise auto-selects the single root
-  `mtp-*.gguf`). A quantized entry without an explicit name derives
+  companion path (modelctl otherwise auto-selects the single root draft, or
+  the single root Q8_0 draft when there are several). IRI-152 (ADR-0020):
+  drafts are `mtp-`/`dspark-`/`dflash-`/`dflash2-` files or files under a
+  matching directory; `draftSpecType` (`^[a-z0-9][a-z0-9-]{0,31}$`) is the
+  llama.cpp `--spec-type` override passed as modelctl `draft_spec_type`, and
+  is omitted from the agent payload when absent (modelctl derives it from the
+  draft kind). Entries echo `draftSpecType` (null when unset). **Requires
+  modelctl ≥ 0.25.0 and an IRI-152 agent:** an older modelctl rejects the
+  unknown queue key and fails the whole dispatched batch (co-batched entries
+  included); an older agent drops it silently. Clients send it only when it
+  differs from the draft kind's default. A quantized entry without an explicit name derives
   `{repo tail}-{TAG}`. IRI-017: `force` opts the entry into replacing an
   existing manifest with different settings (modelctl per-entry `force`;
   without it a conflicting manifest fails the batch preflight).
 - **Bulk form (IRI-015)**: `POST /api/v1/downloads`
-  `{downloads: [{source, name?, quantization?, mtp?, force?}…] (1–50),
+  `{downloads: [{source, name?, quantization?, mtp?, draftSpecType?, force?}…] (1–50),
   jobs?}` → `202 {entries}` (same per-row states). Atomic: any invalid entry
   rejects the whole submission with `400` and nothing lands. Single-row bulk
   submissions are equivalent to the single shape.
@@ -87,7 +96,10 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   default}}}`. `tag` is a substring needle unique across the repo's GGUF
   groups (pass it as `quantization`); `ambiguous` rows cannot be selected.
   Companion `default` is modelctl's auto-pick (single f16 mmproj / single
-  root `mtp-*.gguf`); null means modelctl needs an explicit choice.
+  root draft, else the single root Q8_0 draft, else the only candidate);
+  null means modelctl needs an explicit choice. IRI-152: `companions.mtp.candidates[].kind` is the draft
+  kind (`mtp|dspark|dflash|dflash2`); drafts and `*imatrix*` files never
+  appear in `quants`.
   Errors: `400` invalid repo id, `404` missing/not public, `502` HF
   unreachable or unusable response. No store required (works degraded).
   IRI-019: when a global HF token is configured, the upstream request carries
