@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type TransferProgress } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -224,11 +224,11 @@ export interface JobsService {
    * without a restart still has live jobs the old agent cannot report).
    */
   settleOrphansOnHello(nodeId: string, activeJobs: Array<{ jobId: string }> | undefined): Promise<void>;
-  onCatalog(nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>): Promise<void>;
+  onCatalog(nodeId: string, source: "catalog" | "scan", entries: ScannedModel[]): Promise<void>;
   /** NAS catalog entries from the model_meta cache, sorted by name. */
-  listModels(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date }>>;
+  listModels(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date; meta: unknown }>>;
   /** Same rows ordered by first_seen_at descending (recently-added default). */
-  listModelsByRecent(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date }>>;
+  listModelsByRecent(): Promise<Array<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date; meta: unknown }>>;
   findModel(name: string): Promise<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date } | null>;
   /** Node ids where a succeeded transfer (sync/download/push source) left the model. */
   presentNodesFor(name: string): Promise<string[]>;
@@ -664,12 +664,22 @@ export function createJobsService(
     async onCatalog(nodeId, source, entries) {
       void nodeId;
       for (const e of entries) {
+        // IRI-155: `companions` absent = an older agent: keep whatever is
+        // stored. Present (companions, null, or {unreadable}) = this read's
+        // result: it replaces the stored key.
+        const known = e.companions !== undefined;
         await db
           .insert(modelMeta)
-          .values({ name: e.name, repository: e.repository, runtime: e.runtime, bytes: e.bytes, meta: { source } })
+          .values({ name: e.name, repository: e.repository, runtime: e.runtime, bytes: e.bytes, meta: known ? { source, companions: e.companions } : { source } })
           .onConflictDoUpdate({
             target: modelMeta.name,
-            set: { repository: e.repository, runtime: e.runtime, bytes: e.bytes, updatedAt: new Date() },
+            set: {
+              repository: e.repository,
+              runtime: e.runtime,
+              bytes: e.bytes,
+              updatedAt: new Date(),
+              ...(known ? { meta: sql`${modelMeta.meta} || ${JSON.stringify({ companions: e.companions })}::jsonb` } : {}),
+            },
           });
       }
       // A source=catalog frame carries the agent's COMPLETE store catalog

@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { CatalogFormatError, catalogToEntries, parseCatalog, planPlacement, type PlacementNode } from "../src/catalog.js";
+import {
+  CatalogFormatError,
+  catalogModelSchema,
+  catalogToEntries,
+  parseCatalog,
+  planPlacement,
+  storeCompanionsSchema,
+  storeCompanionsStateSchema,
+  isCompanionsUnreadable,
+  type PlacementNode,
+} from "../src/catalog.js";
+import { catalogMsgSchema } from "../src/job-messages.js";
+import { modelEntrySchema, modelsPageSchema } from "../src/model-api.js";
+import { draftKind } from "../src/hf-quants.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -103,5 +116,77 @@ describe("planPlacement", () => {
       .toEqual({ action: "unavailable", reason: expect.stringContaining("not modelctl-capable") });
     expect(planPlacement({ availableOn: [], target: head, reserveBytes: 0 }))
       .toEqual({ action: "unavailable", reason: expect.stringContaining("not present") });
+  });
+});
+
+describe("store companions wire (IRI-155)", () => {
+  const base = { name: "ink", runtime: "llama.cpp", repository: "o/ink", bytes: 1 };
+  const companions = {
+    mmproj: { path: "mmproj-F16.gguf", bytes: 10 },
+    draft: { path: "dspark-ink-Q8_0.gguf", bytes: 5, specType: null },
+  };
+
+  it("keeps old frames and rows parsing: companions is optional, absent stays absent", () => {
+    const frame = catalogMsgSchema.parse({ type: "catalog", source: "catalog", entries: [base] });
+    expect(frame.entries[0]).toEqual(base);
+    expect("companions" in frame.entries[0]!).toBe(false);
+    const page = modelsPageSchema.parse({ page: 1, pageSize: 25, total: 1, models: [base] });
+    expect(page.models[0]!.companions).toBeUndefined();
+  });
+
+  it("carries companions and known-none (null) through the frame and the API row", () => {
+    const frame = catalogMsgSchema.parse({ type: "catalog", source: "scan", entries: [{ ...base, companions }, { ...base, name: "v", companions: null }] });
+    expect(frame.entries[0]!.companions).toEqual(companions);
+    expect(frame.entries[1]!.companions).toBeNull();
+    expect(modelEntrySchema.parse({ ...base, companions }).companions).toEqual(companions);
+  });
+
+  it("carries the unreadable state, and tells it apart from companions", () => {
+    const frame = catalogMsgSchema.parse({ type: "catalog", source: "catalog", entries: [{ ...base, companions: { unreadable: true } }] });
+    expect(frame.entries[0]!.companions).toEqual({ unreadable: true });
+    expect(isCompanionsUnreadable(frame.entries[0]!.companions)).toBe(true);
+    for (const c of [undefined, null, companions]) expect(isCompanionsUnreadable(c)).toBe(false);
+    expect(storeCompanionsStateSchema.safeParse({ unreadable: false }).success).toBe(false);
+  });
+
+  it("an unknown future companions shape degrades to unknown instead of dropping the frame", () => {
+    const frame = catalogMsgSchema.safeParse({
+      type: "catalog",
+      source: "catalog",
+      entries: [{ ...base, companions: { mmproj: "new-format" } }, { ...base, name: "ok", companions }],
+    });
+    expect(frame.success).toBe(true);
+    expect(frame.data!.entries[0]!.companions).toBeUndefined();
+    expect(frame.data!.entries[1]!.companions).toEqual(companions);
+  });
+
+  it("an unknown companions shape from a newer hub doesn't fail the models page parse", () => {
+    const page = modelsPageSchema.safeParse({ page: 1, pageSize: 25, total: 1, models: [{ ...base, companions: { mmproj: "new" } }] });
+    expect(page.success).toBe(true);
+    expect(page.data!.models[0]!.companions).toBeUndefined();
+  });
+
+  it("an older consumer's catalog model schema strips the field instead of failing", () => {
+    expect(catalogModelSchema.parse({ ...base, companions })).toEqual(base);
+  });
+
+  it("modelctl catalog.json parsing ignores a companions key it does not own", () => {
+    const catalog = parseCatalog(JSON.stringify({ schema: 3, models: [{ ...base, companions: "future-format" }] }));
+    expect(catalog.models[0]).toEqual(base);
+  });
+
+  it("rejects unsafe paths and spec types", () => {
+    expect(storeCompanionsSchema.safeParse({ mmproj: { path: "../x", bytes: null }, draft: null }).success).toBe(false);
+    expect(storeCompanionsSchema.safeParse({ mmproj: { path: "/abs", bytes: null }, draft: null }).success).toBe(false);
+    expect(storeCompanionsSchema.safeParse({ mmproj: null, draft: { path: "d.gguf", bytes: null, specType: "BAD TYPE" } }).success).toBe(false);
+    expect(storeCompanionsSchema.safeParse({ mmproj: null, draft: { path: "MTP/mtp-d.gguf", bytes: null, specType: "draft-mtp" } }).success).toBe(true);
+  });
+
+  it("draftKind mirrors modelctl draft_kind", () => {
+    expect(draftKind("dspark-Inkling-2-Mini-Q8_0.gguf")).toBe("dspark");
+    expect(draftKind("dflash2-x.gguf")).toBe("dflash2");
+    expect(draftKind("MTP/x-Q8_0.gguf")).toBe("mtp");
+    expect(draftKind("mmproj-F16.gguf")).toBeNull();
+    expect(draftKind("mtp-x.bin")).toBeNull();
   });
 });

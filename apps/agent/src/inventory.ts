@@ -65,6 +65,15 @@ export interface InventoryCtx {
 }
 
 /** Parses /etc/passwd into the users whose HF cache can hold models. */
+/**
+ * The inventory's default store read. IRI-155: the inventory keeps
+ * name/repo/runtime/bytes only, so it skips the companion metadata reads that
+ * would otherwise spend its STORE_DEADLINE_MS on a degraded mount.
+ */
+export function inventoryStoreRead(root: string): Promise<StoreRead> {
+  return readStore(root, { companions: false });
+}
+
 export function discoverUsers(passwd: string, agentUser: string): PasswdUser[] {
   const out: PasswdUser[] = [];
   const seen = new Set<string>();
@@ -399,7 +408,7 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
     // dangling read is left behind; the agent keeps answering frames.
     const nasRoot = ctx.nasRoot;
     const deadlineMs = ctx.storeDeadlineMs ?? STORE_DEADLINE_MS;
-    const readImpl = ctx.readStoreImpl ?? ((root: string) => readStore(root));
+    const readImpl = ctx.readStoreImpl ?? inventoryStoreRead;
     const { promise: deadlineP, resolve } = Promise.withResolvers<NodeInventory["store"]>();
     const timer = setTimeout(() => {
       resolve({

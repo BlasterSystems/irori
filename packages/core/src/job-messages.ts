@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { catalogModelSchema } from "./catalog.js";
+import { storeModelSchema } from "./catalog.js";
 import { benchProgressMsgSchema, benchDoneMsgSchema } from "./bench.js";
 import { usageBatchMsgSchema, bodyRetentionSchema } from "./usage.js";
 import { logBatchMsgSchema } from "./logs.js";
@@ -42,7 +42,8 @@ export const jobDoneMsgSchema = z.object({
 export const catalogMsgSchema = z.object({
   type: z.literal("catalog"),
   source: z.enum(["catalog", "scan"]),
-  entries: z.array(catalogModelSchema),
+  /** IRI-155: entries may carry `companions` (see storeCompanionsStateSchema; absent = unknown). */
+  entries: z.array(storeModelSchema),
 });
 
 /**

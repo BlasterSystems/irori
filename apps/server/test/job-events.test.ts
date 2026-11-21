@@ -400,6 +400,45 @@ d("job settle events (db integration)", () => {
     await db.delete(modelMeta).where(inArray(modelMeta.name, [resident, ghost, scanOnly]));
   });
 
+  it("merges catalog-frame companions into model_meta.meta; a frame without the field preserves them (IRI-155)", async () => {
+    const name = "jobevt-companions";
+    await db.delete(modelMeta).where(eq(modelMeta.name, name));
+    const base = { name, runtime: "llama.cpp", repository: `org/${name}`, bytes: 1 };
+    const companions = {
+      mmproj: { path: "mmproj-F16.gguf", bytes: 10 },
+      draft: { path: "dspark-x-Q8_0.gguf", bytes: 5, specType: null },
+    };
+    const meta = async () => (await db.select().from(modelMeta).where(eq(modelMeta.name, name)))[0]!.meta as Record<string, unknown>;
+
+    // insert with companions
+    await service.onCatalog(nodeId, "scan", [{ ...base, companions }]);
+    expect(await meta()).toEqual({ source: "scan", companions });
+
+    // an old agent's frame (no field) keeps them and still updates the row
+    await service.onCatalog(nodeId, "scan", [{ ...base, bytes: 2 }]);
+    expect(await meta()).toEqual({ source: "scan", companions });
+    expect((await db.select().from(modelMeta).where(eq(modelMeta.name, name)))[0]!.bytes).toBe(2);
+
+    // an update replaces them without touching other meta keys
+    const updated = { mmproj: null, draft: { path: "MTP/mtp-x.gguf", bytes: null, specType: "draft-mtp" } };
+    await service.onCatalog(nodeId, "scan", [{ ...base, companions: updated }]);
+    expect(await meta()).toEqual({ source: "scan", companions: updated });
+
+    // unreadable replaces the stored value (owner decision)
+    await service.onCatalog(nodeId, "scan", [{ ...base, companions: { unreadable: true } }]);
+    expect(await meta()).toEqual({ source: "scan", companions: { unreadable: true } });
+
+    // known-none overwrites to null
+    await service.onCatalog(nodeId, "scan", [{ ...base, companions: null }]);
+    expect(await meta()).toEqual({ source: "scan", companions: null });
+
+    // an insert from an old agent stores no companions key at all
+    await db.delete(modelMeta).where(eq(modelMeta.name, name));
+    await service.onCatalog(nodeId, "scan", [base]);
+    expect(await meta()).toEqual({ source: "scan" });
+    await db.delete(modelMeta).where(eq(modelMeta.name, name));
+  });
+
   it("asks for a catalog re-read on failed store-mutating settles too, but not on other kinds", async () => {
     const sent: Array<[string, unknown]> = [];
     const svc = createJobsService(db, (node, msg) => {

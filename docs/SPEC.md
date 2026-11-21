@@ -277,7 +277,16 @@ flowchart LR
   added** default — via Irori-side `first_seen_at`, since `catalog.json`
   carries no timestamp — plus name, size), pagination 25/page. Row click
   opens a **detail drawer** (HF metadata, files, companions, per-node
-  placement + remediations, serve-command copy, armed delete). Downloads are
+  placement + remediations, serve-command copy, armed delete). Installed
+  companions (IRI-155) come from the active object's `.modelctl.json`: the
+  drawer shows a `projector` row (file, size) and a `draft` row (kind, file,
+  size, effective `--spec-type`), and list rows show `+draft` / `+mmproj`
+  chips in the Model cell. Models without companions, or whose agent has not
+  reported them, show neither. When the agent could not read the metadata,
+  the drawer and the list row show only an ⓘ marker labelled "Cannot read the
+  model's companion info from the NAS" (keyboard-focusable), never an older
+  value. The list has no Runtime column: runtime is in
+  the filter chips and the drawer's header chip. Downloads are
   added from a **modal** that takes a pasted list (one HF repo per line)
   parsed into editable rows — bulk submissions land as ONE `download_queue`
   batch (IRI-015) — with a persistent **queue panel** on the page (per-entry

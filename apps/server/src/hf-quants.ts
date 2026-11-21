@@ -1,6 +1,6 @@
 import {
+  draftKind,
   hfModelInfoSchema,
-  type HfDraftKind,
   type HfFile,
   type HfQuantGroup,
   type HfQuantsResult,
@@ -9,6 +9,8 @@ import {
 import type { CardHintsService } from "./hf-card-hints.js";
 
 export { HfQuantsError };
+// IRI-155: the pure draft classifier moved to @irori/core (web labels installed drafts too).
+export { draftKind };
 
 /**
  * IRI-016: HF repo GGUF quantization listing for the download modal's
@@ -31,28 +33,7 @@ const parentDir = (p: string): string => {
   return i === -1 ? "" : p.slice(0, i);
 };
 
-// IRI-152 (modelctl drafts.py): longest prefix first so `dflash2-` never reads as `dflash`.
-const DRAFT_PREFIXES: ReadonlyArray<readonly [string, HfDraftKind]> = [
-  ["dflash2-", "dflash2"],
-  ["dflash-", "dflash"],
-  ["dspark-", "dspark"],
-  ["mtp-", "mtp"],
-];
-const DRAFT_DIRS: ReadonlySet<string> = new Set<HfDraftKind>(["mtp", "dspark", "dflash", "dflash2"]);
 const Q8_0_RE = /(?:^|[-_.])q8_0(?:[-_.]|$)/;
-
-/** Mirrors modelctl `draft_kind`: basename prefix, else the nearest draft-named parent dir. */
-export function draftKind(path: string): HfDraftKind | null {
-  if (!isGguf(path)) return null;
-  const base = baseName(path).toLowerCase();
-  for (const [prefix, kind] of DRAFT_PREFIXES) if (base.startsWith(prefix)) return kind;
-  const parts = parentDir(path).split("/").reverse();
-  for (const part of parts) {
-    const lower = part.toLowerCase();
-    if (DRAFT_DIRS.has(lower)) return lower as HfDraftKind;
-  }
-  return null;
-}
 
 export function isDraftArtifact(path: string): boolean {
   return draftKind(path) !== null;

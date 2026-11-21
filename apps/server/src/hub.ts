@@ -18,6 +18,7 @@ import {
   type ClocksGetResultMsg,
   type ClocksSetResultMsg,
   type NodeShutdownAckMsg,
+  type ScannedModel,
   type TransferProgress,
   type UsageRequest,
 } from "@irori/core";
@@ -75,7 +76,7 @@ export interface AgentHubDeps {
     onDone: (nodeId: string, jobId: string, status: "succeeded" | "failed" | "canceled", exitCode: number | null) => Promise<void>;
     /** IR-131: the agent confirmed the process-group kill. */
     onCancelAck: (nodeId: string, jobId: string) => Promise<void>;
-    onCatalog: (nodeId: string, source: "catalog" | "scan", entries: Array<{ name: string; runtime: string; repository: string; bytes: number }>) => Promise<void>;
+    onCatalog: (nodeId: string, source: "catalog" | "scan", entries: ScannedModel[]) => Promise<void>;
     /** IRI-012: fires on every authenticated hello — settles agent-update jobs. */
     onHello?: (nodeId: string, agentVersion: string) => Promise<unknown>;
     /** IR-131: settles running rows the freshly-connected agent no longer runs. */

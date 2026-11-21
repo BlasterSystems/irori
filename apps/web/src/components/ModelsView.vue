@@ -8,6 +8,7 @@ import { fetchSetups } from "../serve";
 import { fmtBytes } from "../analytics";
 import { computeNasData } from "../overview";
 import { thresholds } from "../thresholds";
+import { COMPANIONS_UNREADABLE_LABEL, companionChips, companionRows, companionsUnreadable } from "../model-companions";
 import { draftKindLabel, draftSpecTypeToSend, effectiveDraftSpecType, hintProvenance, mmprojNote, preselectDraft, safeHref } from "../draft-choice";
 import CleanupDrawer from "./CleanupDrawer.vue";
 import { DOWNLOAD_BATCH_MAX_ENTRIES, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
@@ -926,6 +927,9 @@ function catalogEntry(name: string): ModelEntry | null {
 }
 const drawerRuntime = computed(() => (selected.value === null ? null : catalogEntry(selected.value)?.runtime ?? null));
 const drawerRepo = computed(() => (selected.value === null ? null : catalogEntry(selected.value)?.repository ?? null));
+/** IRI-155: installed projector/draft rows; empty when unknown or none. */
+const drawerCompanions = computed(() => (selected.value === null ? [] : companionRows(catalogEntry(selected.value)?.companions)));
+const drawerCompanionsUnreadable = computed(() => selected.value !== null && companionsUnreadable(catalogEntry(selected.value)?.companions));
 const drawerAdded = computed(() => {
   if (selected.value === null) return null;
   const iso = catalogEntry(selected.value)?.firstSeenAt ?? "";
@@ -1347,7 +1351,8 @@ onBeforeUnmount(() => {
                   @change="toggleBulkAll"
                 />
               </th>
-              <th>Model</th><th>Runtime</th><th class="num">Size</th><th>Added</th><th></th>
+              <!-- IRI-155: no Runtime column; runtime lives in the filter chips and the drawer chip. -->
+              <th>Model</th><th class="num">Size</th><th>Added</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -1363,9 +1368,10 @@ onBeforeUnmount(() => {
               </td>
               <td>
                 <strong>{{ m.name }}</strong>
+                <span v-for="c in companionChips(m.companions)" :key="c.label" class="chip companion-chip" :title="c.title">{{ c.label }}</span>
+                <span v-if="companionsUnreadable(m.companions)" @click.stop><span class="tip companion-info" tabindex="0" role="img" :aria-label="COMPANIONS_UNREADABLE_LABEL" :data-tip="COMPANIONS_UNREADABLE_LABEL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></svg></span></span>
                 <div class="mono faint">{{ m.repository }}</div>
               </td>
-              <td class="mono">{{ m.runtime }}</td>
               <td class="num mono">{{ formatGiB(m.bytes) }}</td>
               <td class="mono">{{ addedLabel(m.firstSeenAt) }}</td>
               <td @click.stop>
@@ -1468,6 +1474,8 @@ onBeforeUnmount(() => {
             <dt>repo</dt><dd>{{ drawerRepo ?? "—" }}</dd>
             <dt>size</dt><dd>{{ formatGiB(placement.model.bytes) }}</dd>
             <dt v-if="drawerAdded !== null">added</dt><dd v-if="drawerAdded !== null">{{ drawerAdded }}</dd>
+            <template v-for="c in drawerCompanions" :key="c.label"><dt>{{ c.label }}</dt><dd class="mono">{{ c.text }}</dd></template>
+            <template v-if="drawerCompanionsUnreadable"><dt>companions</dt><dd><span class="tip companion-info" tabindex="0" role="img" :aria-label="COMPANIONS_UNREADABLE_LABEL" :data-tip="COMPANIONS_UNREADABLE_LABEL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></svg></span></dd></template>
           </dl>
           <table class="table">
             <thead>
@@ -1813,6 +1821,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* IRI-155: companion chips sit after the model name in the Model cell. */
+.companion-chip {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
 .search {
   min-height: 44px;
   min-width: min(320px, 100%);

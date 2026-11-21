@@ -297,6 +297,27 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   (direct modelctl) reconcile on the next frame. `scan` fallback frames and
   empty catalog frames never prune. Any catalog-mutating job settle —
   succeeded OR failed — asks the node to re-report its catalog.
+- Installed companions (IRI-155, ADR-0020): each `catalog` frame entry may
+  carry `companions: {mmproj: {path, bytes} | null, draft: {path, bytes,
+  specType} | null} | {unreadable: true} | null`, read by the agent from the active object's
+  `.modelctl.json` (not the manifest), with the object confined to the store,
+  the file opened without following symlinks and capped at 1 MiB, 2 s per
+  read, 8 reads in flight, and a 10 s budget for one catalog's per-model
+  reads (entries not read in time report unreadable). The node inventory job skips these reads. `draft` is modelctl's `mtp` companion key (MTP,
+  DSpark or DFlash); `specType` is the object's recorded `draft_spec_type`
+  (null = the kind default applies); `bytes` comes from the object's
+  `files[]` (null when not recorded); paths are relative, without `..`.
+  **Absent = unknown** (an older agent): the hub keeps what it stored.
+  **`null` = known, none** (no companions recorded, or an older object with no
+  metadata file). **`{unreadable: true}`** = the read failed (timeout, I/O
+  error, corrupt or oversized metadata, a link outside the store); it
+  replaces any stored value, so the page never shows companions it could not
+  confirm on the last read. A `companions` shape the hub doesn't recognise
+  (a newer agent) is treated as absent, never as a reason to drop the frame.
+  The hub merges the value
+  into `model_meta.meta.companions`, and `GET /api/v1/models` rows expose it
+  as `companions` (absent until an agent has reported it). Older hubs and
+  clients strip the field.
 
 ## Job activity (IRI-028)
 
