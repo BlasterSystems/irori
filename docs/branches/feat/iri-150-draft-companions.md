@@ -25,6 +25,11 @@ together with the model:
   (`unsloth.ai`, `docs.unsloth.ai`, `huggingface.co`), and reports which
   draft, projector and spec type they use. For Inkling-2-Mini, those come
   from unsloth's docs page because the README has no command.
+- **IR-268:** in the download modal's Expand panel, the "Draft model" field
+  preselects the draft from the run instructions (else modelctl's default).
+  Each option shows its kind, and the field explains where the choice came
+  from (with a link) and which `--spec-type` the model will serve with.
+  Plain pasted rows behave exactly as before.
 
 ## 3. Business rules and constraints
 
@@ -64,9 +69,14 @@ together with the model:
 - Grouping fixtures from real repo file lists (Inkling-2-Mini, unsloth and
   bartowski gemma-4-26B), mirrored by modelctl's `tests/test_drafts.py`.
 - Live: hints from real HF and unsloth.ai (Inkling via the docs page).
+- Browser smoke (headless Chromium against the built server and Vite, dark
+  and light themes) for Inkling, both gemma-4-26B repos and flint. The
+  queued Inkling payload carried the dspark draft.
 
 ## 8. Changelog
 
+- 2026-11-21: IR-268: modal draft preselection, kind labels, provenance and
+  spec-type line (`draft-choice.ts`).
 - 2026-11-21: IR-267: README and allow-listed docs run hints on
   `/api/v1/hf-quants` (`hf-card-hints.ts`).
 - 2026-11-21: IR-266: draft-kind grouping port, `draftSpecType` queue

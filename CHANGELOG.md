@@ -20,7 +20,12 @@ All notable changes to Irori are recorded here. Format follows
   `llama-server` snippets in the repo README or up to 3 allow-listed doc
   pages (`IRORI_HF_DOC_HOSTS`). For example, Inkling-2-Mini's draft and
   `draft-dspark` come from unsloth.ai/docs. Hints only name files in the
-  repo's listing.
+  repo's listing. IR-268 / IRI-154: the download modal's Expand panel
+  preselects the hinted draft (else modelctl's default), labels each
+  candidate with its kind (MTP / DSpark / DFlash), shows where the choice
+  came from and the `--spec-type` it will serve with, notes when the model
+  card's projector differs from modelctl's pick, and sends `draftSpecType`
+  only when the hint differs from the kind default.
 - **Public-release preparation** (no IRI — owner request): completed the OSS
   surface for making the repo public under Apache-2.0 — `NOTICE`,
   `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant),
