@@ -105,6 +105,21 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   IRI-019: when a global HF token is configured, the upstream request carries
   `Authorization: Bearer <token>` (gated/private repos answer); without one
   the request is unchanged.
+  IRI-153 (ADR-0020): GGUF listings also carry `hints: {draft, mmproj,
+  specType, source: "readme"|"docs"|null, url, error}`. These are run hints
+  parsed from `llama-server`/`llama-cli` snippets: first the repo README at
+  the resolved commit, then at most 3 README links on the doc-host allowlist
+  (`IRORI_HF_DOC_HOSTS`, default `huggingface.co,unsloth.ai,docs.unsloth.ai`;
+  empty disables doc fetches). Every path names a file in the repo's own
+  listing, so hints are preselections, never new files. The README wins
+  field by field, and docs pages are searched until one resolves a draft.
+  Doc fetches are https-only on port 443, follow redirects manually
+  (allowlisted, at most 2 hops), stop reading after 2 MiB, never carry the HF
+  token, and never fail the listing (`error` is informational). Each hop
+  times out after 5s, and the whole hints computation has a 10s budget, so
+  the endpoint answers within about 20s (10s HF listing + 10s hints).
+  Successful results are cached per (repo, commit) for 10 minutes; failures
+  aren't cached.
 
 ## Hub settings — global HF token (IRI-019, ADR-0009)
 

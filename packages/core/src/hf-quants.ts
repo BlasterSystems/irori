@@ -41,12 +41,29 @@ export const hfCompanionInfoSchema = z.object({
 });
 export type HfCompanionInfo = z.infer<typeof hfCompanionInfoSchema>;
 
+/**
+ * IRI-153 (ADR-0020): run hints parsed from the repo README or an
+ * allow-listed docs page. Every path names a file in the repo listing; they
+ * are UI preselections only. `error` is a best-effort note, never fatal.
+ */
+export const hfRunHintsSchema = z.object({
+  draft: z.string().nullable(),
+  mmproj: z.string().nullable(),
+  specType: z.string().nullable(),
+  source: z.enum(["readme", "docs"]).nullable(),
+  url: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type HfRunHints = z.infer<typeof hfRunHintsSchema>;
+
 /** GET /api/v1/hf-quants response body. */
 export const hfQuantsResultSchema = z.object({
   repo: z.string().min(1),
   modelCard: z.string().nullable(),
   quants: z.array(hfQuantGroupSchema),
   companions: z.object({ mmproj: hfCompanionInfoSchema, mtp: hfCompanionInfoSchema }),
+  /** IRI-153: absent on older hubs and when hints were not computed. */
+  hints: hfRunHintsSchema.nullish(),
 });
 export type HfQuantsResult = z.infer<typeof hfQuantsResultSchema>;
 
@@ -58,6 +75,8 @@ export interface HfFile {
 
 /** Subset of `GET https://huggingface.co/api/models/{repo}?blobs=true` the server consumes. */
 export const hfModelInfoSchema = z.object({
+  /** IRI-153: resolved commit; the README for hints is read at this revision. */
+  sha: z.string().regex(/^[0-9a-f]{40}$/).nullish().catch(null),
   siblings: z
     .array(z.object({ rfilename: z.string(), size: z.number().positive().nullish() }))
     .default([]),

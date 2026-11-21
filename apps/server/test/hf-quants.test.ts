@@ -280,6 +280,20 @@ describe("createHfQuantsService", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("attaches run hints for GGUF listings at the resolved commit (IRI-153)", async () => {
+    const sha = "a".repeat(40);
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ sha, siblings: FLINT_FILES.map((f) => ({ rfilename: f.path })) }));
+    const hints = { hints: vi.fn().mockResolvedValue({ draft: null, mmproj: null, specType: null, source: null, url: null, error: null }) };
+    const service = createHfQuantsService({ fetchImpl, hints });
+    const result = await service.listQuants("unsloth/flint-GGUF", "hf_x");
+    expect(hints.hints).toHaveBeenCalledWith("unsloth/flint-GGUF", sha, expect.any(Array), "hf_x");
+    expect(result.hints).toMatchObject({ draft: null, error: null });
+    // Non-GGUF repos skip hints entirely.
+    fetchImpl.mockResolvedValue(jsonResponse({ siblings: [{ rfilename: "README.md" }, { rfilename: "model.safetensors" }] }));
+    expect((await service.listQuants("org/vllm-model")).hints).toBeUndefined();
+    expect(hints.hints).toHaveBeenCalledTimes(1);
+  });
+
   it("sends the Authorization header only when a token is configured (IRI-019)", async () => {
     const seen: Array<Record<string, string>> = [];
     const fetchImpl = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {

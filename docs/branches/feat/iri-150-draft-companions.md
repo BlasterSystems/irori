@@ -20,6 +20,11 @@ together with the model:
   hides `imatrix` calibration files, preselects the single root Q8_0 draft
   when a repo has several, and labels each draft candidate with its kind.
   Downloads can carry an optional draft spec type through to modelctl.
+- **IR-267:** the listing also reads the model's run instructions. It checks
+  the repo README first, then up to 3 linked pages on allow-listed docs sites
+  (`unsloth.ai`, `docs.unsloth.ai`, `huggingface.co`), and reports which
+  draft, projector and spec type they use. For Inkling-2-Mini, those come
+  from unsloth's docs page because the README has no command.
 
 ## 3. Business rules and constraints
 
@@ -27,6 +32,9 @@ together with the model:
   passes selections, and its grouping rules mirror modelctl ≥ 0.25.0 exactly.
 - The draft spec type must match `^[a-z0-9][a-z0-9-]{0,31}$` at every layer.
   It's sent to modelctl only when set.
+- A run hint is kept only if it names a file in the repo's own listing.
+  Snippets naming another `*-GGUF` repo are ignored. Docs fetches never send
+  the Hugging Face token and never fail the listing.
 
 ## 4. Edge cases handled
 
@@ -47,8 +55,6 @@ together with the model:
 
 ## 6. Out of scope and follow-ups
 
-- IR-267: run hints from the README and allow-listed docs pages.
-- IR-268: modal preselection and provenance UI.
 - Drafts hosted in a separate repository (e.g. vLLM DFlash2 drafters).
 
 ## 7. Verification
@@ -57,8 +63,11 @@ together with the model:
   Postgres: server 448/448 and db 16/16.
 - Grouping fixtures from real repo file lists (Inkling-2-Mini, unsloth and
   bartowski gemma-4-26B), mirrored by modelctl's `tests/test_drafts.py`.
+- Live: hints from real HF and unsloth.ai (Inkling via the docs page).
 
 ## 8. Changelog
 
+- 2026-11-21: IR-267: README and allow-listed docs run hints on
+  `/api/v1/hf-quants` (`hf-card-hints.ts`).
 - 2026-11-21: IR-266: draft-kind grouping port, `draftSpecType` queue
   passthrough (migration 0029), ADR-0020.

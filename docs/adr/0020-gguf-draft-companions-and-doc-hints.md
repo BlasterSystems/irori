@@ -91,8 +91,11 @@ exact-host allowlist.
      `IRORI_HF_DOC_HOSTS`).
    - Fetch rules: https only, port 443, no IP literals or userinfo; redirects
      are followed manually and only to allowlisted hosts, at most 2 hops; 5s
-     timeout; 2 MiB streamed body cap; HTML/markdown/plain only. The HF token
-     is sent only to `huggingface.co`.
+     per hop and a 10s budget per computation; 2 MiB streamed body cap;
+     HTML/markdown/plain only. The HF token is sent only to `huggingface.co`.
+   - Parsing is linear on adversarial input (repo authors control README
+     text), with no backtracking-prone patterns, and a 2 MiB regression test
+     enforces it.
    - A hint is kept only if it names a file in the repository's own listing.
      It is a UI preselection, never a new file. Failures never fail the
      listing.

@@ -6,6 +6,7 @@ import {
   type HfQuantsResult,
   HfQuantsError,
 } from "@irori/core";
+import type { CardHintsService } from "./hf-card-hints.js";
 
 export { HfQuantsError };
 
@@ -211,7 +212,8 @@ export interface HfQuantsService {
 const REPO_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,94}\/[A-Za-z0-9][A-Za-z0-9._-]{0,94}$/;
 
 export function createHfQuantsService(
-  opts: { fetchImpl?: typeof fetch; hfBase?: string } = {},
+  /** IRI-153: `hints` adds README/doc run hints to GGUF listings; omitted = no hints (tests, degraded). */
+  opts: { fetchImpl?: typeof fetch; hfBase?: string; hints?: CardHintsService } = {},
 ): HfQuantsService {
   const fetchImpl = opts.fetchImpl ?? fetch;
   const hfBase = opts.hfBase ?? "https://huggingface.co";
@@ -258,7 +260,10 @@ export function createHfQuantsService(
       if (files.length === 0) {
         throw new HfQuantsError(`repository ${repo} exposed no files`, 502);
       }
-      return groupRepoFiles(repo, files);
+      const result = groupRepoFiles(repo, files);
+      if (opts.hints === undefined || result.quants.length === 0) return result;
+      // Best effort by contract: the hints service never throws.
+      return { ...result, hints: await opts.hints.hints(repo, parsed.data.sha ?? "main", files, token) };
     },
   };
 }

@@ -16,7 +16,11 @@ All notable changes to Irori are recorded here. Format follows
   carry an optional `draftSpecType` end to end (API → `download_queue`
   migration 0029 → agent queue YAML `draft_spec_type`, emitted only when
   set). Needs modelctl ≥ 0.25.0 (IR-265) for DSpark/DFlash selection and the
-  queue field.
+  queue field. IR-267 / IRI-153: `/api/v1/hf-quants` adds `hints` parsed from
+  `llama-server` snippets in the repo README or up to 3 allow-listed doc
+  pages (`IRORI_HF_DOC_HOSTS`). For example, Inkling-2-Mini's draft and
+  `draft-dspark` come from unsloth.ai/docs. Hints only name files in the
+  repo's listing.
 - **Public-release preparation** (no IRI — owner request): completed the OSS
   surface for making the repo public under Apache-2.0 — `NOTICE`,
   `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant),
