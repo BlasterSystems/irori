@@ -33,7 +33,7 @@ variables are optional unless noted:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `IRORI_SERVER_URL` | `ws://127.0.0.1:3947/agent-ws` | Hub WebSocket endpoint |
+| `IRORI_SERVER_URL` | `ws://127.0.0.1:3947/agent-ws` | Hub WebSocket endpoint (`wss://HOST/agent-ws` behind a TLS reverse proxy) |
 | `IRORI_NODE_TOKEN` | required | Per-node hello token (refuses to start without it) |
 | `IRORI_CADENCE_MS` | `2000` | Snapshot cadence (server may override) |
 | `IRORI_LLM_TARGETS` | none | `host:port,...` probe targets extending/overriding server-assigned ports |

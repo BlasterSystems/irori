@@ -5,6 +5,7 @@ import { live } from "../live";
 import { createNode, patchNode, rotateNodeToken } from "../api";
 import { copyToClipboard } from "../clipboard";
 import { vScrimClose } from "../scrim";
+import { agentWsUrl as agentWsUrlFor, hubHttpBase } from "../agent-urls";
 import {
   NODE_KIND_OPTIONS,
   NODE_ROLE_OPTIONS,
@@ -41,15 +42,13 @@ const title = computed(() =>
       : `Rotate token — ${props.node?.name ?? "node"}`,
 );
 
-/** The WS URL the agent dials, derived from the page host. */
-const agentWsUrl = computed(() =>
-  typeof location === "undefined" ? "ws://<server>:3947/agent-ws" : `ws://${location.host}/agent-ws`,
-);
+const pageLocation = typeof location === "undefined" ? undefined : location;
+
+/** The WS URL the agent dials, derived from the page (wss:// on https, IRI-156). */
+const agentWsUrl = computed(() => agentWsUrlFor(pageLocation));
 
 /** The hub's own HTTP root — the script, unit and bundle are served here. */
-const httpBase = computed(() =>
-  typeof location === "undefined" ? "http://<server>:3947" : `${location.protocol}//${location.host}`,
-);
+const httpBase = computed(() => hubHttpBase(pageLocation));
 
 /** IRI-011: everything the node needs, fetched from the hub (no GitHub). */
 const installBlock = computed(() =>

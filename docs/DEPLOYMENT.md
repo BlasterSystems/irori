@@ -4,7 +4,7 @@
 
 First real deploy: tag `dev-0.1.0-dev.2` → run 39080561043 **success**
 (test gate on the self-hosted runner → deploy on `iroiri-dev-vm`) — container
-`irori-dev` up on **10.20.30.9:3947**, `/healthz` ok, SPA served
+`irori-dev` up on **10.0.10.9:3947**, `/healthz` ok, SPA served
 (`IRORI_STATIC_DIR=/srv/irori-web`), `deploy/.env` preserved.
 
 **2026-10-30: all jobs (test gate included) run on the self-hosted runner**
@@ -15,9 +15,9 @@ binaries installed (default cluster service disabled) and each job `initdb`s
 a fresh cluster into a temp dir, points `IRORI_TEST_DATABASE_URL` at it, and
 stops/deletes it in an `always()` step.
 
-Topology (corrected): the **deploy VM is LXC 106 `docker` = 10.20.30.9**
+Topology (corrected): the **deploy VM is LXC 106 `docker` = 10.0.10.9**
 (deploy user, docker 29.8.2); the **runner VM is LXC 110 `gh-runner` =
-10.20.30.10** (all GH runners, user `ghrunner`). The self-hosted runner
+10.0.10.10** (all GH runners, user `ghrunner`). The self-hosted runner
 `iroiri-dev-vm` is registered to this repo and runs from
 `/opt/github-runner-iriori`. NOTE: the repo was renamed
 `iriori` → **`irori`** on 2026-10-17 — registration/config URLs must use the
@@ -33,7 +33,7 @@ on the self-hosted runner (LXC 110), then
 deploys from the same runner:
 
 1. Test gate passes → runner creates a git bundle of the exact commit.
-2. SSH (localhost from the runner VM to 10.20.30.9) → fetch bundle into
+2. SSH (localhost from the runner VM to 10.0.10.9) → fetch bundle into
    `/opt/irori`, `checkout --detach`.
 3. `docker compose -f deploy/docker-compose.yml build --pull irori`
    (server role of `docker/Dockerfile`), remembers the previous image ID. The
@@ -50,11 +50,11 @@ Secrets/variables (repo `BlasterSystems/irori`, environment `development`):
 | Name | Kind | Value |
 |---|---|---|
 | `DEV_VM_SSH_KEY` | secret | SSH private key accepted by the VM for `$DEV_VM_USER` (irori-dev-cd keypair) |
-| `DEV_VM_HOST` | variable | `10.20.30.9` |
+| `DEV_VM_HOST` | variable | `10.0.10.9` |
 | `DEV_VM_USER` | variable | `deploy` |
 | `DEV_DEPLOY_DIR` | variable | `/opt/irori` |
 
-Database: PostgreSQL on the Proxmox pgsql server **10.20.30.136** (role/db
+Database: PostgreSQL on the Proxmox pgsql server **10.0.10.136** (role/db
 `irori_dev` for dev) — referenced from `deploy/.env` on the VM; nothing is
 persisted on the VM itself. Boot migrations apply automatically and are
 advisory-locked (ADR-0002).
@@ -63,7 +63,7 @@ advisory-locked (ADR-0002).
 
 - Rollback: the previous image ID is saved to `/tmp/irori-dev.prev`; a failed
   health gate retags + restarts it automatically. Manual rollback:
-  `docker tag <prev-id> irori-dev:latest && docker compose -f deploy/docker-compose.yml up -d --no-deps irori` (on 10.20.30.9).
+  `docker tag <prev-id> irori-dev:latest && docker compose -f deploy/docker-compose.yml up -d --no-deps irori` (on 10.0.10.9).
 - Runner service: `actions.runner.BlasterSystems-irori.iriori-dev-vm.service`
   on LXC 110. Re-register only with the CURRENT repo name (see rename note).
 - Logs: `journalctl -u actions.runner.BlasterSystems-irori.iriori-dev-vm.service`
@@ -130,6 +130,39 @@ ready to copy:
 curl -fLsS -o install-agent.sh http://IRORI_HOST:3947/install-agent.sh
 curl -fLsS -o irori-agent.service http://IRORI_HOST:3947/irori-agent.service
 sudo bash install-agent.sh --server ws://IRORI_HOST:3947/agent-ws --token irn_... --bundle-url http://IRORI_HOST:3947/agent/irori-agent.mjs
+```
+
+Re-running the installer is how you fix a wrong `--server` or `--token`: it
+rewrites `/etc/irori/agent.env` and **restarts** the unit (IRI-156; before,
+`enable --now` left an already-running agent on its old config). It runs a
+warn-only WebSocket preflight against `--server` first, only counts a
+`handshake ok` logged after the restart (journal cursor taken just before it),
+and on timeout prints the agent's last `connection error` / `server error`
+lines. The restart interrupts jobs running on that node (downloads,
+transfers), so re-run on an idle node.
+
+#### Behind a TLS reverse proxy (IRI-156)
+
+The dev hub is also published as `https://irori.as267.com` through Nginx Proxy
+Manager (LXC 104) → `http://10.0.10.9:3947`. Two things must hold:
+
+- **Agents dial `wss://`**, e.g. `--server wss://irori.as267.com/agent-ws`.
+  Plain `ws://` hits the proxy's 301 to https, and WebSocket clients do not
+  follow redirects (`connection error: Unexpected server response: 301`). The
+  Add-node modal derives the scheme from the page, so opened over https it
+  already shows `wss://`.
+- **The proxy forwards WebSocket upgrades** for `/agent-ws`: NPM's "Websockets
+  Support" toggle, or in raw nginx `proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`
+  plus a long `proxy_read_timeout`. Without it the request reaches Express as
+  plain HTTP and the agent sees `Unexpected server response: 404`.
+
+Quick check from any host: a `101 Switching Protocols` means the path is good.
+
+```sh
+curl --http1.1 -sS -o /dev/null -w '%{http_code}\n' --max-time 3 \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: aXJvcmktcHJlZmxpZ2h0IQ==' https://irori.as267.com/agent-ws
 ```
 
 GitHub release artifacts remain the fallback (`--bundle-url` may be omitted to

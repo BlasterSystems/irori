@@ -96,6 +96,20 @@ describe("agent artifact routes (IRI-011)", () => {
     expect(res.body.toString()).toEqual(readFileSync(REPO_INSTALLER, "utf8"));
   });
 
+  it("IRI-156: the served installer restarts the unit and only trusts post-restart journal lines", async () => {
+    const { app } = makeApp({ agentArtifacts: REPO_ARTIFACTS });
+    const script = (await request(app).get("/install-agent.sh").buffer(true).parse(rawBody)).body.toString();
+    // `enable --now` is a no-op on a running unit — a re-run must restart it.
+    expect(script).toContain("systemctl restart irori-agent.service");
+    expect(script).not.toMatch(/^systemctl enable --now/m);
+    // Success/error lines are read after a cursor taken before the restart.
+    expect(script.indexOf("START_CURSOR=")).toBeLessThan(script.indexOf("systemctl restart irori-agent.service"));
+    expect(script).toContain('--after-cursor "$START_CURSOR"');
+    expect(script).not.toContain('--since "-2 min"');
+    // Warn-only WebSocket preflight (TLS proxy 301 / stripped Upgrade).
+    expect(script).toContain("preflight_ws");
+  });
+
   it("serves the unit file", async () => {
     const { app } = makeApp({ agentArtifacts: REPO_ARTIFACTS });
     const res = await request(app).get("/irori-agent.service").buffer(true).parse(rawBody);
