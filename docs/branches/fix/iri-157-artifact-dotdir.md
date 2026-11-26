@@ -2,11 +2,11 @@
 
 ## Business context
 
-The Add-node modal tells the operator to download `install-agent.sh`, the systemd unit and the agent bundle from the hub. When the hub's files sat under a hidden directory, all three downloads failed with a 500. That breaks onboarding and the one-click agent update, which fetches the bundle from the same route. It also failed the server test suite in worktrees under `~/.herdr/`.
+The Add-node modal tells the operator to download `install-agent.sh`, the systemd unit and the agent bundle from the hub. When the hub's files sat under a hidden directory, all three downloads failed with a 404, and so did every client-side deep link (for example a reload on `/nodes/<id>`). That breaks onboarding and the one-click agent update, which fetches the bundle from the same route. It also failed the server test suite in worktrees under `~/.herdr/`.
 
 ## What changed
 
-- The hub now sends each agent artifact relative to its own directory. The hidden-path check therefore applies only to the file name, not to the install path above it.
+- The hub now sends each agent artifact, and the SPA's `index.html` fallback, relative to its own directory. The hidden-path check therefore applies only to the file name, not to the install path above it.
 
 ## Business rules and constraints
 
@@ -32,4 +32,5 @@ The Add-node modal tells the operator to download `install-agent.sh`, the system
 
 ## Changelog
 
+- fix(server): same fix for the SPA fallback; review wording and temp-dir cleanup (quality-review F1 to F3).
 - fix(server): serve agent artifacts from hidden-directory install paths.

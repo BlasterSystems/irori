@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
@@ -332,7 +332,7 @@ export function createApp(deps: AppDeps): Express {
       res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
       res.setHeader("Cache-Control", "no-store");
       // root + basename: send rejects any dot-segment in an absolute path,
-      // which 404'd the hub when installed under a hidden dir (e.g. ~/.x/).
+      // which 404'd these routes when the hub sat under a hidden dir (~/.x/).
       res.sendFile(basename(path), { root: dirname(path) });
     };
   app.get("/install-agent.sh", serveArtifact("installer", "text/x-shellscript", "install-agent.sh"));
@@ -2327,7 +2327,8 @@ export function createApp(deps: AppDeps): Express {
     app.use((req, res, next) => {
       if (req.method !== "GET" && req.method !== "HEAD") return next();
       if (req.path.startsWith("/api/") || req.path === "/agent-ws") return next();
-      res.sendFile(join(staticDir, "index.html"), (err) => {
+      // root: see serveArtifact — a rootless absolute path 404s under a dot-dir.
+      res.sendFile("index.html", { root: staticDir }, (err) => {
         if (err) next();
       });
     });

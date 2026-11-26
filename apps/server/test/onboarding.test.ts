@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -120,19 +120,46 @@ describe("agent artifact routes (IRI-011)", () => {
   });
 
   it("IRI-157: serves artifacts installed under a hidden directory", async () => {
-    // send() 404s any dot-segment in an absolute path unless the dot part is
-    // the root — a hub checked out under e.g. ~/.herdr/ answered 500 here.
-    const dir = join(mkdtempSync(join(tmpdir(), "irori-iri157-")), ".hidden", "agent");
-    mkdirSync(dir, { recursive: true });
-    const installer = join(dir, "install-agent.sh");
-    const unit = join(dir, "irori-agent.service");
-    copyFileSync(REPO_INSTALLER, installer);
-    copyFileSync(REPO_UNIT, unit);
-    const { app } = makeApp({ agentArtifacts: { installer, unit, bundle: unit } });
-    for (const [path, src] of [["/install-agent.sh", REPO_INSTALLER], ["/irori-agent.service", REPO_UNIT], ["/agent/irori-agent.mjs", REPO_UNIT]] as const) {
-      const res = await request(app).get(path).buffer(true).parse(rawBody);
-      expect(res.status, path).toBe(200);
-      expect(res.body.toString()).toEqual(readFileSync(src, "utf8"));
+    // send() 404s any dot-segment in a rootless absolute path — a hub
+    // checked out under e.g. ~/.herdr/ failed every artifact download.
+    const tmp = mkdtempSync(join(tmpdir(), "irori-iri157-"));
+    try {
+      const dir = join(tmp, ".hidden", "agent");
+      mkdirSync(dir, { recursive: true });
+      const installer = join(dir, "install-agent.sh");
+      const unit = join(dir, "irori-agent.service");
+      copyFileSync(REPO_INSTALLER, installer);
+      copyFileSync(REPO_UNIT, unit);
+      const { app } = makeApp({ agentArtifacts: { installer, unit, bundle: unit } });
+      const cases = [
+        ["/install-agent.sh", REPO_INSTALLER, "text/x-shellscript"],
+        ["/irori-agent.service", REPO_UNIT, "text/plain"],
+        ["/agent/irori-agent.mjs", REPO_UNIT, "text/javascript"],
+      ] as const;
+      for (const [path, src, type] of cases) {
+        const res = await request(app).get(path).buffer(true).parse(rawBody);
+        expect(res.status, path).toBe(200);
+        expect(res.headers["content-type"], path).toContain(type);
+        expect(res.headers["cache-control"], path).toBe("no-store");
+        expect(res.body.toString()).toEqual(readFileSync(src, "utf8"));
+      }
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("IRI-157: the SPA fallback serves index.html from a hidden static dir", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "irori-iri157-"));
+    try {
+      const staticDir = join(tmp, ".hidden", "web");
+      mkdirSync(staticDir, { recursive: true });
+      writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>irori</title>");
+      const { app } = makeApp({ staticDir });
+      const res = await request(app).get("/nodes/some-node");
+      expect(res.status).toBe(200);
+      expect(res.text).toContain("<title>irori</title>");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
     }
   });
 

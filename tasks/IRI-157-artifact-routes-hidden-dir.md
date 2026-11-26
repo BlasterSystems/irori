@@ -10,7 +10,7 @@ whatever the hub's install path is, including paths that contain a dot-directory
 ## Product manager summary
 
 - **One-liner:** Add-node download links work no matter where the hub is installed.
-- **User value:** The copy-paste install block in the Add-node modal doesn't fail with a 500 on hubs installed under a hidden directory.
+- **User value:** The copy-paste install block in the Add-node modal doesn't fail with a 404 on hubs installed under a hidden directory.
 - **Business impact:** Onboarding reliability; also unblocks `pnpm test` in worktrees under `~/.herdr/`.
 - **Success metric:** `apps/server/test/onboarding.test.ts` passes from a dot-directory checkout; the new regression test passes from any checkout.
 - **Dependencies & constraints:** None.
@@ -26,10 +26,11 @@ whatever the hub's install path is, including paths that contain a dot-directory
 ### Included
 
 - `serveArtifact` in `apps/server/src/app.ts`.
+- The SPA `index.html` fallback in the same file (same mechanism; quality-review F1).
 
 ### Excluded
 
-- Static/SPA serving (`express.static` takes a root already and is unaffected).
+- `express.static` (takes a root already and is unaffected).
 - Hub-driven modelctl provisioning on first connect (separate follow-up discussed in the same session).
 
 ## Implementation plan
@@ -85,7 +86,7 @@ whatever the hub's install path is, including paths that contain a dot-directory
 - Compatibility and migrations: none.
 - Tests: regression test added.
 - Documentation and ADRs: CHANGELOG.
-- Adversarial review (`quality-review` verdict; fresh context or self-review): see PR.
+- Adversarial review (`quality-review` verdict; fresh context or self-review): PASS WITH FINDINGS, fresh read-only context. F1 SPA fallback had the same bug: fixed and tested. F2 old status was 404, not 500: wording fixed. F3 test leaked its temp dir: fixed.
 - Residual risks: none known.
 
 ## Completion summary
