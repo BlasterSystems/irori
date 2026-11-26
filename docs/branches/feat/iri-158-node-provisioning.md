@@ -29,7 +29,8 @@ A freshly installed node never got modelctl. On the dev hub, DGX-4 (cache user `
 - A cache user change for an offline node: the next hello picks it up.
 - A cache user cleared or unchanged: nothing is dispatched.
 - An install that succeeds but doesn't fix the report (custom `IRORI_MODELCTL_PATH`): the cooldown stops it repeating.
-- A cache user with no passwd entry: not reported, nothing dispatched for it.
+- A cache user with no passwd entry: not reported, nothing dispatched for it, and hello re-reads throttled to one per 30 minutes.
+- A job that reaches a just-started agent before its config-update: nobody is forced into the inventory, so root never looks like the model user.
 
 ## Integration impact
 
@@ -48,4 +49,5 @@ A freshly installed node never got modelctl. On the dev hub, DGX-4 (cache user `
 
 ## Changelog
 
+- fix: review follow-ups. No forced model user before the first config-update; in-flight step reservation; hello re-read throttle; non-fatal HF-dir creation; hello ordering test.
 - feat: provision node dependencies on agent install and on model cache user changes.
