@@ -235,6 +235,9 @@ export interface AppDeps {
    *  (degraded), the setting routes answer 503 and no auto-provisioning is
    *  dispatched (agents keep their env pin). */
   getModelctlPin?: () => ModelctlPinService | null;
+  /** IR-272: a node's model cache user was set or changed, and the agent
+   *  has been sent the new config — converge that user's setup. */
+  onCacheUserChanged?: (nodeId: string) => void;
   /**
    * IRI-077: durable audit log. Optional — absent/null (degraded) routes
    * behave exactly as unmanaged; mutating routes never fail because of it.
@@ -658,14 +661,30 @@ export function createApp(deps: AppDeps): Express {
     // absent from the request — apply only the keys the client sent.
     const requested = typeof req.body === "object" && req.body !== null ? Object.keys(req.body) : [];
     const patch = Object.fromEntries(Object.entries(body.data).filter(([k]) => requested.includes(k)));
-    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const before = await store.get(id);
+    if (before === null) return res.status(404).json({ error: "node not found" });
+    // IR-272: a new (non-empty) cache user needs its own modelctl and HF
+    // cache. Read the old value before patching (a store may hand back the
+    // row it then mutates).
+    const previousCacheUser = (before.cacheUser ?? "").trim();
+    const nextCacheUser = typeof patch.cacheUser === "string" ? patch.cacheUser.trim() : "";
+    const cacheUserChanged = "cacheUser" in patch && nextCacheUser !== "" && nextCacheUser !== previousCacheUser;
     await store.patch(id, patch);
     // IRI-034: agent-consumed fields changed → push a fresh config-update
     // now; without this the agent keeps its old probe set (ghosting removed
     // ports) until the next WS reconnect.
     if (Object.keys(patch).some((k) => AGENT_CONFIG_KEYS.has(k))) {
       const hub = deps.getHub();
-      if (hub !== null) void hub.refreshConfig(id).catch(() => {});
+      if (hub !== null) {
+        // The inventory must run under the new cache user: dispatch only
+        // after the config-update has gone out (it can overtake otherwise).
+        void hub
+          .refreshConfig(id)
+          .then((sent) => {
+            if (sent && cacheUserChanged) deps.onCacheUserChanged?.(id);
+          })
+          .catch(() => {});
+      }
     }
     const row = await store.get(id);
     if (row === null) return res.status(404).json({ error: "node not found" });

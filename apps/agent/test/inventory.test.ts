@@ -262,6 +262,78 @@ describe("buildInventory", () => {
     ]);
   });
 
+  it("IR-272: always reports the configured cache user, even before an HF cache or modelctl exists", async () => {
+    const dir = tempDir();
+    const rootHome = join(dir, "root");
+    const userHome = join(dir, "piresbruno");
+    const otherHome = join(dir, "other");
+    for (const h of [rootHome, userHome, otherHome]) mkdirSync(h, { recursive: true });
+    const report = await buildInventory({
+      nasRoot: null,
+      modelctlPath: "/fake/modelctl",
+      agentUser: "root",
+      cacheUser: "piresbruno",
+      // No HF cache anywhere and no per-user binary: before IR-272 the list
+      // was empty and the hub never provisioned the fresh cache user.
+      users: [{ user: "root", home: rootHome }, { user: "piresbruno", home: userHome }, { user: "other", home: otherHome }],
+      exec: async () => {
+        throw new Error("no modelctl may run here");
+      },
+    });
+    expect(report.local).toHaveLength(1);
+    expect(report.local[0]).toMatchObject({
+      user: "piresbruno",
+      home: userHome,
+      cacheDir: join(userHome, ".cache/huggingface/hub"),
+      modelctlVersion: null,
+      error: "modelctl is not installed for this user",
+      models: [],
+    });
+  });
+
+  it("IR-272: reports the agent user when no cache user is set (NAS root modelctl)", async () => {
+    const dir = tempDir();
+    const rootHome = join(dir, "root");
+    mkdirSync(rootHome, { recursive: true });
+    const calls: string[][] = [];
+    const report = await buildInventory({
+      nasRoot: null,
+      modelctlPath: "/fake/modelctl",
+      agentUser: "root",
+      cacheUser: null,
+      users: [{ user: "root", home: rootHome }],
+      exec: async (file, args) => {
+        if (file !== "/fake/modelctl") throw new Error("not modelctl"); // uv / update probes
+        calls.push(args);
+        if (args.includes("--version")) return { stdout: "modelctl 0.24.0\n", stderr: "" };
+        throw new Error(`unexpected argv: ${args.join(" ")}`);
+      },
+    });
+    // modelctl present, no HF cache yet: the version is the provisioning
+    // signal; the absent cache is not listed.
+    expect(report.local).toEqual([
+      { user: "root", home: rootHome, cacheDir: join(rootHome, ".cache/huggingface/hub"), modelctlVersion: "0.24.0", error: null, models: [], orphans: [], orphanStates: [] },
+    ]);
+    expect(calls).toEqual([["--version"]]);
+  });
+
+  it("IR-272: a missing agent-user binary is a null version, so the hub provisions it", async () => {
+    const dir = tempDir();
+    const rootHome = join(dir, "root");
+    mkdirSync(rootHome, { recursive: true });
+    const report = await buildInventory({
+      nasRoot: null,
+      modelctlPath: "/root/.local/bin/modelctl",
+      agentUser: "root",
+      users: [{ user: "root", home: rootHome }],
+      exec: async () => {
+        throw Object.assign(new Error("spawn /root/.local/bin/modelctl ENOENT"), { code: "ENOENT" });
+      },
+    });
+    expect(report.local).toHaveLength(1);
+    expect(report.local[0]).toMatchObject({ user: "root", modelctlVersion: null });
+  });
+
   it("reports a local-only node and per-cache errors", async () => {
     const dir = tempDir();
     const home = join(dir, "home");
