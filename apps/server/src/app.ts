@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
@@ -331,7 +331,9 @@ export function createApp(deps: AppDeps): Express {
       res.setHeader("Content-Type", type);
       res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
       res.setHeader("Cache-Control", "no-store");
-      res.sendFile(path);
+      // root + basename: send rejects any dot-segment in an absolute path,
+      // which 404'd the hub when installed under a hidden dir (e.g. ~/.x/).
+      res.sendFile(basename(path), { root: dirname(path) });
     };
   app.get("/install-agent.sh", serveArtifact("installer", "text/x-shellscript", "install-agent.sh"));
   app.get("/irori-agent.service", serveArtifact("unit", "text/plain", "irori-agent.service"));

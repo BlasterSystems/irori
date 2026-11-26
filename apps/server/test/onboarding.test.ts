@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { AGENT_UPDATE_MIN_VERSION } from "@irori/core";
@@ -115,6 +117,23 @@ describe("agent artifact routes (IRI-011)", () => {
     const res = await request(app).get("/irori-agent.service").buffer(true).parse(rawBody);
     expect(res.status).toBe(200);
     expect(res.body.toString()).toEqual(readFileSync(REPO_UNIT, "utf8"));
+  });
+
+  it("IRI-157: serves artifacts installed under a hidden directory", async () => {
+    // send() 404s any dot-segment in an absolute path unless the dot part is
+    // the root — a hub checked out under e.g. ~/.herdr/ answered 500 here.
+    const dir = join(mkdtempSync(join(tmpdir(), "irori-iri157-")), ".hidden", "agent");
+    mkdirSync(dir, { recursive: true });
+    const installer = join(dir, "install-agent.sh");
+    const unit = join(dir, "irori-agent.service");
+    copyFileSync(REPO_INSTALLER, installer);
+    copyFileSync(REPO_UNIT, unit);
+    const { app } = makeApp({ agentArtifacts: { installer, unit, bundle: unit } });
+    for (const [path, src] of [["/install-agent.sh", REPO_INSTALLER], ["/irori-agent.service", REPO_UNIT], ["/agent/irori-agent.mjs", REPO_UNIT]] as const) {
+      const res = await request(app).get(path).buffer(true).parse(rawBody);
+      expect(res.status, path).toBe(200);
+      expect(res.body.toString()).toEqual(readFileSync(src, "utf8"));
+    }
   });
 
   it("answers 503 when artifacts are unavailable", async () => {

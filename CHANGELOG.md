@@ -62,6 +62,13 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **The hub serves the agent installer from any install path** (IRI-157):
+  `/install-agent.sh`, `/irori-agent.service` and `/agent/irori-agent.mjs`
+  answered 500 when the hub's files lived under a hidden directory (for
+  example a checkout under `~/.herdr/`), because Express's `sendFile`
+  rejects absolute paths with a dot segment. Artifacts are now sent relative
+  to their own directory.
+
 - **Clock-cap drift no longer warns on GPUs that cannot report application
   clocks** (IR-259): on DGX Spark (GB10) the driver rejects
   `clocks.applications.sm`, so the GPU cap read-back is always null and every
