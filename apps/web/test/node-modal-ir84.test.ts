@@ -75,4 +75,21 @@ describe("NodeModal modes", () => {
     expect(text).toContain("--token tok-rotated");
     w.unmount();
   });
+
+  it("IRI-156: on an https page the install block dials wss:// (TLS reverse proxy)", async () => {
+    vi.stubGlobal("location", { protocol: "https:", host: "irori.example.com" });
+    try {
+      const w = await mountModal("rotate");
+      const rotate = w.findAll("button").find((b) => /rotate/i.test(b.text()) && b.text() !== "✕");
+      await rotate!.trigger("click");
+      await new Promise((r) => setTimeout(r, 30));
+      const text = w.text();
+      expect(text).toContain("--server wss://irori.example.com/agent-ws");
+      expect(text).toContain("--bundle-url https://irori.example.com/agent/irori-agent.mjs");
+      expect(text).not.toContain("ws://irori.example.com");
+      w.unmount();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
