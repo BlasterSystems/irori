@@ -38,7 +38,7 @@ variables are optional unless noted:
 | `IRORI_CADENCE_MS` | `2000` | Snapshot cadence (server may override) |
 | `IRORI_LLM_TARGETS` | none | `host:port,...` probe targets extending/overriding server-assigned ports |
 | `IRORI_LLM_DETECT_ONLY` | off | Force detection-only LLM probes (no rates) |
-| `IRORI_MODELCTL_PIN` | `0.23.0` | Fallback minimum modelctl version for the `modelctl-install` job; the hub's `modelctl_pin` setting (IR-105) overrides it via config-update and drives per-user auto-provisioning |
+| `IRORI_MODELCTL_PIN` | `0.24.0` | Fallback minimum modelctl version for the `modelctl-install` job; the hub's `modelctl_pin` setting (IR-105) overrides it via config-update and drives per-user auto-provisioning. With no hub pin, users with no modelctl at all are still provisioned at this version (IR-272) |
 | `IRORI_MODELCTL_PATH` | `/root/.local/bin/modelctl` | Explicit modelctl binary |
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
 | `IRORI_MIN_STORE_FREE_BYTES` | `1649267441664` (1.5 TiB) | Download floor (IR-213, IR-207): the job-start gate fails `download`/`download-queue` jobs when the store volume's free space (agent telemetry, snapshot-fresh) is below this, and the same value rides `--min-free-bytes` into modelctl so the per-file check covers the whole expected download; `0` disables both. The per-file check belongs to modelctl's download path — the gate protects the job boundary |

@@ -71,6 +71,26 @@ it("carries the hub modelctl pin in the hello config-update (IR-105)", async () 
   ws.close();
 });
 
+it("IR-272: onNodeOnline fires only after the hello config-update is on the wire", async () => {
+  // The provisioner dispatches its inventory from onNodeOnline: a job frame
+  // ahead of the config-update would run before the agent knows its cache user.
+  let hubRef: { sendToNode: (nodeId: string, msg: never) => boolean } | null = null;
+  const { url, created, hub } = await setup({
+    onNodeOnline: (nodeId) => {
+      hubRef?.sendToNode(nodeId, { type: "catalog-request" } as never);
+    },
+  });
+  hubRef = hub as never;
+  const ws = new WebSocket(url);
+  await opened(ws);
+  const frames: string[] = [];
+  ws.on("message", (data) => frames.push((JSON.parse(String(data)) as { type: string }).type));
+  ws.send(hello(created.token));
+  await sleep(200);
+  expect(frames.slice(0, 3)).toEqual(["hello-ok", "config-update", "catalog-request"]);
+  ws.close();
+});
+
 const snapshotMsg = (overrides: Partial<HardwareSnapshot> = {}) =>
   JSON.stringify({ type: "snapshot", snapshot: makeSnapshot(overrides) });
 

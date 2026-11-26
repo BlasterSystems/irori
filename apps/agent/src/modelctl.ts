@@ -281,10 +281,15 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
           `modelctl-install: no passwd entry for cache user "${installUser}" — clear the node's cache user setting`,
         );
       }
-      const homeBin = installHome === null ? "/root/.local/bin" : `${installHome}/.local/bin`;
+      const homeDir = installHome ?? "/root";
+      const homeBin = `${homeDir}/.local/bin`;
       const script = [
         "set -e",
         `export PATH="${homeBin}:$PATH"`,
+        // IR-272: the user's HF cache dir is part of the setup — created as
+        // that user (runuser below), so ownership is right; idempotent, and
+        // before the version gate so a satisfied install still creates it.
+        `mkdir -p "${homeDir}/.cache/huggingface/hub" || echo "warning: cannot create ${homeDir}/.cache/huggingface/hub (check ownership of ${homeDir}/.cache)"`,
         "command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh",
         `PIN="${ctx.pin}"`,
         `CURRENT="$(modelctl --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1 || true)"`,

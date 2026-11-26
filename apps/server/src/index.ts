@@ -43,6 +43,7 @@ import { createBenchService, type BenchService } from "./bench-service.js";
 import { createAnalyticsService, type AnalyticsService } from "./analytics.js";
 import { createCleanupService, weeklySafePassParams, type CleanupService } from "./cleanup-service.js";
 import { createInventoryService, inventoryStale, type InventoryService } from "./inventory-service.js";
+import { createProvisioner, type Provisioner } from "./provisioning.js";
 import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
 import { type CleanupEntry } from "./cleanup-service.js";
 import { createEnergyEngine } from "./energy.js";
@@ -105,6 +106,8 @@ const state: {
   cleanup: CleanupService | null;
   /** IRI-028: cached per-node model inventory reads. */
   inventory: InventoryService | null;
+  /** IR-272: node setup convergence (install, cache-user change). */
+  provisioner: Provisioner | null;
   usage: UsageStore | null;
   usageClients: UsageClients | null;
   usageChats: UsageChats | null;
@@ -140,6 +143,7 @@ const state: {
   analytics: null,
   cleanup: null,
   inventory: null,
+  provisioner: null,
   usage: null,
   usageClients: null,
   usageChats: null,
@@ -176,6 +180,7 @@ const app = createApp({
   getAnalytics: () => state.analytics,
   getCleanup: () => state.cleanup,
   getInventory: () => state.inventory,
+  onCacheUserChanged: (nodeId) => void state.provisioner?.onCacheUserChanged(nodeId).catch(() => {}),
   getUsage: () => state.usage,
   getUsageClients: () => state.usageClients,
   getUsageChats: () => state.usageChats,
@@ -355,11 +360,39 @@ async function boot(): Promise<void> {
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg), (e) => {
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: e.status, params: e.params, exitCode: e.exitCode, durationMs: e.durationMs });
     queueSettle?.(e);
+    void state.provisioner?.onJobSettled(e).catch(() => {});
   }, (e) => {
     // IRI-028: a job starts from many places (download queue, setups, web
     // pages) — the Activity drawer must learn about all of them.
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", params: e.params, exitCode: null, durationMs: null });
   }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e));
+
+  // IR-272: setup script paths for models-inventory params (stale-recipe
+  // chip) — shared by the daily sweep and the provisioner.
+  const inventoryScriptPaths = async (): Promise<string[]> => {
+    if (state.setups === null) return [];
+    try {
+      const paths: string[] = [];
+      for (const s of await state.setups.list()) {
+        if (typeof s.scriptStart === "string") paths.push(s.scriptStart);
+        if (typeof s.scriptStop === "string") paths.push(s.scriptStop);
+      }
+      return [...new Set(paths)].slice(0, 50);
+    } catch {
+      return [];
+    }
+  };
+
+  state.provisioner = createProvisioner({
+    jobs: jobsService,
+    getNode: (id) => store.get(id),
+    getInventory: async (id) => (await state.inventory?.get(id).catch(() => null))?.report ?? null,
+    getPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()),
+    scriptPaths: inventoryScriptPaths,
+    log: (message) => log.info(message),
+  });
+  const provisionRetry = setInterval(() => void state.provisioner?.retryPending().catch(() => {}), 120_000);
+  provisionRetry.unref();
 
   pushRemediation = createPushRemediation({
     jobs: jobsService,
@@ -466,7 +499,7 @@ async function boot(): Promise<void> {
   // every snapshot-driven rule (disk_pct, gpu_temp_c, kernel_xid, …) was dead
   // while sweep-driven rules worked. The wrap passes get/markSeen/verifyToken
   // through and only overrides insertSnapshot.
-  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); }, setupEvents: {
+  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); void state.provisioner?.onAgentOnline(nodeId).catch(() => {}); }, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),
@@ -603,17 +636,7 @@ async function boot(): Promise<void> {
     void dbHandle?.isHealthy().then(async (healthy) => {
       if (!healthy || state.jobs === null || state.setups === null) return;
       try {
-        let scriptPaths: string[] = [];
-        try {
-          const setups = await state.setups.list();
-          for (const s of setups) {
-            if (typeof s.scriptStart === "string") scriptPaths.push(s.scriptStart);
-            if (typeof s.scriptStop === "string") scriptPaths.push(s.scriptStop);
-          }
-          scriptPaths = [...new Set(scriptPaths)].slice(0, 50);
-        } catch {
-          scriptPaths = [];
-        }
+        const scriptPaths = await inventoryScriptPaths();
         for (const nodeId of hub?.online() ?? []) {
           const inv = (await state.inventory?.get(nodeId).catch(() => null)) ?? null;
           if (!inventoryStale(inv, Date.now(), INVENTORY_DAY_MS)) continue;

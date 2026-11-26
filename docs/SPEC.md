@@ -207,8 +207,21 @@ flowchart LR
     when the current version already satisfies the pin, so a stale env pin
     never downgrades a newer binary; after every succeeded models-inventory
     read the hub dispatches one install job per cache user whose reported
-    version is below the pin (silent skip when the pin is unset, the node is
-    busy, or the agent is offline).
+    version is below the pin (silent skip when the node is busy or the agent
+    is offline). **IR-272 setup convergence**: the inventory always reports
+    the node's model user — the configured cache user, else the agent user
+    (the NAS root modelctl) — even before it has an HF cache or a binary.
+    With no hub pin, a missing binary is still installed at the agent's
+    default pin (`IRORI_MODELCTL_PIN`, 0.24.0); below-pin upgrades wait for
+    a pin. The hub reads the inventory when an agent comes online and its
+    node is not set up (no report, the cache user not reported, a missing or
+    below-pin modelctl), when the cache user is set or changed (after the
+    config-update), and after every successful `modelctl-install`.
+    `modelctl-install` also creates the user's `~/.cache/huggingface/hub`.
+    Serving nodes (not the NAS) get the idempotent `ensure-rsync` once per
+    hub process (a failure retries after 6 h). A busy node keeps the step
+    pending and retries it when a job on that node settles or within
+    2 minutes; one auto-install per node and user per 30 minutes.
   - **Search/download** on the NAS: HF id/URL → manifest generation → staged
     resumable download → validate → atomic publish → activate. GGUF
     quantization selection; mmproj/MTP companions detected. Queue YAML built

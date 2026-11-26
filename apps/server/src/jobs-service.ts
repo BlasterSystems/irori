@@ -102,25 +102,39 @@ export async function reconcilePresenceFromInventory(db: Db, nodeId: string, rep
  * whose reported modelctl is below the hub pin — dispatch the existing
  * version-gated `modelctl-install` job per user. IR-247: a MISSING binary
  * (version null) is converged too — skipping it left the user permanently
- * stuck ("unknown local cache user" on every per-user job). Silent skips
- * (unset pin, busy node, offline agent) just wait for the next inventory
- * read; the install job itself skips without a transfer when the version
- * satisfies the gate, so a stale env pin can never downgrade a newer binary.
+ * stuck ("unknown local cache user" on every per-user job). IR-272: with no
+ * hub pin a missing binary is still installed — at the agent's own default
+ * pin (0.24.0) — while below-pin upgrades wait for a pin. Silent skips (busy
+ * node, offline agent) wait for the next inventory read; the install job
+ * itself skips without a transfer when the version satisfies the gate, so a
+ * stale env pin can never downgrade a newer binary.
+ *
+ * IR-272: a successful install triggers a re-read (provisioning.ts). One
+ * auto-install per node and user per AUTO_INSTALL_COOLDOWN_MS keeps an
+ * install that "succeeds" without fixing the report (e.g. a custom
+ * IRORI_MODELCTL_PATH) from looping.
  */
-async function autoProvisionModelctl(
+export const AUTO_INSTALL_COOLDOWN_MS = 30 * 60_000;
+
+export async function autoProvisionModelctl(
   create: (nodeId: string, kind: string, params: Record<string, unknown>) => Promise<JobRow>,
   getPin: () => Promise<string | null>,
   nodeId: string,
   report: NodeInventory,
+  attempts: Map<string, number> = new Map(),
+  now: () => number = Date.now,
 ): Promise<void> {
   const pin = await getPin();
-  if (pin === null) return;
   for (const cache of report.local) {
     const version = cache.modelctlVersion;
     if (version !== null && !/^\d+\.\d+\.\d+$/.test(version)) continue;
-    if (version !== null && compareVersions(version, pin) >= 0) continue;
+    if (version !== null && (pin === null || compareVersions(version, pin) >= 0)) continue;
+    const key = `${nodeId}\u0000${cache.user}`;
+    const last = attempts.get(key);
+    if (last !== undefined && now() - last < AUTO_INSTALL_COOLDOWN_MS) continue;
     try {
       await create(nodeId, "modelctl-install", { user: cache.user });
+      attempts.set(key, now());
     } catch (err) {
       if (err instanceof JobBusyError || err instanceof JobDispatchError) continue;
       throw err;
@@ -333,11 +347,14 @@ export function createJobsService(
   sendToAgent: JobAgentSend,
   onSettled?: (event: JobSettledEvent) => void,
   onStarted?: (event: JobStartedEvent) => void,
-  /** IR-105: hub-pinned modelctl version; null/absent = no auto-provisioning. */
+  /** IR-105: hub-pinned modelctl version. Absent = no auto-provisioning;
+   *  resolving null = missing binaries only (IR-272). */
   getModelctlPin?: () => Promise<string | null>,
   /** ADR-0014: a failed push whose preflight reported a provisionable gap. */
   onPushBlocked?: (event: PushBlockedEvent) => void,
 ): JobsService {
+  /** IR-272: last auto-dispatched modelctl-install per node and user. */
+  const autoInstallAttempts = new Map<string, number>();
   const service: JobsService = {
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
@@ -574,7 +591,7 @@ export function createJobsService(
             // never fed for out-of-band models.
             await reconcilePresenceFromInventory(db, nodeId, report);
             if (getModelctlPin !== undefined) {
-              await autoProvisionModelctl((n, k, p) => service.create(n, k, p), getModelctlPin, nodeId, report);
+              await autoProvisionModelctl((n, k, p) => service.create(n, k, p), getModelctlPin, nodeId, report, autoInstallAttempts);
             }
           }
         }
