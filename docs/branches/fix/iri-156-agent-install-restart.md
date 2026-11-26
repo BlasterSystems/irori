@@ -59,4 +59,5 @@ Onboarding dgx-4 against the dev hub published at `https://irori.as267.com` fail
 
 ## Changelog
 
+- 2026-11-26: ARCHITECTURE.md "Agent link" now records the TLS reverse-proxy deployment (`wss://`, Upgrade forwarding) and the restart-on-re-run semantics. This satisfies the CI docs-check, which treats the `deploy/` comment changes as architecture-significant.
 - 2026-11-26: Installer restarts the unit and reads post-restart journal lines by cursor, with a warn-only WebSocket preflight and an error tail on timeout. The modal emits `wss://` on https pages. DEPLOYMENT.md has a TLS-proxy section and topology fixes.
