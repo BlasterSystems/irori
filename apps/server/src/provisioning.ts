@@ -29,6 +29,11 @@ type Step = "models-inventory" | "ensure-rsync";
  *  often, so every inventory settle does not re-run a doomed job. */
 export const RSYNC_RETRY_MS = 6 * 3_600_000;
 
+/** A hello re-reads a node that already has a report at most this often. A
+ *  user the agent cannot report (pre-IR-272 bundle, no passwd entry, home
+ *  outside /root and /home) would otherwise cost a read on every reconnect. */
+export const HELLO_REREAD_MS = 30 * 60_000;
+
 export interface ProvisionerNode {
   kind: NodeKind;
   cacheUser: string | null;
@@ -81,6 +86,11 @@ export function createProvisioner(deps: ProvisionerDeps): Provisioner {
   const rsyncOk = new Set<string>();
   /** Last ensure-rsync dispatch per node (failure back-off). */
   const rsyncTried = new Map<string, number>();
+  /** Last hello-triggered read per node (HELLO_REREAD_MS throttle). */
+  const helloRead = new Map<string, number>();
+  /** Steps being dispatched right now: concurrent triggers must not both
+   *  dispatch (the loser would queue a redundant second read). */
+  const inFlight = new Set<string>();
 
   /** Dispatches a step; true when it was created (or the node is gone/offline). */
   async function dispatch(nodeId: string, step: Step): Promise<boolean> {
@@ -99,10 +109,15 @@ export function createProvisioner(deps: ProvisionerDeps): Provisioner {
   }
 
   async function request(nodeId: string, step: Step): Promise<void> {
-    const queued = pending.get(nodeId);
-    if (queued?.has(step)) return; // at most one pending of each step per node
-    if (await dispatch(nodeId, step)) return;
-    pending.set(nodeId, (queued ?? new Set<Step>()).add(step));
+    const key = `${nodeId}\u0000${step}`;
+    if (pending.get(nodeId)?.has(step) || inFlight.has(key)) return; // one of each step per node
+    inFlight.add(key);
+    try {
+      if (await dispatch(nodeId, step)) return;
+      pending.set(nodeId, (pending.get(nodeId) ?? new Set<Step>()).add(step));
+    } finally {
+      inFlight.delete(key);
+    }
   }
 
   /** Inventory first (it may dispatch an install), then rsync. */
@@ -130,8 +145,14 @@ export function createProvisioner(deps: ProvisionerDeps): Provisioner {
       const node = await deps.getNode(nodeId);
       if (node === null) return;
       const [report, pin] = await Promise.all([deps.getInventory(nodeId), deps.getPin()]);
-      if (needsProvisioning(report, node, pin)) await request(nodeId, "models-inventory");
-      else if (await wantsRsync(nodeId)) await request(nodeId, "ensure-rsync");
+      if (needsProvisioning(report, node, pin)) {
+        const last = helloRead.get(nodeId);
+        if (report !== null && last !== undefined && now() - last < HELLO_REREAD_MS) return;
+        helloRead.set(nodeId, now());
+        await request(nodeId, "models-inventory");
+      } else if (await wantsRsync(nodeId)) {
+        await request(nodeId, "ensure-rsync");
+      }
     },
 
     async onCacheUserChanged(nodeId) {

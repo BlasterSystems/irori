@@ -49,7 +49,9 @@ export interface InventoryCtx {
   agentUser: string;
   /** IR-272: the node's configured model cache user (null = the agent user).
    *  That user is always reported, even before it has an HF cache or a
-   *  modelctl binary — the hub provisions from this row. */
+   *  modelctl binary — the hub provisions from this row. Undefined = not
+   *  known yet (no config-update applied): nobody is forced, so a job racing
+   *  the hello's config-update cannot make root look like the model user. */
   cacheUser?: string | null;
   /** IRI-080: setup script paths to stat for the stale-recipe chip. */
   scriptPaths?: string[];
@@ -340,7 +342,7 @@ async function classifyOrphan(cacheDir: string, entry: string): Promise<OrphanSt
  */
 export async function discoverLocalCaches(ctx: InventoryCtx): Promise<InventoryLocalCache[]> {
   const users = ctx.users ?? discoverUsers(readPasswd(ctx.passwdPath ?? "/etc/passwd"), ctx.agentUser);
-  const modelUser = ctx.cacheUser?.trim() || ctx.agentUser;
+  const modelUser = ctx.cacheUser === undefined ? null : ctx.cacheUser?.trim() || ctx.agentUser;
   const caches: InventoryLocalCache[] = [];
   for (const { user, home } of users) {
     const hasCache = existsSync(join(home, ".cache", "huggingface"));

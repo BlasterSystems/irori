@@ -3,7 +3,7 @@ import request from "supertest";
 import type { NodeInventory } from "@irori/core";
 import { createApp, type AppDeps } from "../src/app.js";
 import { AUTO_INSTALL_COOLDOWN_MS, autoProvisionModelctl, JobBusyError, JobDispatchError, type JobRow } from "../src/jobs-service.js";
-import { createProvisioner, needsProvisioning, RSYNC_RETRY_MS, type ProvisionerNode } from "../src/provisioning.js";
+import { createProvisioner, HELLO_REREAD_MS, needsProvisioning, RSYNC_RETRY_MS, type ProvisionerNode } from "../src/provisioning.js";
 import { createRings } from "../src/rings.js";
 import { createSseHub } from "../src/sse.js";
 import { makeFakeStore } from "./helpers.js";
@@ -162,6 +162,56 @@ describe("createProvisioner", () => {
     t = RSYNC_RETRY_MS;
     await provisioner.onJobSettled({ nodeId: "n1", kind: "models-inventory", status: "succeeded" });
     expect(kinds(fake)).toEqual(["ensure-rsync", "ensure-rsync"]);
+  });
+
+  it("dispatches once when two triggers race on one node", async () => {
+    const fake: Fake = { created: [], busy: false, offline: false };
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    const slow = createProvisioner({
+      jobs: {
+        create: async (nodeId, kind, params) => {
+          calls++;
+          await gate; // the first create is still in flight when the second trigger lands
+          fake.created.push({ nodeId, kind, params });
+          return {} as JobRow;
+        },
+      },
+      getNode: async () => SPARK,
+      getInventory: async () => null,
+      getPin: async () => "0.25.0",
+      scriptPaths: async () => [],
+      log: () => {},
+    });
+    const a = slow.onAgentOnline("n1");
+    const b = slow.onCacheUserChanged("n1");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    release();
+    await Promise.all([a, b]);
+    await slow.onJobSettled({ nodeId: "n1", kind: "models-inventory", status: "succeeded" });
+    expect(calls).toBe(2); // the read, then ensure-rsync: no redundant second read
+    expect(kinds(fake)).toEqual(["models-inventory", "ensure-rsync"]);
+  });
+
+  it("throttles hello re-reads of a node whose report cannot converge (old agent)", async () => {
+    let t = 0;
+    // The configured user is never in the report: a pre-IR-272 agent.
+    const { provisioner, fake } = makeProvisioner({ inventory: report([]), now: () => t });
+    await provisioner.onAgentOnline("n1");
+    t = HELLO_REREAD_MS - 1;
+    await provisioner.onAgentOnline("n1");
+    expect(kinds(fake)).toEqual(["models-inventory"]);
+    t = HELLO_REREAD_MS;
+    await provisioner.onAgentOnline("n1");
+    expect(kinds(fake)).toEqual(["models-inventory", "models-inventory"]);
+  });
+
+  it("always reads a node with no report on hello (fresh or invalidated)", async () => {
+    const { provisioner, fake } = makeProvisioner({ now: () => 0 });
+    await provisioner.onAgentOnline("n1");
+    await provisioner.onAgentOnline("n1");
+    expect(kinds(fake)).toEqual(["models-inventory", "models-inventory"]);
   });
 
   it("runs the queued inventory before the queued rsync once the node frees up", async () => {

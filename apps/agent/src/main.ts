@@ -209,7 +209,7 @@ async function run(): Promise<void> {
           nasRoot: transport.getNasRoot(),
           modelctlPath: config.modelctlPath,
           agentUser,
-          cacheUser: transport.getCacheUser(),
+          cacheUser: transport.getKnownCacheUser(),
           scriptPaths: Array.isArray(params.scriptPaths) ? (params.scriptPaths as unknown[]).filter((p): p is string => typeof p === "string") : [],
         });
         emit(JSON.stringify(report));

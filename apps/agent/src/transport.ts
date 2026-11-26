@@ -169,6 +169,9 @@ export class AgentTransport {
   private nasRoot: string | null = null;
   /** IR-101: cache owner for transfers from the last config-update (null = agent user). */
   private cacheUser: string | null = null;
+  /** IR-272: a config-update has been applied — before it, cacheUser is a
+   *  default, not the hub's answer. */
+  private configReceived = false;
   /** IRI-019: global HF token from the last config-update (null = unset/cleared). */
   private hfToken: string | null = null;
   /** IR-105: hub-pinned modelctl version from the last config-update (null = env fallback). */
@@ -249,6 +252,12 @@ export class AgentTransport {
   /** IR-101: cache owner for transfers from the last config-update. */
   getCacheUser(): string | null {
     return this.cacheUser;
+  }
+
+  /** IR-272: the configured cache user, or undefined while no config-update
+   *  has arrived yet (unknown, not "the agent user"). */
+  getKnownCacheUser(): string | null | undefined {
+    return this.configReceived ? this.cacheUser : undefined;
   }
 
   /**
@@ -557,6 +566,7 @@ export class AgentTransport {
     this.nasRoot = msg.nasRoot ?? null;
     // IR-101: null (or absent — old server) = the agent's own user (root).
     this.cacheUser = msg.cacheUser ?? null;
+    this.configReceived = true;
     // IRI-019: string = set, null = clear (env fallback applies), absent
     // (old server) = keep the current value.
     if (msg.hfToken !== undefined) this.hfToken = msg.hfToken;

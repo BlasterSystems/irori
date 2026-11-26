@@ -325,6 +325,7 @@ describe("buildInventory", () => {
       nasRoot: null,
       modelctlPath: "/root/.local/bin/modelctl",
       agentUser: "root",
+      cacheUser: null,
       users: [{ user: "root", home: rootHome }],
       exec: async () => {
         throw Object.assign(new Error("spawn /root/.local/bin/modelctl ENOENT"), { code: "ENOENT" });
@@ -332,6 +333,25 @@ describe("buildInventory", () => {
     });
     expect(report.local).toHaveLength(1);
     expect(report.local[0]).toMatchObject({ user: "root", modelctlVersion: null });
+  });
+
+  it("IR-272: forces nobody while the cache user is unknown (no config-update yet)", async () => {
+    const dir = tempDir();
+    const rootHome = join(dir, "root");
+    mkdirSync(rootHome, { recursive: true });
+    const report = await buildInventory({
+      nasRoot: null,
+      modelctlPath: "/fake/modelctl",
+      agentUser: "root",
+      cacheUser: undefined,
+      users: [{ user: "root", home: rootHome }],
+      exec: async () => {
+        throw new Error("no modelctl may run here");
+      },
+    });
+    // Same as before IR-272: no HF cache, no row — root must not look like
+    // the model user of a spark whose cache user just hasn't arrived.
+    expect(report.local).toEqual([]);
   });
 
   it("reports a local-only node and per-cache errors", async () => {

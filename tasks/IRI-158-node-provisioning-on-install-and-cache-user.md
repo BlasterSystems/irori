@@ -102,4 +102,13 @@ directory, and (on spark nodes) `rsync`. Nobody needs to SSH in or click Refresh
 
 ## Review
 
-- Adversarial review (`quality-review`): see the PR.
+- **Adversarial review (`quality-review`, fresh read-only context): PASS WITH FINDINGS**, no BLOCK. Fixed:
+  - **F1:** two concurrent triggers could double-dispatch an inventory read. Steps are now reserved while in flight. Tested with a gated race.
+  - **F2:** a user the agent can't report caused a read on every hello (pre-IR-272 bundle, no passwd entry, home outside `/root` and `/home`). Hello re-reads of a node with a report are now throttled to one per 30 minutes. Tested.
+  - **U1:** a job racing the hello's config-update ran with the default (null) cache user, so root could look like the model user of a spark and get modelctl and a root HF dir. The agent now forces no user until a config-update has been applied (`getKnownCacheUser`). Tested.
+  - **U3:** the new `mkdir` failed an already-satisfied install when `~/.cache` was unwritable. It now warns instead.
+  - **F3:** added a hub test that `onNodeOnline` frames follow the hello config-update. It fails when the hooks are reordered (checked).
+- **Accepted as is:**
+  - **U4:** the `/root` home for the agent's own user (the agent runs as root).
+  - **U5:** the NAS root row now completes presence reconcile for the NAS. `node_models` means the local HF cache, and no NAS-sourced presence exists.
+  - **F3 (b, c):** the index wiring and settle ordering are covered by reading the code and by the dev live check. CI's PG suite covers the jobs-service settle.
