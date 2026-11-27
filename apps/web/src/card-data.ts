@@ -1,8 +1,7 @@
-import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
-import { GB10_SOC_TDP_W } from "@irori/core";
+import type { HardwareSnapshot, NodeInfo } from "@irori/core";
+import { GB10_SOC_TDP_W, GB10_SYSTEM_ENVELOPE_W } from "@irori/core";
 import { fmtBytes, fmtWatts } from "./analytics";
 import { thresholds } from "./thresholds";
-import { llmSummaryLine, nodeLlmPorts } from "./llm-data";
 
 export interface CardRow {
   /** Stable v-for key: "gpu0" | "cpu" | "mem" | "disk". */
@@ -11,8 +10,12 @@ export interface CardRow {
   barPct: number | null;
   /** Available-space share rendered as the trailing orange segment (disk rows only, IR-98). */
   freePct?: number;
-  /** Metric segments without the temperature: "NVIDIA GB10 · 34% · 42.1 / 127.0 GB". */
+  /** Compact visible value (IRI-159): no model names, no totals — e.g. "34% · 74 W". */
   line: string;
+  /** Touch fallback (hover: none): the pre-IRI-159 full value with totals; absent when `line` already carries them. */
+  lineFull?: string;
+  /** Static row detail for the label tooltip (IRI-159); absent when the row has nothing to add. */
+  tip?: string;
   /** Rendered after `line` with the hot-temp accent; null when unreadable. */
   tempC: number | null;
   /** Value renders with the hot accent (disk usage > 80 %); absent otherwise. */
@@ -29,8 +32,8 @@ export interface CardData {
   statusText: string;
   agentVersion: string | null;
   hasSnapshot: boolean;
-  /** Head cards only: ":8000 EXL3 · :8001 idle"; null when nothing to show. */
-  inferenceLine: string | null;
+  /** Static identity string for the card-name tooltip (IRI-159): model · kind · agent · totals. Null when nothing readable. */
+  identityTip: string | null;
   /** Importance order: sparks GPU → CPU → MEM, NAS Disk → MEM → CPU. */
   rows: CardRow[];
 }
@@ -69,7 +72,6 @@ export function isHotTemp(tempC: number | null): boolean {
 export function computeCardData(
   node: NodeInfo,
   snapshot: HardwareSnapshot | null | undefined,
-  llm?: { ports: LlmPortSnapshot[] } | null,
 ): CardData {
   const cpu = snapshot?.cpu ?? null;
   const memory = snapshot?.memory ?? null;
@@ -82,34 +84,55 @@ export function computeCardData(
 
   const memUsed = formatGiB(memory?.usedBytes ?? null);
   const memTotal = formatGiB(memory?.totalBytes ?? null);
-  const memLine =
-    memUsed === null && memTotal === null
-      ? ""
-      : `${memUsed ?? "?"} / ${memTotal ?? "?"} GB`;
 
   const cpuRow: CardRow = {
     key: "cpu",
     label: "CPU",
     barPct: cpuPct,
     line: formatMetricLine(formatPct(cpuPct)),
+    lineFull: formatMetricLine(formatPct(cpuPct)),
+    tip: cpu
+      ? formatMetricLine(cpu.model, `${cpu.cores} cores`, "mean utilization across cores", "package watts on the Power card when readable")
+      : undefined,
     tempC: cpu?.tempC ?? null,
   };
-  const memRow: CardRow = { key: "mem", label: "MEM", barPct: memPct, line: memLine, tempC: null };
+  const memRow: CardRow = {
+    key: "mem",
+    label: "MEM",
+    barPct: memPct,
+    line: memUsed === null ? "" : `${memUsed} GB`,
+    lineFull: memUsed === null && memTotal === null ? undefined : `${memUsed ?? "?"} / ${memTotal ?? "?"} GB`,
+    tip: memTotal === null ? "Unified memory · CPU and GPU share one pool" : `Unified memory · ${memTotal} GB total · CPU and GPU share one pool`,
+    tempC: null,
+  };
 
   const gpuRows: CardRow[] = (snapshot?.gpus ?? []).map((gpu) => {
     const memUsedGiB = formatGiB(gpu.memUsedBytes);
     const memTotalGiB = formatGiB(gpu.memTotalBytes);
+    const vramPct =
+      gpu.memUsedBytes !== null && gpu.memTotalBytes !== null && gpu.memTotalBytes > 0
+        ? Math.round((gpu.memUsedBytes / gpu.memTotalBytes) * 100)
+        : null;
     return {
       key: `gpu${gpu.index}`,
       label: `GPU${gpu.index}`,
       barPct: gpu.usagePct,
-      line: formatMetricLine(
+      // IRI-159: the model name and VRAM totals move to the label tooltip —
+      // the compact value keeps only the live metric segments; lineFull keeps
+      // the pre-IRI-159 value for touch users and the node detail page.
+      line: formatMetricLine(formatPct(gpu.usagePct), gpu.powerW === null ? null : fmtWatts(gpu.powerW)),
+      lineFull: formatMetricLine(
         gpu.name,
         formatPct(gpu.usagePct),
         gpu.powerW === null ? null : fmtWatts(gpu.powerW),
+        memUsedGiB === null && memTotalGiB === null ? null : `${memUsedGiB ?? "?"} / ${memTotalGiB ?? "?"} GB`,
+      ),
+      tip: formatMetricLine(
+        gpu.name,
         memUsedGiB === null && memTotalGiB === null
           ? null
-          : `${memUsedGiB ?? "?"} / ${memTotalGiB ?? "?"} GB`,
+          : `VRAM ${memUsedGiB ?? "?"} / ${memTotalGiB ?? "?"} GB${vramPct === null ? "" : ` (${vramPct}%)`}`,
+        `per-node envelope ${GB10_SYSTEM_ENVELOPE_W} W`,
       ),
       tempC: gpu.tempC,
     };
@@ -142,7 +165,12 @@ export function computeCardData(
       label: "DISK",
       barPct: (bestMount.usedBytes / bestMount.totalBytes) * 100,
       freePct: 100 - (bestMount.usedBytes / bestMount.totalBytes) * 100,
-      line: `${fmtBytes(bestMount.usedBytes)} / ${fmtBytes(bestMount.totalBytes)}`,
+      line: fmtBytes(bestMount.usedBytes),
+      lineFull: `${fmtBytes(bestMount.usedBytes)} / ${fmtBytes(bestMount.totalBytes)}`,
+      tip:
+        node.kind === "nas"
+          ? `Store volume · ${fmtBytes(bestMount.totalBytes)} total · ${fmtBytes(Math.max(0, bestMount.totalBytes - bestMount.usedBytes))} free`
+          : `Internal NVMe · ${fmtBytes(bestMount.totalBytes)} total · ${fmtBytes(Math.max(0, bestMount.totalBytes - bestMount.usedBytes))} free · orange = available share`,
       tempC: null,
       warn: diskPctValue >= thresholds.diskWarnPct,
     };
@@ -159,8 +187,19 @@ export function computeCardData(
           label: "PKG",
           barPct: Math.min(100, (pkgW / GB10_SOC_TDP_W) * 100),
           line: fmtWatts(pkgW),
+          lineFull: fmtWatts(pkgW),
           tempC: null,
         };
+
+  // IRI-159: static identity string for the card-name tooltip — carries what
+  // the declutter removed from the visible card (kind, agent, totals).
+  const identityTip = formatMetricLine(
+    snapshot?.gpus?.[0]?.name ?? null,
+    node.kind === "nas" ? "NAS storage" : "DGX Spark",
+    node.agentVersion ? `agent ${node.agentVersion}` : null,
+    memTotal === null ? null : `unified memory ${memTotal} GB`,
+    bestMount !== null ? fmtBytes(bestMount.totalBytes) : null,
+  );
 
   return {
     name: node.name,
@@ -171,10 +210,7 @@ export function computeCardData(
     statusText: node.online ? "online" : "offline",
     agentVersion: node.agentVersion,
     hasSnapshot: snapshot !== null && snapshot !== undefined,
-    inferenceLine:
-      node.role === "head"
-        ? llmSummaryLine(llm?.ports ?? null, nodeLlmPorts(node))
-        : null,
+    identityTip: identityTip === "" ? null : identityTip,
     rows:
       snapshot === null || snapshot === undefined
         ? []

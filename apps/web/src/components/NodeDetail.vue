@@ -1114,7 +1114,7 @@ onUnmounted(() => {
               <div v-for="row in card.rows" :key="row.key" class="barrow">
                 <span>{{ row.label }}</span>
                 <div class="bar"><div class="bar__fill" :style="{ width: (row.barPct ?? 0) + '%' }"></div><div v-if="row.freePct !== undefined" class="bar__fill bar__fill--free" :style="{ width: row.freePct + '%' }"></div></div>
-                <span class="val" :class="{ 'metric--hot': row.warn === true }">{{ row.line }}<template v-if="row.tempC !== null"><template v-if="row.line"> · </template><span :class="{ 'metric--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
+                <span class="val" :class="{ 'metric--hot': row.warn === true }">{{ row.lineFull ?? row.line }}<template v-if="(row.lineFull ?? row.line)"><template v-if="row.line"> · </template><span :class="{ 'metric--hot': isHotTemp(row.tempC) }">{{ formatTemp(row.tempC) }}</span></template></span>
               </div>
             </template>
             <p v-else class="muted">waiting for first snapshot</p>

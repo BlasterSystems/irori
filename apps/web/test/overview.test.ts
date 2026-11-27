@@ -382,6 +382,28 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).toContain("hottest <span"); // page-head token on every tier
     expect(OVERVIEW_SRC).toContain("fleetTemps(");
   });
+
+  it("renders the Main+Rail shell: power in main, token/NAS/caps/feed in the rail (IRI-159)", () => {
+    expect(OVERVIEW_SRC).toContain('<div class="ov-shell"');
+    expect(OVERVIEW_SRC).toContain("ov-shell--flat"); // >1 serving hero flattens the shell
+    expect(OVERVIEW_SRC).toContain('class="nodes-grid"');
+    expect(OVERVIEW_SRC).toContain(".nodes-grid > :last-child:nth-child(odd)"); // 1–3 nodes waste nothing
+    expect(OVERVIEW_SRC).toContain('class="thermal-alert"'); // degraded-only alert row
+    expect(OVERVIEW_SRC).toContain("hero-split"); // hero body splits stats | chart
+    // rail composition order: token stats → NAS store → clock caps → feed
+    const railIdx = OVERVIEW_SRC.indexOf('<aside class="rail">');
+    const tokenIdx = OVERVIEW_SRC.indexOf(">Token stats</h3>");
+    const nasIdx = OVERVIEW_SRC.indexOf(">NAS store</span>");
+    const capsIdx = OVERVIEW_SRC.indexOf('aria-label="Fleet clock caps"');
+    const feedIdx = OVERVIEW_SRC.indexOf(">Telemetry</h3>");
+    const updatesIdx = OVERVIEW_SRC.indexOf(">Updates</h3>");
+    expect(railIdx).toBeGreaterThan(-1);
+    expect(tokenIdx).toBeGreaterThan(railIdx);
+    expect(nasIdx).toBeGreaterThan(tokenIdx);
+    expect(capsIdx).toBeGreaterThan(nasIdx);
+    expect(feedIdx).toBeGreaterThan(capsIdx);
+    expect(updatesIdx).toBeGreaterThan(feedIdx); // updates stays full-width below the shell
+  });
 });
 
 describe("width tier store (IR-128)", () => {

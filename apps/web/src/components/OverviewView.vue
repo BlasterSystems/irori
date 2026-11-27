@@ -60,6 +60,18 @@ const fleetTempData = computed(() =>
   ),
 );
 
+// ─── IRI-159: degraded-only thermal alert row — the desktop answer to "what
+// is hot" now that node cards stay the per-node home for temps (the
+// temps-strip promotion was rejected: it would duplicate them). A healthy
+// fleet renders nothing (IR-103: chrome only for exceptions). Filtered from
+// the hottest-first fleetTemps order; gpu-only per the approved spec.
+const thermalAlertNodes = computed(() =>
+  fleetTempData.value.items.filter((i) => i.online && i.gpu !== null && i.gpu >= TEMP_WARN_C),
+);
+const thermalAlertText = computed(() =>
+  thermalAlertNodes.value.map((i) => `${i.gpu}°C ${i.name}`).join(" · "),
+);
+
 // ─── IR-189: fleet-wide clock caps — one action, per-node results ────────────
 const fleetGpuCap = ref<string>("");
 const fleetCpuCap = ref<string>("");
@@ -479,6 +491,12 @@ function showItl(h: HeroData): boolean {
 function heroGridClass(h: HeroData): string {
   return showTtft(h) || showItl(h) ? "statgrid statgrid--6" : "statgrid";
 }
+/** IRI-159: the compact 4-tile hero splits internally (stats | sparkline);
+ *  heroes with TTFT/ITL tiles keep the stacked body — six stat tiles need
+ *  the full card width. */
+function heroSplitClass(h: HeroData): string {
+  return showTtft(h) || showItl(h) ? "card__body" : "card__body hero-split";
+}
 function hasQueue(h: HeroData): boolean {
   return h.queueRunning !== null || h.queueWaiting !== null;
 }
@@ -589,6 +607,14 @@ function heroStateView(p: HeroProcess): HeroStateView {
        clean-up-disk CTA, above everything else. -->
   <HealthBanner :findings="live.findings.value" :nodes="sortedNodes" />
 
+  <!-- IRI-159: degraded-only thermal alert — spark nodes at/above the warn
+       tier (70 °C), hottest first; hidden on a healthy fleet. -->
+  <div v-if="thermalAlertNodes.length > 0" class="thermal-alert" role="status">
+    <span class="thermal-alert__head">thermal</span>
+    <span class="mono">{{ thermalAlertText }}</span>
+    <span class="faint">≥ {{ TEMP_WARN_C }} °C warn tier</span>
+  </div>
+
   <!-- ── Fleet temperatures (IR-129): small tier only, ordered above the
        heroes — on phones the node cards are below the fold. Spark nodes only;
        the NAS is excluded (no power or thermal telemetry). ── -->
@@ -623,7 +649,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
           <span v-if="heroStateView(p) !== null" class="chip hero__state" :class="heroStateView(p)!.cls"><span class="dot" :class="heroStateView(p)!.dot" aria-hidden="true"></span> {{ heroStateView(p)!.label }}</span>
         </div>
       </div>
-      <div class="card__body">
+      <div :class="heroSplitClass(p.hero)">
         <div :class="heroGridClass(p.hero)">
           <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">{{ fmtTps(p.hero.decodeTps) }}</span><span v-if="charts.get(p.key)?.peak != null" class="stat__sub">{{ peakSubLabel(charts.get(p.key)!.granularity, charts.get(p.key)!.peak!) }}</span></div>
           <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">{{ fmtTps(p.hero.prefillTps) }}</span><span v-if="p.hero.cacheHitPct !== null" class="stat__sub">cache hit {{ Math.round(p.hero.cacheHitPct) }}%</span></div>
@@ -634,13 +660,13 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
         <!-- IR-128: sparklines hidden ONLY on small — shown on medium and
              full (owner final call). IR-220: v1.1 legend swatches. -->
-        <template v-if="tier !== 'small' && charts.get(p.key) !== undefined">
-          <LensChartVue :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" style="margin-top: 12px;" :aria-label="`decode and prefill, ${rangeLabel}`" />
+        <div v-if="tier !== 'small' && charts.get(p.key) !== undefined" class="hero-chart">
+          <LensChartVue :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" :aria-label="`decode and prefill, ${rangeLabel}`" />
           <div class="bs-legend" aria-hidden="true" style="margin-top: 8px;">
             <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--thread)" stroke-width="1.5" fill="none"/></svg>decode</span>
             <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--ink-2)" stroke-width="1.5" fill="none"/></svg>prefill</span>
           </div>
-        </template>
+        </div>
       </div>
     </article>
   </section>
@@ -650,18 +676,25 @@ function heroStateView(p: HeroProcess): HeroStateView {
   </div>
 
   <h2 class="h2-gap">Nodes</h2>
-  <section v-if="sparkNodes.length > 0" class="cols cols-3">
-    <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" :llm="live.getLlm(node.id)" />
+  <!-- IRI-159: 2-col node grid at any count — 1–3 nodes render without waste
+       (the odd last card spans both columns), 4 nodes fill it exactly. -->
+  <section v-if="sparkNodes.length > 0" class="nodes-grid">
+    <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" />
   </section>
   <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
     <span>{{ totalCount === 0 ? "no nodes yet" : "no spark nodes" }}</span>
     <span v-if="totalCount === 0" style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
   </div>
 
-  <!-- Fleet power + NAS store -->
-  <section class="hero-grid section-gap">
-    <article class="card">
-      <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
+  <!-- Fleet power + NAS store (IRI-159): power keeps the main column of the
+       Main+Rail shell; the rail holds token stats, the NAS store card, fleet
+       clock caps and the telemetry feed (all content-sized — no more
+       half-empty cards). Updates stays full-width below the shell. With more
+       than one serving hero the shell flattens to full-width rows. -->
+  <div class="ov-shell" :class="{ 'ov-shell--flat': heroProcesses.length > 1 }">
+    <div class="maincol">
+      <article class="card section-gap">
+        <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
       <div class="card__body" style="padding-top: 12px;">
         <div class="statgrid statgrid--3">
           <div class="stat"><span class="stat__label">Fleet now<Tip text="fleet = sparks only · the NAS is excluded (no power telemetry)" /></span><span class="stat__value">{{ fleetNowText }}</span></div>
@@ -719,8 +752,28 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
       </div>
     </article>
-    <article v-if="nasNode !== null" class="card">
-      <div class="card__head"><h3>{{ nasNode.name }}</h3><span class="chip chip--accent">NAS store</span></div>
+    </div>
+    <aside class="rail">
+      <!-- IRI-159: token stats join the rail — supersedes the IR-224 S7
+           full-width row (tiles shrink from ~416px to rail width). The
+           all-nodes fleet scope, prev-window deltas and the menu-range
+           behaviour are unchanged. -->
+      <section class="card section-gap">
+        <div class="card__head"><h3>Token stats</h3><span class="chip">■ recorded · token ledger · last {{ rangeLabel }}</span></div>
+        <div class="card__body" style="padding-top: 12px;">
+          <div class="statgrid statgrid--3">
+            <div v-for="t in tokenTiles" :key="t.label" class="stat">
+              <span class="stat__label">{{ t.label }}<Tip v-if="t.label === 'Cost' && tokenCost !== null" :text="tokenCostTip" /></span>
+              <span class="stat__value">{{ t.value }}</span>
+              <span v-if="t.sub !== null" class="stat__sub">{{ t.sub }}</span>
+              <span v-if="t.deltaPct !== null" class="stat__delta" :class="t.deltaPct >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPct * 10) / 10) }}% vs prev. {{ rangeLabel }}</span>
+              <span v-else-if="t.deltaPts !== null" class="stat__delta" :class="t.deltaPts >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPts * 10) / 10) }} pts vs prev. {{ rangeLabel }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <article v-if="nasNode !== null" class="card section-gap">
+        <div class="card__head"><h3>{{ nasNode.name }}</h3><span class="chip chip--accent">NAS store</span></div>
       <div class="card__body" style="padding-top: 12px;">
         <div class="stat"><span class="stat__label">Models</span><span class="stat__value">{{ nas.modelCount ?? "—" }}</span></div>
         <div v-if="storeText !== null" style="margin-top: 10px;" class="barrow">
@@ -739,68 +792,57 @@ function heroStateView(p: HeroProcess): HeroStateView {
         </div>
       </div>
     </article>
-  </section>
-
-  <!-- IR-224 S7 (IR-231) + IR-236: Token stats — own FULL-WIDTH row directly
-       below the NAS card (the 2-col hero-grid left the card half-empty);
-       six tiles in a 3-col grid — Average-per-hour and Busiest tiles dropped
-       (owner round 9). All-nodes fleet scope; deltas come from one
-       prev-window fetch; the card follows the menu range. -->
-  <section class="card section-gap">
-    <div class="card__head"><h3>Token stats</h3><span class="chip">■ recorded · token ledger · last {{ rangeLabel }}</span></div>
-    <div class="card__body" style="padding-top: 12px;">
-      <div class="statgrid statgrid--3">
-        <div v-for="t in tokenTiles" :key="t.label" class="stat">
-          <span class="stat__label">{{ t.label }}<Tip v-if="t.label === 'Cost' && tokenCost !== null" :text="tokenCostTip" /></span>
-          <span class="stat__value">{{ t.value }}</span>
-          <span v-if="t.sub !== null" class="stat__sub">{{ t.sub }}</span>
-          <span v-if="t.deltaPct !== null" class="stat__delta" :class="t.deltaPct >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPct * 10) / 10) }}% vs prev. {{ rangeLabel }}</span>
-          <span v-else-if="t.deltaPts !== null" class="stat__delta" :class="t.deltaPts >= 0 ? 'up' : 'down'">{{ Math.abs(Math.round(t.deltaPts * 10) / 10) }} pts vs prev. {{ rangeLabel }}</span>
+      <section v-if="sparkNodes.length > 0" class="card section-gap" aria-label="Fleet clock caps">
+        <div class="card__head">
+          <div class="row"><h3>Fleet clock caps</h3><Tip text="applies to every enabled spark node · a cap is a ceiling, not an operating point · 'keep after reboot' installs the boot-time oneshot on each node · a stored cap is re-applied whenever a node comes back online" /></div>
+          <span class="mono faint">{{ sparkNodes.length }} spark nodes</span>
         </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── IR-189/IR-198: fleet-wide clock caps — one action fans out to every
-       enabled spark node; per-node outcomes stay visible as touch-legible rows
-       instead of collapsing into a single status. Demoted below Nodes/Power
-       (IR-198 option A) and hidden entirely on a NAS-only fleet. ── -->
-  <section v-if="sparkNodes.length > 0" class="card section-gap" aria-label="Fleet clock caps">
-    <div class="card__head">
-      <div class="row"><h3>Fleet clock caps</h3><Tip text="applies to every enabled spark node · a cap is a ceiling, not an operating point · 'keep after reboot' installs the boot-time oneshot on each node · a stored cap is re-applied whenever a node comes back online" /></div>
-      <span class="mono faint">{{ sparkNodes.length }} spark nodes</span>
-    </div>
-    <div class="card__body">
-      <div class="row" style="align-items: center; gap: 6px; flex-wrap: wrap;">
-        <label class="visually-hidden" for="fleetGpuCap">GPU SM clock cap</label>
-        <select id="fleetGpuCap" v-model="fleetGpuCap" class="select" style="max-width: 165px;">
-          <option value="">GPU: leave alone</option>
-          <option v-for="o in fleetGpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-        <label class="visually-hidden" for="fleetCpuCap">CPU clock cap</label>
-        <select id="fleetCpuCap" v-model="fleetCpuCap" class="select" style="max-width: 165px;">
-          <option value="">CPU: leave alone</option>
-          <option v-for="o in fleetCpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-        <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
-          <input v-model="fleetPersist" type="checkbox" /> keep after reboot
-        </label>
-        <button class="btn btn--secondary btn--sm" :disabled="fleetBusy || (fleetGpuCap === '' && fleetCpuCap === '')" @click="applyFleetCaps(false)">Apply to fleet</button>
-        <button class="btn btn--ghost btn--sm" :disabled="fleetBusy" @click="applyFleetCaps(true)">Clear fleet</button>
-      </div>
-      <p v-if="fleetMsg" class="stat__sub" role="status">{{ fleetMsg }}</p>
-      <p v-if="fleetError" class="banner banner--warn">{{ fleetError }}</p>
-      <div v-if="fleetResults !== null" class="fleet-orows" role="list" aria-label="Per-node apply outcomes" style="margin-top: 8px;">
-        <div v-for="r in fleetResults" :key="r.nodeId" class="orow" role="listitem">
-          <span class="dot" :class="r.status === 200 ? 'dot--ok' : 'dot--warn'" aria-hidden="true"></span>
-          <span class="orow__n">{{ r.name }}</span>
-          <span class="orow__d">{{ fleetOutcomeText(r) }}</span>
+        <div class="card__body">
+          <div class="capsrow">
+            <label class="visually-hidden" for="fleetGpuCap">GPU SM clock cap</label>
+            <select id="fleetGpuCap" v-model="fleetGpuCap" class="select">
+              <option value="">GPU: leave alone</option>
+              <option v-for="o in fleetGpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+            <label class="visually-hidden" for="fleetCpuCap">CPU clock cap</label>
+            <select id="fleetCpuCap" v-model="fleetCpuCap" class="select">
+              <option value="">CPU: leave alone</option>
+              <option v-for="o in fleetCpuOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
+          </div>
+          <div class="capsrow" style="margin-top: 8px;">
+            <label class="stat__sub" style="display: flex; gap: 4px; align-items: center; cursor: pointer;">
+              <input v-model="fleetPersist" type="checkbox" /> keep after reboot
+            </label>
+            <button class="btn btn--secondary btn--sm" :disabled="fleetBusy || (fleetGpuCap === '' && fleetCpuCap === '')" @click="applyFleetCaps(false)">Apply to fleet</button>
+            <button class="btn btn--ghost btn--sm" :disabled="fleetBusy" @click="applyFleetCaps(true)">Clear fleet</button>
+          </div>
+          <p v-if="fleetMsg" class="stat__sub" role="status">{{ fleetMsg }}</p>
+          <p v-if="fleetError" class="banner banner--warn">{{ fleetError }}</p>
+          <div v-if="fleetResults !== null" class="fleet-orows" role="list" aria-label="Per-node apply outcomes" style="margin-top: 8px;">
+            <div v-for="r in fleetResults" :key="r.nodeId" class="orow" role="listitem">
+              <span class="dot" :class="r.status === 200 ? 'dot--ok' : 'dot--warn'" aria-hidden="true"></span>
+              <span class="orow__n">{{ r.name }}</span>
+              <span class="orow__d">{{ fleetOutcomeText(r) }}</span>
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
-  </section>
+      </section>
+      <section class="card section-gap">
+        <div class="card__head"><h3>Telemetry</h3><span class="chip">streaming</span></div>
+        <div class="card__body card__body--flush">
+          <div ref="feedLog" class="log feedlog">
+            <div v-for="(line, i) in feed" :key="`${line.t}-${i}`"><span class="dim">{{ fmtBucket(line.t, "minute") }}</span> {{ line.text }}</div>
+            <div v-if="feed.length === 0" class="dim">waiting for events…</div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </div>
 
   <!-- IRI-081: fleet update posture vs upstream baseline (informational only) -->
+  <!-- IRI-159: the updates table keeps its full-width row (needs ≥640px; the
+       card body scrolls horizontally on small screens). -->
   <section class="card section-gap">
     <div class="card__head">
       <h3>Updates</h3>
@@ -822,17 +864,6 @@ function heroStateView(p: HeroProcess): HeroStateView {
     </div>
   </section>
 
-  <!-- All event classes in one feed (owner decision) -->
-  <section class="card section-gap">
-    <div class="card__head"><h3>Telemetry</h3><span class="chip">streaming</span></div>
-    <div class="card__body card__body--flush">
-      <div ref="feedLog" class="log feedlog">
-        <div v-for="(line, i) in feed" :key="`${line.t}-${i}`"><span class="dim">{{ fmtBucket(line.t, "minute") }}</span> {{ line.text }}</div>
-        <div v-if="feed.length === 0" class="dim">waiting for events…</div>
-      </div>
-    </div>
-  </section>
-
   <!-- IR-220: v1.1 refresh-note — live status, cadence, fleet draw. -->
   <footer class="refresh-note" aria-label="Refresh status">
     <span class="dot dot--run" aria-hidden="true"></span>
@@ -850,6 +881,26 @@ function heroStateView(p: HeroProcess): HeroStateView {
 /* A single serving process spans the full row — no dead column. */
 .hero-grid--single {
   grid-template-columns: 1fr;
+}
+/* IRI-159: the compact hero splits internally — stats 2×2 left, sparkline
+   right. Heroes with TTFT/ITL tiles skip the split (heroSplitClass keeps
+   plain card__body): six stat tiles need the full card width. */
+.hero-split {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.hero-split .statgrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.hero-chart {
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .hero-split {
+    grid-template-columns: 1fr;
+  }
 }
 /* Hero heads: long model names truncate, the node label never breaks.
    v1.1 panel head: title 17/600 + mono meta (IR-220). */
@@ -910,6 +961,107 @@ html[data-tier="small"] .tempitem__name { flex: none; }
    them — inline margins could not be overridden. */
 .section-gap { margin: 20px 0 12px; }
 .h2-gap { margin: 20px 0 10px; }
+/* ── IRI-159: Main + Rail shell ────────────────────────────────────────
+   Main column (2fr): power. Rail (1fr): token stats · NAS store · fleet
+   clock caps · telemetry feed — all content-sized. The shell stacks at
+   ≤1100 (the global statgrid breakpoint) and flattens to one column when
+   more than one process is serving (ov-shell--flat). */
+.ov-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  margin-top: 20px;
+}
+.maincol,
+.rail {
+  min-width: 0;
+}
+.rail {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+.rail .section-gap,
+.maincol .section-gap {
+  margin: 0;
+}
+/* TTFT/ITL heroes keep the stacked body — their chart needs the 12px offset
+   the split layout carries via the grid gap. */
+.card__body:not(.hero-split) .hero-chart {
+  margin-top: 12px;
+}
+.ov-shell--flat {
+  grid-template-columns: 1fr;
+}
+/* Nodes: 2-col at any count; the odd last card spans both columns so
+   1–3-node fleets waste nothing (the old cols-3 orphaned the 4th). */
+.nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.nodes-grid > * {
+  min-width: 0;
+}
+.nodes-grid > :last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+/* IRI-159: degraded-only thermal alert — spark nodes at/above the warn
+   tier; a healthy fleet renders nothing (IR-103). */
+.thermal-alert {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid var(--thread);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  color: var(--thread-ink);
+}
+.thermal-alert__head {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.thermal-alert .faint {
+  margin-left: auto;
+}
+/* Rail clock caps: selects stack above the actions — a 428px rail fits two
+   165px selects, not five controls on one line. */
+.capsrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+/* Rail token tiles: 2-col at rail width, 3-col once the rail is full-width. */
+.rail .statgrid--3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 1100px) {
+  .ov-shell {
+    grid-template-columns: 1fr;
+  }
+  .rail .statgrid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+html[data-tier="small"] .ov-shell {
+  grid-template-columns: 1fr;
+}
+html[data-tier="small"] .nodes-grid {
+  grid-template-columns: 1fr;
+}
+html[data-tier="small"] .nodes-grid > :last-child:nth-child(odd) {
+  grid-column: auto;
+}
+html[data-tier="small"] .rail .statgrid--3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .powerchart { width: 100%; height: 96px; display: block; margin-top: 6px; }
 /* IR-220: labeled power chart (v1.1 idiom) — 44px y column, hairline grid,
    mono uppercase x labels. Percent tops map the 600×90 viewBox onto the box. */
