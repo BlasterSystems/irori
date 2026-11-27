@@ -180,27 +180,3 @@ export function groupNodes(nodes: NodeInfo[]): NodeGroups {
   }
   return groups;
 }
-
-/**
- * Head-card inference summary: ":8000 EXL3 · :8001 idle". Ports without a
- * probe yet are listed bare; detected ports not in the registry list are
- * appended (hot-added probes). Null when there is nothing to show.
- */
-export function llmSummaryLine(
-  ports: LlmPortSnapshot[] | null | undefined,
-  configured: number[],
-): string | null {
-  const snapshots = ports ?? [];
-  const ordered = [...configured];
-  // Hot-added ports surface only when they answered; undetected entries are
-  // idle ghosts of ports removed from the config (IRI-034).
-  for (const snap of snapshots) {
-    if (snap.detected && !ordered.includes(snap.port)) ordered.push(snap.port);
-  }
-  const parts = ordered.map((port) => {
-    const snap = snapshots.find((p) => p.port === port);
-    if (!snap) return `:${port}`;
-    return snap.detected ? `:${port} ${backendLabel(snap.backend)}` : `:${port} idle`;
-  });
-  return parts.length > 0 ? parts.join(" · ") : null;
-}

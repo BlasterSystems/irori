@@ -5,7 +5,7 @@ import { computed, reactive, ref } from "vue";
  * createLiveStore's public members (reactive maps + refs) so every view's
  * setup body runs without the SSE singleton.
  */
-interface MockNode { id: string; name: string; online: boolean; role?: string; kind?: string }
+interface MockNode { id: string; name: string; online: boolean; role?: string; kind?: string; agentVersion?: string }
 
 export const liveMock: {
   nodes: Map<string, MockNode>;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HardwareSnapshot, LlmPortSnapshot, NodeInfo } from "@irori/core";
+import type { HardwareSnapshot, NodeInfo } from "@irori/core";
 import { computeCardData, isHotTemp } from "../src/card-data";
 
 const GIB = 2 ** 30;
@@ -86,10 +86,18 @@ describe("computeCardData", () => {
     const [gpu, cpu, mem, pkg] = card.rows;
     expect(cpu?.line).toBe("18%");
     expect(cpu?.tempC).toBe(62);
-    expect(mem?.line).toBe("96.0 / 127.0 GB");
+    // IRI-159: compact visible values; totals/model live in lineFull/tip.
+    expect(mem?.line).toBe("96.0 GB");
+    expect(mem?.lineFull).toBe("96.0 / 127.0 GB");
+    expect(mem?.tip).toBe("Unified memory · 127.0 GB total · CPU and GPU share one pool");
     expect(mem?.barPct).toBeCloseTo((96 / 127) * 100);
     expect(gpu?.label).toBe("GPU0");
-    expect(gpu?.line).toBe("NVIDIA GB10 · 34% · 74 W · 42.1 / 127.0 GB");
+    expect(gpu?.line).toBe("34% · 74 W");
+    expect(gpu?.tip).toBe("NVIDIA GB10 · VRAM 42.1 / 127.0 GB (33%) · per-node envelope 240 W");
+    expect(cpu?.tip).toBe("GB10 · 20 cores · mean utilization across cores · package watts on the Power card when readable");
+    // every row carries a touch-fallback value so the hover:none swap never blanks a row
+    expect(cpu?.lineFull).toBe("18%");
+    expect(pkg?.lineFull).toBe("41 W");
     expect(gpu?.tempC).toBe(61);
     expect(gpu?.barPct).toBe(34);
     // package power scaled against the documented GB10 SOC TDP (140 W)
@@ -112,9 +120,10 @@ describe("computeCardData", () => {
     expect(cpu?.line).toBe("");
     expect(cpu?.tempC).toBe(62);
     // memory is never nullable in the schema, so its line stays readable
-    expect(card.rows[2]?.line).toBe("96.0 / 127.0 GB");
-    // the gpu name is always readable — only the metric segments drop out
-    expect(gpu?.line).toBe("NVIDIA GB10");
+    expect(card.rows[2]?.line).toBe("96.0 GB");
+    // the gpu name is always readable — it survives in the label tooltip
+    expect(gpu?.line).toBe("");
+    expect(gpu?.tip).toBe("NVIDIA GB10 · per-node envelope 240 W");
     expect(gpu?.tempC).toBeNull();
   });
 
@@ -134,7 +143,9 @@ describe("computeCardData", () => {
     const card = computeCardData(nodeFixture({ kind: "nas", role: "standalone" }), { ...SNAPSHOT, gpus: [], storage });
     expect(card.rows.map((r) => r.key)).toEqual(["disk", "mem", "cpu"]);
     expect(card.rows[0]?.label).toBe("DISK");
-    expect(card.rows[0]?.line).toBe("11.6 TB / 18.1 TB");
+    expect(card.rows[0]?.line).toBe("11.6 TB");
+    expect(card.rows[0]?.lineFull).toBe("11.6 TB / 18.1 TB");
+    expect(card.rows[0]?.tip).toContain("Store volume · 18.1 TB total");
     expect(card.rows[0]?.barPct).toBeCloseTo((11_603_944_087_552 / 18_108_599_115_776) * 100);
     expect(card.rows[0]?.freePct).toBeCloseTo(100 - (11_603_944_087_552 / 18_108_599_115_776) * 100);
   });
@@ -147,7 +158,9 @@ describe("computeCardData", () => {
     const card = computeCardData(nodeFixture(), { ...SNAPSHOT, storage });
     const disk = card.rows.find((r) => r.key === "disk");
     // the 18.1 TB NAS share must not win the row — the root device does
-    expect(disk?.line).toBe("3.6 TB / 4 TB");
+    expect(disk?.line).toBe("3.6 TB");
+    expect(disk?.lineFull).toBe("3.6 TB / 4 TB");
+    expect(disk?.tip).toContain("Internal NVMe · 4 TB total");
     expect(disk?.barPct).toBeCloseTo((3_599_884_947_456 / 3_999_872_163_840) * 100);
     expect(disk?.freePct).toBeCloseTo(100 - (3_599_884_947_456 / 3_999_872_163_840) * 100);
     expect(disk?.warn).toBe(true); // 90 % — the row text still warns at the app tier
@@ -160,7 +173,7 @@ describe("computeCardData", () => {
       { mount: "/mnt/nas", fs: "nfs4", totalBytes: 18_108_599_115_776, usedBytes: 14_236_433_331_200, readBps: null, writeBps: null, device: null },
     ];
     const card = computeCardData(nodeFixture(), { ...SNAPSHOT, storage });
-    expect(card.rows.find((r) => r.key === "disk")?.line).toBe("14.2 TB / 18.1 TB");
+    expect(card.rows.find((r) => r.key === "disk")?.lineFull).toBe("14.2 TB / 18.1 TB");
   });
 
   it("omits the disk row when a NAS has no readable storage", () => {
@@ -185,27 +198,26 @@ describe("computeCardData", () => {
     expect(coolCard.rows[0]?.warn).toBe(false);
   });
 
-  it("shows the inference summary line on head cards only", () => {
-    const ports = [
-      { port: 8000, host: "127.0.0.1", backend: "exl3", detected: true, model: "GLM", decodeTps: 142.3, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, e2eP95Ms: null, itlP95Ms: null, engineMeta: null, probedAtMs: 1 },
-      { port: 8001, host: "127.0.0.1", backend: "unknown", detected: false, model: null, decodeTps: null, prefillTps: null, queueRunning: null, queueWaiting: null, kvCachePct: null, ttftP95Ms: null, e2eP95Ms: null, itlP95Ms: null, engineMeta: null, probedAtMs: 1 },
-    ] as LlmPortSnapshot[];
-    // IRI-034: undetected hot-added ports are hidden (idle ghosts of removed
-    // ports); configured idle ports still render.
-    const head = computeCardData(nodeFixture({ role: "head" }), SNAPSHOT, { ports });
-    expect(head.inferenceLine).toBe(":8000 EXL3");
+  it("moves static identity into the name tooltip (IRI-159)", () => {
+    const card = computeCardData(nodeFixture(), SNAPSHOT);
+    expect(card.identityTip).toContain("NVIDIA GB10");
+    expect(card.identityTip).toContain("DGX Spark");
+    expect(card.identityTip).toContain("agent 0.1.0");
+    expect(card.identityTip).toContain("unified memory 127.0 GB");
 
-    const configuredIdle = computeCardData(
-      nodeFixture({ role: "head", llmPorts: [8001] }),
-      SNAPSHOT,
-      { ports: [ports[1]!] },
-    );
-    expect(configuredIdle.inferenceLine).toBe(":8001 idle");
+    // node constants survive without a snapshot (GPU model/total need one)
+    const noSnapshot = computeCardData(nodeFixture(), null);
+    expect(noSnapshot.identityTip).toContain("agent 0.1.0");
+  });
 
-    const headWithoutProbes = computeCardData(nodeFixture({ role: "head" }), SNAPSHOT);
-    expect(headWithoutProbes.inferenceLine).toBeNull();
-
-    const worker = computeCardData(nodeFixture(), SNAPSHOT, { ports });
-    expect(worker.inferenceLine).toBeNull();
+  it("keeps compact and touch-fallback disk values consistent (IRI-159)", () => {
+    const storage: HardwareSnapshot["storage"] = [
+      // decimal GB — fmtBytes is decimal (657 GB used of a 983 GB NVMe)
+      { mount: "/", fs: "ext4", totalBytes: 983_000_000_000, usedBytes: 657_000_000_000, readBps: null, writeBps: null, device: null },
+    ];
+    const disk = computeCardData(nodeFixture(), { ...SNAPSHOT, storage }).rows.find((r) => r.key === "disk");
+    expect(disk?.line).toBe("657 GB");
+    expect(disk?.lineFull).toBe("657 GB / 983 GB");
+    expect(disk?.tip).toContain("326 GB free");
   });
 });

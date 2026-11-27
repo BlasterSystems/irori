@@ -9,7 +9,6 @@ import {
   formatTps,
   groupNodes,
   kvBarPct,
-  llmSummaryLine,
   nodeLlmPorts,
   shapeLlmPort,
 } from "../src/llm-data";
@@ -231,34 +230,3 @@ describe("groupNodes", () => {
   });
 });
 
-describe("llmSummaryLine", () => {
-  it("joins ports with detected backends and idle markers", () => {
-    const ports = [
-      portFixture({ port: 8000 }),
-      portFixture({ port: 8001, detected: false, backend: "llama.cpp" }),
-    ];
-    expect(llmSummaryLine(ports, [8000, 8001])).toBe(":8000 EXL3 · :8001 idle");
-  });
-
-  it("lists configured ports bare when no probe has arrived", () => {
-    expect(llmSummaryLine(null, [8000, 8001])).toBe(":8000 · :8001");
-  });
-
-  it("appends detected hot-added ports missing from the registry", () => {
-    const ports = [portFixture({ port: 8081, backend: "tensorfold" })];
-    expect(llmSummaryLine(ports, [])).toBe(":8081 TensorFold");
-    expect(llmSummaryLine(ports, [8000])).toBe(":8000 · :8081 TensorFold");
-  });
-
-  it("hides undetected hot-added ports (idle ghosts of removed ports, IRI-034)", () => {
-    const ports = [
-      portFixture({ port: 8081, detected: false, backend: "llama.cpp" }),
-      portFixture({ port: 9000, backend: "tensorfold" }),
-    ];
-    expect(llmSummaryLine(ports, [])).toBe(":9000 TensorFold");
-  });
-
-  it("returns null when there is nothing to show", () => {
-    expect(llmSummaryLine([], [])).toBeNull();
-  });
-});

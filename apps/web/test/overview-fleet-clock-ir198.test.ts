@@ -64,7 +64,7 @@ describe("OverviewView fleet clock caps (IR-198)", () => {
     liveMock.nodes.set(DGX1, { id: DGX1, name: "dgx1", online: true, role: "head", kind: "spark" });
     liveMock.nodes.set(DGX2, { id: DGX2, name: "dgx2", online: true, role: "worker", kind: "spark" });
     const w = await mountOverview();
-    const sections = Array.from((w.element as HTMLElement).querySelectorAll("section"));
+    const sections = Array.from((w.element as HTMLElement).querySelectorAll("section, article"));
     const clockIdx = sections.findIndex((s) => s.getAttribute("aria-label") === "Fleet clock caps");
     const powerIdx = sections.findIndex((s) => Array.from(s.querySelectorAll("h3")).some((h) => h.textContent === "Power"));
     const updatesIdx = sections.findIndex((s) => Array.from(s.querySelectorAll("h3")).some((h) => h.textContent === "Updates"));

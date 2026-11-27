@@ -15,7 +15,7 @@ const cssSource = readFileSync(new URL("../src/assets/irori.css", import.meta.ur
  * (irori.css classes) verbatim. Rendering tests need jsdom and are deferred.
  */
 it("NodeCard keeps the DS card vocabulary", () => {
-  for (const cls of ["card", "card__head", "card__body", "chip", "barrow", "bar__fill", "mono faint"]) {
+  for (const cls of ["card", "card__head", "card__body", "chip", "barrow", "bar__fill", "card__name"]) {
     expect(nodeCardSource).toContain(cls);
   }
   // IR-103: no status chip on healthy cards; offline is a strip + error border.

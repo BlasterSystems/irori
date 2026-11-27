@@ -1,0 +1,305 @@
+<!doctype html>
+<!-- Overview ADJUSTED mockup — Option 1 (Main + Rail) as approved 2026-11-27:
+     · Rail composition: TOKEN STATS moved into the rail (owner: "power or token stats can move
+       to the rail, or updates as well"). Power stays main (its 24h chart needs a ≥560px plot);
+       Updates stays full-width (its table needs ≥640px, horizontal scroll on mobile).
+     · Node cards fully decluttered: no SPARK chip, no agent version, no GPU model name,
+       no MEM/DISK totals, NO inference line ("also-drop-inference" owner decision).
+       Constants live in tooltips (native title here; Tip.vue + focus fix at implement).
+     · Tier switch: Full 1296 / Medium 1000 (shell stacks ≤1100) / Mobile 390 (≤900:
+       single column, temps strip reappears, totals return inline — hover:none fallback).
+     Static, self-contained; approximate DS v1.4 dark colors. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overview — adjusted Main+Rail mockup (responsive)</title>
+<style>
+  :root {
+    --bg:#0b0e13; --surface:#12161d; --surface2:#1a2029; --border:#262c37;
+    --fg:#e8ebf0; --muted:#98a0ae; --faint:#5c6472; --accent:#ff7a45; --ok:#3fb27f; --warn:#e0a33c;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .mockhead { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:14px;
+    padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .mockhead b { font-size:13px; }
+  .seg { display:flex; gap:4px; }
+  .seg label { font:11.5px var(--mono); color:var(--muted); border:1px solid var(--border); border-radius:6px; padding:4px 10px; cursor:pointer; }
+  .mockhead .note { font:11px var(--mono); color:var(--faint); width:100%; }
+  body > input { position:absolute; opacity:0; pointer-events:none; }
+  #tFull:checked ~ .mockhead label[for="tFull"], #tMed:checked ~ .mockhead label[for="tMed"],
+  #tSmall:checked ~ .mockhead label[for="tSmall"] { color:var(--fg); border-color:var(--accent); }
+
+  /* viewport simulation */
+  .viewport { margin:20px auto 60px; transition:none; padding:0 0 0 0; }
+  #tFull:checked ~ .stage .viewport { width:1296px; }
+  #tMed:checked  ~ .stage .viewport { width:1000px; }
+  #tSmall:checked ~ .stage .viewport { width:390px; border:1px solid var(--border); border-radius:18px; padding:10px 0 20px; }
+
+  .pagehead { padding:0 20px; }
+  .pagehead h1 { margin:0 0 2px; font-size:22px; }
+  .pagehead p { margin:0; font:12px var(--mono); color:var(--muted); }
+  .pagehead .hot { color:var(--accent); }
+  h2 { font-size:15px; margin:18px 20px 10px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; min-width:0; }
+  .card__head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 13px; border-bottom:1px solid var(--border); }
+  .card__head h3 { margin:0; font-size:13.5px; font-weight:600; }
+  .card__body { padding:11px 13px 13px; min-width:0; }
+  .chip { font:9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--muted); border:1px solid var(--border); border-radius:4px; padding:1px 6px; white-space:nowrap; }
+  .chip--accent { color:var(--accent); border-color:var(--accent); }
+  .sub { font:11px var(--mono); color:var(--faint); }
+  .muted { font:11px var(--mono); color:var(--muted); }
+  .tag { font:9.5px var(--mono); background:var(--accent); color:#000; border-radius:4px; padding:1px 6px; vertical-align:2px; }
+  .gap { margin-top:16px; }
+  .mx { margin-left:20px; margin-right:20px; }
+
+  /* thermal alert row — degraded-only (IR-103) */
+  .thermal { display:flex; align-items:center; gap:8px; border:1px solid var(--accent); border-radius:8px;
+    padding:7px 12px; margin:14px 20px 0; font:12px var(--mono); color:var(--accent); flex-wrap:wrap; }
+
+  /* temps strip — small tier only (IR-129, unchanged) */
+  .tempsstrip { display:none; align-items:baseline; gap:14px; flex-wrap:wrap; border:1px solid var(--border); border-radius:8px;
+    padding:8px 12px; margin:14px 20px 0; font:11px var(--mono); color:var(--muted); }
+  #tSmall:checked ~ .stage .tempsstrip { display:flex; }
+  .tempsstrip b { color:var(--fg); font-weight:600; }
+  .tempsstrip .hotv { color:var(--accent); }
+
+  /* shell: full = 2fr/1fr, stacked ≤1100 (med+small via radio) */
+  .shell { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); gap:16px; align-items:start; margin-top:16px; }
+  .shell > div { min-width:0; }
+  .rail { display:grid; gap:16px; }
+  #tMed:checked ~ .stage .shell, #tSmall:checked ~ .stage .shell { grid-template-columns:1fr; }
+
+  /* hero */
+  .hero-split { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:16px; }
+  #tSmall:checked ~ .stage .hero-split { grid-template-columns:1fr; }
+  .statgrid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px 16px; }
+  .statgrid--3 { grid-template-columns:repeat(3,1fr); }
+  .stat__label { display:block; font:9.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+  .stat__value { font-size:17px; font-weight:600; }
+  .stat__sub { display:block; font:10px var(--mono); color:var(--muted); }
+  .delta-down { color:var(--ok); }
+  .squig { width:100%; height:110px; border-bottom:1px solid var(--border); }
+  #tSmall:checked ~ .stage .squig { height:80px; }
+
+  /* decluttered node card — dual values: compact (pointer devices) / total (touch fallback) */
+  .ncard { display:block; min-width:0; }
+  .ncard .row { display:flex; align-items:center; gap:6px; }
+  .ncard h4 { margin:0; font-size:12.5px; cursor:help; text-decoration:underline dotted var(--faint); text-underline-offset:3px; }
+  .ngrid-2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+  #tSmall:checked ~ .stage .ngrid-2 { grid-template-columns:1fr; }
+  .barrow { display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:8px; align-items:center; font:10.5px var(--mono); color:var(--muted); min-width:0; }
+  .barrow + .barrow { margin-top:7px; }
+  .barrow .lbl { cursor:help; text-decoration:underline dotted var(--faint); text-underline-offset:3px; text-transform:uppercase; letter-spacing:.05em; }
+  .bar { height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; display:flex; min-width:0; }
+  .bar i { display:block; height:100%; background:var(--fg); }
+  .bar i.acc { background:var(--accent); }
+  .barrow .val { color:var(--fg); white-space:nowrap; cursor:help; }
+  .v-total { display:none; }
+  #tSmall:checked ~ .stage .v-compact { display:none; }
+  #tSmall:checked ~ .stage .v-total { display:inline; }
+
+  /* token-in-rail grid: 2 cols in rail (full), 3 cols when stacked wide (med), 2 cols mobile */
+  .tg-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #tMed:checked ~ .stage .tg-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  #tSmall:checked ~ .stage .tg-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+
+  /* power */
+  .pbars { display:flex; align-items:flex-end; gap:4px; height:60px; margin-top:10px; border-bottom:1px solid var(--border); }
+  .pbars i { flex:1; min-width:2px; background:var(--fg); opacity:.92; }
+  .pbars-cap { display:flex; justify-content:space-between; margin-top:4px; font:9.5px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+
+  .caps .row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .fake-select { font:11.5px var(--mono); color:var(--muted); border:1px solid var(--border); border-radius:6px; padding:6px 11px; background:var(--surface2); }
+  .btn { font:12px var(--mono); border-radius:6px; padding:6px 13px; border:1px solid var(--border); background:var(--surface2); color:var(--fg); }
+  .btn--ghost { background:transparent; color:var(--muted); }
+  table.ut { width:100%; border-collapse:collapse; font:11px var(--mono); color:var(--muted); }
+  table.ut td, table.ut th { text-align:left; padding:5px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .utwrap { overflow-x:auto; }
+  .feed { font:10.5px var(--mono); color:var(--muted); }
+  .feed div { padding:2px 0; border-bottom:1px dotted var(--border); }
+  .legend { max-width:1296px; margin:0 auto 40px; padding:12px 14px; border:1px dashed var(--border); border-radius:10px; font:11.5px var(--mono); color:var(--muted); }
+  .legend b { color:var(--fg); }
+</style>
+</head>
+<body>
+  <input type="radio" name="t" id="tFull" checked>
+  <input type="radio" name="t" id="tMed">
+  <input type="radio" name="t" id="tSmall">
+
+  <div class="mockhead">
+    <b>Overview · adjusted Main+Rail</b>
+    <div class="seg">
+      <label for="tFull">Full · 1296</label>
+      <label for="tMed">Medium · 1000</label>
+      <label for="tSmall">Mobile · 390</label>
+    </div>
+    <span class="note">approved composition: token stats in the rail · power + updates stay wide · no inference line · hover labels/values/head for tooltip content · mobile shows the touch fallback (totals inline)</span>
+  </div>
+
+  <div class="stage">
+    <div class="viewport">
+      <div class="pagehead">
+        <h1>Overview</h1>
+        <p>5 nodes · 5 online · 1 serving · hottest <span class="hot">71.8 °C DGX-2</span></p>
+      </div>
+
+      <div class="thermal">⚠ thermal · 71.8 °C DGX-2 · 70.1 °C DGX-1 GPU — above 70 °C warn tier <span class="sub" style="margin-left:auto;">hidden on a healthy fleet (IR-103)</span></div>
+
+      <div class="tempsstrip">fleet temps <span>DGX-1 gpu <b class="hotv">70.1 °C</b> cpu <b>58 °C</b></span><span>DGX-2 gpu <b class="hotv">71.8 °C</b> cpu <b>61 °C</b></span><span>DGX-3 gpu <b>64 °C</b> cpu <b>57 °C</b></span><span>DGX-4 gpu <b>61 °C</b> cpu <b>55 °C</b></span></div>
+
+      <div class="shell mx">
+        <!-- ── main column ── -->
+        <div>
+          <section class="card">
+            <div class="card__head"><h3>GLM-5.3-Flash-EXL3-TP4</h3><span class="sub">tensorfold :8081 · DGX-1 +3 workers</span></div>
+            <div class="card__body">
+              <div class="hero-split">
+                <div class="statgrid">
+                  <div><span class="stat__label">Decode</span><span class="stat__value">88 tok/s</span><span class="stat__sub">peak minute 81</span></div>
+                  <div><span class="stat__label">Prefill</span><span class="stat__value">0 tok/s</span></div>
+                  <div><span class="stat__label">Queue</span><span class="stat__value">3 · 0</span><span class="stat__sub">running · waiting</span></div>
+                  <div><span class="stat__label">KV cache</span><span class="stat__value">28%</span></div>
+                </div>
+                <div>
+                  <svg class="squig" viewBox="0 0 560 110" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M0 88 L60 74 L120 90 L180 48 L240 80 L300 30 L360 66 L420 40 L480 72 L560 56" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+                    <path d="M0 66 L60 66 L120 78 L180 64 L240 72 L300 56 L360 70 L420 60 L480 66 L560 62" fill="none" stroke="var(--faint)" stroke-width="1.3"/>
+                  </svg>
+                  <div class="sub" style="margin-top:5px;">— decode · — prefill · last 24 h</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <h2 style="margin-left:0;margin-right:0;">Nodes</h2>
+          <section class="ngrid-2">
+            <a class="card ncard" href="#">
+              <div class="card__head"><div class="row"><h4 title="NVIDIA GB10 · DGX Spark · agent 0.7.0 · unified memory 121.6 GB · NVMe 983 GB">DGX-1</h4><span class="chip chip--accent">HEAD</span></div></div>
+              <div class="card__body">
+                <div class="barrow"><span class="lbl" title="NVIDIA GB10 · VRAM 42.1 / 127.0 GB (33%) · per-node envelope 240 W">GPU0</span><div class="bar"><i style="width:96%"></i></div><span class="val" title="VRAM 42.1 / 127.0 GB (33%)">96% · 31 W · 65 °C</span></div>
+                <div class="barrow"><span class="lbl" title="GB10 20-core SoC · mean utilization across cores · PKG watts on the Power card when readable">CPU</span><div class="bar"><i style="width:17%"></i></div><span class="val">17% · 70 °C</span></div>
+                <div class="barrow"><span class="lbl" title="Unified memory · 121.6 GB total · CPU and GPU share one pool">MEM</span><div class="bar"><i style="width:94%"></i></div><span class="val"><span class="v-compact">114.7 GB</span><span class="v-total">114.7 / 121.6 GB</span></span></div>
+                <div class="barrow"><span class="lbl" title="Internal NVMe · 983 GB total · 326 GB free · orange = available · warn > 80%">DISK</span><div class="bar"><i style="width:53%"></i><i class="acc" style="width:14%"></i></div><span class="val"><span class="v-compact">657 GB</span><span class="v-total">657 GB / 983 GB</span></span></div>
+              </div>
+            </a>
+            <a class="card ncard" href="#">
+              <div class="card__head"><div class="row"><h4 title="NVIDIA GB10 · DGX Spark · agent 0.7.0 · unified memory 121.6 GB · NVMe 983 GB">DGX-2</h4><span class="chip chip--accent">WORKER</span></div></div>
+              <div class="card__body">
+                <div class="barrow"><span class="lbl" title="NVIDIA GB10 · VRAM 40.8 / 127.0 GB (32%)">GPU0</span><div class="bar"><i style="width:96%"></i></div><span class="val">96% · 32 W · 66 °C</span></div>
+                <div class="barrow"><span class="lbl" title="GB10 20-core SoC">CPU</span><div class="bar"><i style="width:16%"></i></div><span class="val">16% · 72 °C</span></div>
+                <div class="barrow"><span class="lbl" title="Unified memory · 121.6 GB total">MEM</span><div class="bar"><i style="width:92%"></i></div><span class="val"><span class="v-compact">112.4 GB</span><span class="v-total">112.4 / 121.6 GB</span></span></div>
+                <div class="barrow"><span class="lbl" title="Internal NVMe · 983 GB total · 342 GB free">DISK</span><div class="bar"><i style="width:52%"></i><i class="acc" style="width:14%"></i></div><span class="val"><span class="v-compact">641 GB</span><span class="v-total">641 GB / 983 GB</span></span></div>
+              </div>
+            </a>
+            <a class="card ncard" href="#">
+              <div class="card__head"><div class="row"><h4 title="NVIDIA GB10 · DGX Spark · agent 0.7.0 · unified memory 121.6 GB · NVMe 1 TB">DGX-3</h4><span class="chip chip--accent">HEAD</span></div></div>
+              <div class="card__body">
+                <div class="barrow"><span class="lbl" title="NVIDIA GB10 · VRAM 41.0 / 127.0 GB (32%)">GPU0</span><div class="bar"><i style="width:96%"></i></div><span class="val">96% · 32 W · 64 °C</span></div>
+                <div class="barrow"><span class="lbl" title="GB10 20-core SoC">CPU</span><div class="bar"><i style="width:15%"></i></div><span class="val">15% · 68 °C</span></div>
+                <div class="barrow"><span class="lbl" title="Unified memory · 121.6 GB total">MEM</span><div class="bar"><i style="width:92%"></i></div><span class="val"><span class="v-compact">112.0 GB</span><span class="v-total">112.0 / 121.6 GB</span></span></div>
+                <div class="barrow"><span class="lbl" title="Internal NVMe · 1 TB total · 234 GB free">DISK</span><div class="bar"><i style="width:65%"></i><i class="acc" style="width:14%"></i></div><span class="val"><span class="v-compact">790 GB</span><span class="v-total">790 GB / 1 TB</span></span></div>
+              </div>
+            </a>
+            <a class="card ncard" href="#">
+              <div class="card__head"><div class="row"><h4 title="NVIDIA GB10 · DGX Spark · agent 0.7.0 · unified memory 121.7 GB · NVMe 1 TB">DGX-4</h4><span class="chip chip--accent">WORKER</span></div></div>
+              <div class="card__body">
+                <div class="barrow"><span class="lbl" title="NVIDIA GB10 · VRAM 40.9 / 127.0 GB (32%)">GPU0</span><div class="bar"><i style="width:96%"></i></div><span class="val">96% · 32 W · 61 °C</span></div>
+                <div class="barrow"><span class="lbl" title="GB10 20-core SoC">CPU</span><div class="bar"><i style="width:16%"></i></div><span class="val">16% · 65 °C</span></div>
+                <div class="barrow"><span class="lbl" title="Unified memory · 121.7 GB total">MEM</span><div class="bar"><i style="width:92%"></i></div><span class="val"><span class="v-compact">112.0 GB</span><span class="v-total">112.0 / 121.7 GB</span></span></div>
+                <div class="barrow"><span class="lbl" title="Internal NVMe · 1 TB total · 580 GB free">DISK</span><div class="bar"><i style="width:36%"></i><i class="acc" style="width:14%"></i></div><span class="val"><span class="v-compact">444 GB</span><span class="v-total">444 GB / 1 TB</span></span></div>
+              </div>
+            </a>
+          </section>
+
+          <section class="card" style="margin-top:16px;">
+            <div class="card__head"><h3>Power <span class="tag">stays in main — chart needs the width</span></h3><span class="chip">estimated</span></div>
+            <div class="card__body">
+              <div class="statgrid statgrid--3">
+                <div><span class="stat__label">Fleet now</span><span class="stat__value">288 W</span></div>
+                <div><span class="stat__label">Energy · 24 h</span><span class="stat__value">3.96 kWh</span></div>
+                <div><span class="stat__label">Cost · 24 h</span><span class="stat__value">≈ €0.52</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 40px;margin-top:10px;">
+                <div class="barrow"><span>DGX-1</span><div class="bar"><i style="width:30%"></i></div><span class="val">71 W</span></div>
+                <div class="barrow"><span>DGX-2</span><div class="bar"><i style="width:30%"></i></div><span class="val">72 W</span></div>
+                <div class="barrow"><span>DGX-3</span><div class="bar"><i style="width:30%"></i></div><span class="val">72 W</span></div>
+                <div class="barrow"><span>DGX-4</span><div class="bar"><i style="width:30%"></i></div><span class="val">72 W</span></div>
+              </div>
+              <div class="pbars"><i style="height:52%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:58%"></i><i style="height:50%"></i><i style="height:34%"></i><i style="height:62%"></i><i style="height:56%"></i><i style="height:53%"></i><i style="height:66%"></i><i style="height:60%"></i><i style="height:57%"></i><i style="height:64%"></i><i style="height:58%"></i><i style="height:68%"></i><i style="height:62%"></i><i style="height:59%"></i><i style="height:63%"></i><i style="height:57%"></i><i style="height:66%"></i><i style="height:55%"></i><i style="height:61%"></i><i style="height:58%"></i><i style="height:64%"></i></div>
+              <div class="pbars-cap"><span>−24 h</span><span>window avg 172 W · 240 W envelope</span><span>now</span></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ── rail: token stats · NAS · clock caps · telemetry ── -->
+        <aside class="rail">
+          <section class="card">
+            <div class="card__head"><h3>Token stats <span class="tag">moved to rail</span></h3><span class="chip">ledger · 30m</span></div>
+            <div class="card__body">
+              <div class="statgrid tg-grid">
+                <div><span class="stat__label">Total</span><span class="stat__value">4.7M</span><span class="stat__sub delta-down">▼ 52.5%</span></div>
+                <div><span class="stat__label">Generated</span><span class="stat__value">55.6k</span><span class="stat__sub delta-down">▼ 54%</span></div>
+                <div><span class="stat__label">Prompt</span><span class="stat__value">4.7M</span><span class="stat__sub">0 cached</span></div>
+                <div><span class="stat__label">Cache hit</span><span class="stat__value">0.0%</span><span class="stat__sub">0 saved</span></div>
+                <div><span class="stat__label">Out : in</span><span class="stat__value">1 : 84</span></div>
+                <div><span class="stat__label">Cost</span><span class="stat__value">≈ €0.73</span><span class="stat__sub">server-side</span></div>
+              </div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card__head"><h3>NAS</h3><span class="chip chip--accent">NAS store</span></div>
+            <div class="card__body">
+              <div><span class="stat__label">Models</span><span class="stat__value">82</span></div>
+              <div class="barrow" style="margin-top:11px;"><span>store</span><div class="bar"><i style="width:67%"></i></div><span class="val">12.2 TB / 18.1 TB</span></div>
+              <div class="sub" style="margin-top:9px;">newest added 1d ago</div>
+              <div class="sub" style="margin-top:10px;">(active-download block renders here while a transfer runs)</div>
+            </div>
+          </section>
+          <section class="card caps">
+            <div class="card__head"><h3>Fleet clock caps</h3></div>
+            <div class="card__body">
+              <div class="row" style="flex-direction:column;align-items:stretch;">
+                <span class="fake-select">GPU: leave alone ▾</span>
+                <span class="fake-select">CPU: leave alone ▾</span>
+                <span class="sub">☐ keep after reboot</span>
+                <span style="display:flex;gap:8px;"><span class="btn">Apply to fleet</span><span class="btn btn--ghost">Clear fleet</span></span>
+              </div>
+            </div>
+          </section>
+          <section class="card">
+            <div class="card__head"><h3>Telemetry</h3><span class="chip">streaming</span></div>
+            <div class="card__body feed">
+              <div>14:02 <span class="sub">DGX-2 inventory refreshed</span></div>
+              <div>13:58 <span class="sub">download GLM-5.3 finished · 12.2 GB</span></div>
+              <div>13:41 <span class="sub">DGX-4 clock cap cleared</span></div>
+              <div>13:20 <span class="sub">serving started :8081 DGX-1</span></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <section class="card mx" style="margin-top:16px;">
+        <div class="card__head"><h3>Updates <span class="tag">stays full-width — table needs ≥640px</span></h3><span class="chip">baseline fresh</span></div>
+        <div class="card__body utwrap">
+          <table class="ut"><tr><th>Node</th><th>Posture</th><th>DGX OS / driver</th><th>Reboot</th></tr>
+          <tr><td>● DGX-1</td><td>up to date</td><td>37.4.3 / 580.65</td><td>no</td></tr>
+          <tr><td>● DGX-2</td><td>up to date</td><td>37.4.3 / 580.65</td><td>no</td></tr>
+          <tr><td>● DGX-3</td><td>up to date</td><td>37.4.3 / 580.65</td><td>no</td></tr>
+          <tr><td>● DGX-4</td><td>pending reboot</td><td>37.4.3 / 580.65</td><td>yes</td></tr></table>
+        </div>
+      </section>
+      <div class="sub" style="margin:12px 20px 0;">live · 5 s cadence · fleet 288 W</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>Approved composition (2026-11-27)</b> — Option 1 Main + Rail with <b>Token stats in the rail</b> (rail order: token · NAS · clock caps · telemetry); Power stays in main (24h chart needs ≥560px plot) and Updates stays full-width (table ≥640px, horizontal scroll on mobile).<br>
+    <b>Node card (all tiers)</b>: no SPARK chip · no agent version · no GPU model · no inference line; head name tooltip = identity string; per-row label tooltips = totals/VRAM/model; role chip + drift chip + offline treatment stay.<br>
+    <b>Responsive</b>: shell 2fr/1fr ≥1101 → stacked ≤1100 (rail follows main) → single column ≤900, temps strip reappears (IR-129), node grid 1-col, hero stacks, token/power tiles 2-col, updates table scrolls horizontally.<br>
+    <b>Touch fallback (mobile view)</b>: MEM/DISK totals return inline (<code>hover: none</code>); GPU model name stays tooltip-only (fallback = the card's link to node detail); tips get <code>tabindex</code> + <code>aria-label</code> at implement.
+  </div>
+</body>
+</html>
