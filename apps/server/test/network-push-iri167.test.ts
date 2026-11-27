@@ -54,6 +54,9 @@ describe("fabric push hosts", () => {
     expect(await rewritePushHosts(deps, id("DGX-1"), unknown)).toBe(unknown);
     const already = { name: "m", hosts: ["10.100.112.1"], _lanHosts: [host("DGX-2")] };
     expect(await rewritePushHosts(deps, id("DGX-1"), already)).toBe(already);
+    // Review U2: a remediated re-push keeps the hosts whose keys were pinned.
+    const remediated = { name: "m", hosts: [host("DGX-2")], _remediated: true };
+    expect(await rewritePushHosts(deps, id("DGX-1"), remediated)).toBe(remediated);
     const fallback = { name: "m", hosts: [host("DGX-2")], _fabricFallback: true };
     expect(await rewritePushHosts(deps, id("DGX-1"), fallback)).toBe(fallback);
     const broken = { listNodes: async () => fixture.nodes, network: { topology: async () => Promise.reject(new Error("down")) } };

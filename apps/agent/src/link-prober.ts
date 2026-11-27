@@ -88,6 +88,8 @@ export class LinkProber {
   private hubPeers: Array<{ iface: string; ip: string }> = [];
   private timer: ReturnType<typeof setInterval> | undefined;
   private running = false;
+  /** start() was called (and stop() not since): an interval change re-arms it. */
+  private started = false;
   private latest = new Map<string, LinkProbe>();
   private readonly ping: PingRunner;
   private readonly now: () => number;
@@ -102,12 +104,14 @@ export class LinkProber {
     if (peers !== undefined) this.hubPeers = peers;
     if (intervalS !== undefined && intervalS !== this.intervalS) {
       this.intervalS = intervalS;
-      if (this.timer !== undefined) this.start();
+      // 0 → 10 must re-arm too: a disabled prober has no timer but is still started.
+      if (this.started) this.start();
     }
   }
 
   start(): void {
     this.stop();
+    this.started = true;
     if (this.intervalS <= 0) {
       this.latest.clear();
       return;
@@ -120,6 +124,7 @@ export class LinkProber {
   stop(): void {
     clearInterval(this.timer);
     this.timer = undefined;
+    this.started = false;
   }
 
   /** Latest result per (iface, peer), dropping peers no longer targeted. */

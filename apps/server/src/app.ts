@@ -1793,6 +1793,12 @@ export function createApp(deps: AppDeps): Express {
         error: "agent-update must use POST /api/v1/nodes/:id/agent-update",
       });
     }
+    // IRI-166 (ADR-0021): link-test jobs only through /api/v1/network/tests,
+    // which applies the kill switch, the busy-endpoint guard, the one-test
+    // limit and persistence; a direct dispatch would bypass all four.
+    if (body.kind === "net-tool-ensure" || body.kind === "net-test-server" || body.kind === "net-test-client") {
+      return res.status(400).json({ error: `${body.kind} must be started through POST /api/v1/network/tests` });
+    }
     const jobs = deps.getJobs();
     if (jobs === null) return res.status(503).json({ error: "database unavailable" });
     const store = requireStore(res);

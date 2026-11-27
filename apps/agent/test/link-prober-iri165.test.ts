@@ -111,6 +111,31 @@ describe("LinkProber", () => {
   });
 });
 
+describe("re-enabling after 0 (review F2)", () => {
+  it("re-arms a started prober when the interval goes 0 → 10", async () => {
+    vi.useFakeTimers();
+    try {
+      const ping = vi.fn(async () => OK);
+      const prober = new LinkProber({ facts: () => new Map([["p0", fabric()]]), ping });
+      prober.configure(0, [{ iface: "p0", ip: "10.1.0.2" }]);
+      prober.start(); // an agent that connects while the hub setting is 0
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(ping).not.toHaveBeenCalled();
+      prober.configure(10, undefined);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ping).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(ping).toHaveBeenCalledTimes(2);
+      prober.stop();
+      prober.configure(5, undefined); // stopped stays stopped
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(ping).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("config-update contract", () => {
   it("accepts the prober fields, and old frames without them", () => {
     const base = { type: "config-update", cadenceMs: 2000 };

@@ -51,6 +51,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — Review fixes: listeners run line-buffered with a readiness grace (iperf3 never flushed its listening line on a pipe), the prober re-arms after interval 0, link-test kinds are refused on the generic job route, a remediated push is never re-addressed, live frames only from fabric Sparks.
 - 2026-11-27 — S7 (IR-281 / IRI-168): RDMA perftest link tests and per-link minute history.
 - 2026-11-27 — S6 (IR-280 / IRI-167): pushes between directly cabled Sparks use the fabric.
 - 2026-11-27 — S5 (IR-279 / IRI-166): on-demand iperf3 link tests with guards and history.

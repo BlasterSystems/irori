@@ -222,6 +222,17 @@ describe("link test routes", () => {
     expect((await request(createApp(deps(busy.svc))).post("/api/v1/network/tests/all").send({})).status).toBe(409);
   });
 
+  it("refuses link-test job kinds on the generic job route (review F3)", async () => {
+    const fake = makeFakeStore();
+    const { id } = await fake.store.create({ name: "spark1", kind: "spark", role: "head", host: "spark1.local" });
+    const app = createApp({ ...deps(harness().svc), getStore: () => fake.store } as AppDeps);
+    for (const kind of ["net-tool-ensure", "net-test-server", "net-test-client"]) {
+      const res = await request(app).post(`/api/v1/nodes/${id}/jobs`).send({ kind, params: { bindIp: "10.1.0.2", port: 5201, runs: 1, timeoutS: 60 } });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe(`${kind} must be started through POST /api/v1/network/tests`);
+    }
+  });
+
   it("rejects malformed requests and answers 503 without the service", async () => {
     const app = createApp(deps(harness().svc));
     expect((await request(app).post("/api/v1/network/tests").send({ aNodeId: "x", bNodeId: B })).status).toBe(400);

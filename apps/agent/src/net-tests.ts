@@ -170,6 +170,40 @@ function paramError(prefix: string, issues: Array<{ path: PropertyKey[]; message
   return `${prefix}: ${issues.map((i) => `${i.path.map(String).join(".") || "params"} ${i.message}`).join("; ")}`;
 }
 
+/**
+ * A listener that has not exited this long after spawn is bound: iperf3 and
+ * perftest fail within milliseconds on a bad address or a taken port. This
+ * backs up the status-line match, which needs the tool to flush stdout.
+ */
+export const LISTEN_GRACE_MS = 1500;
+
+/**
+ * Runs one listener under `stdbuf -oL`: iperf3 and perftest print their
+ * "listening" line with stdio, which a pipe fully buffers until exit. The
+ * grace timer announces a listener that is still running even if the line
+ * never arrives; the client retries a refused connect either way.
+ */
+async function runListener(
+  run: ProcRunner,
+  cmd: string,
+  args: string[],
+  ready: RegExp,
+  announce: () => void,
+  opts: { signal: AbortSignal; timeoutMs: number },
+): Promise<ProcResult> {
+  const grace = setTimeout(announce, LISTEN_GRACE_MS);
+  try {
+    return await run("stdbuf", ["-oL", cmd, ...args], {
+      ...opts,
+      onLine: (line) => {
+        if (ready.test(line)) announce();
+      },
+    });
+  } finally {
+    clearTimeout(grace);
+  }
+}
+
 /** net-test-server: N one-shot iperf3 listeners on a verified fabric address. */
 export async function runNetTestServer(
   rawParams: Record<string, unknown>,
@@ -191,6 +225,11 @@ export async function runNetTestServer(
   const run = deps.run ?? defaultRunner;
   const deadline = Date.now() + p.timeoutS * 1000;
   let announced = false;
+  const announce = (): void => {
+    if (announced) return;
+    announced = true;
+    emit(`${NET_LISTENING_MARKER} ${mine.iface} ${p.bindIp}:${p.port}`);
+  };
   if (p.tool === "rdma") {
     // IRI-168: perftest server — one ib_write_bw then one ib_send_lat, each
     // serving a single client and exiting. RDMA rides the fabric port's GID;
@@ -203,15 +242,9 @@ export async function runNetTestServer(
     for (const tool of ["ib_write_bw", "ib_send_lat"]) {
       const remaining = deadline - Date.now();
       if (remaining <= 0 || signal.aborted) break;
-      const res = await run(tool, [...base, ...(tool === "ib_write_bw" ? ["--report_gbits", "-D", "10"] : ["-n", "1000"])], {
+      const res = await runListener(run, tool, [...base, ...(tool === "ib_write_bw" ? ["--report_gbits", "-D", "10"] : ["-n", "1000"])], /Waiting for client/i, announce, {
         signal,
         timeoutMs: remaining,
-        onLine: (line) => {
-          if (!announced && /Waiting for client/i.test(line)) {
-            announced = true;
-            emit(`${NET_LISTENING_MARKER} ${mine.iface} ${p.bindIp}:${p.port}`);
-          }
-        },
       });
       if (res.code !== 0 && !signal.aborted) {
         emit(`error: ${tool} exited ${res.code ?? "on a signal"}: ${res.stderr.trim().split("\n").at(-1) ?? ""}`);
@@ -224,15 +257,9 @@ export async function runNetTestServer(
   for (let i = 0; i < p.runs; i++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0 || signal.aborted) break;
-    const res = await run("iperf3", ["-s", "-1", "-B", p.bindIp, "-p", String(p.port)], {
+    const res = await runListener(run, "iperf3", ["-s", "-1", "-B", p.bindIp, "-p", String(p.port)], /Server listening on/, announce, {
       signal,
       timeoutMs: remaining,
-      onLine: (line) => {
-        if (!announced && /Server listening on/.test(line)) {
-          announced = true;
-          emit(`${NET_LISTENING_MARKER} ${mine.iface} ${p.bindIp}:${p.port}`);
-        }
-      },
     });
     if (res.code !== 0 && !signal.aborted) {
       emit(`error: iperf3 listener exited ${res.code ?? "on a signal"}: ${res.stderr.trim().split("\n").at(-1) ?? ""}`);

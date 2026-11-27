@@ -121,6 +121,7 @@ export function createNetLive(deps: NetLiveDeps): NetLiveService {
     status: () => ({ enabled: deps.enabled(), effectiveIntervalMs: effective(), leases: [...leases.values()].filter((l) => l.expiresAt > now()).length }),
     onRates(nodeId, msg) {
       if (effective() === null) return; // no viewer: a stray or late frame
+      if (!deps.fabricNodes().includes(nodeId)) return; // only the stream's audience (never the NAS)
       deps.sse.send({ type: "net-rates", serverTimeMs: now(), nodeId, intervalMs: msg.intervalMs, ifaces: msg.ifaces });
     },
     onNodeOnline(nodeId) {

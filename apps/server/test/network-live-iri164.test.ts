@@ -87,6 +87,13 @@ describe("lease manager", () => {
     expect(events).toHaveLength(1);
   });
 
+  it("drops frames from nodes outside the stream's audience (review U3)", () => {
+    const { live, events } = setup();
+    live.acquire(250);
+    live.onRates("99999999-9999-4999-8999-999999999999", rates);
+    expect(events).toHaveLength(0);
+  });
+
   it("tells a node that comes online about a running stream", () => {
     const { live, sent } = setup();
     live.onNodeOnline(NODE);

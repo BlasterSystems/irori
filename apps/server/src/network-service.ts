@@ -139,8 +139,10 @@ export async function rewritePushHosts(
   sourceId: string,
   params: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  // A remediation re-push or a LAN fallback keeps what it was given.
-  if (params._lanHosts !== undefined || params._fabricFallback === true) return params;
+  // A remediation re-push or a LAN fallback keeps what it was given: the
+  // remediator pinned host keys for exactly these hosts, so re-addressing
+  // a remediated push would fail its preflight with no retry left.
+  if (params._lanHosts !== undefined || params._fabricFallback === true || params._remediated === true) return params;
   const hosts = Array.isArray(params.hosts) ? params.hosts.filter((h): h is string => typeof h === "string" && h.length > 0) : [];
   if (hosts.length === 0 || hosts.length !== (params.hosts as unknown[]).length) return params;
   try {

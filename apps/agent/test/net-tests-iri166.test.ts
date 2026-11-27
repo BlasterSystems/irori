@@ -62,10 +62,39 @@ describe("runNetTestServer", () => {
     const out = await runNetTestServer({ bindIp: "10.100.112.2", port: 5203, runs: 2, timeoutS: 60 }, (l) => lines.push(l), signal(), deps(run));
     expect(out.ok).toBe(true);
     expect(calls).toEqual([
-      ["iperf3", "-s", "-1", "-B", "10.100.112.2", "-p", "5203"],
-      ["iperf3", "-s", "-1", "-B", "10.100.112.2", "-p", "5203"],
+      ["stdbuf", "-oL", "iperf3", "-s", "-1", "-B", "10.100.112.2", "-p", "5203"],
+      ["stdbuf", "-oL", "iperf3", "-s", "-1", "-B", "10.100.112.2", "-p", "5203"],
     ]);
     expect(lines.filter((l) => l.startsWith("IRORI_NET_LISTENING"))).toEqual(["IRORI_NET_LISTENING enp1s0f0np0 10.100.112.2:5203"]);
+  });
+});
+
+describe("listener readiness without a flushed status line (review F1)", () => {
+  it("announces a listener that is still running after the grace period", async () => {
+    // iperf3 on a pipe buffers "Server listening" until exit: the line never comes.
+    const run: ProcRunner = async (cmd, args) => {
+      expect([cmd, args[0]]).toEqual(["stdbuf", "-oL"]); // line-buffered stdout
+      await new Promise((r) => setTimeout(r, 1700));
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const lines: string[] = [];
+    const started = Date.now();
+    const out = await runNetTestServer({ bindIp: "10.100.112.2", port: 5203, runs: 1, timeoutS: 60 }, (l) => {
+      if (l.startsWith("IRORI_NET_LISTENING")) lines.push(`${Date.now() - started}`);
+    }, signal(), deps(run));
+    expect(out.ok).toBe(true);
+    expect(lines).toHaveLength(1);
+    expect(Number(lines[0])).toBeGreaterThanOrEqual(1400);
+  });
+
+  it("does not announce a listener that exits at once (bad address, port taken)", async () => {
+    const run: ProcRunner = async () => ({ code: 1, stdout: "", stderr: "iperf3: error - unable to start listener for connections: Address already in use" });
+    const lines: string[] = [];
+    const out = await runNetTestServer({ bindIp: "10.100.112.2", port: 5203, runs: 1, timeoutS: 60 }, (l) => lines.push(l), signal(), deps(run));
+    await new Promise((r) => setTimeout(r, 1600));
+    expect(out.ok).toBe(false);
+    expect(lines.some((l) => l.startsWith("IRORI_NET_LISTENING"))).toBe(false);
+    expect(lines.at(-1)).toContain("Address already in use");
   });
 });
 

@@ -80,8 +80,8 @@ describe("RDMA runners", () => {
     const out = await runNetTestServer({ tool: "rdma", bindIp: "10.100.112.2", port: 18517, runs: 2, timeoutS: 80 }, (l) => lines.push(l), signal(), deps(run));
     expect(out.ok).toBe(true);
     expect(calls).toEqual([
-      ["ib_write_bw", "-d", "rocep1s0f0", "-i", "1", "-x", "3", "-F", "-p", "18517", "--report_gbits", "-D", "10"],
-      ["ib_send_lat", "-d", "rocep1s0f0", "-i", "1", "-x", "3", "-F", "-p", "18517", "-n", "1000"],
+      ["stdbuf", "-oL", "ib_write_bw", "-d", "rocep1s0f0", "-i", "1", "-x", "3", "-F", "-p", "18517", "--report_gbits", "-D", "10"],
+      ["stdbuf", "-oL", "ib_send_lat", "-d", "rocep1s0f0", "-i", "1", "-x", "3", "-F", "-p", "18517", "-n", "1000"],
     ]);
     expect(lines.filter((l) => l.startsWith("IRORI_NET_LISTENING"))).toHaveLength(1);
   });
