@@ -21,6 +21,7 @@ import {
   type ScannedModel,
   type TransferProgress,
   type UsageRequest,
+  type NetRatesMsg,
 } from "@irori/core";
 import { randomUUID } from "node:crypto";
 import type { NodeStore } from "@irori/db";
@@ -119,6 +120,8 @@ export interface AgentHubDeps {
    * and the agent keeps its defaults.
    */
   getNetConfig?: (nodeId: string) => Promise<{ netProbeIntervalS: number; netPeers: Array<{ iface: string; ip: string }> }>;
+  /** IRI-164 (ADR-0021): a live fabric-rate frame; the lease manager decides whether it is forwarded. */
+  onNetRates?: (nodeId: string, msg: NetRatesMsg) => void;
   /**
    * IR-189: fired once per authenticated hello, after the socket is registered
    * and the config-update is sent. The clock-cap service re-applies any stored
@@ -395,6 +398,12 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         } catch {
           enqueuePending(currentId, "llm", payload);
         }
+        return;
+      }
+
+      if (msg.type === "net-rates") {
+        // IRI-164: SSE only (via the lease manager) — never rings or the DB.
+        deps.onNetRates?.(currentId, msg);
         return;
       }
 

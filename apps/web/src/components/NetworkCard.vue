@@ -4,6 +4,11 @@ import { linkRates, type TopologyLink } from "@irori/core";
 import { live } from "../live";
 import Tip from "./Tip.vue";
 import {
+  acquireLiveLease,
+  LIVE_RENEW_MS,
+  LiveLeaseError,
+  releaseLiveLease,
+  withLiveRates,
   diagramLayout,
   fetchTopology,
   fmtBits,
@@ -42,7 +47,84 @@ onMounted(() => {
   void refresh();
   timer = setInterval(() => void refresh(), TOPOLOGY_REFRESH_MS);
 });
-onUnmounted(() => clearInterval(timer));
+onUnmounted(() => {
+  clearInterval(timer);
+  void stopLive();
+});
+
+// ─── IRI-164: opt-in live rates (shared 60 s lease, renewed while visible) ──
+const LIVE_RATES = [
+  { ms: 1000, label: "1 s" },
+  { ms: 500, label: "500 ms" },
+  { ms: 250, label: "250 ms" },
+] as const;
+const liveOn = ref(false);
+const liveIntervalMs = ref<number>(1000);
+const liveMsg = ref<string | null>(null);
+let leaseId: string | null = null;
+let renewTimer: ReturnType<typeof setInterval> | undefined;
+/** Ticks so a frame that stops arriving goes stale on screen too. */
+const clock = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+
+async function takeLease(): Promise<void> {
+  try {
+    const lease = await acquireLiveLease(liveIntervalMs.value, leaseId ?? undefined);
+    leaseId = lease.leaseId;
+    liveMsg.value = lease.effectiveIntervalMs < liveIntervalMs.value ? `another viewer streams at ${lease.effectiveIntervalMs} ms` : null;
+  } catch (err) {
+    if (err instanceof LiveLeaseError && err.status === 410 && err.reason === "unknown-lease" && leaseId !== null) {
+      // The lease lapsed (hidden tab): take a fresh one; the cap restarts.
+      leaseId = null;
+      await takeLease();
+      return;
+    }
+    if (err instanceof LiveLeaseError && err.status === 410) {
+      // The 10-minute limit: stop visibly rather than silently re-leasing forever.
+      leaseId = null;
+      await stopLive();
+      liveMsg.value = "Live mode stopped after 10 minutes.";
+      return;
+    }
+    await stopLive();
+    liveMsg.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function startLive(): Promise<void> {
+  liveOn.value = true;
+  liveMsg.value = null;
+  await takeLease();
+  if (!liveOn.value) return;
+  clearInterval(renewTimer);
+  renewTimer = setInterval(() => {
+    // Renew only while the page is visible; a hidden tab lets the lease lapse.
+    if (typeof document === "undefined" || document.visibilityState !== "hidden") void takeLease();
+  }, LIVE_RENEW_MS);
+  clearInterval(clockTimer);
+  clockTimer = setInterval(() => (clock.value = Date.now()), 500);
+}
+
+async function stopLive(): Promise<void> {
+  liveOn.value = false;
+  clearInterval(renewTimer);
+  clearInterval(clockTimer);
+  renewTimer = undefined;
+  if (leaseId !== null) {
+    const id = leaseId;
+    leaseId = null;
+    await releaseLiveLease(id);
+  }
+}
+
+async function toggleLive(): Promise<void> {
+  if (liveOn.value) await stopLive();
+  else await startLive();
+}
+
+async function changeRate(): Promise<void> {
+  if (liveOn.value) await takeLease();
+}
 
 const nameOf = (id: string): string => topology.value?.nodes.find((n) => n.id === id)?.name ?? id.slice(0, 8);
 
@@ -68,7 +150,9 @@ interface LinkRow {
 const rows = computed<LinkRow[]>(() =>
   (topology.value?.links ?? []).map((link) => {
     // Live: the latest SSE snapshot of node a (tx = a → b).
-    const rates = linkRates(link, live.snapshots.get(link.a)?.network);
+    // IRI-164: a fresh live frame overrides the 2 s snapshot rates.
+    const entries = liveOn.value ? withLiveRates(live.snapshots.get(link.a)?.network, live.netRates?.get(link.a), clock.value) : live.snapshots.get(link.a)?.network;
+    const rates = linkRates(link, entries);
     const lat = linkLatency(link, { a: live.snapshots.get(link.a)?.linkProbes, b: live.snapshots.get(link.b)?.linkProbes });
     return {
       link,
@@ -98,8 +182,17 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
         <h3>Network</h3>
         <Tip text="RoCE fabric between Sparks only — the NAS and the management LAN are never shown · links from neighbour MACs or shared point-to-point subnets · throughput is live from the 2 s snapshots (the larger of RDMA and kernel counters)" />
       </div>
-      <span class="chip">RoCE fabric</span>
+      <div class="row netcontrols">
+        <button type="button" class="btn btn--secondary btn--sm" :aria-pressed="liveOn" @click="toggleLive">
+          <span class="dot" :class="liveOn ? 'dot--run' : ''" aria-hidden="true"></span>{{ liveOn ? "Live" : "Live off" }}
+        </button>
+        <label class="visually-hidden" for="net-live-rate">Live refresh rate</label>
+        <select id="net-live-rate" v-model.number="liveIntervalMs" class="input netrate" @change="changeRate">
+          <option v-for="r in LIVE_RATES" :key="r.ms" :value="r.ms">{{ r.label }}</option>
+        </select>
+      </div>
     </div>
+    <p v-if="liveMsg !== null" class="muted netlivemsg" role="status">{{ liveMsg }}</p>
     <div class="card__body">
       <p v-if="loadError !== null && topology === null" class="muted">Topology unavailable: {{ loadError }}</p>
       <p v-else-if="topology === null" class="muted">Loading the fabric…</p>
@@ -194,6 +287,9 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
 </template>
 
 <style scoped>
+.netcontrols { gap: 8px; }
+.netrate { width: auto; min-height: var(--control-sm); }
+.netlivemsg { margin: 0; padding: 0 18px; font-size: var(--fs-small); }
 .netdiagram { width: 100%; height: auto; max-height: 360px; display: block; margin-bottom: var(--space-3); }
 .netedge { stroke: var(--ink-2); stroke-width: 2; }
 .netedge--warn { stroke: var(--thread); stroke-dasharray: 6 4; }

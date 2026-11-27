@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { netRatesEventSchema } from "./network.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmEventSchema, type LlmEvent } from "./llm.js";
 import { usagePartMetaSchema, usageRequestSchema } from "./usage.js";
@@ -189,6 +190,8 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   usageEventSchema,
   logUpdateEventSchema,
   healthEventSchema,
+  // IRI-164 (ADR-0021): live fabric rates (never journaled).
+  netRatesEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;

@@ -54,6 +54,8 @@ import { log } from "./logger.js";
 import { installProcessGuards } from "./process-guards.js";
 import { createNetPeersSync, createNetworkService, type NetPeersSync, type NetworkService } from "./network-service.js";
 import { createNetworkSettingsService, type NetworkSettingsService } from "./network-settings.js";
+import { createNetLive, type NetLiveService } from "./network-live.js";
+import { isFabricEntry } from "@irori/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -131,6 +133,8 @@ const state: {
   networkSettings: NetworkSettingsService | null;
   /** IRI-165: expected fabric peers per agent (config-update). */
   netPeers: NetPeersSync | null;
+  /** IRI-164: leased live fabric rates (SSE only). */
+  netLive: NetLiveService | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -163,6 +167,7 @@ const state: {
   network: null,
   networkSettings: null,
   netPeers: null,
+  netLive: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -219,7 +224,9 @@ const app = createApp({
   getCadence: () => state.cadence,
   getNetwork: () => state.network,
   getNetworkSettings: () => state.networkSettings,
+  getNetLive: () => state.netLive,
   onNetworkSettingsChanged: () => {
+    if (state.networkSettings?.cached().liveEnabled === false) state.netLive?.stopAll();
     // A new probe interval reaches every online agent with its config-update.
     state.netPeers?.reset();
     for (const nodeId of state.hub?.online() ?? []) void state.hub?.refreshConfig(nodeId).catch(() => false);
@@ -522,7 +529,7 @@ async function boot(): Promise<void> {
   // every snapshot-driven rule (disk_pct, gpu_temp_c, kernel_xid, …) was dead
   // while sweep-driven rules worked. The wrap passes get/markSeen/verifyToken
   // through and only overrides insertSnapshot.
-  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), getNetConfig: (nodeId) => (state.netPeers === null ? Promise.reject(new Error("network not ready")) : state.netPeers.configFor(nodeId)), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); void state.provisioner?.onAgentOnline(nodeId).catch(() => {}); }, setupEvents: {
+  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), getNetConfig: (nodeId) => (state.netPeers === null ? Promise.reject(new Error("network not ready")) : state.netPeers.configFor(nodeId)), onNetRates: (nodeId, msg) => state.netLive?.onRates(nodeId, msg), jobEvents, onNodeOnline: (nodeId) => { state.netLive?.onNodeOnline(nodeId); void clockCaps.reassert(nodeId); void state.provisioner?.onAgentOnline(nodeId).catch(() => {}); }, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),
@@ -572,6 +579,15 @@ async function boot(): Promise<void> {
   });
   const netPeersTimer = setInterval(() => void state.netPeers?.tick().catch(() => {}), 60_000);
   netPeersTimer.unref();
+  // IRI-164: the audience is every online Spark whose latest snapshot has a fabric port.
+  state.netLive = createNetLive({
+    enabled: () => state.networkSettings?.cached().liveEnabled ?? true,
+    fabricNodes: () => [...hub.online()].filter((id) => (rings.latest(id)?.network ?? []).some(isFabricEntry)),
+    sendToNode: (nodeId, msg) => hub.sendToNode(nodeId, msg),
+    sse,
+  });
+  const netLiveTimer = setInterval(() => state.netLive?.tick(), 5_000);
+  netLiveTimer.unref();
 
   // Staged transfers that were running at restart resume from the first
   // pending stage; the health watcher polls driver truth + probes every 5 s.

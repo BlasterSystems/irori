@@ -12,18 +12,21 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - **The hub derives the topology.** `GET /api/v1/network/topology` groups fabric lanes into links per node pair, recognises switched subnets, checks every cluster's fabric path to its head, and warns on MTU and speed mismatches, down lanes, offline nodes, and registry hosts that are not on the fabric. It works with today's agents too: an old snapshot's 200 Gb/s non-virtual ports count as fabric.
 - **Overview Network card.** A diagram of the Sparks in cable order with each link's format (RoCE v2, speed × lanes, MTU) and live ↑/↓ throughput, a link table with utilisation bars, switched subnets, running clusters with their fabric-path check, and the warnings. On the small tier the table is the whole view. The NAS and the LAN never appear.
 - **Live latency per link.** Agents ping every fabric peer (their ARP neighbours plus the far end of each lane, which the hub pushes) every 10 s and report RTT and loss in the snapshot; the card shows the worst up lane per link. The interval is a hub setting (`/api/v1/settings/network`, 0 turns it off), next to the kill switches for tests and live mode.
+- **Opt-in live mode.** A Live toggle on the card streams fabric rates at 1 s, 500 ms or 250 ms. The browser holds a 60 s lease it renews while visible; every viewer shares one stream at the fastest requested rate. Rates travel agent → hub → browser over the existing WebSocket and SSE and are never stored.
 
 ## Business rules and constraints
 
 - Only the RoCE fabric between Sparks is in scope. The NAS and the management LAN are never drawn or measured.
 - A direct cable is never claimed as fact: point-to-point lanes are links; a subnet shared by three or more nodes is drawn as a switch.
 - The prober only pings out of fabric interfaces, at most 16 peers, with validated interface names and IPv4 literals and no shell.
+- Live mode: 250 ms floor, a lease ends after 10 minutes (the card says so and stops), agents stop on their own when the hub stops renewing or the socket drops, and `liveEnabled` turns it off for everyone.
 
 ## Edge cases handled
 
 - Interfaces without sysfs (macOS dev boxes), a docker bridge or tailscale with a MAC, an incomplete ARP entry, and an RDMA counter that goes backwards (reported as unknown, never as a negative rate).
 - A fleet with no fabric links shows an empty-state line; an unavailable or malformed topology shows a one-line error instead of breaking the Overview; offline nodes keep their tile, drawn dashed, without links.
 - An unreachable peer, or a ping that cannot start, reports 100 % loss instead of failing; peers that vanish from the topology drop out of the results; a config-update never carries an invalid peer, so an old or strict agent never rejects the whole frame.
+- A hidden tab lets its lease lapse and silently takes a new one when it comes back; an old agent ignores `net-live` and the card falls back to snapshot rates; a frame that stops arriving goes stale on screen after three intervals.
 
 ## Integration impact
 
@@ -39,6 +42,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — S3b (IR-283 / IRI-164): leased live RoCE rates over SSE.
 - 2026-11-27 — S4 (IR-278 / IRI-165): fabric latency prober, network settings.
 - 2026-11-27 — S3 (IR-277 / IRI-163): Overview Network card with live throughput.
 - 2026-11-27 — S2 (IR-276 / IRI-162): topology derivation and the topology API.

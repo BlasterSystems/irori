@@ -126,3 +126,49 @@ describe("NetworkCard", () => {
     w.unmount();
   });
 });
+
+describe("live mode (IRI-164)", () => {
+  it("overlays a fresh live frame and ignores a stale one", async () => {
+    const { withLiveRates } = await import("../src/network");
+    const entries = parseNet([{ iface: "p0", rxBps: 1, txBps: 1, speedMbps: 200000, operState: "up", addrs: [] }]);
+    const frame = { receivedAtMs: 1000, intervalMs: 250, ifaces: [{ iface: "p0", rxBps: 5, txBps: 6, rdmaRxBps: 7, rdmaTxBps: 8 }] };
+    expect(withLiveRates(entries, frame, 1500)![0]).toMatchObject({ rxBps: 5, txBps: 6, rdmaRxBps: 7, rdmaTxBps: 8 });
+    expect(withLiveRates(entries, frame, 3000)![0]).toMatchObject({ rxBps: 1, txBps: 1 });
+    expect(withLiveRates(entries, undefined, 0)).toBe(entries);
+  });
+
+  it("takes a lease on toggle, shows live rates, and releases it on unmount", async () => {
+    const t = realTopology();
+    const d1 = fixture.nodes.find((n) => n.name === "DGX-1")!.id;
+    const calls: Array<{ url: string; method: string; body: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({ url, method: init?.method ?? "GET", body: init?.body === undefined ? null : JSON.parse(String(init.body)) });
+        if (url === "/api/v1/network/live") {
+          return new Response(JSON.stringify({ leaseId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", intervalMs: 1000, effectiveIntervalMs: 1000, expiresAt: "x", endsAt: "y" }), { status: 200 });
+        }
+        if (url.startsWith("/api/v1/network/live/")) return new Response(null, { status: 204 });
+        return new Response(JSON.stringify({ ...t, generatedAt: "x" }), { status: 200 });
+      }),
+    );
+    liveMock.snapshots.set(d1, { network: parseNet(fixture.snapshots[d1]!) });
+    const { default: NetworkCard } = await import("../src/components/NetworkCard.vue");
+    const w = mount(NetworkCard as never);
+    await new Promise((r) => setTimeout(r, 20));
+    await w.find("button[aria-pressed]").trigger("click");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ intervalMs: 1000 });
+    liveMock.netRates.set(d1, {
+      type: "net-rates", serverTimeMs: 0, nodeId: d1, intervalMs: 1000, receivedAtMs: Date.now(),
+      ifaces: [{ iface: "enp1s0f0np0", rxBps: 0, txBps: 2_500_000_000, rdmaRxBps: null, rdmaTxBps: null }],
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(w.text()).toContain("↑ 20.0 Gb/s");
+    w.unmount();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))).toBe(true);
+    liveMock.netRates.clear();
+  });
+});

@@ -12,6 +12,7 @@ export const liveMock: {
   snapshots: Map<string, unknown>;
   jobs: Map<string, unknown>;
   llm: Map<string, unknown>;
+  netRates: Map<string, unknown>;
   events: { value: unknown[] };
   usageLatest: { value: unknown[] };
   findings: { value: unknown[] };
@@ -30,6 +31,7 @@ export const liveMock: {
   snapshots: reactive(new Map()),
   jobs: reactive(new Map()),
   llm: reactive(new Map()),
+  netRates: reactive(new Map()),
   events: ref([]),
   usageLatest: ref([]),
   findings: ref([]),

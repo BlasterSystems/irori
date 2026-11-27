@@ -810,3 +810,21 @@ RoCE fabric between Sparks only; the NAS and the management LAN never appear.
   the snapshot's `linkProbes[]` (`rtt*Ms` null and `lossPct` 100 when the
   peer does not answer). The hub re-sends `config-update` within 60 s when a
   node's expected peers change.
+- **Live rates (IRI-164).** `POST /api/v1/network/live` `{intervalMs: 1000 |
+  500 | 250, leaseId?}` takes (or renews) a 60 s lease →
+  `{leaseId, intervalMs, effectiveIntervalMs, expiresAt, endsAt}`. One shared
+  stream serves every viewer at the fastest active interval. A lease ends 10
+  minutes after it was taken: renewing then answers `410 {reason:
+  "lease-ended"}`; renewing a lapsed lease answers `410 {reason:
+  "unknown-lease"}` (take a new one). `409` while `liveEnabled` is off, `400`
+  below the 250 ms floor. `DELETE /api/v1/network/live/:id` ends a lease
+  (`204`). Taking and ending are audited (`network.live.start` /
+  `network.live.stop`); renewals are not. `GET /api/v1/network/live` →
+  `{enabled, effectiveIntervalMs, leases}`.
+- Wire: the hub sends `net-live {intervalMs, durationMs}` (relative, so
+  clock skew cannot stretch it; `0/0` = stop) to online Sparks with fabric
+  ports and re-sends it every 20 s while a lease runs; agents answer with
+  unbuffered `net-rates {intervalMs, ifaces[]}` frames and stop on expiry or
+  disconnect. The hub forwards them as SSE `net-rates {serverTimeMs, nodeId,
+  intervalMs, ifaces}`, which is excluded from the event feed and the journal
+  and never reaches rings, rollups or the database.

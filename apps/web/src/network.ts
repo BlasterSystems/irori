@@ -1,4 +1,4 @@
-import type { LinkProbe, Topology, TopologyLink, TopologyNode } from "@irori/core";
+import type { LinkProbe, NetLiveLease, NetRate, NetworkEntry, Topology, TopologyLink, TopologyNode } from "@irori/core";
 
 /**
  * IRI-163 (ADR-0021): Overview Network card data — topology fetch, the SVG
@@ -140,4 +140,55 @@ export function fmtRtt(ms: number | null): string {
 
 export function roleLabel(role: TopologyNode["role"]): string {
   return role === "head" ? "head" : role === "worker" ? "worker" : "standalone";
+}
+
+// ---------------------------------------------------------------------------
+// IRI-164: opt-in live rates (leased; SSE `net-rates` frames).
+// ---------------------------------------------------------------------------
+
+/** How often the card renews its lease while visible (TTL is 60 s). */
+export const LIVE_RENEW_MS = 30_000;
+
+export class LiveLeaseError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    /** 410 only: "lease-ended" (10-minute cap) or "unknown-lease" (lapsed). */
+    readonly reason: string | null = null,
+  ) {
+    super(message);
+  }
+}
+
+export async function acquireLiveLease(intervalMs: number, leaseId?: string): Promise<NetLiveLease> {
+  const res = await fetch("/api/v1/network/live", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify(leaseId === undefined ? { intervalMs } : { intervalMs, leaseId }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string; reason?: string };
+  if (!res.ok) throw new LiveLeaseError(body.error ?? `HTTP ${res.status}`, res.status, body.reason ?? null);
+  return body as NetLiveLease;
+}
+
+export async function releaseLiveLease(leaseId: string): Promise<void> {
+  await fetch(`/api/v1/network/live/${encodeURIComponent(leaseId)}`, { method: "DELETE" }).catch(() => undefined);
+}
+
+/**
+ * Snapshot entries with a fresh live frame's rates laid over them (fresh =
+ * received within three intervals plus a second). A stale frame, or none,
+ * leaves the 2 s snapshot rates in place: the fallback for old agents.
+ */
+export function withLiveRates(
+  entries: NetworkEntry[] | undefined,
+  frame: { receivedAtMs: number; intervalMs: number; ifaces: NetRate[] } | undefined,
+  nowMs: number,
+): NetworkEntry[] | undefined {
+  if (entries === undefined || frame === undefined || nowMs - frame.receivedAtMs > frame.intervalMs * 3 + 1000) return entries;
+  const byIface = new Map(frame.ifaces.map((r) => [r.iface, r]));
+  return entries.map((e) => {
+    const r = byIface.get(e.iface);
+    return r === undefined ? e : { ...e, rxBps: r.rxBps, txBps: r.txBps, rdmaRxBps: r.rdmaRxBps, rdmaTxBps: r.rdmaTxBps };
+  });
 }

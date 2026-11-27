@@ -3,6 +3,7 @@ import { CACHE_USER_PATTERN } from "./node.js";
 import { MODELCTL_PIN_RE } from "./modelctl-pin.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { IPV4_RE, NET_IFACE_RE } from "./network-topology.js";
+import { netLiveMsgSchema, netRatesMsgSchema } from "./network.js";
 import { llmMsgSchema } from "./llm.js";
 import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
 import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema, clocksGetMsgSchema, clocksSetMsgSchema, nodeShutdownMsgSchema } from "./job-messages.js";
@@ -48,6 +49,8 @@ export const agentMsgSchema = z.discriminatedUnion("type", [
   agentPingMsgSchema,
   llmMsgSchema,
   setupAckMsgSchema,
+  // IRI-164 (ADR-0021): live fabric rates, only while a net-live lease runs.
+  netRatesMsgSchema,
 ]);
 
 export type HelloMsg = z.infer<typeof helloMsgSchema>;
@@ -137,6 +140,8 @@ export const serverMsgSchema = z.discriminatedUnion("type", [
   clocksGetMsgSchema,
   clocksSetMsgSchema,
   nodeShutdownMsgSchema,
+  // IRI-164 (ADR-0021): start/stop the leased live-rate stream.
+  netLiveMsgSchema,
 ]);
 
 export type HelloOkMsg = z.infer<typeof helloOkMsgSchema>;

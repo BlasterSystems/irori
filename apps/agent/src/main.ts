@@ -3,6 +3,7 @@ import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
 import { collect, linkFactsCacheFor } from "./collector.js";
 import { LinkProber } from "./link-prober.js";
+import { NetLive } from "./net-live.js";
 import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown, shouldPersist } from "./clocks.js";
 import { mergeClocksReply, persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
 import { readStore } from "./catalog-read.js";
@@ -370,6 +371,12 @@ async function run(): Promise<void> {
   // link facts (refreshed every 30 s by the snapshot path) for its peers.
   const prober = new LinkProber({ facts: () => linkFactsCacheFor("/sys", "/proc").peek(), log });
 
+  const netLive = new NetLive({
+    facts: () => linkFactsCacheFor("/sys", "/proc").peek(),
+    send: (msg) => transport.sendNetRates(msg),
+    log,
+  });
+
   const transport = new AgentTransport({
     token: config.token,
     hostname: os.hostname(),
@@ -385,6 +392,9 @@ async function run(): Promise<void> {
       return probes.length > 0 ? { ...snapshot, linkProbes: probes } : snapshot;
     },
     onNetConfig: (intervalS, peers) => prober.configure(intervalS, peers),
+    // IRI-164: leased live rates — stop with the socket, never buffered.
+    onNetLive: (intervalMs, durationMs) => netLive.apply(intervalMs, durationMs),
+    onDisconnect: () => netLive.stop(),
     collectLlm: async (detectOnly) =>
       Promise.all([...probes.values()].map((probe) => probe.probe(detectOnly))),
     onLlmConfig: mergeLlmConfig,
@@ -538,6 +548,7 @@ async function run(): Promise<void> {
     durableLog(`${signal} received, stopping`);
     usageSync.stop();
     prober.stop();
+    netLive.stop();
     buffer.close();
     logSink.stop();
     // IRI-039/IR-116: flush the last batching window before exit.
