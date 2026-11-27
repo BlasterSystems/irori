@@ -352,12 +352,15 @@ export function createJobsService(
   getModelctlPin?: () => Promise<string | null>,
   /** ADR-0014: a failed push whose preflight reported a provisionable gap. */
   onPushBlocked?: (event: PushBlockedEvent) => void,
+  /** IRI-167 (ADR-0021): rewrite push hosts to direct fabric addresses. */
+  rewritePushParams?: (sourceNodeId: string, params: Record<string, unknown>) => Promise<Record<string, unknown>>,
 ): JobsService {
   /** IR-272: last auto-dispatched modelctl-install per node and user. */
   const autoInstallAttempts = new Map<string, number>();
   const service: JobsService = {
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
+      if (kind === "push" && rewritePushParams !== undefined) params = await rewritePushParams(nodeId, params);
       const [active] = await db
         .select({ id: jobs.id, kind: jobs.kind, params: jobs.params })
         .from(jobs)
@@ -606,7 +609,10 @@ export function createJobsService(
           .orderBy(desc(jobOutput.seq))
           .limit(MAX_OUTPUT_LINES);
         const parsed = parsePushBlocked(output.reverse());
-        if (parsed !== null && (row.params as { _remediated?: unknown } | null)?._remediated !== true) {
+        // IRI-167: a fabric push whose destination did not answer gets one LAN retry.
+        const fabricUnreachable =
+          (row.params as { _lanHosts?: unknown } | null)?._lanHosts !== undefined && output.some((o) => /^IRORI_PREFLIGHT \(.*\): unreachable/.test(o.line));
+        if ((parsed !== null && (row.params as { _remediated?: unknown } | null)?._remediated !== true) || fabricUnreachable) {
           try {
             onPushBlocked({ jobId, nodeId, params: (row.params ?? {}) as Record<string, unknown>, output });
           } catch {

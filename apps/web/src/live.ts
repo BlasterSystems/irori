@@ -7,6 +7,8 @@ import {
   type HealthFinding,
   type LlmPortSnapshot,
   type LogUpdateEvent,
+  type NetRatesEvent,
+  type NetworkTestEvent,
   type NodeInfo,
   type SseEvent,
   type UsageEvent,
@@ -23,6 +25,9 @@ export interface LlmEntry {
   /** Server receive time of the probe, ISO. */
   updatedAt: string;
 }
+
+/** IRI-164: a live fabric-rate frame plus its client receive time. */
+export type NetRatesLive = NetRatesEvent & { receivedAtMs: number };
 
 /** Latest bench frame per run id (SSE bench events; M6). */
 export interface BenchLive {
@@ -56,6 +61,10 @@ export interface LiveStore {
   llm: Map<string, LlmEntry>;
   /** Latest bench frame per run id, from SSE bench events (M6). */
   benches: Map<string, BenchLive>;
+  /** IRI-164: latest live fabric-rate frame per node (only while a live lease runs). */
+  netRates: Map<string, NetRatesLive>;
+  /** IRI-166: last link-test lifecycle frame (the rows themselves are REST). */
+  netTestPulse: Ref<NetworkTestEvent | null>;
   /** Live job view (id → job), seeded from GET /api/v1/jobs and updated by
    *  the `job` / `job-progress` SSE frames (IRI-028). Progress output lines
    *  stream into the Telemetry feed (IR-102); the seed keeps node/kind
@@ -110,6 +119,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   const snapshots = reactive(new Map<string, HardwareSnapshot>());
   const llm = reactive(new Map<string, LlmEntry>());
   const benches = reactive(new Map<string, BenchLive>());
+  const netRates = reactive(new Map<string, NetRatesLive>());
+  const netTestPulse = ref<NetworkTestEvent | null>(null);
   const jobs = reactive(new Map<string, JobLive>());
   const events = ref<SseEvent[]>([]);
   const usageLatest = ref<UsageEvent[]>([]);
@@ -178,6 +189,10 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
         if (event.agentVersion) node.agentVersion = event.agentVersion;
         break;
       }
+      case "net-rates":
+        // Client receive time: freshness must not depend on hub/browser clock skew.
+        netRates.set(event.nodeId, { ...event, receivedAtMs: now() });
+        break;
       case "heartbeat":
         break;
       case "bench":
@@ -234,6 +249,11 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
       case "thermal":
       case "setup-state":
       case "setup-transfer":
+        pushEvent(event);
+        break;
+      // IRI-166: link-test lifecycle — feed line + a pulse the card re-reads on.
+      case "network-test":
+        netTestPulse.value = event;
         pushEvent(event);
         break;
       // IR-147: the hub emits throttled setup-log frames (unchanged lines
@@ -427,6 +447,8 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
     snapshots,
     llm,
     benches,
+    netRates,
+    netTestPulse,
     jobs,
     events,
     usageLatest,

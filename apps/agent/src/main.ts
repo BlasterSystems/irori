@@ -1,7 +1,10 @@
 import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
-import { collect } from "./collector.js";
+import { collect, linkFactsCacheFor, readLinkDetail } from "./collector.js";
+import { fabricAddrsOf, runNetTestClient, runNetTestServer, type NetTestDeps } from "./net-tests.js";
+import { LinkProber } from "./link-prober.js";
+import { NetLive } from "./net-live.js";
 import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown, shouldPersist } from "./clocks.js";
 import { mergeClocksReply, persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
 import { readStore } from "./catalog-read.js";
@@ -203,6 +206,17 @@ async function run(): Promise<void> {
     },
     async (jobId, kind, params, emit, signal) => {
       void jobId;
+      if (kind === "net-test-server" || kind === "net-test-client") {
+        // IRI-166 (ADR-0021): validated against this node's own fabric addresses.
+        const deps: NetTestDeps = {
+          fabricAddrs: async () => {
+            const detail = await readLinkDetail("/sys");
+            const speeds = new Map([...detail].map(([iface, d]) => [iface, d.speedMbps] as const));
+            return fabricAddrsOf(detail, await linkFactsCacheFor("/sys", "/proc").get("/sys", "/proc", speeds));
+          },
+        };
+        return kind === "net-test-server" ? runNetTestServer(params, emit, signal, deps) : runNetTestClient(params, emit, signal, deps);
+      }
       const hygieneCtx = { nasRoot: transport.getNasRoot(), modelctlPath: config.modelctlPath };
       if (kind === "models-inventory") {
         const report = await buildInventory({
@@ -365,6 +379,16 @@ async function run(): Promise<void> {
     log,
   );
 
+  // IRI-165 (ADR-0021): fabric latency prober; reads the collector's cached
+  // link facts (refreshed every 30 s by the snapshot path) for its peers.
+  const prober = new LinkProber({ facts: () => linkFactsCacheFor("/sys", "/proc").peek(), log });
+
+  const netLive = new NetLive({
+    facts: () => linkFactsCacheFor("/sys", "/proc").peek(),
+    send: (msg) => transport.sendNetRates(msg),
+    log,
+  });
+
   const transport = new AgentTransport({
     token: config.token,
     hostname: os.hostname(),
@@ -376,8 +400,13 @@ async function run(): Promise<void> {
     collect: async () => {
       const snapshot = await collect();
       noteStoreFree(snapshot, transport?.getNasRoot() ?? null);
-      return snapshot;
+      const probes = prober.results();
+      return probes.length > 0 ? { ...snapshot, linkProbes: probes } : snapshot;
     },
+    onNetConfig: (intervalS, peers) => prober.configure(intervalS, peers),
+    // IRI-164: leased live rates — stop with the socket, never buffered.
+    onNetLive: (intervalMs, durationMs) => netLive.apply(intervalMs, durationMs),
+    onDisconnect: () => netLive.stop(),
     collectLlm: async (detectOnly) =>
       Promise.all([...probes.values()].map((probe) => probe.probe(detectOnly))),
     onLlmConfig: mergeLlmConfig,
@@ -520,6 +549,7 @@ async function run(): Promise<void> {
     onDone: (jobId) => transport.sendAgentServer({ type: "job-done", jobId, status: "failed", exitCode: null }),
   });
   transport.connect(config.serverUrl);
+  prober.start();
   usageSync.start();
   logSink.start();
 
@@ -529,6 +559,8 @@ async function run(): Promise<void> {
     stopping = true;
     durableLog(`${signal} received, stopping`);
     usageSync.stop();
+    prober.stop();
+    netLive.stop();
     buffer.close();
     logSink.stop();
     // IRI-039/IR-116: flush the last batching window before exit.

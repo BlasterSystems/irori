@@ -1,6 +1,6 @@
 import { WebSocket } from "ws";
 import { serverMsgSchema } from "@irori/core";
-import type { AgentMsg, AgentServerMsg, BenchType, BodyRetention, HardwareSnapshot, LlmEvent, LlmPortSnapshot, LogEvent, ServerMsg, UsageRequest } from "@irori/core";
+import type { AgentMsg, AgentServerMsg, BenchType, NetRatesMsg, BodyRetention, HardwareSnapshot, LlmEvent, LlmPortSnapshot, LogEvent, ServerMsg, UsageRequest } from "@irori/core";
 
 /** Bound on snapshots queued while the connection is down (drop-oldest). */
 export const MAX_BUFFERED_SNAPSHOTS = 500;
@@ -54,6 +54,12 @@ export interface AgentTransportOptions {
   onLlmConfig?: (config: LlmRuntimeConfig) => LlmRuntimeConfig | void;
   /** LLM probe config seeded before the first config-update (env). */
   llm?: LlmRuntimeConfig;
+  /** IRI-165 (ADR-0021): fabric prober config from config-update (undefined = keep). */
+  onNetConfig?: (intervalS: number | undefined, peers: Array<{ iface: string; ip: string }> | undefined) => void;
+  /** IRI-164 (ADR-0021): start/renew/stop the leased live-rate stream. */
+  onNetLive?: (intervalMs: number, durationMs: number) => void;
+  /** Called when the connection drops (live streams stop with the socket). */
+  onDisconnect?: () => void;
   /** Server asks the agent to run one job (one active per node). */
   onJobRequest?: (jobId: string, kind: string, params: Record<string, unknown>) => void;
   onJobCancel?: (jobId: string) => void;
@@ -112,6 +118,9 @@ export class AgentTransport {
   private readonly collect: () => Promise<HardwareSnapshot>;
   private readonly collectLlm?: (detectOnly: boolean) => Promise<LlmPortSnapshot[]>;
   private readonly onLlmConfig?: (config: LlmRuntimeConfig) => LlmRuntimeConfig | void;
+  private readonly onNetConfig?: (intervalS: number | undefined, peers: Array<{ iface: string; ip: string }> | undefined) => void;
+  private readonly onNetLive?: (intervalMs: number, durationMs: number) => void;
+  private readonly onDisconnect?: () => void;
   private readonly onJobRequest?: (jobId: string, kind: string, params: Record<string, unknown>) => void;
   private readonly onJobCancel?: (jobId: string) => void;
   private readonly onCatalogRequest?: () => void;
@@ -186,6 +195,9 @@ export class AgentTransport {
     this.cadenceMs = options.cadenceMs;
     this.llm = options.llm ?? { llmPorts: [], llmCadenceMs: 0, llmDetectOnly: false };
     this.onLlmConfig = options.onLlmConfig;
+    this.onNetConfig = options.onNetConfig;
+    this.onNetLive = options.onNetLive;
+    this.onDisconnect = options.onDisconnect;
     this.collectLlm = options.collectLlm;
     this.onJobRequest = options.onJobRequest;
     this.onJobCancel = options.onJobCancel;
@@ -307,6 +319,20 @@ export class AgentTransport {
         events,
         dropped,
       });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * IRI-164: send one live-rate frame. Never buffered; false when the socket
+   * is not ready, so the caller stops sampling.
+   */
+  sendNetRates(msg: NetRatesMsg): boolean {
+    if (!this.ready) return false;
+    try {
+      this.sendRaw(msg);
       return true;
     } catch {
       return false;
@@ -459,6 +485,9 @@ export class AgentTransport {
       case "job-cancel":
         this.onJobCancel?.(parsed.data.jobId);
         break;
+      case "net-live":
+        this.onNetLive?.(parsed.data.intervalMs, parsed.data.durationMs);
+        break;
       case "catalog-request":
         this.onCatalogRequest?.();
         break;
@@ -574,6 +603,8 @@ export class AgentTransport {
     // applies), absent (old server) = keep the current value.
     if (msg.modelctlPin !== undefined) this.modelctlPin = msg.modelctlPin;
     this.log(`cadence updated to ${msg.cadenceMs} ms`);
+    // IRI-165: absent fields (old hub) keep the agent's prober defaults.
+    this.onNetConfig?.(msg.netProbeIntervalS, msg.netPeers);
     if (this.ready) this.startSnapshotTimer();
 
     const serverConfig: LlmRuntimeConfig = {
@@ -603,6 +634,7 @@ export class AgentTransport {
 
   private handleClose(): void {
     this.ready = false;
+    this.onDisconnect?.();
     clearInterval(this.pingTimer);
     this.pingTimer = undefined;
     clearInterval(this.snapshotTimer);

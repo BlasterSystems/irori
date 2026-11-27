@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { netRatesEventSchema } from "./network.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
 import { llmEventSchema, type LlmEvent } from "./llm.js";
 import { usagePartMetaSchema, usageRequestSchema } from "./usage.js";
@@ -160,6 +161,18 @@ export const logUpdateEventSchema = z.object({
   latestId: z.string().regex(/^\d+$/).nullable(),
 });
 
+/** IRI-166 (ADR-0021): link-test lifecycle; the row itself is REST. */
+export const networkTestEventSchema = z.object({
+  type: z.literal("network-test"),
+  serverTimeMs: z.number(),
+  testId: z.string().uuid(),
+  linkId: z.string(),
+  status: z.enum(["running", "succeeded", "failed"]),
+  stage: z.string().nullable(),
+  summary: z.string(),
+});
+export type NetworkTestEvent = z.infer<typeof networkTestEventSchema>;
+
 /** IRI-069: a health rule opened or cleared (durable journal + live feed). */
 export const healthEventSchema = z.object({
   type: z.literal("health"),
@@ -189,6 +202,10 @@ export const sseEventSchema = z.discriminatedUnion("type", [
   usageEventSchema,
   logUpdateEventSchema,
   healthEventSchema,
+  // IRI-164 (ADR-0021): live fabric rates (never journaled).
+  netRatesEventSchema,
+  // IRI-166: a link test started, advanced or finished (journaled).
+  networkTestEventSchema,
 ]);
 
 export type SnapshotEvent = z.infer<typeof snapshotEventSchema>;

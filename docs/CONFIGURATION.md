@@ -100,6 +100,23 @@ quants listing sends no Authorization header. The modal's fields (HF token,
 snapshot cadence, energy cost, token cost) are unchanged by the v1.1
 restyle — only the surface (underline fields, ink actions) moved.
 
+### Network settings (runtime, ADR-0021)
+
+`GET`/`PUT /api/v1/settings/network` (a `network` row in the `settings`
+table; no environment variable). Any subset may be sent; unknown keys and
+out-of-range values are rejected, and an invalid stored value reads as the
+defaults.
+
+| Key | Default | Effect |
+|---|---|---|
+| `testsEnabled` | `true` | On-demand link tests (iperf3 / RDMA). `false` refuses new tests with `409`. |
+| `liveEnabled` | `true` | Opt-in live rates. `false` ends every lease and stops the agents' streams. |
+| `probeIntervalS` | `10` | Agent fabric ping prober interval, 0–3600 s; `0` turns it off. Pushed to online agents via `config-update`; agents on an older hub keep 10 s. |
+
+A `PUT` re-sends `config-update` to every online agent. Link tests also
+install `iperf3` and `perftest` on demand (apt, no parameters); there is no
+setting for the listener ports (iperf3 5201–5210, perftest 18515–18524).
+
 ### Alarm webhooks (runtime, IR-241)
 
 Per-rule push alarms live in the same surface (topbar gear → Hub settings →

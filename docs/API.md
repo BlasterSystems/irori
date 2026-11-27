@@ -774,3 +774,97 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 - Transfer recovery re-runs a stage that was persisted `running` when the
   server died — a resumed transfer never reports `succeeded` with a stage
   that never executed.
+
+## Network (IR-273, ADR-0021)
+
+RoCE fabric between Sparks only; the NAS and the management LAN never appear.
+
+- `GET /api/v1/network/topology` — derived on request from the latest ring
+  snapshot per node (never stored). Answers `503` while the service is
+  unavailable (degraded hub). Body:
+  - `nodes[]`: `{id, name, online, role, clusterIds, fabricIfaces, hostOnFabric}`.
+    `hostOnFabric` compares the registry host's A records with the node's
+    fabric addresses; `null` = unknown (unresolvable, or no fabric).
+  - `links[]`: one per node pair, `{id: "<a>|<b>" (a < b), a, b, medium:
+    roce|ethernet|unknown, speedMbps, lanesUp, lanes[]}`. A lane is one netdev
+    pair: `{a, b: {nodeId, iface, ip, mac, mtu, speedMbps, operState, rdma},
+    subnet, evidence: confirmed|neighbor|subnet, up, probe}`. Speeds are not
+    summed across lanes (two netdevs share one cage). `medium` is `unknown`
+    while an endpoint's agent predates link facts.
+  - `switches[]`: a subnet shared by more than two nodes, with its members.
+  - `clusters[]`: cluster setups with `fabricPath` (every online member
+    reaches the head over up lanes; `null` while the head is offline).
+  - `warnings[]`: `{code, severity, message, nodeIds, linkId?}` with codes
+    `mtu-mismatch`, `speed-mismatch`, `lane-down`, `cluster-no-path` (warn),
+    `node-offline`, `push-not-on-fabric` (info).
+  - `generatedAt` (ISO).
+- `GET`/`PUT /api/v1/settings/network` — `{testsEnabled, liveEnabled,
+  probeIntervalS}` (defaults `true`, `true`, `10`). `PUT` takes any subset,
+  rejects unknown keys (`400`), is audited (`settings.network.put`) and
+  re-sends every online agent's `config-update`. `503` without a DB.
+- **Prober (IRI-165).** `config-update` carries `netProbeIntervalS` (0 =
+  off) and `netPeers` (`[{iface, ip}]`, the far end of each lane, at most
+  32); both are omitted when the topology is unavailable, and the agent then
+  keeps its defaults. Agents ping each fabric peer (`ping -c 5 -i 0.2 -W 1
+  -I <iface>`, at most 16 peers) and report the latest result per peer in
+  the snapshot's `linkProbes[]` (`rtt*Ms` null and `lossPct` 100 when the
+  peer does not answer). The hub re-sends `config-update` within 60 s when a
+  node's expected peers change.
+- **Live rates (IRI-164).** `POST /api/v1/network/live` `{intervalMs: 1000 |
+  500 | 250, leaseId?}` takes (or renews) a 60 s lease →
+  `{leaseId, intervalMs, effectiveIntervalMs, expiresAt, endsAt}`. One shared
+  stream serves every viewer at the fastest active interval. A lease ends 10
+  minutes after it was taken: renewing then answers `410 {reason:
+  "lease-ended"}`; renewing a lapsed lease answers `410 {reason:
+  "unknown-lease"}` (take a new one). `409` while `liveEnabled` is off, `400`
+  below the 250 ms floor. `DELETE /api/v1/network/live/:id` ends a lease
+  (`204`). Taking and ending are audited (`network.live.start` /
+  `network.live.stop`); renewals are not. `GET /api/v1/network/live` →
+  `{enabled, effectiveIntervalMs, leases}`.
+- Wire: the hub sends `net-live {intervalMs, durationMs}` (relative, so
+  clock skew cannot stretch it; `0/0` = stop) to online Sparks with fabric
+  ports and re-sends it every 20 s while a lease runs; agents answer with
+  unbuffered `net-rates {intervalMs, ifaces[]}` frames and stop on expiry or
+  disconnect. The hub forwards them as SSE `net-rates {serverTimeMs, nodeId,
+  intervalMs, ifaces}`, which is excluded from the event feed and the journal
+  and never reaches rings, rollups or the database.
+- **Link tests (IRI-166).** `POST /api/v1/network/tests` `{aNodeId, bNodeId,
+  override?, tool?}` → `202` with the `running` row; A is the client
+  (forward = A → B). The run continues in the background: `net-tool-ensure`
+  on both nodes, `net-test-server` on B, `net-test-client` on A, then the
+  listener job is canceled. `409` while another test runs, while tests are
+  disabled, or — without `override: true` — while an endpoint serves a
+  running setup or runs a transfer job (`reasons[]` names each);
+  `404` without a fabric link between the nodes. `POST
+  /api/v1/network/tests/all` `{override?}` → `202 {links}` tests every link
+  in turn under the same guards. `GET /api/v1/network/tests?limit=` →
+  `{tests, running}`, newest first (newest 50 kept per link). Rows:
+  `{id, linkId, aNodeId, bNodeId, aIface, bIface, aIp, bIp, tool, status:
+  running|succeeded|failed, stage: ensure|listen|measure|null, override,
+  forwardGbps, reverseGbps, retransmits, rttP50Ms, rttP99Ms, lossPct,
+  durationS, streams, error, startedAt, finishedAt}`. Starting is audited
+  (`network.test.start`, `network.test.all`); every stage and result is an
+  SSE `network-test {testId, linkId, status, stage, summary}` frame, which
+  the event journal keeps. A row a hub restart left running is settled
+  `failed` at boot.
+- **Fabric pushes (IRI-167).** When the topology has a direct link between a
+  push job's source and its destination node, the hub rewrites the job's
+  `hosts` to the destination's fabric address on every up lane (modelctl
+  `--host` fan-out; `user@` is kept) and keeps the originals in `_lanHosts`.
+  Pushes between Sparks that are not directly cabled keep the registry host.
+  Remediation (ADR-0014) resolves a fabric address to its node and pins the
+  host key per address; a fabric destination whose preflight reports
+  `unreachable` is re-pushed once over `_lanHosts` (`_fabricFallback: true`).
+- **RDMA tests (IRI-168).** `tool: "rdma"` on either test route runs
+  perftest instead of iperf3: `ib_write_bw` (10 s, `--report_gbits`) then
+  `ib_send_lat` (1000 iterations) on the lane's RoCE v2 GID, rendezvous ports
+  18515–18524. Results: `forwardGbps` = write bandwidth, `reverseGbps` null,
+  `rttP50Ms`/`rttP99Ms` from `t_typical` and the 99 % percentile (µs → ms),
+  `streams` 1. `net-tool-ensure` installs `perftest` with `iperf3`.
+- **Link history (IRI-168).** `GET /api/v1/network/links/:linkId/history?range=1h|24h|7d`
+  (`linkId` = `<a>|<b>` URL-encoded) → `{linkId, range, points: [{t, txBps,
+  rxBps, txMaxBps, rxMaxBps, rttMs, lossPct}]}`, binned to 1, 5 and 30 minutes.
+  The hub samples every link every 10 s from the latest snapshots (node a's
+  side, tx = a → b) and writes one `network_link_minutes` row per link per
+  minute (migration 0031); 7 days are kept. `400` for a malformed link id or
+  range, `503` without a DB.

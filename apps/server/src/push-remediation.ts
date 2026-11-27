@@ -18,6 +18,8 @@ export interface PushRemediationDeps {
   jobs: Pick<JobsService, "create" | "get">;
   getNode: (id: string) => Promise<RemediationNode | null>;
   getNodes: () => Promise<RemediationNode[]>;
+  /** IRI-167: resolve a push host (registry host or fabric address) to a node id. */
+  resolveNodeId?: (host: string) => Promise<string | null>;
   log?: (message: string) => void;
 }
 
@@ -44,7 +46,16 @@ export function createPushRemediation(deps: PushRemediationDeps): (event: PushBl
       cacheDir?: unknown;
       ssh?: unknown;
       _remediated?: unknown;
+      _lanHosts?: unknown;
     };
+    // IRI-167: a fabric push whose destination did not answer falls back to
+    // the registry (LAN) hosts once; that push may still remediate normally.
+    if (Array.isArray(params._lanHosts) && event.output.some((o) => /^IRORI_PREFLIGHT \(.*\): unreachable/.test(o.line))) {
+      const { _lanHosts, _remediated: _r, ...rest } = params;
+      await deps.jobs.create(event.nodeId, "push", { ...rest, hosts: _lanHosts, _fabricFallback: true });
+      deps.log?.(`[irori-server] push remediation: fabric unreachable — push re-dispatched over the registry hosts`);
+      return;
+    }
     // The `_remediated` guard makes the re-push single-shot: if the gap
     // persists, the second preflight failure stands for the owner to read.
     if (params._remediated === true) return;
@@ -61,7 +72,9 @@ export function createPushRemediation(deps: PushRemediationDeps): (event: PushBl
     const at = destTarget.indexOf("@");
     const destUser = at >= 0 ? destTarget.slice(0, at) : null;
     const destHost = at >= 0 ? destTarget.slice(at + 1) : destTarget;
-    const dest = (await deps.getNodes()).find((n) => n.host === destHost) ?? null;
+    const nodes = await deps.getNodes();
+    const destId = deps.resolveNodeId === undefined ? null : await deps.resolveNodeId(destHost).catch(() => null);
+    const dest = nodes.find((n) => n.host === destHost) ?? (destId === null ? null : (nodes.find((n) => n.id === destId) ?? null));
     if (dest === null) {
       deps.log?.(`[irori-server] push remediation: no node for host ${destHost}`);
       return;
@@ -91,15 +104,24 @@ export function createPushRemediation(deps: PushRemediationDeps): (event: PushBl
       }
       const authorize = await runJob(dest.id, "transfer-key-authorize", { user: destCacheUser, publicKey }, deps.log);
       if (authorize === null) return;
-      const hostKeys = authorize.output
-        .map((o) => o.line)
-        .filter((l) => l.startsWith(HOSTKEY_MARKER))
-        .map((l) => normalizeHostKey(destHost, l.slice(HOSTKEY_MARKER.length)));
-      if (hostKeys.length === 0) {
+      const rawKeys = authorize.output.map((o) => o.line).filter((l) => l.startsWith(HOSTKEY_MARKER)).map((l) => l.slice(HOSTKEY_MARKER.length));
+      if (rawKeys.length === 0) {
         deps.log?.("[irori-server] push remediation: transfer-key-authorize produced no host keys");
         return;
       }
-      if ((await runJob(event.nodeId, "transfer-hostkey-pin", { user: sourceUser, host: destHost, hostKeys }, deps.log)) === null) return;
+      // IRI-167: a fabric push dials one address per lane; every address of
+      // this destination needs its own known_hosts entry.
+      const destHosts = [destHost];
+      for (const h of hosts.slice(1)) {
+        const name = h.includes("@") ? h.slice(h.indexOf("@") + 1) : h;
+        if (destHosts.includes(name)) continue;
+        const owner = deps.resolveNodeId === undefined ? null : await deps.resolveNodeId(name).catch(() => null);
+        if (owner === dest.id || nodes.find((n) => n.host === name)?.id === dest.id) destHosts.push(name);
+      }
+      for (const host of destHosts) {
+        const hostKeys = rawKeys.map((k) => normalizeHostKey(host, k));
+        if ((await runJob(event.nodeId, "transfer-hostkey-pin", { user: sourceUser, host, hostKeys }, deps.log)) === null) return;
+      }
     }
     await deps.jobs.create(event.nodeId, "push", { ...params, _remediated: true });
     deps.log?.(`[irori-server] push remediation: wire complete — push re-dispatched to ${destHost}`);

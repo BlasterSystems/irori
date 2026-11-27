@@ -21,6 +21,7 @@ import {
   type ScannedModel,
   type TransferProgress,
   type UsageRequest,
+  type NetRatesMsg,
 } from "@irori/core";
 import { randomUUID } from "node:crypto";
 import type { NodeStore } from "@irori/db";
@@ -113,6 +114,14 @@ export interface AgentHubDeps {
   getHfToken?: () => Promise<string | null | undefined>;
   /** IR-105: hub-pinned modelctl version; null = unset (agents keep env), absent = getter unavailable. */
   getModelctlPin?: () => Promise<string | null>;
+  /**
+   * IRI-165 (ADR-0021): fabric prober config for a node's config-update
+   * (interval + expected peers). Absent or rejecting = the keys are omitted
+   * and the agent keeps its defaults.
+   */
+  getNetConfig?: (nodeId: string) => Promise<{ netProbeIntervalS: number; netPeers: Array<{ iface: string; ip: string }> }>;
+  /** IRI-164 (ADR-0021): a live fabric-rate frame; the lease manager decides whether it is forwarded. */
+  onNetRates?: (nodeId: string, msg: NetRatesMsg) => void;
   /**
    * IR-189: fired once per authenticated hello, after the socket is registered
    * and the config-update is sent. The clock-cap service re-applies any stored
@@ -214,6 +223,14 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     // applies again.
     const modelctlPin = deps.getModelctlPin === undefined ? undefined : await deps.getModelctlPin().catch(() => undefined);
     if (modelctlPin !== undefined) msg.modelctlPin = modelctlPin;
+    // IRI-165: prober interval + expected peers; omitted on failure (agent keeps its values).
+    if (row?.kind !== "nas") {
+      const net = deps.getNetConfig === undefined ? undefined : await deps.getNetConfig(id).catch(() => undefined);
+      if (net !== undefined) {
+        msg.netProbeIntervalS = net.netProbeIntervalS;
+        msg.netPeers = net.netPeers;
+      }
+    }
     sendMsg(msg);
   };
 
@@ -381,6 +398,12 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
         } catch {
           enqueuePending(currentId, "llm", payload);
         }
+        return;
+      }
+
+      if (msg.type === "net-rates") {
+        // IRI-164: SSE only (via the lease manager) — never rings or the DB.
+        deps.onNetRates?.(currentId, msg);
         return;
       }
 

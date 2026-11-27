@@ -104,6 +104,10 @@ export const RUNNER_KINDS = new Set([
   "quarantine-prune",
   "prune-cleanup-quarantine",
   "staging-tree-audit",
+  // ADR-0021 (IRI-166): link-test listener and client (agent code, validated
+  // against this node's own fabric addresses).
+  "net-test-server",
+  "net-test-client",
 ]);
 
 /** Kinds whose writes land on the NAS store — gated on the store's free
