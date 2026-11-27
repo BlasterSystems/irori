@@ -52,6 +52,7 @@ import { createPushRemediation } from "./push-remediation.js";
 import { initOtel, shutdownOtel } from "./otel.js";
 import { log } from "./logger.js";
 import { installProcessGuards } from "./process-guards.js";
+import { createNetworkService, type NetworkService } from "./network-service.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -123,6 +124,8 @@ const state: {
   eventJournal: EventJournalService | null;
   /** IRI-078: durable structured logs (agent ships + hub-scope lines). */
   logs: LogStore | null;
+  /** IRI-162 (ADR-0021): derived RoCE topology (needs the hub and setups). */
+  network: NetworkService | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -152,6 +155,7 @@ const state: {
   audit: null,
   eventJournal: null,
   logs: null,
+  network: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -206,6 +210,7 @@ const app = createApp({
   },
   getHfToken: () => state.hfToken,
   getCadence: () => state.cadence,
+  getNetwork: () => state.network,
   getCost: () => state.cost,
   getModelctlPin: () => state.modelctlPin,
   getAudit: () => state.audit,
@@ -535,6 +540,12 @@ async function boot(): Promise<void> {
   state.downloads = downloadQueue;
   state.setups = setupsService;
   state.bench = benchService;
+  state.network = createNetworkService({
+    listNodes: () => store.list(),
+    online: () => hub.online(),
+    latest: (nodeId) => rings.latest(nodeId),
+    listSetups: () => setupsService.list(),
+  });
 
   // Staged transfers that were running at restart resume from the first
   // pending stage; the health watcher polls driver truth + probes every 5 s.

@@ -774,3 +774,27 @@ guarantees callers rely on, kept current when behavior changes. Last updated
 - Transfer recovery re-runs a stage that was persisted `running` when the
   server died — a resumed transfer never reports `succeeded` with a stage
   that never executed.
+
+## Network (IR-273, ADR-0021)
+
+RoCE fabric between Sparks only; the NAS and the management LAN never appear.
+
+- `GET /api/v1/network/topology` — derived on request from the latest ring
+  snapshot per node (never stored). Answers `503` while the service is
+  unavailable (degraded hub). Body:
+  - `nodes[]`: `{id, name, online, role, clusterIds, fabricIfaces, hostOnFabric}`.
+    `hostOnFabric` compares the registry host's A records with the node's
+    fabric addresses; `null` = unknown (unresolvable, or no fabric).
+  - `links[]`: one per node pair, `{id: "<a>|<b>" (a < b), a, b, medium:
+    roce|ethernet|unknown, speedMbps, lanesUp, lanes[]}`. A lane is one netdev
+    pair: `{a, b: {nodeId, iface, ip, mac, mtu, speedMbps, operState, rdma},
+    subnet, evidence: confirmed|neighbor|subnet, up, probe}`. Speeds are not
+    summed across lanes (two netdevs share one cage). `medium` is `unknown`
+    while an endpoint's agent predates link facts.
+  - `switches[]`: a subnet shared by more than two nodes, with its members.
+  - `clusters[]`: cluster setups with `fabricPath` (every online member
+    reaches the head over up lanes; `null` while the head is offline).
+  - `warnings[]`: `{code, severity, message, nodeIds, linkId?}` with codes
+    `mtu-mismatch`, `speed-mismatch`, `lane-down`, `cluster-no-path` (warn),
+    `node-offline`, `push-not-on-fabric` (info).
+  - `generatedAt` (ISO).

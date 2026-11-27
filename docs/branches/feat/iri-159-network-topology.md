@@ -9,10 +9,12 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - **Decision recorded.** ADR 0021 covers the snapshot extension, the derived topology, the leased live stream, the listener and installer job kinds, the new tables and fabric push addressing.
 - **Real evidence.** The fleet is a four-node ring, two 200 Gb/s lanes per cable, one /24 per lane. Every node's registry host is on the management LAN, so pushes have never used the fabric.
 - **Agents report link facts.** Every interface now carries its MAC, MTU, driver, classification (fabric, LAN or virtual), addresses with prefix, the bound RoCE port (device, state, rate), complete IPv4 neighbours on fabric links, and RDMA byte rates. RoCE traffic bypasses the kernel counters, so the RDMA rates are what show NCCL traffic.
+- **The hub derives the topology.** `GET /api/v1/network/topology` groups fabric lanes into links per node pair, recognises switched subnets, checks every cluster's fabric path to its head, and warns on MTU and speed mismatches, down lanes, offline nodes, and registry hosts that are not on the fabric. It works with today's agents too: an old snapshot's 200 Gb/s non-virtual ports count as fabric.
 
 ## Business rules and constraints
 
 - Only the RoCE fabric between Sparks is in scope. The NAS and the management LAN are never drawn or measured.
+- A direct cable is never claimed as fact: point-to-point lanes are links; a subnet shared by three or more nodes is drawn as a switch.
 
 ## Edge cases handled
 
@@ -32,5 +34,6 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — S2 (IR-276 / IRI-162): topology derivation and the topology API.
 - 2026-11-27 — S1 (IR-275 / IRI-161): agent link facts and RDMA rates in the snapshot.
 - 2026-11-27 — S0 (IR-274 / IRI-160): ADR 0021 accepted and indexed; real-fleet network fixture; epic task file.

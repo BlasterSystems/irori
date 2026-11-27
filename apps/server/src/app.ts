@@ -1,3 +1,5 @@
+import { registerNetworkRoutes } from "./network-routes.js";
+import type { NetworkService } from "./network-service.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -228,6 +230,8 @@ export interface AppDeps {
    * exposed on the version payload; setCadenceMs keeps it in sync on PUT.
    */
   getCadence?: () => CadenceService | null;
+  /** IRI-162 (ADR-0021): fleet network topology; absent or null = 503. */
+  getNetwork?: () => NetworkService | null;
   /** IRI-025: energy/token cost settings. Optional — when absent or null
    *  (degraded), the cost settings routes answer 503 like the cadence routes. */
   getCost?: () => CostService | null;
@@ -795,6 +799,8 @@ export function createApp(deps: AppDeps): Express {
       throw err;
     }
   });
+
+  registerNetworkRoutes(app, { getNetwork: () => deps.getNetwork?.() ?? null });
 
   app.get("/api/v1/nodes/:id/snapshot", async (req, res) => {
     const id = parseUuidParam(req);
