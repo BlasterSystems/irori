@@ -7,8 +7,8 @@ import { liveMock } from "./live-mock";
  * IRI-159: the Overview Main+Rail shell — the serving hero, node cards and
  * power render in the main column (scope fixed by IR-285), token stats /
  * NAS / clock caps / telemetry render in the rail, node cards render in a
- * 2-col grid with constants carried in tooltips, and the thermal
- * alert row appears only when a spark node runs at/above the warn tier.
+ * 2-col grid with constants carried in tooltips. IR-287 removed the
+ * thermal alert row; the page-head hottest token names its sensor instead.
  */
 
 vi.mock("../src/live", async () => ({ live: (await import("./live-mock")).liveMock }));
@@ -26,7 +26,7 @@ const fetchStub = vi.fn(async (input: RequestInfo | URL) => {
   return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 });
 
-function snap(gpuTempC: number): Record<string, unknown> {
+function snap(gpuTempC: number, cpuTempC = 58): Record<string, unknown> {
   return {
     schemaVersion: 1,
     agentVersion: "0.7.0",
@@ -34,7 +34,7 @@ function snap(gpuTempC: number): Record<string, unknown> {
     transport: "ws",
     timestampMs: Date.now(),
     gpus: [{ index: 0, name: "NVIDIA GB10", uuid: null, usagePct: 34, tempC: gpuTempC, memUsedBytes: 42_100_000_000, memTotalBytes: 127_000_000_000, powerW: 74, powerLimitW: null, smClockMHz: null, smClockMaxMHz: null, throttleReasons: [], processes: [] }],
-    cpu: { model: "GB10", cores: 20, usagePct: 18, tempC: 58, packagePowerW: 41 },
+    cpu: { model: "GB10", cores: 20, usagePct: 18, tempC: cpuTempC, packagePowerW: 41 },
     memory: { totalBytes: 127 * 2 ** 30, usedBytes: 96 * 2 ** 30, swapTotalBytes: null, swapUsedBytes: null },
     unifiedMemory: null,
   };
@@ -119,22 +119,29 @@ describe("OverviewView Main+Rail (IRI-159)", () => {
     w.unmount();
   });
 
-  it("shows the thermal alert only when a spark node reaches the warn tier", async () => {
+  it("renders no thermal alert row; the hottest token names its sensor (IR-287)", async () => {
     vi.stubGlobal("fetch", fetchStub);
     liveMock.nodes.set(D1, { id: D1, name: "dgx1", online: true, role: "head", kind: "spark" });
     liveMock.nodes.set(D2, { id: D2, name: "dgx2", online: true, role: "worker", kind: "spark" });
-    liveMock.snapshots.set(D1, snap(72));
-    liveMock.snapshots.set(D2, snap(60));
+    liveMock.snapshots.set(D1, snap(72)); // GPU 72 over CPU 58
+    liveMock.snapshots.set(D2, snap(60, 75.8)); // CPU 75.8 is the fleet max
     const w = await mountOverview();
-    const alert = w.find(".thermal-alert");
-    expect(alert.exists()).toBe(true);
-    expect(alert.text()).toContain("72°C dgx1");
-    expect(alert.text()).not.toContain("dgx2"); // cool nodes stay out
+    expect(w.find(".thermal-alert").exists()).toBe(false); // even with a GPU at the warn tier
+    const head = w.find(".pagehead");
+    expect(head.text()).toContain("hottest dgx2 CPU 75.8°C");
+    expect(head.find(".hot").exists()).toBe(true); // ≥ 70 °C keeps the warn tint
     w.unmount();
 
-    liveMock.snapshots.set(D1, snap(60));
+    liveMock.snapshots.set(D2, snap(60, 60)); // GPU = CPU tie on the hottest node
+    liveMock.snapshots.set(D1, snap(50));
     const w2 = await mountOverview();
-    expect(w2.find(".thermal-alert").exists()).toBe(false);
+    expect(w2.find(".pagehead").text()).toContain("hottest dgx2 GPU/CPU 60°C");
+    expect(w2.find(".pagehead .hot").exists()).toBe(false);
     w2.unmount();
+
+    liveMock.snapshots.set(D2, snap(70)); // exactly the warn tier tints (>=, not >)
+    const w3 = await mountOverview();
+    expect(w3.find(".pagehead .hot").text()).toBe("dgx2 GPU 70°C");
+    w3.unmount();
   });
 });

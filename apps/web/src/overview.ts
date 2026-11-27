@@ -341,11 +341,19 @@ export interface FleetTempItem {
   online: boolean;
 }
 
+/** Which sensor produced the hottest reading — `both` when GPU and CPU tie (IR-287). */
+export type HottestSource = "gpu" | "cpu" | "both";
+
 export interface FleetTemps {
   /** Hottest first (offline nodes last). */
   items: FleetTempItem[];
   /** The hottest readable node — the page-head token; null when nothing reads. */
-  hottest: { name: string; tempC: number } | null;
+  hottest: { name: string; tempC: number; source: HottestSource } | null;
+}
+
+/** Page-head label for the hottest reading's sensor (IR-287). */
+export function hottestSourceLabel(source: HottestSource): string {
+  return source === "both" ? "GPU/CPU" : source.toUpperCase();
 }
 
 /** Fleet thermal snapshot over the given nodes (callers pass spark nodes
@@ -364,7 +372,11 @@ export function fleetTemps(
   });
   items.sort((a, b) => b.max - a.max);
   const hottest = items.find((i) => i.max >= 0);
-  return { items, hottest: hottest === undefined ? null : { name: hottest.name, tempC: hottest.max } };
+  if (hottest === undefined) return { items, hottest: null };
+  // max came from whichever axis equals it; an exact GPU = CPU tie names both.
+  const source: HottestSource =
+    hottest.gpu !== null && hottest.gpu === hottest.cpu ? "both" : hottest.gpu === hottest.max ? "gpu" : "cpu";
+  return { items, hottest: { name: hottest.name, tempC: hottest.max, source } };
 }
 
 // ─── telemetry feed ─────────────────────────────────────────────────────────
