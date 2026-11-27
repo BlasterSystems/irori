@@ -1,4 +1,4 @@
-import type { Topology, TopologyLink, TopologyNode } from "@irori/core";
+import type { LinkProbe, Topology, TopologyLink, TopologyNode } from "@irori/core";
 
 /**
  * IRI-163 (ADR-0021): Overview Network card data — topology fetch, the SVG
@@ -106,9 +106,24 @@ export function utilPct(rates: { txBps: number | null; rxBps: number | null }, s
   return Math.min(100, Math.round(((peak * 8) / (speedMbps * 1e6)) * 1000) / 10);
 }
 
-/** Latency of a link: the worst up lane's prober RTT and loss. */
-export function linkLatency(link: TopologyLink): { rttMs: number | null; lossPct: number | null; at: number | null } {
-  const probes = link.lanes.filter((l) => l.up && l.probe !== null).map((l) => l.probe!);
+/**
+ * Latency of a link: the worst up lane's prober RTT and loss. Live probes
+ * from the SSE snapshots (2 s) win over the topology's copy (30 s refresh),
+ * so a fresh result shows within one probe interval.
+ */
+export function linkLatency(
+  link: TopologyLink,
+  live?: { a?: LinkProbe[]; b?: LinkProbe[] },
+): { rttMs: number | null; lossPct: number | null; at: number | null } {
+  const probes = link.lanes
+    .filter((l) => l.up)
+    .map((l) => {
+      const fromA = l.b.ip === null ? undefined : live?.a?.find((p) => p.iface === l.a.iface && p.peerIp === l.b.ip);
+      const fromB = l.a.ip === null ? undefined : live?.b?.find((p) => p.iface === l.b.iface && p.peerIp === l.a.ip);
+      const p = fromA ?? fromB;
+      return p === undefined ? l.probe : { rttAvgMs: p.rttAvgMs, rttMaxMs: p.rttMaxMs, lossPct: p.lossPct, at: p.at };
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null);
   if (probes.length === 0) return { rttMs: null, lossPct: null, at: null };
   const rtts = probes.map((p) => p.rttAvgMs).filter((r): r is number => r !== null);
   return {

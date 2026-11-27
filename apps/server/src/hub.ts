@@ -114,6 +114,12 @@ export interface AgentHubDeps {
   /** IR-105: hub-pinned modelctl version; null = unset (agents keep env), absent = getter unavailable. */
   getModelctlPin?: () => Promise<string | null>;
   /**
+   * IRI-165 (ADR-0021): fabric prober config for a node's config-update
+   * (interval + expected peers). Absent or rejecting = the keys are omitted
+   * and the agent keeps its defaults.
+   */
+  getNetConfig?: (nodeId: string) => Promise<{ netProbeIntervalS: number; netPeers: Array<{ iface: string; ip: string }> }>;
+  /**
    * IR-189: fired once per authenticated hello, after the socket is registered
    * and the config-update is sent. The clock-cap service re-applies any stored
    * cap the node lost while it was down (SPEC §10). Fire-and-forget: a slow
@@ -214,6 +220,14 @@ export function createAgentHub(deps: AgentHubDeps): AgentHub {
     // applies again.
     const modelctlPin = deps.getModelctlPin === undefined ? undefined : await deps.getModelctlPin().catch(() => undefined);
     if (modelctlPin !== undefined) msg.modelctlPin = modelctlPin;
+    // IRI-165: prober interval + expected peers; omitted on failure (agent keeps its values).
+    if (row?.kind !== "nas") {
+      const net = deps.getNetConfig === undefined ? undefined : await deps.getNetConfig(id).catch(() => undefined);
+      if (net !== undefined) {
+        msg.netProbeIntervalS = net.netProbeIntervalS;
+        msg.netPeers = net.netPeers;
+      }
+    }
     sendMsg(msg);
   };
 

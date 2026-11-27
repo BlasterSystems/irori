@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { deriveTopology, type HardwareSnapshot, type LinkProbe, type NetworkEntry, type SetupInfo, type Topology } from "@irori/core";
+import { deriveTopology, expectedPeersOf, type HardwareSnapshot, type LinkProbe, type NetworkEntry, type SetupInfo, type Topology } from "@irori/core";
 
 /**
  * IRI-162 (ADR-0021): the hub's view of the RoCE fabric. The topology is
@@ -80,6 +80,49 @@ export function createNetworkService(deps: NetworkServiceDeps): NetworkService {
         setups: setups.map((s) => ({ id: s.id, name: s.name, kind: s.kind, headNodeId: s.headNodeId, nodes: s.nodes, status: s.status })),
       });
       return { ...topology, generatedAt: new Date(now()).toISOString() };
+    },
+  };
+}
+
+/**
+ * IRI-165: keeps each agent's expected fabric peers in step with the
+ * topology. configFor() feeds the hub's config-update; tick() (every 60 s)
+ * re-sends the config to online nodes whose peer set changed — a fresh
+ * agent's first snapshot can arrive after its hello.
+ */
+export interface NetPeersSync {
+  configFor(nodeId: string): Promise<{ netProbeIntervalS: number; netPeers: Array<{ iface: string; ip: string }> }>;
+  tick(): Promise<void>;
+  /** Forget what was sent (a settings change re-sends everything). */
+  reset(): void;
+}
+
+export function createNetPeersSync(deps: {
+  network: Pick<NetworkService, "topology">;
+  probeIntervalS: () => number;
+  online: () => ReadonlySet<string>;
+  refreshConfig: (nodeId: string) => Promise<boolean>;
+}): NetPeersSync {
+  const sent = new Map<string, string>();
+  const keyOf = (peers: Array<{ iface: string; ip: string }>): string => peers.map((p) => `${p.iface}/${p.ip}`).sort().join(",");
+  return {
+    async configFor(nodeId) {
+      const netPeers = expectedPeersOf(await deps.network.topology(), nodeId);
+      sent.set(nodeId, keyOf(netPeers));
+      return { netProbeIntervalS: deps.probeIntervalS(), netPeers };
+    },
+    async tick() {
+      const topology = await deps.network.topology();
+      for (const nodeId of deps.online()) {
+        if (!topology.nodes.some((n) => n.id === nodeId)) continue; // NAS / unknown
+        const key = keyOf(expectedPeersOf(topology, nodeId));
+        if (sent.get(nodeId) === key) continue;
+        // configFor (called by the hub's config-update) records the new key.
+        await deps.refreshConfig(nodeId).catch(() => false);
+      }
+    },
+    reset() {
+      sent.clear();
     },
   };
 }

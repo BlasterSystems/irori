@@ -1,5 +1,6 @@
 import { registerNetworkRoutes } from "./network-routes.js";
 import type { NetworkService } from "./network-service.js";
+import type { NetworkSettingsService } from "./network-settings.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -232,6 +233,10 @@ export interface AppDeps {
   getCadence?: () => CadenceService | null;
   /** IRI-162 (ADR-0021): fleet network topology; absent or null = 503. */
   getNetwork?: () => NetworkService | null;
+  /** ADR-0021: network kill switches + prober interval; absent or null = 503. */
+  getNetworkSettings?: () => NetworkSettingsService | null;
+  /** Called after a successful PUT /api/v1/settings/network. */
+  onNetworkSettingsChanged?: () => void;
   /** IRI-025: energy/token cost settings. Optional — when absent or null
    *  (degraded), the cost settings routes answer 503 like the cadence routes. */
   getCost?: () => CostService | null;
@@ -800,7 +805,12 @@ export function createApp(deps: AppDeps): Express {
     }
   });
 
-  registerNetworkRoutes(app, { getNetwork: () => deps.getNetwork?.() ?? null });
+  registerNetworkRoutes(app, {
+    getNetwork: () => deps.getNetwork?.() ?? null,
+    getSettings: () => deps.getNetworkSettings?.() ?? null,
+    onSettingsChanged: () => deps.onNetworkSettingsChanged?.(),
+    getAudit,
+  });
 
   app.get("/api/v1/nodes/:id/snapshot", async (req, res) => {
     const id = parseUuidParam(req);

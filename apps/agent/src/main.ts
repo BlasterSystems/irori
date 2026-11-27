@@ -1,7 +1,8 @@
 import os from "node:os";
 import { SCHEMA_VERSION } from "@irori/core";
 import { BenchRunner } from "./bench/runner.js";
-import { collect } from "./collector.js";
+import { collect, linkFactsCacheFor } from "./collector.js";
+import { LinkProber } from "./link-prober.js";
 import { readClocks, setSmCap, persistClockCap, scheduleNodeShutdown, shouldPersist } from "./clocks.js";
 import { mergeClocksReply, persistCpuCap, readCpuClocks, setCpuCap } from "./cpu-clocks.js";
 import { readStore } from "./catalog-read.js";
@@ -365,6 +366,10 @@ async function run(): Promise<void> {
     log,
   );
 
+  // IRI-165 (ADR-0021): fabric latency prober; reads the collector's cached
+  // link facts (refreshed every 30 s by the snapshot path) for its peers.
+  const prober = new LinkProber({ facts: () => linkFactsCacheFor("/sys", "/proc").peek(), log });
+
   const transport = new AgentTransport({
     token: config.token,
     hostname: os.hostname(),
@@ -376,8 +381,10 @@ async function run(): Promise<void> {
     collect: async () => {
       const snapshot = await collect();
       noteStoreFree(snapshot, transport?.getNasRoot() ?? null);
-      return snapshot;
+      const probes = prober.results();
+      return probes.length > 0 ? { ...snapshot, linkProbes: probes } : snapshot;
     },
+    onNetConfig: (intervalS, peers) => prober.configure(intervalS, peers),
     collectLlm: async (detectOnly) =>
       Promise.all([...probes.values()].map((probe) => probe.probe(detectOnly))),
     onLlmConfig: mergeLlmConfig,
@@ -520,6 +527,7 @@ async function run(): Promise<void> {
     onDone: (jobId) => transport.sendAgentServer({ type: "job-done", jobId, status: "failed", exitCode: null }),
   });
   transport.connect(config.serverUrl);
+  prober.start();
   usageSync.start();
   logSink.start();
 
@@ -529,6 +537,7 @@ async function run(): Promise<void> {
     stopping = true;
     durableLog(`${signal} received, stopping`);
     usageSync.stop();
+    prober.stop();
     buffer.close();
     logSink.stop();
     // IRI-039/IR-116: flush the last batching window before exit.

@@ -798,3 +798,15 @@ RoCE fabric between Sparks only; the NAS and the management LAN never appear.
     `mtu-mismatch`, `speed-mismatch`, `lane-down`, `cluster-no-path` (warn),
     `node-offline`, `push-not-on-fabric` (info).
   - `generatedAt` (ISO).
+- `GET`/`PUT /api/v1/settings/network` — `{testsEnabled, liveEnabled,
+  probeIntervalS}` (defaults `true`, `true`, `10`). `PUT` takes any subset,
+  rejects unknown keys (`400`), is audited (`settings.network.put`) and
+  re-sends every online agent's `config-update`. `503` without a DB.
+- **Prober (IRI-165).** `config-update` carries `netProbeIntervalS` (0 =
+  off) and `netPeers` (`[{iface, ip}]`, the far end of each lane, at most
+  32); both are omitted when the topology is unavailable, and the agent then
+  keeps its defaults. Agents ping each fabric peer (`ping -c 5 -i 0.2 -W 1
+  -I <iface>`, at most 16 peers) and report the latest result per peer in
+  the snapshot's `linkProbes[]` (`rtt*Ms` null and `lossPct` 100 when the
+  peer does not answer). The hub re-sends `config-update` within 60 s when a
+  node's expected peers change.

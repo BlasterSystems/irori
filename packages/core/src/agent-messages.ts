@@ -2,6 +2,7 @@ import { z } from "zod";
 import { CACHE_USER_PATTERN } from "./node.js";
 import { MODELCTL_PIN_RE } from "./modelctl-pin.js";
 import { hardwareSnapshotSchema } from "./snapshot.js";
+import { IPV4_RE, NET_IFACE_RE } from "./network-topology.js";
 import { llmMsgSchema } from "./llm.js";
 import { benchRunRequestMsgSchema, benchCancelRequestMsgSchema } from "./bench.js";
 import { jobRequestMsgSchema, jobCancelMsgSchema, catalogRequestMsgSchema, setupAckMsgSchema, setupStartMsgSchema, setupStopMsgSchema, setupStatusMsgSchema, setupLogAttachMsgSchema, setupValidateMsgSchema, clocksGetMsgSchema, clocksSetMsgSchema, nodeShutdownMsgSchema } from "./job-messages.js";
@@ -94,6 +95,19 @@ export const configUpdateMsgSchema = z.object({
    * applies again), absent = no change. Older agents strip the field.
    */
   modelctlPin: z.string().regex(MODELCTL_PIN_RE).nullish(),
+  /**
+   * IRI-165 (ADR-0021): fabric latency prober interval in seconds; 0 =
+   * disabled, absent = the agent default (10 s). Older agents strip it.
+   */
+  netProbeIntervalS: z.number().int().min(0).max(3600).optional(),
+  /**
+   * IRI-165: expected fabric peers from the hub's topology (the far end of
+   * every lane), so idle links are probed before ARP learns them.
+   */
+  netPeers: z
+    .array(z.object({ iface: z.string().regex(NET_IFACE_RE), ip: z.string().regex(IPV4_RE) }))
+    .max(32)
+    .optional(),
 });
 
 export const serverErrorMsgSchema = z.object({

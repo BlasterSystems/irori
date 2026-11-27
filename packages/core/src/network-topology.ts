@@ -137,6 +137,11 @@ export interface Topology {
   warnings: TopologyWarning[];
 }
 
+/** Linux interface names (IFNAMSIZ 16 incl. NUL); validated before any spawn. */
+export const NET_IFACE_RE = /^[A-Za-z0-9_.:-]{1,15}$/;
+/** Dotted-quad IPv4 literal (octet ranges checked by ipv4ToInt). */
+export const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
 const VIRTUAL_NAME = /^(lo|docker|veth|br-|virbr|tailscale|wg|tun|tap|cni|flannel|vxlan|zt)/;
 const FABRIC_MIN_SPEED_MBPS = 100_000;
 
@@ -477,4 +482,20 @@ function maxNullable(a: number | null | undefined, b: number | null | undefined)
   if (a == null) return b ?? null;
   if (b == null) return a;
   return Math.max(a, b);
+}
+
+/**
+ * IRI-165: the far end of every lane that touches `nodeId` — the prober's
+ * expected peers (iface = this node's netdev, ip = the peer's address).
+ */
+export function expectedPeersOf(topology: Pick<Topology, "links">, nodeId: string): Array<{ iface: string; ip: string }> {
+  const out: Array<{ iface: string; ip: string }> = [];
+  for (const link of topology.links) {
+    for (const lane of link.lanes) {
+      const [mine, theirs] = lane.a.nodeId === nodeId ? [lane.a, lane.b] : lane.b.nodeId === nodeId ? [lane.b, lane.a] : [null, null];
+      if (mine === null || theirs === null || theirs.ip === null || !IPV4_RE.test(theirs.ip) || !NET_IFACE_RE.test(mine.iface)) continue;
+      out.push({ iface: mine.iface, ip: theirs.ip });
+    }
+  }
+  return out.slice(0, 32);
 }

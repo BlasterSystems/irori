@@ -80,6 +80,11 @@ describe("network helpers", () => {
       ],
     };
     expect(linkLatency(probed)).toEqual({ rttMs: 0.05, lossPct: 20, at: 8 });
+    // A live probe from the SSE snapshot wins over the topology copy (S4).
+    const a = probed.lanes[0]!.a;
+    const b = probed.lanes[0]!.b;
+    const live = { a: [{ iface: a.iface, peerIp: b.ip!, rttMinMs: 0.01, rttAvgMs: 0.09, rttMaxMs: 0.1, mdevMs: 0, lossPct: 0, at: 99 }] };
+    expect(linkLatency(probed, live)).toEqual({ rttMs: 0.09, lossPct: 20, at: 8 });
   });
 });
 

@@ -69,7 +69,7 @@ const rows = computed<LinkRow[]>(() =>
   (topology.value?.links ?? []).map((link) => {
     // Live: the latest SSE snapshot of node a (tx = a → b).
     const rates = linkRates(link, live.snapshots.get(link.a)?.network);
-    const lat = linkLatency(link);
+    const lat = linkLatency(link, { a: live.snapshots.get(link.a)?.linkProbes, b: live.snapshots.get(link.b)?.linkProbes });
     return {
       link,
       title: `${nameOf(link.a)} ↔ ${nameOf(link.b)}`,
