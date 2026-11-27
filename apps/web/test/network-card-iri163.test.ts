@@ -101,7 +101,9 @@ describe("NetworkCard", () => {
     const text = w.text();
     expect(text).toContain("DGX-1 ↔ DGX-2");
     expect(text).toContain("DGX-3 ↔ DGX-4");
-    expect(text).toContain("↑ 10.0 Gb/s ↓ 1.0 Gb/s");
+    // IR-286: directions are named (clockwise first), never "↑/↓ relative to a".
+    expect(text).toContain("DGX-1 → DGX-2 10.0 Gb/s");
+    expect(text).toContain("DGX-2 → DGX-1 1.0 Gb/s");
     expect(text).toContain("2/2 lanes up");
     expect(w.findAll(".nettile")).toHaveLength(4);
     expect(text).not.toContain("NAS");
@@ -134,6 +136,8 @@ describe("live mode (IRI-164)", () => {
     const frame = { receivedAtMs: 1000, intervalMs: 250, ifaces: [{ iface: "p0", rxBps: 5, txBps: 6, rdmaRxBps: 7, rdmaTxBps: 8 }] };
     expect(withLiveRates(entries, frame, 1500)![0]).toMatchObject({ rxBps: 5, txBps: 6, rdmaRxBps: 7, rdmaTxBps: 8 });
     expect(withLiveRates(entries, frame, 3000)![0]).toMatchObject({ rxBps: 1, txBps: 1 });
+    // IR-286: one freshness rule — past 2.5 × the interval the snapshot rates return.
+    expect(withLiveRates(entries, frame, 1000 + 626)![0]).toMatchObject({ rxBps: 1, txBps: 1 });
     expect(withLiveRates(entries, undefined, 0)).toBe(entries);
   });
 
@@ -165,7 +169,8 @@ describe("live mode (IRI-164)", () => {
       ifaces: [{ iface: "enp1s0f0np0", rxBps: 0, txBps: 2_500_000_000, rdmaRxBps: null, rdmaTxBps: null }],
     });
     await new Promise((r) => setTimeout(r, 20));
-    expect(w.text()).toContain("↑ 20.0 Gb/s");
+    expect(w.text()).toContain("DGX-1 → DGX-2 20.0 Gb/s");
+    expect(w.text()).toContain("live · 1 s");
     w.unmount();
     await new Promise((r) => setTimeout(r, 20));
     expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))).toBe(true);

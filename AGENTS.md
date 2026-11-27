@@ -44,7 +44,7 @@ For architectural work, read `docs/adr/README.md` first. Load only matching ADRs
 
 Create an ADR when a decision is durable, cross-cutting, security-sensitive, expensive to reverse, or changes data, deployment, dependencies, or integration boundaries. Do not create ADRs for routine refactors or local implementation details.
 
-Use `docs/adr/template.md`. Accepted ADRs are historical records: supersede them with a new ADR rather than rewriting the original decision.
+Use `docs/adr/template.md`. Accepted ADRs are historical records: supersede them with a new ADR rather than rewriting the original decision. A new ADR may instead amend a narrow, named part of an Accepted ADR without editing it, under the amend rule in `docs/adr/README.md` (for example, ADR-0022 amends ADR-0018).
 
 ## Validation
 

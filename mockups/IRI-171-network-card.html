@@ -1,0 +1,519 @@
+<!doctype html>
+<!-- IRI-171 Network card refresh — mockup (2026-11-27).
+     Owner feedback on the shipped IR-277 card: wants movement (simulated traffic), the text
+     painted over the connecting lines doesn't help, and the empty band around the ring looks odd.
+     PM + UX review outcome, shown here:
+     · Two-column composition: compact ring (left) + link list (right); no centred island.
+     · Nothing is painted on an edge. Each cable = two lanes (one per direction), colour-coded
+       by ring direction (clockwise / counter-clockwise), with particles whose speed, density and
+       opacity follow a LOG scale of real throughput (1 Mb/s … 400 Gb/s per cable).
+     · Rates live in small pills INSIDE the ring (the empty centre), arrows match the geometry.
+     · Format string shown once in the header; per link only on deviation (badge on the edge).
+     · Honesty: idle → no particles; stale/no data → dashed grey, no motion; down → red, no motion.
+       prefers-reduced-motion → static lane width/opacity instead of motion.
+     · Hover/focus links diagram edge ⇄ table row; edge hover shows the detail tooltip.
+     Static, self-contained; approximate DS v1.4 dark colours. Scenario data is simulated. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IRI-171 — Network card refresh (mockup)</title>
+<style>
+  :root {
+    --bg:#0b0e13; --surface:#151a21; --surface2:#1b212a; --border:#262c37; --border2:#333b48;
+    --fg:#e8ebf0; --muted:#98a0ae; --faint:#5c6472; --accent:#ff7a45; --ccw:#6aa9ff;
+    --ok:#3fb27f; --warn:#e0a33c; --bad:#e5534b;
+    --mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "Fira Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @font-face { font-family:"DM Mono"; src:url(fonts/dm-mono-latin-400.woff2) format("woff2"); font-weight:400; }
+  @font-face { font-family:"DM Mono"; src:url(fonts/dm-mono-latin-500.woff2) format("woff2"); font-weight:500; }
+  @font-face { font-family:"Fira Sans"; src:url(fonts/fira-sans-latin-400.woff2) format("woff2"); font-weight:400; }
+  @font-face { font-family:"Fira Sans"; src:url(fonts/fira-sans-latin-600.woff2) format("woff2"); font-weight:600; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 var(--sans); }
+
+  /* ── mockup chrome ─────────────────────────────────────────── */
+  .mockhead { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+    padding:10px 20px; background:#10141a; border-bottom:1px solid var(--border); }
+  .mockhead b { font-size:13px; }
+  .seg { display:flex; gap:4px; align-items:center; }
+  .seg span { font:11px var(--mono); color:var(--faint); margin-right:2px; }
+  .seg button { font:11.5px var(--mono); color:var(--muted); background:none; border:1px solid var(--border); border-radius:6px; padding:4px 10px; cursor:pointer; }
+  .seg button[aria-pressed="true"] { color:var(--fg); border-color:var(--accent); background:rgba(255,122,69,.1); }
+  .mockhead .note { font:11px var(--mono); color:var(--faint); width:100%; }
+  .stage { margin:24px auto; padding:0 20px; transition:max-width .2s; }
+
+  /* ── card ──────────────────────────────────────────────────── */
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:8px; }
+  .card__head { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+  .titlebox { display:flex; flex-direction:column; gap:2px; }
+  .titlebox h3 { margin:0; font-size:16px; font-weight:600; display:flex; align-items:center; gap:10px; }
+  .fmt { font:12px var(--mono); color:var(--muted); }
+  .fmt b { color:var(--fg); font-weight:500; }
+  .mode { font:11px var(--mono); letter-spacing:.04em; padding:2px 8px; border-radius:999px; border:1px solid var(--border2); color:var(--muted); display:inline-flex; align-items:center; gap:6px; }
+  .mode i { width:7px; height:7px; border-radius:50%; background:var(--faint); }
+  .mode--live { color:var(--fg); border-color:rgba(63,178,127,.5); }
+  .mode--live i { background:var(--ok); box-shadow:0 0 0 0 rgba(63,178,127,.6); animation:pulse 1.6s infinite; }
+  .mode--stale { color:var(--warn); border-color:rgba(224,163,60,.5); }
+  .mode--stale i { background:var(--warn); }
+  @keyframes pulse { 70% { box-shadow:0 0 0 6px rgba(63,178,127,0); } 100% { box-shadow:0 0 0 0 rgba(63,178,127,0); } }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; }
+  .btn { font:13px var(--sans); color:var(--fg); background:transparent; border:1px solid var(--border2); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  .btn--primary { background:var(--fg); color:#111; border-color:var(--fg); font-weight:600; }
+  .btn--sm { padding:4px 10px; font-size:12.5px; }
+  select.btn { padding-right:8px; }
+
+  /* The card sizes itself from its OWN width (container queries), not viewport tiers,
+     so it never overflows wherever the shell puts it. */
+  .card { container-type:inline-size; container-name:net; }
+  .body { display:grid; padding:14px 18px 18px; gap:12px 28px; align-items:start;
+    grid-template-columns:minmax(380px, 460px) minmax(0, 1fr);
+    grid-template-areas:"diag aside" "diag list"; }
+  .body > * { min-width:0; }
+  .a-diag { grid-area:diag; position:relative; }
+  .a-aside { grid-area:aside; display:flex; flex-direction:column; gap:12px; }
+  .a-list { grid-area:list; overflow-x:auto; }   /* last-resort guard; layouts below keep it unused */
+  svg.diag { width:100%; height:auto; display:block; overflow:visible; }
+
+  /* edges */
+  .track { stroke-width:2; stroke-linecap:round; opacity:.18; }
+  .flow { fill:none; stroke-width:2.2; stroke-linecap:round; }
+  .cw { stroke:var(--accent); } .ccw { stroke:var(--ccw); }
+  .edge.is-down .track { stroke:var(--bad); opacity:.7; stroke-dasharray:5 5; }
+  .edge.is-stale .track { stroke:var(--faint); opacity:.8; stroke-dasharray:3 5; }
+  .edge.is-down .flow, .edge.is-stale .flow { display:none; }
+  .edge.is-warn .track { opacity:.35; }
+  .hit { stroke:transparent; stroke-width:22; cursor:pointer; }
+  .badge rect { fill:var(--surface); stroke-width:1; }
+  .badge text { font:500 10.5px var(--mono); }
+  .badge--warn rect { stroke:var(--warn); } .badge--warn text { fill:var(--warn); }
+  .badge--bad rect { stroke:var(--bad); } .badge--bad text { fill:var(--bad); }
+
+  /* node tiles */
+  .tile rect { fill:var(--surface2); stroke:var(--border2); }
+  .tile.in-cluster rect { stroke:rgba(255,122,69,.55); }
+  .tile .name { font:600 13.5px var(--sans); fill:var(--fg); }
+  .tile .role { font:10.5px var(--mono); letter-spacing:.08em; fill:var(--faint); text-transform:uppercase; }
+  .tile.in-cluster .role { fill:var(--accent); }
+
+  /* rate pills (inside the ring, never on a line) */
+  .pill text { font:11px var(--mono); }
+  .pill .v { fill:var(--fg); }
+  .pill .cwt { fill:var(--accent); } .pill .ccwt { fill:var(--ccw); }
+  .pill .na { fill:var(--faint); }
+
+  /* hover linking */
+  .card.hl .edge:not(.on), .card.hl .pill:not(.on) { opacity:.25; }
+  .card.hl .tile:not(.on) { opacity:.45; }
+  .edge, .pill, .tile { transition:opacity .15s; }
+  .edge.on .flow { stroke-width:3; }
+  .tile.on rect { stroke:var(--fg); }
+
+  .summary { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; }
+  .stat { border:1px solid var(--border); border-radius:6px; padding:8px 10px; background:var(--surface2); min-width:0; }
+  .stat .k { font:10.5px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+  .stat .v { font:500 15px var(--mono); color:var(--fg); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stat .s { font:11px var(--mono); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .stat--ok .v { color:var(--ok); } .stat--warn .v { color:var(--warn); } .stat--bad .v { color:var(--bad); }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 16px; font:11px var(--mono); color:var(--muted); }
+  .legend i { display:inline-block; width:18px; height:0; border-top:2px solid; vertical-align:middle; margin-right:6px; }
+  .cluster { font-size:12.5px; color:var(--muted); display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .chip { font:11px var(--mono); padding:1px 7px; border-radius:4px; border:1px solid var(--border2); color:var(--muted); }
+  .chip--acc { border-color:rgba(255,122,69,.5); color:var(--accent); }
+  .chip--warn { border-color:rgba(224,163,60,.55); color:var(--warn); }
+
+  /* tooltip */
+  .tip { position:absolute; pointer-events:none; z-index:3; background:#0f1318; border:1px solid var(--border2); border-radius:6px; padding:8px 10px;
+    font:11.5px/1.6 var(--mono); color:var(--muted); min-width:220px; display:none; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  .tip b { color:var(--fg); font:600 12.5px var(--sans); display:block; margin-bottom:2px; }
+  .tip .v { color:var(--fg); }
+
+  /* link list */
+  table { width:100%; border-collapse:collapse; }
+  th { font:10.5px var(--mono); letter-spacing:.1em; color:var(--faint); text-transform:uppercase; text-align:left; font-weight:400; padding:6px 8px 8px; border-bottom:1px solid var(--border); }
+  td { padding:10px 8px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  tr.row { cursor:pointer; }
+  tr.row:hover td, tr.row.on td, tr.row:focus-visible td { background:rgba(255,255,255,.025); }
+  tr.row:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
+  .lname { font-weight:600; white-space:nowrap; }
+  td .sub { white-space:nowrap; }
+  .sub { font:11.5px var(--mono); color:var(--faint); margin-top:2px; }
+  .sub .warn { color:var(--warn); }
+  .dir { font:12px var(--mono); white-space:nowrap; color:var(--muted); }
+  .dir .v { color:var(--fg); display:inline-block; min-width:76px; text-align:right; }
+  .dir .cwt { color:var(--accent); } .dir .ccwt { color:var(--ccw); }
+  .load { width:120px; }
+  .lbar { height:6px; background:rgba(255,255,255,.06); border-radius:3px; position:relative; overflow:hidden; }
+  .lbar div { position:absolute; inset:0 auto 0 0; background:linear-gradient(90deg, rgba(255,122,69,.55), var(--accent)); border-radius:3px; transition:width .6s; }
+  .lbar::after { content:""; position:absolute; inset:0; background:repeating-linear-gradient(90deg, transparent 0 calc(20% - 1px), rgba(11,14,19,.9) calc(20% - 1px) 20%); }
+  .lpct { font:11px var(--mono); color:var(--faint); margin-top:3px; white-space:nowrap; }
+  .c-test { text-align:right; } .c-test .sub { margin-top:4px; white-space:normal; line-height:1.35; }
+  .rtt { font:12px var(--mono); white-space:nowrap; }
+  .spark { width:110px; height:26px; display:block; }
+  .spark path { fill:none; stroke:var(--muted); stroke-width:1.2; }
+  .spark .area { fill:rgba(152,160,174,.08); stroke:none; }
+  .na { color:var(--faint); }
+  .vh { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+  /* ≤1279 px card: table moves BELOW the animation; summary sits beside the ring. */
+  @container net (max-width: 1279px) {
+    .body { grid-template-columns:minmax(340px, 500px) minmax(0, 1fr); grid-template-areas:"diag aside" "list list"; }
+    .a-aside { align-self:center; }
+    .summary { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  }
+  /* ≤ 820: drop the 24 h and Load columns (the ring already shows load). */
+  @container net (max-width: 820px) {
+    .c-24h, .c-load { display:none; }
+  }
+  /* ≤ 700: single column; summary as a 4-up strip under the ring. */
+  @container net (max-width: 700px) {
+    .body { grid-template-columns:minmax(0,1fr); grid-template-areas:"diag" "aside" "list"; }
+    svg.diag { max-width:460px; margin:0 auto; }
+    .summary { grid-template-columns:repeat(4, minmax(0,1fr)); }
+  }
+  /* ≤ 600 (phone): rows become cards, no pills, larger tile text, header stacks. */
+  @container net (max-width: 600px) {
+    .card__head { flex-direction:column; align-items:flex-start; }
+    .pill { display:none; }
+    .tile .name { font-size:20px; } .tile .role { font-size:14px; }
+    .summary { grid-template-columns:repeat(2, minmax(0,1fr)); }
+    thead { display:none; }
+    tr.row { display:grid; grid-template-columns:1fr auto; gap:4px 12px; padding:10px 0; border-bottom:1px solid var(--border); }
+    td { border:0; padding:0; }
+    .c-dir { grid-column:1 / -1; }
+    .c-test { grid-column:2; grid-row:1; }
+  }
+
+  .reduced .flow { stroke-dasharray:none !important; }
+</style>
+</head>
+<body>
+<div class="mockhead">
+  <b>IRI-171 Network card — mockup</b>
+  <div class="seg" id="sc"><span>scenario</span>
+    <button data-v="today" aria-pressed="true">Today (light)</button>
+    <button data-v="burst">TP all-reduce burst</button>
+    <button data-v="degraded">Degraded link</button>
+    <button data-v="stale">Stale data</button>
+  </div>
+  <div class="seg" id="tier"><span>card width</span>
+    <button data-v="1500">1500</button>
+    <button data-v="1150" aria-pressed="true">1150</button>
+    <button data-v="900">900</button>
+    <button data-v="640">640</button>
+    <button data-v="380">380</button>
+    <input type="range" id="wr" min="340" max="1600" step="10" value="1150" aria-label="Card width">
+    <span id="wl" style="min-width:56px">1150 px</span>
+  </div>
+  <div class="seg" id="rm"><span>motion</span>
+    <button data-v="on" aria-pressed="true">Animated</button>
+    <button data-v="reduced">Reduced motion</button>
+  </div>
+  <div class="note">Hover an edge, a tile or a row — they highlight each other. Toggle "Live" in the card. Particle speed, density and opacity are a log scale of real per-direction rate (1 Mb/s → 400 Gb/s per cable); below 1 Mb/s there are no particles. Data here is simulated.</div>
+</div>
+
+<div class="stage" id="stage" style="width:1190px; max-width:calc(100vw - 0px)">
+<section class="card" id="card" aria-label="Network">
+  <div class="card__head">
+    <div class="titlebox">
+      <h3>Network <span class="mode" id="mode"><i></i><span id="modeText">snapshot · 2 s</span></span></h3>
+      <div class="fmt">RoCE fabric · <b>4 links</b> · every link <b>RoCE v2 · 200G ×2 · MTU 9000</b></div>
+    </div>
+    <div class="controls">
+      <select class="btn btn--sm" aria-label="Test tool"><option>TCP (iperf3)</option><option>RDMA (perftest)</option></select>
+      <button class="btn btn--primary btn--sm">Test all links</button>
+      <button class="btn btn--sm" id="liveBtn" aria-pressed="false">Go live</button>
+      <select class="btn btn--sm" aria-label="Live refresh rate" id="rate"><option value="1000">1 s</option><option value="500">500 ms</option><option value="250">250 ms</option></select>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="a-diag" id="diagwrap">
+      <svg class="diag" id="diag" viewBox="0 0 520 380" role="img" aria-label="Fabric ring: DGX-1, DGX-2, DGX-3, DGX-4"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="a-aside">
+      <div class="summary" id="summary"></div>
+      <div class="legend">
+        <span><i style="border-color:var(--accent)"></i>clockwise</span>
+        <span><i style="border-color:var(--ccw)"></i>counter-clockwise</span>
+        <span><i style="border-color:var(--faint);border-top-style:dashed"></i>no data</span>
+        <span><i style="border-color:var(--bad);border-top-style:dashed"></i>down</span>
+        <span style="color:var(--faint)">motion ∝ log rate</span>
+      </div>
+      <div class="cluster"><span class="chip chip--acc">cluster</span> GLM-5.3-Flash-EXL3-TP4 · DGX-1 head + 3 workers <span style="color:var(--faint)">· RoCE path to the head</span></div>
+    </div>
+
+    <div class="a-list">
+      <table>
+        <thead><tr>
+          <th>Link</th><th class="c-dir">Traffic</th><th class="c-load" title="busier direction, log scale; % of 400 Gb/s">Load</th><th>RTT · loss</th><th class="c-24h">24 h</th><th><span class="vh">Actions</span></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+</div>
+
+<script>
+const NODES = {
+  d1: { name:"DGX-1", role:"head",   x:110, y:80 },
+  d2: { name:"DGX-2", role:"worker", x:410, y:80 },
+  d3: { name:"DGX-3", role:"worker", x:410, y:300 },
+  d4: { name:"DGX-4", role:"worker", x:110, y:300 },
+};
+const TW = 132, TH = 50;
+// Ring order clockwise: d1 → d2 → d3 → d4 → d1. a→b is the clockwise direction.
+const LINKS = [
+  { id:"l12", a:"d1", b:"d2", side:"top" },
+  { id:"l23", a:"d2", b:"d3", side:"right" },
+  { id:"l34", a:"d3", b:"d4", side:"bottom" },
+  { id:"l41", a:"d4", b:"d1", side:"left" },
+];
+const G = 1e9, M = 1e6;
+// Rates in bits/s: [clockwise, counter-clockwise]
+const SCEN = {
+  today:    { l12:[6.8*G, 68.6*M], l23:[5.6*G, 47.1*M], l34:[48.3*M, 5.6*G], l41:[70.7*M, 6.8*G], rtt:{l12:.334,l23:.400,l34:.490,l41:.261} },
+  burst:    { l12:[142*G, 3.1*G], l23:[138*G, 2.9*G], l34:[141*G, 3.4*G], l41:[139*G, 3.0*G], rtt:{l12:.41,l23:.47,l34:.52,l41:.38} },
+  degraded: { l12:[6.8*G, 68.6*M], l23:[5.6*G, 47.1*M], l34:[2.1*G, 0.4*M], l41:[70.7*M, 6.8*G], rtt:{l12:.334,l23:.400,l34:1.92,l41:.261},
+              lanes:{ l34:[1,2] }, mtu:{ l41:"MTU 9000 ≠ 1500" }, loss:{ l34:0.8 } },
+  stale:    { l12:[null,null], l23:[null,null], l34:[null,null], l41:[null,null], rtt:{l12:null,l23:null,l34:null,l41:null} },
+};
+const TESTS = { l12:"18.4 / 18.1 Gb/s · 3 h ago", l23:null, l34:null, l41:null };
+const HIST = {}; LINKS.forEach((l,i) => { let v = 3 + i; HIST[l.id] = Array.from({length:96}, (_,k) => { v = Math.max(0.05, v + (Math.random()-.5)*1.6 + (k>60&&k<70? 4:0) - (k>70&&k<74?4:0)); return v; }); });
+
+let scen = "today", live = false, liveMs = 1000, reduced = false;
+const cur = {}; // smoothed per-direction state { bps, speed }
+const svgNS = "http://www.w3.org/2000/svg";
+const el = (t, a={}, p) => { const e = document.createElementNS(svgNS, t); for (const k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; };
+
+function fmt(b) { if (b == null) return "—"; if (b >= G) return (b/G).toFixed(1)+" Gb/s"; if (b >= M) return (b/M).toFixed(1)+" Mb/s"; if (b >= 1e3) return (b/1e3).toFixed(0)+" kb/s"; return Math.round(b)+" b/s"; }
+// log intensity: 0 at 1 Mb/s, 1 at 400 Gb/s (one direction of a 2×200G cable)
+const LOGMAX = Math.log10(400e9 / 1e6);
+const intensity = b => b == null || b < M ? 0 : Math.min(1, Math.log10(b / M) / LOGMAX);
+
+// Geometry: edge endpoints between tile borders, two lanes offset ±5px.
+function lanes(l) {
+  const A = NODES[l.a], B = NODES[l.b];
+  const horiz = Math.abs(A.y - B.y) < 1;
+  const s = horiz ? Math.sign(B.x - A.x) : Math.sign(B.y - A.y);
+  const p1 = horiz ? { x: A.x + s*TW/2, y: A.y } : { x: A.x, y: A.y + s*TH/2 };
+  const p2 = horiz ? { x: B.x - s*TW/2, y: B.y } : { x: B.x, y: B.y - s*TH/2 };
+  // offset: clockwise lane on the OUTER side of the ring, ccw lane inner
+  const out = { top:{x:0,y:-1}, right:{x:1,y:0}, bottom:{x:0,y:1}, left:{x:-1,y:0} }[l.side];
+  const o = 5;
+  return {
+    cw:  [{x:p1.x+out.x*o, y:p1.y+out.y*o}, {x:p2.x+out.x*o, y:p2.y+out.y*o}],
+    ccw: [{x:p2.x-out.x*o, y:p2.y-out.y*o}, {x:p1.x-out.x*o, y:p1.y-out.y*o}],
+    mid: { x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2 }, side:l.side, out,
+  };
+}
+// Arrow glyphs per side for the cw / ccw direction (matches the geometry).
+const ARROWS = { top:["→","←"], right:["↓","↑"], bottom:["←","→"], left:["↑","↓"] };
+
+const svg = document.getElementById("diag");
+const refs = {};
+function build() {
+  svg.textContent = "";
+  for (const l of LINKS) {
+    const g = lanes(l); const grp = el("g", { class:"edge", "data-link":l.id }, svg);
+    const r = { grp, flows:{} };
+    for (const d of ["cw","ccw"]) {
+      const [p,q] = g[d];
+      el("line", { x1:p.x, y1:p.y, x2:q.x, y2:q.y, class:`track ${d}` }, grp);
+      r.flows[d] = el("line", { x1:p.x, y1:p.y, x2:q.x, y2:q.y, class:`flow ${d}` }, grp);
+      cur[l.id+d] = cur[l.id+d] || { bps:0, off:0 };
+    }
+    el("line", { x1:g.cw[0].x, y1:g.cw[0].y, x2:g.cw[1].x, y2:g.cw[1].y, class:"hit", "data-link":l.id }, grp);
+    r.badge = el("g", { class:"badge" }, grp);
+    // pill inside the ring
+    const pill = el("g", { class:"pill", "data-link":l.id }, svg);
+    const inX = -g.out.x, inY = -g.out.y;
+    const horiz = g.side === "top" || g.side === "bottom";
+    const px = g.mid.x + inX * (horiz ? 0 : 58), py = g.mid.y + inY * (horiz ? 34 : 0);
+    const anchor = horiz ? "middle" : (g.side === "right" ? "end" : "start");
+    const ax = horiz ? px : px + (g.side === "right" ? 6 : -6) * 0;
+    const t1 = el("text", { x:ax, y:py - 3, "text-anchor":anchor }, pill);
+    const t2 = el("text", { x:ax, y:py + 12, "text-anchor":anchor }, pill);
+    r.pill = { pill, t1, t2, arrows:ARROWS[g.side] };
+    refs[l.id] = r;
+  }
+  const cluster = new Set(["d1","d2","d3","d4"]);
+  for (const id in NODES) {
+    const n = NODES[id];
+    const g = el("g", { class:"tile" + (cluster.has(id) ? " in-cluster" : ""), "data-node":id, transform:`translate(${n.x-TW/2},${n.y-TH/2})` }, svg);
+    el("rect", { width:TW, height:TH, rx:6 }, g);
+    el("text", { x:TW/2, y:22, "text-anchor":"middle", class:"name" }, g).textContent = n.name;
+    el("text", { x:TW/2, y:38, "text-anchor":"middle", class:"role" }, g).textContent = n.role;
+  }
+}
+
+function setBadge(l, txt, kind) {
+  const b = refs[l.id].badge; b.textContent = "";
+  if (!txt) return;
+  const g = lanes(l); const w = txt.length * 6.6 + 12;
+  const cx = g.mid.x + g.out.x * 18, cy = g.mid.y + g.out.y * 18;
+  b.setAttribute("class", "badge badge--" + kind);
+  el("rect", { x:cx - w/2, y:cy - 9, width:w, height:18, rx:9 }, b);
+  el("text", { x:cx, y:cy + 4, "text-anchor":"middle" }, b).textContent = txt;
+}
+
+function state(l) {
+  const s = SCEN[scen];
+  const lanesUp = s.lanes?.[l.id]; const down = lanesUp && lanesUp[0] === 0;
+  return { cw:s[l.id][0], ccw:s[l.id][1], rtt:s.rtt[l.id], loss:s.loss?.[l.id] ?? 0, lanes:lanesUp ?? [2,2], mtu:s.mtu?.[l.id], stale:scen === "stale", down };
+}
+
+// Jitter so the mockup feels alive; real impl uses the actual samples.
+let sample = {};
+function resample() {
+  for (const l of LINKS) {
+    const st = state(l);
+    const j = v => v == null ? null : v * (0.82 + Math.random() * 0.36);
+    sample[l.id] = { ...st, cw:j(st.cw), ccw:j(st.ccw) };
+  }
+  render();
+}
+
+const rowsEl = document.getElementById("rows");
+function spark(id) {
+  const pts = HIST[id], max = Math.max(...pts);
+  const d = pts.map((v,i) => `${i?"L":"M"}${(i/(pts.length-1)*120).toFixed(1)},${(24 - v/max*21).toFixed(1)}`).join("");
+  return `<svg class="spark" viewBox="0 0 120 26" aria-label="24 h throughput"><path class="area" d="${d}L120,26L0,26Z"/><path d="${d}"/></svg>`;
+}
+function buildRows() {
+  rowsEl.innerHTML = LINKS.map(l => `<tr class="row" tabindex="0" data-link="${l.id}">
+    <td><div class="lname">${NODES[l.a].name} ↔ ${NODES[l.b].name}</div><div class="sub" data-sub></div></td>
+    <td class="c-dir"><div class="dir" data-cw></div><div class="dir" data-ccw></div></td>
+    <td class="c-load load"><div class="lbar"><div data-bar></div></div><div class="lpct" data-pct></div></td>
+    <td class="rtt" data-rtt></td>
+    <td class="c-24h">${spark(l.id)}</td>
+    <td class="c-test"><button class="btn btn--sm">Test</button><div class="sub" data-test></div></td></tr>`).join("");
+}
+
+function render() {
+  for (const l of LINKS) {
+    const s = sample[l.id], r = refs[l.id];
+    r.grp.classList.toggle("is-stale", s.stale);
+    r.grp.classList.toggle("is-down", !!s.down);
+    const warn = s.lanes[0] < s.lanes[1] || !!s.mtu;
+    r.grp.classList.toggle("is-warn", warn);
+    setBadge(l, s.down ? "down" : s.stale ? "" : s.lanes[0] < s.lanes[1] ? `${s.lanes[0]}/${s.lanes[1]} lanes` : s.mtu ? "MTU ≠" : "", s.down ? "bad" : "warn");
+    const [acw, accw] = r.pill.arrows;
+    r.pill.t1.innerHTML = s.stale ? `<tspan class="na">no data</tspan>` : `<tspan class="cwt">${acw}</tspan> <tspan class="v">${fmt(s.cw)}</tspan>`;
+    r.pill.t2.innerHTML = s.stale ? "" : `<tspan class="ccwt">${accw}</tspan> <tspan class="v">${fmt(s.ccw)}</tspan>`;
+    // table row
+    const row = rowsEl.querySelector(`[data-link="${l.id}"]`);
+    const A = NODES[l.a].name, B = NODES[l.b].name;
+    row.querySelector("[data-cw]").innerHTML = `<span class="cwt">●</span> ${A} → ${B} <span class="v">${fmt(s.cw)}</span>`;
+    row.querySelector("[data-ccw]").innerHTML = `<span class="ccwt">●</span> ${B} → ${A} <span class="v">${fmt(s.ccw)}</span>`;
+    const peak = Math.max(s.cw ?? 0, s.ccw ?? 0);
+    const pct = s.stale ? null : peak / 400e9 * 100;
+    row.querySelector("[data-bar]").style.width = (s.stale ? 0 : intensity(peak) * 100) + "%";
+    row.querySelector("[data-pct]").textContent = pct == null ? "—" : (pct < 0.1 ? "<0.1" : pct.toFixed(pct < 10 ? 1 : 0)) + " %";
+    row.querySelector("[data-rtt]").innerHTML = s.rtt == null ? `<span class="na">—</span>` : `${s.rtt.toFixed(3)} ms · ${s.loss} %`;
+    const tst = TESTS[l.id];
+    row.querySelector("[data-sub]").innerHTML = `${s.lanes[0]}/${s.lanes[1]} lanes${s.lanes[0] < s.lanes[1] ? ' <span class="warn">degraded</span>' : ""}${s.mtu ? `<br><span class="warn">${s.mtu}</span>` : ""}`;
+    row.querySelector("[data-test]").textContent = tst ? tst.split(" · ")[0].split(" / ")[0] + " Gb/s, " + tst.split(" · ")[1] : "untested";
+  }
+  renderSummary();
+  const mode = document.getElementById("mode"), mt = document.getElementById("modeText");
+  mode.className = "mode" + (scen === "stale" ? " mode--stale" : live ? " mode--live" : "");
+  mt.textContent = scen === "stale" ? "stale · 14 s" : live ? `live · ${liveMs >= 1000 ? "1 s" : liveMs + " ms"}` : "snapshot · 2 s";
+  document.getElementById("liveBtn").textContent = live ? "Stop live" : "Go live";
+}
+
+function renderSummary() {
+  const all = LINKS.map(l => ({ l, s: sample[l.id] }));
+  const stale = all.every(x => x.s.stale);
+  let total = 0, busiest = null;
+  for (const { l, s } of all) for (const [d, a, b] of [["cw", l.a, l.b], ["ccw", l.b, l.a]]) {
+    const v = s[d] ?? 0; total += v;
+    if (!busiest || v > busiest.v) busiest = { v, a, b };
+  }
+  const worst = all.filter(x => x.s.rtt != null).sort((x, y) => y.s.rtt - x.s.rtt)[0];
+  const issues = all.filter(x => x.s.down || x.s.lanes[0] < x.s.lanes[1] || x.s.mtu);
+  const up = all.filter(x => !x.s.down).length;
+  const stat = (k, v, sub, cls = "") => `<div class="stat ${cls}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+  document.getElementById("summary").innerHTML =
+    stat("Health", stale ? "no data" : issues.length ? `${issues.length} warning${issues.length > 1 ? "s" : ""}` : "healthy",
+         stale ? "last frame 14 s ago" : `${up}/${all.length} links up` + (issues.length ? " · " + issues.map(x => NODES[x.l.a].name.slice(4) + "↔" + NODES[x.l.b].name.slice(4)).join(", ") : ""),
+         stale ? "stat--warn" : issues.length ? "stat--warn" : "stat--ok") +
+    stat("Fabric total", stale ? "—" : fmt(total), "all links, both directions") +
+    stat("Busiest", stale ? "—" : fmt(busiest.v), stale ? "—" : `${NODES[busiest.a].name} → ${NODES[busiest.b].name}`) +
+    stat("Worst RTT", worst ? worst.s.rtt.toFixed(3) + " ms" : "—", worst ? `${NODES[worst.l.a].name} ↔ ${NODES[worst.l.b].name}` : "—", worst && worst.s.rtt > 1 ? "stat--warn" : "");
+}
+
+// Particle animation: dashoffset advanced per frame; speed eased toward target.
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  for (const l of LINKS) {
+    const s = sample[l.id]; if (!s) continue;
+    for (const d of ["cw","ccw"]) {
+      const c = cur[l.id+d], f = refs[l.id].flows[d];
+      const target = s.stale || s.down ? 0 : (s[d] ?? 0);
+      c.bps += (target - c.bps) * Math.min(1, dt * 3);      // ~600 ms ease
+      const t = intensity(c.bps);
+      if (t <= 0.001) { f.style.opacity = 0; continue; }
+      if (reduced) {                                          // static encoding
+        f.style.strokeDasharray = "none"; f.style.opacity = 0.35 + 0.65*t; f.style.strokeWidth = 1.5 + 2.5*t; continue;
+      }
+      const dash = 3, gap = 26 - 18*t;                         // denser when busier
+      const speed = 18 + 150*t;                                // px/s
+      c.off -= speed * dt;
+      f.style.strokeWidth = "";
+      f.style.strokeDasharray = `${dash} ${gap.toFixed(1)}`;
+      f.style.strokeDashoffset = c.off.toFixed(1);
+      f.style.opacity = (0.35 + 0.65*t) * (live ? 1 : 0.75);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+// Hover linking + tooltip
+const card = document.getElementById("card"), tip = document.getElementById("tip"), wrap = document.getElementById("diagwrap");
+function highlight(id) {
+  card.classList.toggle("hl", !!id);
+  document.querySelectorAll("[data-link]").forEach(e => e.classList.toggle("on", e.dataset.link === id));
+  const l = LINKS.find(x => x.id === id);
+  document.querySelectorAll(".tile").forEach(t => t.classList.toggle("on", !!l && (t.dataset.node === l.a || t.dataset.node === l.b)));
+}
+function showTip(id, ev) {
+  const l = LINKS.find(x => x.id === id), s = sample[id];
+  const A = NODES[l.a].name, B = NODES[l.b].name;
+  tip.innerHTML = `<b>${A} ↔ ${B}</b>RoCE v2 · 200G ×2 · ${s.mtu ?? "MTU 9000"}<br>${A} → ${B} <span class="v">${fmt(s.cw)}</span><br>${B} → ${A} <span class="v">${fmt(s.ccw)}</span><br>RTT <span class="v">${s.rtt == null ? "—" : s.rtt.toFixed(3) + " ms"}</span> · loss ${s.loss} %<br>lanes ${s.lanes[0]}/${s.lanes[1]} · ${TESTS[id] ? "last test " + TESTS[id] : "not tested yet"}`;
+  const b = wrap.getBoundingClientRect();
+  tip.style.display = "block";
+  tip.style.left = Math.min(b.width - 240, ev.clientX - b.left + 14) + "px";
+  tip.style.top = (ev.clientY - b.top + 14) + "px";
+}
+svg.addEventListener("mousemove", e => { const h = e.target.closest("[data-link]"); if (h) { highlight(h.dataset.link); showTip(h.dataset.link, e); } else { const t = e.target.closest(".tile"); if (!t) { highlight(null); tip.style.display = "none"; } } });
+svg.addEventListener("mouseleave", () => { highlight(null); tip.style.display = "none"; });
+svg.addEventListener("mouseover", e => { const t = e.target.closest(".tile"); if (t) { tip.style.display = "none"; card.classList.add("hl"); const id = t.dataset.node;
+  document.querySelectorAll(".edge,.pill,tr.row").forEach(x => { const l = LINKS.find(k => k.id === x.dataset.link); x.classList.toggle("on", l.a === id || l.b === id); });
+  document.querySelectorAll(".tile").forEach(x => x.classList.toggle("on", x === t)); } });
+rowsEl.addEventListener("mouseover", e => { const r = e.target.closest("tr.row"); if (r) highlight(r.dataset.link); });
+rowsEl.addEventListener("mouseleave", () => highlight(null));
+rowsEl.addEventListener("focusin", e => { const r = e.target.closest("tr.row"); if (r) highlight(r.dataset.link); });
+rowsEl.addEventListener("focusout", () => highlight(null));
+
+// Mockup controls
+let timer;
+function restartTimer() { clearInterval(timer); timer = setInterval(resample, live ? liveMs : 2000); }
+function seg(id, fn) { const s = document.getElementById(id); s.addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; s.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); fn(b.dataset.v); }); }
+seg("sc", v => { scen = v; resample(); });
+function setWidth(w) { document.getElementById("stage").style.width = (+w + 40) + "px"; document.getElementById("wr").value = w; document.getElementById("wl").textContent = w + " px"; }
+seg("tier", v => setWidth(v));
+document.getElementById("wr").addEventListener("input", e => { document.querySelectorAll("#tier button").forEach(b => b.setAttribute("aria-pressed", "false")); setWidth(e.target.value); });
+seg("rm", v => { reduced = v === "reduced"; document.body.classList.toggle("reduced", reduced); });
+document.getElementById("liveBtn").addEventListener("click", () => { live = !live; restartTimer(); render(); });
+document.getElementById("rate").addEventListener("change", e => { liveMs = +e.target.value; if (live) restartTimer(); render(); });
+if (matchMedia("(prefers-reduced-motion: reduce)").matches) { reduced = true; document.body.classList.add("reduced"); document.querySelector('#rm [data-v="reduced"]').click(); }
+
+build(); buildRows(); resample(); restartTimer(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

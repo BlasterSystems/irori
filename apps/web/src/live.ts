@@ -57,6 +57,8 @@ export interface LiveStore {
   nodes: Map<string, NodeInfo>;
   /** Latest hardware snapshot per node (id → snapshot), from SSE. */
   snapshots: Map<string, HardwareSnapshot>;
+  /** IR-286: client receive time (ms) of each node's latest snapshot — freshness without agent clock skew. */
+  snapshotAt: Map<string, number>;
   /** Latest LLM probe per node (id → entry), from SSE llm events. */
   llm: Map<string, LlmEntry>;
   /** Latest bench frame per run id, from SSE bench events (M6). */
@@ -117,6 +119,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
 
   const nodes = reactive(new Map<string, NodeInfo>());
   const snapshots = reactive(new Map<string, HardwareSnapshot>());
+  const snapshotAt = reactive(new Map<string, number>());
   const llm = reactive(new Map<string, LlmEntry>());
   const benches = reactive(new Map<string, BenchLive>());
   const netRates = reactive(new Map<string, NetRatesLive>());
@@ -178,6 +181,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
           node.agentVersion = event.snapshot.agentVersion;
         }
         snapshots.set(event.nodeId, event.snapshot);
+        snapshotAt.set(event.nodeId, now());
         break;
       }
       case "node-online":
@@ -445,6 +449,7 @@ export function createLiveStore(options: LiveStoreOptions = {}): LiveStore {
   return {
     nodes,
     snapshots,
+    snapshotAt,
     llm,
     benches,
     netRates,

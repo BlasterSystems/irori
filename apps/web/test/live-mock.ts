@@ -10,6 +10,7 @@ interface MockNode { id: string; name: string; online: boolean; role?: string; k
 export const liveMock: {
   nodes: Map<string, MockNode>;
   snapshots: Map<string, unknown>;
+  snapshotAt: Map<string, number>;
   jobs: Map<string, unknown>;
   llm: Map<string, unknown>;
   netRates: Map<string, unknown>;
@@ -30,6 +31,7 @@ export const liveMock: {
 } = {
   nodes: reactive(new Map()),
   snapshots: reactive(new Map()),
+  snapshotAt: reactive(new Map()),
   jobs: reactive(new Map()),
   llm: reactive(new Map()),
   netRates: reactive(new Map()),
