@@ -189,10 +189,26 @@ never drawn or measured.
   into links per node pair; a subnet shared by more than two nodes is a
   switch. Warnings: MTU and speed mismatch, down lane, cluster worker without
   a fabric path to its head, offline node, registry host not on the fabric.
-- **Overview Network card.** Diagram in cable order, per-link format and live
-  throughput (the larger of RDMA and kernel rates), latency from the agent
-  prober (5 pings per peer every 10 s), last test, warnings. Small tier: the
-  link table only.
+- **Overview Network card.** Ring diagram in cable order, live throughput
+  (the larger of RDMA and kernel rates), latency from the agent prober
+  (5 pings per peer every 10 s), last test and warnings (IR-286):
+  - Each cable is two lanes, coloured by ring direction (clockwise
+    `--flow-cw`, counter-clockwise `--flow-ccw`, ADR-0022).
+  - Particles move at a log scale of each direction's rate, from 1 Mb/s to
+    400 Gb/s. Idle, stale (more than 2.5 × the hub's snapshot cadence or the
+    Live interval), offline and down links never move.
+  - Under reduced motion, the rate is shown by static lane width.
+    Animation pauses when the tab is hidden or the card is off-screen.
+  - No text sits on an edge. Rates are in pills inside the ring, and
+    deviations (lane loss, MTU ≠, down) are badges. The shared format appears
+    once in the subtitle.
+  - A summary shows Health, Fabric total, Busiest direction and Worst RTT.
+  - The link table names both directions. Its load bar uses the same log
+    scale.
+  - The layout follows the card's own width (container queries), never
+    overflowing: side by side from 1280 px; table below the ring under 1280;
+    the 24 h and Load columns dropped under 820; single column under 700;
+    row cards under 600.
 - **Live mode.** Opt-in 1 s / 500 ms / 250 ms rates over a shared 60 s lease
   (10-minute cap), SSE only.
 - **Link tests** are on demand only: `net-tool-ensure` (apt `iperf3`, no

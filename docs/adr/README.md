@@ -8,6 +8,12 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 
 Accepted records are historical. Create a new ADR to replace a decision, mark the old record `Superseded`, and link both records.
 
+A new ADR may instead **amend** a narrow, named part of an Accepted record without replacing the whole decision:
+- The new ADR states `Amends: ADR-NNNN` and the part it changes.
+- Its index row records the amendment in the Supersedes column.
+- The amended ADR stays `Accepted` and is not edited.
+- To read the current rule, read both records.
+
 ## Index
 
 | ADR | Status | Scope | Tags | Summary | Supersedes |
@@ -33,6 +39,7 @@ Accepted records are historical. Create a new ADR to replace a decision, mark th
 | [ADR-0019](0019-self-reported-agent-bundle-generation.md) | Accepted | Agent identity/versioning, node registry schema, node page | agent, deployment, schema, observability | The agent hello self-reports the sha256 of its own bundle; the hub diffs it against the artifact it serves and every node payload carries `bundle: current | behind | unknown` (unknown never a verdict). Accepted 2026-11-16 (owner, IR-260 round-15 gate) | None |
 | [ADR-0020](0020-gguf-draft-companions-and-doc-hints.md) | Accepted | Model supply chain, download queue schema, hub outbound fetches | supply-chain, gguf, modelctl, schema, security, integration | Speculative drafts (MTP/DSpark/DFlash/DFlash2) are `mtp` companions by prefix/dir; Q8_0 multi-draft default; optional `draft_spec_type` end to end (migration 0029); README + allow-listed doc-host run hints preselect only files in the repo listing. Accepted 2026-11-21 (owner, IR-264) | None |
 | [ADR-0021](0021-fleet-network-topology-and-link-tests.md) | Accepted | Snapshot network contract, agent WS live stream, listener/install job kinds, topology derivation, link test and history tables, push addressing | network, rdma, roce, telemetry, agent, jobs, security, schema, transfers | Agents report link facts, RDMA rates and ping probes; the hub derives the RoCE topology (never stored); leased `net-live`/`net-rates` rides SSE only; iperf3/perftest tests run as bounded fabric-bound jobs with guards; pushes use direct fabric addresses; per-link minute history 7 d. Accepted 2026-11-27 (owner, IR-273) | None |
+| [ADR-0022](0022-directional-flow-colour-token.md) | Accepted | UI colour tokens, data visualisation, Network card | frontend, design-system, tokens, dataviz, network | Amends ADR-0018 for one new colour: `--flow-cw` (= thread) and `--flow-ccw` (blue, light + dark) encode traffic direction only (ring clockwise / counter-clockwise lanes); never status, actions or decoration; direction also carried by lane position and arrows. Accepted 2026-11-27 (owner, IR-286) | None (amends ADR-0018) |
 
 ## When an ADR is required
 

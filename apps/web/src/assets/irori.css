@@ -31,6 +31,11 @@
   --border-1: var(--rule); --border-2: var(--rule-2);
   --action-bg: var(--ink); --action-bg-hover: var(--ink-2); --action-fg: var(--paper);
   --accent: var(--thread); --accent-text: var(--thread-ink); --accent-wash: var(--thread-wash);
+  /* ADR-0022 (amends ADR-0018 for these two only): traffic DIRECTION on the
+     Network card — ring clockwise / counter-clockwise lanes. Never status,
+     actions, links or decoration. */
+  --flow-cw: var(--thread);
+  --flow-ccw: oklch(0.52 0.14 255);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -42,6 +47,7 @@
     --thread-wash: oklch(0.68 0.17 35 / 0.16);
     --grid: oklch(0.95 0.004 250 / 0.05);
     --band: oklch(0.95 0.004 250 / 0.10);
+    --flow-ccw: oklch(0.72 0.12 250); /* ADR-0022 */
   }
 }
 :root[data-theme="dark"] {
@@ -53,6 +59,7 @@
   --thread-wash: oklch(0.68 0.17 35 / 0.16);
   --grid: oklch(0.95 0.004 250 / 0.05);
   --band: oklch(0.95 0.004 250 / 0.10);
+  --flow-ccw: oklch(0.72 0.12 250); /* ADR-0022 */
 }
 :root[data-theme="light"] { color-scheme: light; }
 
