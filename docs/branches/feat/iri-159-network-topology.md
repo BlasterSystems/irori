@@ -13,6 +13,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - **Overview Network card.** A diagram of the Sparks in cable order with each link's format (RoCE v2, speed × lanes, MTU) and live ↑/↓ throughput, a link table with utilisation bars, switched subnets, running clusters with their fabric-path check, and the warnings. On the small tier the table is the whole view. The NAS and the LAN never appear.
 - **Live latency per link.** Agents ping every fabric peer (their ARP neighbours plus the far end of each lane, which the hub pushes) every 10 s and report RTT and loss in the snapshot; the card shows the worst up lane per link. The interval is a hub setting (`/api/v1/settings/network`, 0 turns it off), next to the kill switches for tests and live mode.
 - **Opt-in live mode.** A Live toggle on the card streams fabric rates at 1 s, 500 ms or 250 ms. The browser holds a 60 s lease it renews while visible; every viewer shares one stream at the fastest requested rate. Rates travel agent → hub → browser over the existing WebSocket and SSE and are never stored.
+- **Link tests on demand.** Each link has a Test button and the card has Test all fabric links. A test installs iperf3 where missing, opens a one-shot listener on the far end's fabric address, measures both directions (10 s, 4 streams) and a 100-ping burst, and keeps the result with its age (labelled TCP). The newest 50 results per link are kept.
 
 ## Business rules and constraints
 
@@ -20,6 +21,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - A direct cable is never claimed as fact: point-to-point lanes are links; a subnet shared by three or more nodes is drawn as a switch.
 - The prober only pings out of fabric interfaces, at most 16 peers, with validated interface names and IPv4 literals and no shell.
 - Live mode: 250 ms floor, a lease ends after 10 minutes (the card says so and stops), agents stop on their own when the hub stops renewing or the socket drops, and `liveEnabled` turns it off for everyone.
+- Link tests: one at a time fleet-wide; refused while either end serves a running setup or runs a transfer, unless the owner presses Run anyway; the listener binds only a verified fabric address and the client only targets that subnet; `testsEnabled` switches tests off.
 
 ## Edge cases handled
 
@@ -27,10 +29,12 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - A fleet with no fabric links shows an empty-state line; an unavailable or malformed topology shows a one-line error instead of breaking the Overview; offline nodes keep their tile, drawn dashed, without links.
 - An unreachable peer, or a ping that cannot start, reports 100 % loss instead of failing; peers that vanish from the topology drop out of the results; a config-update never carries an invalid peer, so an old or strict agent never rejects the whole frame.
 - A hidden tab lets its lease lapse and silently takes a new one when it comes back; an old agent ignores `net-live` and the card falls back to snapshot rates; a frame that stops arriving goes stale on screen after three intervals.
+- A listener that never comes up fails the test and frees both job slots; one failed direction is reported next to the working one; a hub restart mid-test settles the row as failed at boot; a node deleted later takes its test rows with it.
 
 ## Integration impact
 
 - Snapshot contract: new optional, defaulted fields (ADR-0006). Old hubs strip them; new hubs fill defaults for old agents.
+- Database: migration 0030 adds `network_tests` (additive; rollback = drop the table). New job kinds `net-tool-ensure`, `net-test-server`, `net-test-client` need the updated agent bundle; old agents fail them with a clear 'unknown kind' error.
 
 ## Out of scope and follow-ups
 
@@ -42,6 +46,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — S5 (IR-279 / IRI-166): on-demand iperf3 link tests with guards and history.
 - 2026-11-27 — S3b (IR-283 / IRI-164): leased live RoCE rates over SSE.
 - 2026-11-27 — S4 (IR-278 / IRI-165): fabric latency prober, network settings.
 - 2026-11-27 — S3 (IR-277 / IRI-163): Overview Network card with live throughput.

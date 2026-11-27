@@ -184,6 +184,13 @@
       "when": 1795246361383,
       "tag": "0029_download_draft_spec_type",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795774800000,
+      "tag": "0030_network_tests",
+      "breakpoints": true
     }
   ]
 }

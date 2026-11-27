@@ -4,7 +4,8 @@ import { audit } from "./audit-routes.js";
 import type { NetworkService } from "./network-service.js";
 import { networkSettingsPatchSchema, type NetworkSettingsService } from "./network-settings.js";
 import type { NetLiveService } from "./network-live.js";
-import { netLiveLeaseRequestSchema } from "@irori/core";
+import { netLiveLeaseRequestSchema, networkTestAllRequestSchema, networkTestRequestSchema } from "@irori/core";
+import type { NetworkTestsService } from "./network-tests.js";
 
 /**
  * IRI-162+ (ADR-0021): the network routes. Degraded hubs (no DB) answer 503
@@ -17,6 +18,7 @@ export interface NetworkRouteDeps {
   onSettingsChanged: () => void;
   getAudit: () => AuditService | null;
   getLive: () => NetLiveService | null;
+  getTests: () => NetworkTestsService | null;
 }
 
 export function registerNetworkRoutes(app: Express, deps: NetworkRouteDeps): void {
@@ -87,6 +89,52 @@ export function registerNetworkRoutes(app: Express, deps: NetworkRouteDeps): voi
       const id = typeof req.params.id === "string" ? req.params.id : "";
       live.release(id);
       res.status(204).end();
+    },
+  );
+
+  // IRI-166: on-demand link tests. Starting one is audited; the run's
+  // progress and result are journaled through the `network-test` SSE frames.
+  const requireTests = (res: Response): NetworkTestsService | null => {
+    const svc = deps.getTests();
+    if (svc === null) res.status(503).json({ error: "database unavailable" });
+    return svc;
+  };
+
+  app.get("/api/v1/network/tests", async (req, res) => {
+    const svc = requireTests(res);
+    if (svc === null) return;
+    const limit = Number.parseInt(String(req.query.limit ?? "50"), 10);
+    res.json({ tests: await svc.list(Number.isFinite(limit) ? limit : 50), running: svc.busy() });
+  });
+
+  app.post(
+    "/api/v1/network/tests",
+    audit({ action: "network.test.start", targetType: "network", targetId: (req) => {
+      const body: unknown = req.body;
+      return body && typeof body === "object" && "aNodeId" in body && "bNodeId" in body ? `${String(body.aNodeId)}→${String(body.bNodeId)}` : null;
+    } }, deps.getAudit),
+    async (req, res) => {
+      const svc = requireTests(res);
+      if (svc === null) return;
+      const body = networkTestRequestSchema.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ error: "invalid link test request", issues: body.error.issues });
+      const out = await svc.start(body.data);
+      if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.reasons === undefined ? {} : { reasons: out.reasons }) });
+      res.status(202).json(out.test);
+    },
+  );
+
+  app.post(
+    "/api/v1/network/tests/all",
+    audit({ action: "network.test.all", targetType: "network", targetId: () => "all" }, deps.getAudit),
+    async (req, res) => {
+      const svc = requireTests(res);
+      if (svc === null) return;
+      const body = networkTestAllRequestSchema.safeParse(req.body ?? {});
+      if (!body.success) return res.status(400).json({ error: "invalid link test request", issues: body.error.issues });
+      const out = await svc.startAll(body.data);
+      if (!out.ok) return res.status(out.status).json({ error: out.error, ...(out.reasons === undefined ? {} : { reasons: out.reasons }) });
+      res.status(202).json({ links: out.links });
     },
   );
 

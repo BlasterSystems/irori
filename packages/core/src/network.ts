@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IPV4_RE } from "./network-topology.js";
 
 /**
  * ADR-0021 network contracts shared by hub, agent and web: the settings row
@@ -88,3 +89,118 @@ export interface NetLiveLease {
   /** The lease's hard end (NET_LIVE_MAX_LEASE_MS after it was taken). */
   endsAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// IRI-166 (ADR-0021): on-demand link tests (iperf3; RDMA perftest in S7).
+// ---------------------------------------------------------------------------
+
+const ipv4 = z.string().regex(IPV4_RE);
+
+export const NET_TEST_TOOLS = ["iperf3"] as const;
+export const netTestToolSchema = z.enum(NET_TEST_TOOLS);
+export type NetTestTool = z.infer<typeof netTestToolSchema>;
+
+/** iperf3 listener ports a test may use. */
+export const NET_TEST_PORT_MIN = 5201;
+export const NET_TEST_PORT_MAX = 5210;
+export const NET_TEST_MAX_DURATION_S = 30;
+
+/** Printed by net-test-server once its listener is bound. */
+export const NET_LISTENING_MARKER = "IRORI_NET_LISTENING";
+/** Prefix of net-test-client's single JSON result line. */
+export const NET_RESULT_MARKER = "IRORI_NET_RESULT=";
+
+/** One-shot listener bound to a verified local fabric address. */
+export const netTestServerParamsSchema = z
+  .object({
+    tool: netTestToolSchema.default("iperf3"),
+    bindIp: ipv4,
+    port: z.number().int().min(NET_TEST_PORT_MIN).max(NET_TEST_PORT_MAX),
+    /** One-shot runs to serve (forward + reverse = 2). */
+    runs: z.number().int().min(1).max(4),
+    /** Hard end of the listener, whatever happens. */
+    timeoutS: z.number().int().min(10).max(120),
+  })
+  .strict();
+export type NetTestServerParams = z.infer<typeof netTestServerParamsSchema>;
+
+export const netTestClientParamsSchema = z
+  .object({
+    tool: netTestToolSchema.default("iperf3"),
+    bindIp: ipv4,
+    targetIp: ipv4,
+    port: z.number().int().min(NET_TEST_PORT_MIN).max(NET_TEST_PORT_MAX),
+    durationS: z.number().int().min(1).max(NET_TEST_MAX_DURATION_S),
+    streams: z.number().int().min(1).max(8),
+    /** Also measure B → A (iperf3 -R). */
+    reverse: z.boolean(),
+    /** Latency burst size after the throughput runs (0 = skip). */
+    pings: z.number().int().min(0).max(200),
+  })
+  .strict();
+export type NetTestClientParams = z.infer<typeof netTestClientParamsSchema>;
+
+export const netTestResultSchema = z.object({
+  tool: netTestToolSchema,
+  /** A → B (the client's send direction), Gb/s as the receiver saw it. */
+  forwardGbps: z.number().nonnegative().nullable(),
+  /** B → A, null when reverse was not run or failed. */
+  reverseGbps: z.number().nonnegative().nullable(),
+  retransmits: z.number().int().nonnegative().nullable(),
+  rttP50Ms: z.number().nonnegative().nullable(),
+  rttP99Ms: z.number().nonnegative().nullable(),
+  lossPct: z.number().min(0).max(100).nullable(),
+  durationS: z.number().int().positive(),
+  streams: z.number().int().positive(),
+  /** Per-direction failures, e.g. "reverse: unable to connect". */
+  errors: z.array(z.string().max(300)).max(4).default([]),
+});
+export type NetTestResult = z.infer<typeof netTestResultSchema>;
+
+export const NETWORK_TEST_STATUSES = ["running", "succeeded", "failed"] as const;
+export type NetworkTestStatus = (typeof NETWORK_TEST_STATUSES)[number];
+
+/** A persisted test as the API serves it (network_tests row). */
+export interface NetworkTestView {
+  id: string;
+  /** `${a}|${b}` with a < b, as in the topology. */
+  linkId: string;
+  /** Client side (A → B is "forward"). */
+  aNodeId: string;
+  bNodeId: string;
+  aIface: string;
+  bIface: string;
+  aIp: string;
+  bIp: string;
+  tool: NetTestTool;
+  status: NetworkTestStatus;
+  /** Current step while running: ensure, listen, measure. */
+  stage: string | null;
+  override: boolean;
+  forwardGbps: number | null;
+  reverseGbps: number | null;
+  retransmits: number | null;
+  rttP50Ms: number | null;
+  rttP99Ms: number | null;
+  lossPct: number | null;
+  durationS: number;
+  streams: number;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export const networkTestRequestSchema = z
+  .object({
+    aNodeId: z.string().uuid(),
+    bNodeId: z.string().uuid(),
+    /** Run even while an endpoint serves a setup or runs a transfer. */
+    override: z.boolean().default(false),
+    tool: netTestToolSchema.default("iperf3"),
+  })
+  .strict();
+export type NetworkTestRequest = z.infer<typeof networkTestRequestSchema>;
+
+export const networkTestAllRequestSchema = z
+  .object({ override: z.boolean().default(false), tool: netTestToolSchema.default("iperf3") })
+  .strict();

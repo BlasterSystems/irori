@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { linkRates, type TopologyLink } from "@irori/core";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { linkRates, type NetworkTestView, type TopologyLink } from "@irori/core";
 import { live } from "../live";
 import Tip from "./Tip.vue";
 import {
+  fetchLinkTests,
+  latestTestByLink,
+  LinkTestError,
+  startAllLinkTests,
+  startLinkTest,
+  testSummary,
   acquireLiveLease,
   LIVE_RENEW_MS,
   LiveLeaseError,
@@ -45,12 +51,64 @@ async function refresh(): Promise<void> {
 
 onMounted(() => {
   void refresh();
+  void refreshTests();
   timer = setInterval(() => void refresh(), TOPOLOGY_REFRESH_MS);
 });
 onUnmounted(() => {
   clearInterval(timer);
   void stopLive();
 });
+
+// ─── IRI-166: on-demand link tests ──────────────────────────────────────────
+const tests = ref<NetworkTestView[]>([]);
+const testsRunning = ref(false);
+const testMsg = ref<string | null>(null);
+/** A refused request waiting for "Run anyway": the target and the reasons. */
+const pendingGuard = ref<{ link: TopologyLink | null; reasons: string[]; error: string } | null>(null);
+
+async function refreshTests(): Promise<void> {
+  try {
+    const out = await fetchLinkTests();
+    tests.value = out.tests;
+    testsRunning.value = out.running;
+  } catch {
+    /* tests unavailable (degraded hub) — the column shows "never tested" */
+  }
+}
+
+// Every lifecycle frame (start, stage, result) re-reads the rows.
+watch(
+  () => live.netTestPulse?.value,
+  (pulse) => {
+    void refreshTests();
+    // The terminal frame is sent while the hub still counts the run as busy:
+    // read once more so the buttons re-enable.
+    if (pulse != null && (pulse as { status?: string }).status !== "running") setTimeout(() => void refreshTests(), 1500);
+  },
+);
+
+const latestTests = computed(() => latestTestByLink(tests.value));
+
+async function runTest(link: TopologyLink | null, override = false): Promise<void> {
+  testMsg.value = null;
+  pendingGuard.value = null;
+  try {
+    if (link === null) {
+      await startAllLinkTests(override);
+      testMsg.value = "Testing every fabric link in turn, about 30 s each.";
+    } else {
+      await startLinkTest(link.a, link.b, override);
+    }
+    testsRunning.value = true;
+    await refreshTests();
+  } catch (err) {
+    if (err instanceof LinkTestError && err.status === 409 && err.reasons.length > 0) {
+      pendingGuard.value = { link, reasons: err.reasons, error: err.message };
+      return;
+    }
+    testMsg.value = err instanceof Error ? err.message : String(err);
+  }
+}
 
 // ─── IRI-164: opt-in live rates (shared 60 s lease, renewed while visible) ──
 const LIVE_RATES = [
@@ -183,6 +241,7 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
         <Tip text="RoCE fabric between Sparks only — the NAS and the management LAN are never shown · links from neighbour MACs or shared point-to-point subnets · throughput is live from the 2 s snapshots (the larger of RDMA and kernel counters)" />
       </div>
       <div class="row netcontrols">
+        <button type="button" class="btn btn--primary btn--sm" :disabled="testsRunning || (topology?.links.length ?? 0) === 0" @click="runTest(null)">Test all fabric links</button>
         <button type="button" class="btn btn--secondary btn--sm" :aria-pressed="liveOn" @click="toggleLive">
           <span class="dot" :class="liveOn ? 'dot--run' : ''" aria-hidden="true"></span>{{ liveOn ? "Live" : "Live off" }}
         </button>
@@ -193,6 +252,18 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
       </div>
     </div>
     <p v-if="liveMsg !== null" class="muted netlivemsg" role="status">{{ liveMsg }}</p>
+    <p v-if="testMsg !== null" class="muted netlivemsg" role="status">{{ testMsg }}</p>
+    <div v-if="pendingGuard !== null" class="netguard" role="alertdialog" aria-label="Endpoint busy">
+      <span class="chip chip--warn">endpoint busy</span>
+      <p>{{ pendingGuard.error }}.</p>
+      <ul>
+        <li v-for="r in pendingGuard.reasons" :key="r">{{ r }}</li>
+      </ul>
+      <div class="row">
+        <button type="button" class="btn btn--ghost btn--sm" @click="pendingGuard = null">Cancel</button>
+        <button type="button" class="btn btn--secondary btn--sm" @click="runTest(pendingGuard.link, true)">Run anyway</button>
+      </div>
+    </div>
     <div class="card__body">
       <p v-if="loadError !== null && topology === null" class="muted">Topology unavailable: {{ loadError }}</p>
       <p v-else-if="topology === null" class="muted">Loading the fabric…</p>
@@ -241,6 +312,8 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
               <th>Format</th>
               <th>Live</th>
               <th>Latency</th>
+              <th>Last test</th>
+              <th><span class="visually-hidden">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -257,6 +330,10 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
                 </div>
               </td>
               <td class="mono">{{ fmtRtt(r.rttMs) }}<span v-if="r.lossPct !== null"> · {{ r.lossPct }} %</span></td>
+              <td class="mono" :title="latestTests.get(r.link.id)?.error ?? undefined">{{ testSummary(latestTests.get(r.link.id), Date.now()) }}</td>
+              <td>
+                <button type="button" class="btn btn--secondary btn--sm" :disabled="testsRunning || r.link.lanesUp === 0" @click="runTest(r.link)">Test</button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -287,7 +364,10 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
 </template>
 
 <style scoped>
-.netcontrols { gap: 8px; }
+.netcontrols { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.netguard { margin: 0 18px 12px; padding: 12px 14px; border: 1px solid var(--accent); background: var(--accent-wash); border-radius: var(--radius-panel); font-size: var(--fs-small); display: flex; flex-direction: column; gap: 8px; }
+.netguard p, .netguard ul { margin: 0; }
+.netguard ul { padding-left: 18px; }
 .netrate { width: auto; min-height: var(--control-sm); }
 .netlivemsg { margin: 0; padding: 0 18px; font-size: var(--fs-small); }
 .netdiagram { width: 100%; height: auto; max-height: 360px; display: block; margin-bottom: var(--space-3); }

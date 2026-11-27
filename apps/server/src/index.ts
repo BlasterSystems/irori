@@ -55,6 +55,7 @@ import { installProcessGuards } from "./process-guards.js";
 import { createNetPeersSync, createNetworkService, type NetPeersSync, type NetworkService } from "./network-service.js";
 import { createNetworkSettingsService, type NetworkSettingsService } from "./network-settings.js";
 import { createNetLive, type NetLiveService } from "./network-live.js";
+import { createNetworkTests, createNetworkTestStore, type NetworkTestsService } from "./network-tests.js";
 import { isFabricEntry } from "@irori/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -135,6 +136,8 @@ const state: {
   netPeers: NetPeersSync | null;
   /** IRI-164: leased live fabric rates (SSE only). */
   netLive: NetLiveService | null;
+  /** IRI-166: on-demand link tests. */
+  networkTests: NetworkTestsService | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -168,6 +171,7 @@ const state: {
   networkSettings: null,
   netPeers: null,
   netLive: null,
+  networkTests: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -225,6 +229,7 @@ const app = createApp({
   getNetwork: () => state.network,
   getNetworkSettings: () => state.networkSettings,
   getNetLive: () => state.netLive,
+  getNetworkTests: () => state.networkTests,
   onNetworkSettingsChanged: () => {
     if (state.networkSettings?.cached().liveEnabled === false) state.netLive?.stopAll();
     // A new probe interval reaches every online agent with its config-update.
@@ -588,6 +593,19 @@ async function boot(): Promise<void> {
   });
   const netLiveTimer = setInterval(() => state.netLive?.tick(), 5_000);
   netLiveTimer.unref();
+  // IRI-166: link tests. A row left running by a hub restart has lost its
+  // orchestrator: settle it failed (its jobs are reaped by the job layer).
+  const networkTestStore = createNetworkTestStore(dbHandle.db);
+  void networkTestStore.failRunning("the hub restarted during the test").catch(() => 0);
+  state.networkTests = createNetworkTests({
+    store: networkTestStore,
+    jobs: jobsService,
+    topology: () => state.network!.topology(),
+    listSetups: () => setupsService.list(),
+    enabled: () => state.networkSettings?.cached().testsEnabled ?? true,
+    sse,
+    log: (message) => log.info(message),
+  });
 
   // Staged transfers that were running at restart resume from the first
   // pending stage; the health watcher polls driver truth + probes every 5 s.

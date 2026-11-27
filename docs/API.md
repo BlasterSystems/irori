@@ -828,3 +828,22 @@ RoCE fabric between Sparks only; the NAS and the management LAN never appear.
   disconnect. The hub forwards them as SSE `net-rates {serverTimeMs, nodeId,
   intervalMs, ifaces}`, which is excluded from the event feed and the journal
   and never reaches rings, rollups or the database.
+- **Link tests (IRI-166).** `POST /api/v1/network/tests` `{aNodeId, bNodeId,
+  override?, tool?}` → `202` with the `running` row; A is the client
+  (forward = A → B). The run continues in the background: `net-tool-ensure`
+  on both nodes, `net-test-server` on B, `net-test-client` on A, then the
+  listener job is canceled. `409` while another test runs, while tests are
+  disabled, or — without `override: true` — while an endpoint serves a
+  running setup or runs a transfer job (`reasons[]` names each);
+  `404` without a fabric link between the nodes. `POST
+  /api/v1/network/tests/all` `{override?}` → `202 {links}` tests every link
+  in turn under the same guards. `GET /api/v1/network/tests?limit=` →
+  `{tests, running}`, newest first (newest 50 kept per link). Rows:
+  `{id, linkId, aNodeId, bNodeId, aIface, bIface, aIp, bIp, tool, status:
+  running|succeeded|failed, stage: ensure|listen|measure|null, override,
+  forwardGbps, reverseGbps, retransmits, rttP50Ms, rttP99Ms, lossPct,
+  durationS, streams, error, startedAt, finishedAt}`. Starting is audited
+  (`network.test.start`, `network.test.all`); every stage and result is an
+  SSE `network-test {testId, linkId, status, stage, summary}` frame, which
+  the event journal keeps. A row a hub restart left running is settled
+  `failed` at boot.

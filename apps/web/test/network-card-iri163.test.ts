@@ -172,3 +172,49 @@ describe("live mode (IRI-164)", () => {
     liveMock.netRates.clear();
   });
 });
+
+describe("link tests (IRI-166)", () => {
+  it("summarises a test row, labelled TCP", async () => {
+    const { testSummary } = await import("../src/network");
+    const now = Date.parse("2026-11-27T12:00:00Z");
+    expect(testSummary(undefined, now)).toBe("never tested");
+    const base = { tool: "iperf3", status: "succeeded", forwardGbps: 94.2, reverseGbps: 93.7, rttP50Ms: 0.031, finishedAt: "2026-11-27T09:00:00Z", startedAt: "2026-11-27T08:59:30Z", stage: null } as never;
+    expect(testSummary(base, now)).toBe("94.2 / 93.7 Gb/s TCP · p50 0.031 ms · 3 h ago");
+    expect(testSummary({ ...(base as object), status: "running", stage: "measure" } as never, now)).toBe("running · measure");
+  });
+
+  it("shows the guard reasons on 409 and re-sends with override on Run anyway", async () => {
+    const t = realTopology();
+    const posts: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/v1/network/tests" && init?.method === "POST") {
+          const body = JSON.parse(String(init.body));
+          posts.push(body);
+          if (body.override !== true) {
+            return new Response(JSON.stringify({ error: "an endpoint is busy; a test saturates the link for about 20 s", reasons: ["DGX-2 serves GLM-5.3-Flash-EXL3-TP4 (cluster worker)"] }), { status: 409 });
+          }
+          return new Response(JSON.stringify({ id: "t1", status: "running" }), { status: 202 });
+        }
+        if (url.startsWith("/api/v1/network/tests")) return new Response(JSON.stringify({ tests: [], running: false }), { status: 200 });
+        return new Response(JSON.stringify({ ...t, generatedAt: "x" }), { status: 200 });
+      }),
+    );
+    const { default: NetworkCard } = await import("../src/components/NetworkCard.vue");
+    const w = mount(NetworkCard as never);
+    await new Promise((r) => setTimeout(r, 20));
+    const testButtons = w.findAll("button").filter((b) => b.text() === "Test");
+    expect(testButtons).toHaveLength(4);
+    await testButtons[0]!.trigger("click");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(w.text()).toContain("DGX-2 serves GLM-5.3-Flash-EXL3-TP4 (cluster worker)");
+    await w.findAll("button").find((b) => b.text() === "Run anyway")!.trigger("click");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts).toHaveLength(2);
+    expect((posts[1] as { override: boolean }).override).toBe(true);
+    expect(w.text()).not.toContain("Run anyway");
+    w.unmount();
+  });
+});

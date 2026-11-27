@@ -13,6 +13,7 @@ export const liveMock: {
   jobs: Map<string, unknown>;
   llm: Map<string, unknown>;
   netRates: Map<string, unknown>;
+  netTestPulse: { value: unknown };
   events: { value: unknown[] };
   usageLatest: { value: unknown[] };
   findings: { value: unknown[] };
@@ -32,6 +33,7 @@ export const liveMock: {
   jobs: reactive(new Map()),
   llm: reactive(new Map()),
   netRates: reactive(new Map()),
+  netTestPulse: ref(null),
   events: ref([]),
   usageLatest: ref([]),
   findings: ref([]),

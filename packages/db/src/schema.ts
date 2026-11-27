@@ -734,3 +734,47 @@ export const usageBuckets = pgTable(
     index("usage_buckets_bucket_idx").on(t.granularity, t.bucketStart),
   ],
 );
+
+/**
+ * IRI-166 (ADR-0021): on-demand link tests. One row per test (a = client,
+ * b = listener; forward = a → b). The topology itself is never stored.
+ * Retention: the newest 50 rows per node pair (pruned on insert).
+ */
+export const networkTests = pgTable(
+  "network_tests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** `${a}|${b}` with a < b — the topology link id. */
+    linkId: text("link_id").notNull(),
+    aNodeId: uuid("a_node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    bNodeId: uuid("b_node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    aIface: text("a_iface").notNull(),
+    bIface: text("b_iface").notNull(),
+    aIp: text("a_ip").notNull(),
+    bIp: text("b_ip").notNull(),
+    /** "iperf3" (S5) or "rdma" (S7). */
+    tool: text("tool").notNull(),
+    /** running | succeeded | failed */
+    status: text("status").notNull().default("running"),
+    stage: text("stage"),
+    override: boolean("override").notNull().default(false),
+    forwardGbps: real("forward_gbps"),
+    reverseGbps: real("reverse_gbps"),
+    retransmits: integer("retransmits"),
+    rttP50Ms: real("rtt_p50_ms"),
+    rttP99Ms: real("rtt_p99_ms"),
+    lossPct: real("loss_pct"),
+    durationS: integer("duration_s").notNull(),
+    streams: integer("streams").notNull(),
+    error: text("error"),
+    /** The client's raw result line (parsed), for audit and S7 fields. */
+    result: jsonb("result"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("network_tests_link_idx").on(t.linkId, t.startedAt)],
+);

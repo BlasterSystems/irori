@@ -1,4 +1,4 @@
-import type { LinkProbe, NetLiveLease, NetRate, NetworkEntry, Topology, TopologyLink, TopologyNode } from "@irori/core";
+import type { LinkProbe, NetLiveLease, NetRate, NetworkEntry, NetworkTestView, Topology, TopologyLink, TopologyNode } from "@irori/core";
 
 /**
  * IRI-163 (ADR-0021): Overview Network card data — topology fetch, the SVG
@@ -191,4 +191,67 @@ export function withLiveRates(
     const r = byIface.get(e.iface);
     return r === undefined ? e : { ...e, rxBps: r.rxBps, txBps: r.txBps, rdmaRxBps: r.rdmaRxBps, rdmaTxBps: r.rdmaTxBps };
   });
+}
+
+// ---------------------------------------------------------------------------
+// IRI-166: on-demand link tests.
+// ---------------------------------------------------------------------------
+
+export class LinkTestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    /** 409 guard: why an endpoint is busy (serving, transferring). */
+    readonly reasons: string[] = [],
+  ) {
+    super(message);
+  }
+}
+
+export async function fetchLinkTests(signal?: AbortSignal): Promise<{ tests: NetworkTestView[]; running: boolean }> {
+  const res = await fetch("/api/v1/network/tests?limit=100", { headers: { accept: "application/json" }, signal });
+  if (!res.ok) throw new Error(`GET /api/v1/network/tests failed: HTTP ${res.status}`);
+  const body = (await res.json()) as { tests?: unknown; running?: unknown };
+  if (!Array.isArray(body.tests)) throw new Error("malformed link tests payload");
+  return { tests: body.tests as NetworkTestView[], running: body.running === true };
+}
+
+async function postTest(url: string, body: unknown): Promise<unknown> {
+  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) });
+  const out = (await res.json().catch(() => ({}))) as { error?: string; reasons?: string[] };
+  if (!res.ok) throw new LinkTestError(out.error ?? `HTTP ${res.status}`, res.status, Array.isArray(out.reasons) ? out.reasons : []);
+  return out;
+}
+
+export const startLinkTest = (aNodeId: string, bNodeId: string, override: boolean): Promise<unknown> =>
+  postTest("/api/v1/network/tests", { aNodeId, bNodeId, override });
+
+export const startAllLinkTests = (override: boolean): Promise<unknown> => postTest("/api/v1/network/tests/all", { override });
+
+/** Newest test per link (the list is newest first). */
+export function latestTestByLink(tests: NetworkTestView[]): Map<string, NetworkTestView> {
+  const out = new Map<string, NetworkTestView>();
+  for (const t of tests) if (!out.has(t.linkId)) out.set(t.linkId, t);
+  return out;
+}
+
+/** "3 h ago", "just now". */
+export function ago(iso: string | null, nowMs: number): string {
+  if (iso === null) return "";
+  const s = Math.max(0, Math.round((nowMs - Date.parse(iso)) / 1000));
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86_400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86_400)} d ago`;
+}
+
+/** The card's "last test" cell, labelled TCP so nobody reads it as NCCL bandwidth. */
+export function testSummary(t: NetworkTestView | undefined, nowMs: number): string {
+  if (t === undefined) return "never tested";
+  if (t.status === "running") return `running · ${t.stage ?? "starting"}`;
+  if (t.status === "failed") return `failed · ${ago(t.finishedAt ?? t.startedAt, nowMs)}`;
+  const label = t.tool === "iperf3" ? "TCP" : "RDMA";
+  const rate = `${t.forwardGbps ?? "—"} / ${t.reverseGbps ?? "—"} Gb/s ${label}`;
+  const rtt = t.rttP50Ms === null ? "" : ` · p50 ${fmtRtt(t.rttP50Ms)}`;
+  return `${rate}${rtt} · ${ago(t.finishedAt, nowMs)}`;
 }
