@@ -191,6 +191,13 @@
       "when": 1795774800000,
       "tag": "0030_network_tests",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795774860000,
+      "tag": "0031_network_link_minutes",
+      "breakpoints": true
     }
   ]
 }

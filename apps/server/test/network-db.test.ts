@@ -5,6 +5,7 @@ import { createDbHandle, networkTests, nodes, settings, type Db, type DbHandle }
 import { createNetworkSettingsService, NETWORK_SETTINGS_KEY } from "../src/network-settings.js";
 import { createNetworkTestStore, KEEP_PER_LINK } from "../src/network-tests.js";
 import { createJobsService } from "../src/jobs-service.js";
+import { createLinkHistoryStore } from "../src/network-history.js";
 import { jobs } from "@irori/db";
 
 /**
@@ -104,6 +105,29 @@ d("network tables (db integration)", () => {
     expect(row.params).toMatchObject({ hosts: ["10.100.112.1", "10.100.113.1"], _lanHosts: ["dgx2.lan"] });
     expect(sent[0]).toMatchObject({ type: "job", kind: "push", params: { hosts: ["10.100.112.1", "10.100.113.1"] } });
     await db.delete(jobs).where(eq(jobs.id, row.id));
+  });
+
+  it("IRI-168: writes, upserts, bins and prunes link minute rows", async () => {
+    const store = createLinkHistoryStore(db);
+    const row = (iso: string, tx: number) => ({
+      linkId, aNodeId: a, bNodeId: b, bucketStart: new Date(iso),
+      txBpsAvg: tx, rxBpsAvg: tx / 2, txBpsMax: tx * 2, rxBpsMax: tx, rttMsAvg: 0.03, lossPctAvg: 0, samples: 6,
+    });
+    await store.write([row("2026-11-27T12:00:00Z", 100), row("2026-11-27T12:01:00Z", 300), row("2026-11-27T12:05:00Z", 500)]);
+    await store.write([row("2026-11-27T12:00:00Z", 200)]); // upsert, not a duplicate
+    const perMinute = await store.query(linkId, new Date("2026-11-27T11:00:00Z"), 60);
+    expect(perMinute.map((p) => [p.t, p.txBps])).toEqual([
+      ["2026-11-27T12:00:00.000Z", 200],
+      ["2026-11-27T12:01:00.000Z", 300],
+      ["2026-11-27T12:05:00.000Z", 500],
+    ]);
+    const fiveMin = await store.query(linkId, new Date("2026-11-27T11:00:00Z"), 300);
+    expect(fiveMin.map((p) => [p.t, p.txBps, p.txMaxBps])).toEqual([
+      ["2026-11-27T12:00:00.000Z", 250, 600],
+      ["2026-11-27T12:05:00.000Z", 500, 1000],
+    ]);
+    expect(await store.prune(new Date("2026-11-27T12:02:00Z"))).toBe(2);
+    expect(await store.query(linkId, new Date("2026-11-27T11:00:00Z"), 60)).toHaveLength(1);
   });
 
   it("round-trips the network settings row and ignores invalid stored values", async () => {

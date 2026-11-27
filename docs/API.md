@@ -855,3 +855,16 @@ RoCE fabric between Sparks only; the NAS and the management LAN never appear.
   Remediation (ADR-0014) resolves a fabric address to its node and pins the
   host key per address; a fabric destination whose preflight reports
   `unreachable` is re-pushed once over `_lanHosts` (`_fabricFallback: true`).
+- **RDMA tests (IRI-168).** `tool: "rdma"` on either test route runs
+  perftest instead of iperf3: `ib_write_bw` (10 s, `--report_gbits`) then
+  `ib_send_lat` (1000 iterations) on the lane's RoCE v2 GID, rendezvous ports
+  18515–18524. Results: `forwardGbps` = write bandwidth, `reverseGbps` null,
+  `rttP50Ms`/`rttP99Ms` from `t_typical` and the 99 % percentile (µs → ms),
+  `streams` 1. `net-tool-ensure` installs `perftest` with `iperf3`.
+- **Link history (IRI-168).** `GET /api/v1/network/links/:linkId/history?range=1h|24h|7d`
+  (`linkId` = `<a>|<b>` URL-encoded) → `{linkId, range, points: [{t, txBps,
+  rxBps, txMaxBps, rxMaxBps, rttMs, lossPct}]}`, binned to 1, 5 and 30 minutes.
+  The hub samples every link every 10 s from the latest snapshots (node a's
+  side, tx = a → b) and writes one `network_link_minutes` row per link per
+  minute (migration 0031); 7 days are kept. `400` for a malformed link id or
+  range, `503` without a DB.

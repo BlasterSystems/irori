@@ -6,6 +6,7 @@ import { networkSettingsPatchSchema, type NetworkSettingsService } from "./netwo
 import type { NetLiveService } from "./network-live.js";
 import { netLiveLeaseRequestSchema, networkTestAllRequestSchema, networkTestRequestSchema } from "@irori/core";
 import type { NetworkTestsService } from "./network-tests.js";
+import { HISTORY_RANGES, type HistoryRange, type LinkHistory } from "./network-history.js";
 
 /**
  * IRI-162+ (ADR-0021): the network routes. Degraded hubs (no DB) answer 503
@@ -19,7 +20,11 @@ export interface NetworkRouteDeps {
   getAudit: () => AuditService | null;
   getLive: () => NetLiveService | null;
   getTests: () => NetworkTestsService | null;
+  getHistory: () => LinkHistory | null;
 }
+
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const LINK_ID_RE = new RegExp(`^${UUID}\\|${UUID}$`, "i");
 
 export function registerNetworkRoutes(app: Express, deps: NetworkRouteDeps): void {
   const requireNetwork = (res: Response): NetworkService | null => {
@@ -137,6 +142,17 @@ export function registerNetworkRoutes(app: Express, deps: NetworkRouteDeps): voi
       res.status(202).json({ links: out.links });
     },
   );
+
+  // IRI-168: per-link minute history (7 days), binned per range.
+  app.get("/api/v1/network/links/:linkId/history", async (req, res) => {
+    const history = deps.getHistory();
+    if (history === null) return res.status(503).json({ error: "database unavailable" });
+    const linkId = typeof req.params.linkId === "string" ? req.params.linkId : "";
+    if (!LINK_ID_RE.test(linkId)) return res.status(400).json({ error: "invalid link id" });
+    const range = String(req.query.range ?? "24h");
+    if (!Object.hasOwn(HISTORY_RANGES, range)) return res.status(400).json({ error: "range must be 1h, 24h or 7d" });
+    res.json({ linkId, range, points: await history.query(linkId, range as HistoryRange) });
+  });
 
   app.get("/api/v1/settings/network", async (_req, res) => {
     const svc = requireSettings(res);

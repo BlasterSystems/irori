@@ -135,6 +135,8 @@ export function linkLatency(
 
 export function fmtRtt(ms: number | null): string {
   if (ms === null) return "—";
+  // RDMA latency is a few µs: show it in µs rather than as "0.002 ms".
+  if (ms < 0.01) return `${(ms * 1000).toFixed(2)} µs`;
   return ms < 1 ? `${ms.toFixed(3)} ms` : `${ms.toFixed(2)} ms`;
 }
 
@@ -223,10 +225,10 @@ async function postTest(url: string, body: unknown): Promise<unknown> {
   return out;
 }
 
-export const startLinkTest = (aNodeId: string, bNodeId: string, override: boolean): Promise<unknown> =>
-  postTest("/api/v1/network/tests", { aNodeId, bNodeId, override });
+export const startLinkTest = (aNodeId: string, bNodeId: string, override: boolean, tool: string = "iperf3"): Promise<unknown> =>
+  postTest("/api/v1/network/tests", { aNodeId, bNodeId, override, tool });
 
-export const startAllLinkTests = (override: boolean): Promise<unknown> => postTest("/api/v1/network/tests/all", { override });
+export const startAllLinkTests = (override: boolean, tool: string = "iperf3"): Promise<unknown> => postTest("/api/v1/network/tests/all", { override, tool });
 
 /** Newest test per link (the list is newest first). */
 export function latestTestByLink(tests: NetworkTestView[]): Map<string, NetworkTestView> {
@@ -250,8 +252,43 @@ export function testSummary(t: NetworkTestView | undefined, nowMs: number): stri
   if (t === undefined) return "never tested";
   if (t.status === "running") return `running · ${t.stage ?? "starting"}`;
   if (t.status === "failed") return `failed · ${ago(t.finishedAt ?? t.startedAt, nowMs)}`;
-  const label = t.tool === "iperf3" ? "TCP" : "RDMA";
-  const rate = `${t.forwardGbps ?? "—"} / ${t.reverseGbps ?? "—"} Gb/s ${label}`;
+  // RDMA measures one direction (ib_write_bw); TCP measures both.
+  const rate = t.tool === "rdma" ? `${t.forwardGbps ?? "—"} Gb/s RDMA write` : `${t.forwardGbps ?? "—"} / ${t.reverseGbps ?? "—"} Gb/s TCP`;
   const rtt = t.rttP50Ms === null ? "" : ` · p50 ${fmtRtt(t.rttP50Ms)}`;
   return `${rate}${rtt} · ${ago(t.finishedAt, nowMs)}`;
 }
+
+// ---------------------------------------------------------------------------
+// IRI-168: per-link history (minute rows, 7 days) and the RDMA test tool.
+// ---------------------------------------------------------------------------
+
+export interface LinkHistoryPoint {
+  t: string;
+  txBps: number | null;
+  rxBps: number | null;
+  txMaxBps: number | null;
+  rxMaxBps: number | null;
+  rttMs: number | null;
+  lossPct: number | null;
+}
+
+export async function fetchLinkHistory(linkId: string, range: "1h" | "24h" | "7d" = "24h"): Promise<LinkHistoryPoint[]> {
+  const res = await fetch(`/api/v1/network/links/${encodeURIComponent(linkId)}/history?range=${range}`, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`link history failed: HTTP ${res.status}`);
+  const body = (await res.json()) as { points?: unknown };
+  return Array.isArray(body.points) ? (body.points as LinkHistoryPoint[]) : [];
+}
+
+/** Sparkline series: the busier direction per bin, in Gb/s. */
+export function historySeries(points: LinkHistoryPoint[]): Array<number | null> {
+  return points.map((p) => {
+    const v = Math.max(p.txBps ?? -1, p.rxBps ?? -1);
+    return v < 0 ? null : Math.round(((v * 8) / 1e9) * 100) / 100;
+  });
+}
+
+export const LINK_TEST_TOOLS = [
+  { value: "iperf3", label: "TCP (iperf3)" },
+  { value: "rdma", label: "RDMA (perftest)" },
+] as const;
+export type LinkTestTool = (typeof LINK_TEST_TOOLS)[number]["value"];

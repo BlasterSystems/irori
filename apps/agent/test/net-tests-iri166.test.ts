@@ -27,7 +27,8 @@ describe("job surface", () => {
     expect(RUNNER_KINDS.has("net-test-client")).toBe(true);
     const built = buildCommand("net-tool-ensure", { packages: ["evil"] }, { nasRoot: null, pin: "0.25.0" });
     expect(built.argv[0]).toBe("bash");
-    expect(built.argv[2]).toContain("apt-get install -y iperf3");
+    expect(built.argv[2]).toContain("apt-get install -y $NEED");
+    expect(built.argv[2]).toContain("NEED=\"$NEED perftest\"");
     expect(built.argv[2]).not.toContain("evil"); // params are ignored, never interpolated
   });
 });
@@ -140,6 +141,6 @@ describe("parsers and fabric addresses", () => {
       ["enp1s0f0np0", { kind: "fabric" }],
       ["enP7s7", { kind: "lan" }],
     ]);
-    expect(fabricAddrsOf(detail, facts)).toEqual([{ iface: "enp1s0f0np0", ip: "10.100.112.2", subnet: "10.100.112.0/24" }]);
+    expect(fabricAddrsOf(detail, facts)).toEqual([{ iface: "enp1s0f0np0", ip: "10.100.112.2", subnet: "10.100.112.0/24", rdma: null }]);
   });
 });

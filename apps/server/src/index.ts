@@ -56,6 +56,7 @@ import { createNetPeersSync, createNetworkService, nodeIdForHost, rewritePushHos
 import { createNetworkSettingsService, type NetworkSettingsService } from "./network-settings.js";
 import { createNetLive, type NetLiveService } from "./network-live.js";
 import { createNetworkTests, createNetworkTestStore, type NetworkTestsService } from "./network-tests.js";
+import { createLinkHistory, createLinkHistoryStore, SAMPLE_MS as LINK_HISTORY_SAMPLE_MS, type LinkHistory } from "./network-history.js";
 import { isFabricEntry } from "@irori/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -138,6 +139,8 @@ const state: {
   netLive: NetLiveService | null;
   /** IRI-166: on-demand link tests. */
   networkTests: NetworkTestsService | null;
+  /** IRI-168: per-link minute history. */
+  linkHistory: LinkHistory | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -172,6 +175,7 @@ const state: {
   netPeers: null,
   netLive: null,
   networkTests: null,
+  linkHistory: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -230,6 +234,7 @@ const app = createApp({
   getNetworkSettings: () => state.networkSettings,
   getNetLive: () => state.netLive,
   getNetworkTests: () => state.networkTests,
+  getLinkHistory: () => state.linkHistory,
   onNetworkSettingsChanged: () => {
     if (state.networkSettings?.cached().liveEnabled === false) state.netLive?.stopAll();
     // A new probe interval reaches every online agent with its config-update.
@@ -608,6 +613,18 @@ async function boot(): Promise<void> {
     sse,
     log: (message) => log.info(message),
   });
+  // IRI-168: per-link history — 10 s samples folded into minute rows, 7 days kept.
+  const linkHistory = createLinkHistory({
+    store: createLinkHistoryStore(dbHandle.db),
+    topology: () => state.network!.topology(),
+    latest: (nodeId) => rings.latest(nodeId),
+    log: (message) => log.warn(message),
+  });
+  state.linkHistory = linkHistory;
+  const linkHistoryTimer = setInterval(() => void linkHistory.sample().catch(() => {}), LINK_HISTORY_SAMPLE_MS);
+  linkHistoryTimer.unref();
+  const linkHistoryPrune = setInterval(() => void linkHistory.prune().catch(() => 0), 3_600_000);
+  linkHistoryPrune.unref();
 
   // Staged transfers that were running at restart resume from the first
   // pending stage; the health watcher polls driver truth + probes every 5 s.

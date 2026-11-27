@@ -15,6 +15,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - **Opt-in live mode.** A Live toggle on the card streams fabric rates at 1 s, 500 ms or 250 ms. The browser holds a 60 s lease it renews while visible; every viewer shares one stream at the fastest requested rate. Rates travel agent → hub → browser over the existing WebSocket and SSE and are never stored.
 - **Link tests on demand.** Each link has a Test button and the card has Test all fabric links. A test installs iperf3 where missing, opens a one-shot listener on the far end's fabric address, measures both directions (10 s, 4 streams) and a 100-ping burst, and keeps the result with its age (labelled TCP). The newest 50 results per link are kept.
 - **Pushes take the fabric.** A model push between two directly cabled Sparks now dials the destination's fabric address on both lanes instead of its 1 GbE management address. Pushes between Sparks that are not cabled to each other keep the LAN.
+- **RDMA tests and history.** The tool picker next to Test all offers RDMA (perftest): write bandwidth and send latency on the RoCE path, the numbers NCCL sees. Each link row shows a 24 h throughput sparkline from a new per-minute history (7 days kept).
 
 ## Business rules and constraints
 
@@ -23,6 +24,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - The prober only pings out of fabric interfaces, at most 16 peers, with validated interface names and IPv4 literals and no shell.
 - Live mode: 250 ms floor, a lease ends after 10 minutes (the card says so and stops), agents stop on their own when the hub stops renewing or the socket drops, and `liveEnabled` turns it off for everyone.
 - Link tests: one at a time fleet-wide; refused while either end serves a running setup or runs a transfer, unless the owner presses Run anyway; the listener binds only a verified fabric address and the client only targets that subnet; `testsEnabled` switches tests off.
+- RDMA tests use their own rendezvous ports (18515–18524); perftest cannot bind its rendezvous socket to one address, so it is one-shot and killed by the test timeout (ADR 0021 records this).
 
 ## Edge cases handled
 
@@ -37,6 +39,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 - Snapshot contract: new optional, defaulted fields (ADR-0006). Old hubs strip them; new hubs fill defaults for old agents.
 - Database: migration 0030 adds `network_tests` (additive; rollback = drop the table). New job kinds `net-tool-ensure`, `net-test-server`, `net-test-client` need the updated agent bundle; old agents fail them with a clear 'unknown kind' error.
+- Database: migration 0031 adds `network_link_minutes` (additive; rollback = drop the table). The hub writes one row per link per minute.
 
 ## Out of scope and follow-ups
 
@@ -48,6 +51,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — S7 (IR-281 / IRI-168): RDMA perftest link tests and per-link minute history.
 - 2026-11-27 — S6 (IR-280 / IRI-167): pushes between directly cabled Sparks use the fabric.
 - 2026-11-27 — S5 (IR-279 / IRI-166): on-demand iperf3 link tests with guards and history.
 - 2026-11-27 — S3b (IR-283 / IRI-164): leased live RoCE rates over SSE.

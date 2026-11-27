@@ -3,6 +3,7 @@ import type { NetworkService } from "./network-service.js";
 import type { NetworkSettingsService } from "./network-settings.js";
 import type { NetLiveService } from "./network-live.js";
 import type { NetworkTestsService } from "./network-tests.js";
+import type { LinkHistory } from "./network-history.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -237,6 +238,8 @@ export interface AppDeps {
   getNetwork?: () => NetworkService | null;
   /** ADR-0021: network kill switches + prober interval; absent or null = 503. */
   getNetworkSettings?: () => NetworkSettingsService | null;
+  /** IRI-168: per-link minute history; absent or null = 503. */
+  getLinkHistory?: () => LinkHistory | null;
   /** IRI-166: on-demand link tests; absent or null = 503. */
   getNetworkTests?: () => NetworkTestsService | null;
   /** IRI-164: the leased live-rate stream; absent or null = 503. */
@@ -818,6 +821,7 @@ export function createApp(deps: AppDeps): Express {
     getAudit,
     getLive: () => deps.getNetLive?.() ?? null,
     getTests: () => deps.getNetworkTests?.() ?? null,
+    getHistory: () => deps.getLinkHistory?.() ?? null,
   });
 
   app.get("/api/v1/nodes/:id/snapshot", async (req, res) => {

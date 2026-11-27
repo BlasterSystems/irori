@@ -218,3 +218,25 @@ describe("link tests (IRI-166)", () => {
     w.unmount();
   });
 });
+
+describe("RDMA tests and history (IRI-168)", () => {
+  it("summarises an RDMA result as one-way write bandwidth and shows µs latency", async () => {
+    const { testSummary, fmtRtt } = await import("../src/network");
+    const now = Date.parse("2026-11-27T12:00:00Z");
+    const rdma = { tool: "rdma", status: "succeeded", forwardGbps: 186.33, reverseGbps: null, rttP50Ms: 0.00168, finishedAt: "2026-11-27T11:59:50Z", startedAt: "x", stage: null } as never;
+    expect(testSummary(rdma, now)).toBe("186.33 Gb/s RDMA write · p50 1.68 µs · just now");
+    expect(fmtRtt(0.031)).toBe("0.031 ms");
+    expect(fmtRtt(2.5)).toBe("2.50 ms");
+  });
+
+  it("turns history rows into a Gb/s series of the busier direction, gaps kept", async () => {
+    const { historySeries } = await import("../src/network");
+    expect(
+      historySeries([
+        { t: "a", txBps: 1_250_000_000, rxBps: 125_000_000, txMaxBps: null, rxMaxBps: null, rttMs: null, lossPct: null },
+        { t: "b", txBps: null, rxBps: null, txMaxBps: null, rxMaxBps: null, rttMs: null, lossPct: null },
+        { t: "c", txBps: 0, rxBps: 2_500_000_000, txMaxBps: null, rxMaxBps: null, rttMs: null, lossPct: null },
+      ]),
+    ).toEqual([10, null, 20]);
+  });
+});

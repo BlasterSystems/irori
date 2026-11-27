@@ -2,8 +2,7 @@ import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import {
   NET_LISTENING_MARKER,
   NET_RESULT_MARKER,
-  NET_TEST_PORT_MAX,
-  NET_TEST_PORT_MIN,
+  netTestPortRange,
   netTestResultSchema,
   type NetTestResult,
   type NetTestTool,
@@ -57,7 +56,7 @@ export interface NetworkTestsDeps {
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   /** Test hooks: deterministic port. */
-  pickPort?: () => number;
+  pickPort?: (tool: NetTestTool) => number;
 }
 
 export type StartOutcome =
@@ -93,7 +92,12 @@ function planFor(link: TopologyLink, clientId: string): Plan | null {
 
 export function createNetworkTests(deps: NetworkTestsDeps): NetworkTestsService {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const pickPort = deps.pickPort ?? (() => NET_TEST_PORT_MIN + Math.floor(Math.random() * (NET_TEST_PORT_MAX - NET_TEST_PORT_MIN + 1)));
+  const pickPort =
+    deps.pickPort ??
+    ((tool: NetTestTool) => {
+      const r = netTestPortRange(tool);
+      return r.min + Math.floor(Math.random() * (r.max - r.min + 1));
+    });
   let running: Promise<void> | null = null;
 
   const nameMap = (t: Topology): Map<string, string> => new Map(t.nodes.map((n) => [n.id, n.name]));
@@ -180,7 +184,8 @@ export function createNetworkTests(deps: NetworkTestsDeps): NetworkTestsService 
       rttP99Ms: null,
       lossPct: null,
       durationS: TEST_DURATION_S,
-      streams: TEST_STREAMS,
+      // perftest runs one RC connection; iperf3 runs parallel TCP streams.
+      streams: tool === "rdma" ? 1 : TEST_STREAMS,
       error: null,
     });
     onInserted?.(test);
@@ -197,7 +202,7 @@ export function createNetworkTests(deps: NetworkTestsDeps): NetworkTestsService 
         if (done?.status !== "succeeded") throw new Error(`installing the test tools on ${names.get(nodeId) ?? nodeId} ${done?.status ?? "failed"}`);
       }
       await step({ stage: "listen" });
-      const port = pickPort();
+      const port = pickPort(tool);
       const server = await createJob(plan.b.nodeId, "net-test-server", {
         tool,
         bindIp: plan.b.ip,
@@ -218,9 +223,10 @@ export function createNetworkTests(deps: NetworkTestsDeps): NetworkTestsService 
         targetIp: plan.b.ip,
         port,
         durationS: TEST_DURATION_S,
-        streams: TEST_STREAMS,
-        reverse: true,
-        pings: TEST_PINGS,
+        streams: tool === "rdma" ? 1 : TEST_STREAMS,
+        // RDMA measures latency with ib_send_lat; the ping burst is TCP's.
+        reverse: tool !== "rdma",
+        pings: tool === "rdma" ? 0 : TEST_PINGS,
       });
       const done = await waitJob(client.id, (TEST_DURATION_S * 2 + 60) * 1000);
       const line = done?.output.map((o) => o.line).find((l) => l.startsWith(NET_RESULT_MARKER));

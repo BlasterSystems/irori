@@ -96,13 +96,27 @@ export interface NetLiveLease {
 
 const ipv4 = z.string().regex(IPV4_RE);
 
-export const NET_TEST_TOOLS = ["iperf3"] as const;
+/** iperf3 = TCP (S5); rdma = perftest ib_write_bw + ib_send_lat over RoCE (S7). */
+export const NET_TEST_TOOLS = ["iperf3", "rdma"] as const;
 export const netTestToolSchema = z.enum(NET_TEST_TOOLS);
 export type NetTestTool = z.infer<typeof netTestToolSchema>;
 
 /** iperf3 listener ports a test may use. */
 export const NET_TEST_PORT_MIN = 5201;
 export const NET_TEST_PORT_MAX = 5210;
+/** perftest out-of-band (TCP) exchange ports for tool "rdma". */
+export const NET_RDMA_PORT_MIN = 18515;
+export const NET_RDMA_PORT_MAX = 18524;
+
+/** Port range per tool. */
+export function netTestPortRange(tool: NetTestTool): { min: number; max: number } {
+  return tool === "rdma" ? { min: NET_RDMA_PORT_MIN, max: NET_RDMA_PORT_MAX } : { min: NET_TEST_PORT_MIN, max: NET_TEST_PORT_MAX };
+}
+
+const portInRange = (v: { tool: NetTestTool; port: number }): boolean => {
+  const r = netTestPortRange(v.tool);
+  return v.port >= r.min && v.port <= r.max;
+};
 export const NET_TEST_MAX_DURATION_S = 30;
 
 /** Printed by net-test-server once its listener is bound. */
@@ -115,13 +129,14 @@ export const netTestServerParamsSchema = z
   .object({
     tool: netTestToolSchema.default("iperf3"),
     bindIp: ipv4,
-    port: z.number().int().min(NET_TEST_PORT_MIN).max(NET_TEST_PORT_MAX),
+    port: z.number().int().min(NET_TEST_PORT_MIN).max(NET_RDMA_PORT_MAX),
     /** One-shot runs to serve (forward + reverse = 2). */
     runs: z.number().int().min(1).max(4),
     /** Hard end of the listener, whatever happens. */
     timeoutS: z.number().int().min(10).max(120),
   })
-  .strict();
+  .strict()
+  .refine(portInRange, { message: "port is outside the tool's range", path: ["port"] });
 export type NetTestServerParams = z.infer<typeof netTestServerParamsSchema>;
 
 export const netTestClientParamsSchema = z
@@ -129,7 +144,7 @@ export const netTestClientParamsSchema = z
     tool: netTestToolSchema.default("iperf3"),
     bindIp: ipv4,
     targetIp: ipv4,
-    port: z.number().int().min(NET_TEST_PORT_MIN).max(NET_TEST_PORT_MAX),
+    port: z.number().int().min(NET_TEST_PORT_MIN).max(NET_RDMA_PORT_MAX),
     durationS: z.number().int().min(1).max(NET_TEST_MAX_DURATION_S),
     streams: z.number().int().min(1).max(8),
     /** Also measure B → A (iperf3 -R). */
@@ -137,7 +152,8 @@ export const netTestClientParamsSchema = z
     /** Latency burst size after the throughput runs (0 = skip). */
     pings: z.number().int().min(0).max(200),
   })
-  .strict();
+  .strict()
+  .refine(portInRange, { message: "port is outside the tool's range", path: ["port"] });
 export type NetTestClientParams = z.infer<typeof netTestClientParamsSchema>;
 
 export const netTestResultSchema = z.object({

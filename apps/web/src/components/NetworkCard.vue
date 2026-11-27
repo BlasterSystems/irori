@@ -3,7 +3,12 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { linkRates, type NetworkTestView, type TopologyLink } from "@irori/core";
 import { live } from "../live";
 import Tip from "./Tip.vue";
+import Sparkline from "./Sparkline.vue";
 import {
+  fetchLinkHistory,
+  historySeries,
+  LINK_TEST_TOOLS,
+  type LinkTestTool,
   fetchLinkTests,
   latestTestByLink,
   LinkTestError,
@@ -94,10 +99,10 @@ async function runTest(link: TopologyLink | null, override = false): Promise<voi
   pendingGuard.value = null;
   try {
     if (link === null) {
-      await startAllLinkTests(override);
+      await startAllLinkTests(override, testTool.value);
       testMsg.value = "Testing every fabric link in turn, about 30 s each.";
     } else {
-      await startLinkTest(link.a, link.b, override);
+      await startLinkTest(link.a, link.b, override, testTool.value);
     }
     testsRunning.value = true;
     await refreshTests();
@@ -109,6 +114,38 @@ async function runTest(link: TopologyLink | null, override = false): Promise<voi
     testMsg.value = err instanceof Error ? err.message : String(err);
   }
 }
+
+// IRI-168: the test tool (TCP by default; RDMA is what NCCL sees).
+const testTool = ref<LinkTestTool>("iperf3");
+
+// ─── IRI-168: per-link 24 h history (minute rows), re-read every 5 min ───────
+const HISTORY_REFRESH_MS = 300_000;
+const history = ref(new Map<string, Array<number | null>>());
+let historyTimer: ReturnType<typeof setInterval> | undefined;
+async function refreshHistory(): Promise<void> {
+  const links = topology.value?.links ?? [];
+  const next = new Map<string, Array<number | null>>();
+  await Promise.all(
+    links.map(async (l) => {
+      try {
+        next.set(l.id, historySeries(await fetchLinkHistory(l.id, "24h")));
+      } catch {
+        /* history unavailable (degraded hub) — no sparkline */
+      }
+    }),
+  );
+  history.value = next;
+}
+watch(
+  () => (topology.value?.links ?? []).map((l) => l.id).join(","),
+  (ids, prev) => {
+    if (ids !== prev) void refreshHistory();
+  },
+);
+onMounted(() => {
+  historyTimer = setInterval(() => void refreshHistory(), HISTORY_REFRESH_MS);
+});
+onUnmounted(() => clearInterval(historyTimer));
 
 // ─── IRI-164: opt-in live rates (shared 60 s lease, renewed while visible) ──
 const LIVE_RATES = [
@@ -241,6 +278,10 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
         <Tip text="RoCE fabric between Sparks only — the NAS and the management LAN are never shown · links from neighbour MACs or shared point-to-point subnets · throughput is live from the 2 s snapshots (the larger of RDMA and kernel counters)" />
       </div>
       <div class="row netcontrols">
+        <label class="visually-hidden" for="net-test-tool">Test tool</label>
+        <select id="net-test-tool" v-model="testTool" class="input netrate">
+          <option v-for="t in LINK_TEST_TOOLS" :key="t.value" :value="t.value">{{ t.label }}</option>
+        </select>
         <button type="button" class="btn btn--primary btn--sm" :disabled="testsRunning || (topology?.links.length ?? 0) === 0" @click="runTest(null)">Test all fabric links</button>
         <button type="button" class="btn btn--secondary btn--sm" :aria-pressed="liveOn" @click="toggleLive">
           <span class="dot" :class="liveOn ? 'dot--run' : ''" aria-hidden="true"></span>{{ liveOn ? "Live" : "Live off" }}
@@ -328,6 +369,15 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
                 <div class="bar netbar" :title="r.util === null ? 'no rate yet' : `${r.util}% of link speed`">
                   <div class="bar__fill" :style="{ width: (r.util ?? 0) + '%' }"></div>
                 </div>
+                <Sparkline
+                  v-if="(history.get(r.link.id)?.filter((v) => v !== null).length ?? 0) > 1"
+                  class="nethist"
+                  :points="history.get(r.link.id)!"
+                  :height="24"
+                  :width="220"
+                  :aria-label="`${r.title} throughput, last 24 hours`"
+                  :format="(v: number) => `${v} Gb/s`"
+                />
               </td>
               <td class="mono">{{ fmtRtt(r.rttMs) }}<span v-if="r.lossPct !== null"> · {{ r.lossPct }} %</span></td>
               <td class="mono" :title="latestTests.get(r.link.id)?.error ?? undefined">{{ testSummary(latestTests.get(r.link.id), Date.now()) }}</td>
@@ -381,6 +431,7 @@ const isEmpty = computed(() => topology.value !== null && topology.value.links.l
 .nettile__role { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: var(--tracking-mono); text-transform: uppercase; fill: var(--text-3); }
 .nettable td { vertical-align: top; }
 .netbar { margin-top: 6px; max-width: 220px; }
+.nethist { margin-top: 6px; max-width: 220px; display: block; }
 .netwarn-text { color: var(--accent-text); }
 .netlist, .netwarnings { list-style: none; margin: var(--space-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-small); }
 .netwarnings li { display: flex; gap: 8px; align-items: baseline; }

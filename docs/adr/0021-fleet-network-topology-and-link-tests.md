@@ -95,10 +95,14 @@ A second unauthenticated upgrade endpoint (ADR-0002, no app auth) plus more
    - `net-tool-ensure`: installs `iperf3` and `perftest` with apt when
      missing. It takes **no params**, so it cannot become an arbitrary-install
      surface.
-   - `net-test-server`: runs `iperf3 -s -1` (or `ib_write_bw` / `ib_send_lat`
-     for `tool: "rdma"`) bound to an address the agent verifies is on one of
-     its own **fabric** interfaces, on a port in 5201–5210 (RDMA: 18515), for
-     a fixed number of one-shot runs, under a hard timeout of at most 120 s.
+   - `net-test-server`: runs `iperf3 -s -1` bound to an address the agent
+     verifies is on one of its own **fabric** interfaces, on a port in
+     5201–5210, for a fixed number of one-shot runs, under a hard timeout of
+     at most 120 s. For `tool: "rdma"` it runs one `ib_write_bw` and one
+     `ib_send_lat` server on the fabric port's RoCE v2 GID (ports
+     18515–18524). perftest has no server bind option, so its one-shot TCP
+     rendezvous socket listens on all addresses for at most that timeout;
+     the RDMA traffic itself stays on the fabric port.
    - `net-test-client`: runs the matching client from a local fabric address
      to a target that must be in the same fabric subnet, at most 30 s per
      direction and 1–8 streams, then a 100-packet latency burst. It reports
@@ -140,8 +144,10 @@ A second unauthenticated upgrade endpoint (ADR-0002, no app auth) plus more
 
 - *A test disturbs NCCL traffic.* Refused during cluster serving or transfers
   unless overridden, capped at 30 s per direction, and never scheduled.
-- *A listener is reachable from the LAN.* It binds only a verified fabric
-  address, serves a fixed number of clients and is killed by its timeout.
+- *A listener is reachable from the LAN.* The iperf3 listener binds only a
+  verified fabric address; perftest's rendezvous socket cannot be bound, so
+  it is one-shot and killed by the same timeout (at most 120 s, typically
+  about 25 s). Both serve a fixed number of clients.
 - *The client is used to flood an arbitrary host.* The target must be inside
   the client's own fabric subnet; params are validated agent-side.
 - *Neighbour tables age out on idle links.* Subnet matching covers the gap

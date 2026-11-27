@@ -778,3 +778,30 @@ export const networkTests = pgTable(
   },
   (t) => [index("network_tests_link_idx").on(t.linkId, t.startedAt)],
 );
+
+/**
+ * IRI-168 (ADR-0021): per-link history — one row per link per minute, folded
+ * by the hub from the latest snapshots (10 s samples). Rates are from node
+ * a's side (tx = a → b). Retention 7 days.
+ */
+export const networkLinkMinutes = pgTable(
+  "network_link_minutes",
+  {
+    linkId: text("link_id").notNull(),
+    aNodeId: uuid("a_node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    bNodeId: uuid("b_node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    txBpsAvg: doublePrecision("tx_bps_avg"),
+    rxBpsAvg: doublePrecision("rx_bps_avg"),
+    txBpsMax: doublePrecision("tx_bps_max"),
+    rxBpsMax: doublePrecision("rx_bps_max"),
+    rttMsAvg: real("rtt_ms_avg"),
+    lossPctAvg: real("loss_pct_avg"),
+    samples: integer("samples").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.linkId, t.bucketStart] }), index("network_link_minutes_bucket_idx").on(t.bucketStart)],
+);

@@ -229,3 +229,19 @@ describe("link test routes", () => {
     expect((await request(createApp(deps(null))).get("/api/v1/network/tests")).status).toBe(503);
   });
 });
+
+describe("RDMA link tests (IRI-168)", () => {
+  it("passes the rdma tool with its own port range, one stream, no ping burst", async () => {
+    const h = harness();
+    const ports: string[] = [];
+    await h.svc.start({ aNodeId: A, bNodeId: B, override: false, tool: "rdma" });
+    await h.settle();
+    const server = h.created.find((c) => c.kind === "net-test-server")!;
+    const client = h.created.find((c) => c.kind === "net-test-client")!;
+    ports.push(String(server.params.port));
+    expect(server.params).toMatchObject({ tool: "rdma", bindIp: "10.1.0.2" });
+    expect(client.params).toMatchObject({ tool: "rdma", streams: 1, reverse: false, pings: 0 });
+    expect([...h.stored.values()][0]).toMatchObject({ tool: "rdma", streams: 1 });
+    expect(ports).toEqual(["5207"]); // the harness pins the port; the range is per tool in core
+  });
+});

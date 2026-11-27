@@ -203,6 +203,10 @@ never drawn or measured.
   overridden; results persisted (`network_tests`, newest 50 per link) and
   labelled TCP. Kill switches: `testsEnabled`, `liveEnabled`,
   `probeIntervalS` in `/api/v1/settings/network`.
+- **RDMA tests** (tool `rdma`): perftest `ib_write_bw` + `ib_send_lat` on the
+  lane's RoCE v2 GID — the number NCCL sees — next to the TCP default.
+- **Per-link history:** one row per link per minute (rates from 10 s
+  samples, prober RTT/loss), 7 days, shown as a 24 h sparkline per link.
 - **Pushes use the fabric** between directly cabled Sparks: the destination's
   fabric address on each up lane replaces the registry (LAN) host, with a
   one-shot LAN fallback when the fabric does not answer. Multi-hop paths are

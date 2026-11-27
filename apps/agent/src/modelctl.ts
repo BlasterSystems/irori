@@ -413,20 +413,24 @@ function buildKindArgs(kind: string, params: Record<string, unknown>, ctx: Model
       // ADR-0021 (IRI-166): the link-test tools. Same shape as ensure-rsync:
       // apt only, idempotent, and deliberately no params — a package list
       // would make this an arbitrary-install surface.
+      // IRI-168: perftest (ib_write_bw, ib_send_lat) joins iperf3 for RDMA tests.
       const script = [
-        'if command -v iperf3 >/dev/null 2>&1; then',
-        '  echo "iperf3 present: $(iperf3 --version 2>/dev/null | head -n1)"',
+        'NEED=""',
+        'command -v iperf3 >/dev/null 2>&1 || NEED="$NEED iperf3"',
+        'command -v ib_write_bw >/dev/null 2>&1 || NEED="$NEED perftest"',
+        'if [ -z "$NEED" ]; then',
+        '  echo "test tools present: $(iperf3 --version 2>/dev/null | head -n1); perftest $(ib_write_bw --version 2>/dev/null | head -n1)"',
         '  exit 0',
         'fi',
         'if ! command -v apt-get >/dev/null 2>&1; then',
-        '  echo "no apt-get — install iperf3 manually"; exit 1',
+        '  echo "no apt-get — install$NEED manually"; exit 1',
         'fi',
         'apt-get update -qq',
         // iperf3's postinst asks whether to start a daemon; never start one.
         'echo "iperf3 iperf3/start_daemon boolean false" | debconf-set-selections 2>/dev/null || true',
-        'DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3',
+        'DEBIAN_FRONTEND=noninteractive apt-get install -y $NEED',
         'systemctl disable --now iperf3.service >/dev/null 2>&1 || true',
-        'echo "iperf3 installed: $(iperf3 --version 2>/dev/null | head -n1)"',
+        'echo "installed:$NEED"',
       ].join("\n");
       return { argv: ["bash", "-c", script], shell: "bash" };
     }
