@@ -323,7 +323,7 @@ describe("OverviewView source pins", () => {
   it("leads with nodes above power/nas and auto-scrolls the feed (IR-108/IR-109)", () => {
     // IR-108: the nodes section swapped places with the fleet power/NAS row.
     expect(OVERVIEW_SRC.indexOf(">Nodes</h2>")).toBeGreaterThan(-1);
-    expect(OVERVIEW_SRC.indexOf(">Nodes</h2>")).toBeLessThan(OVERVIEW_SRC.indexOf("Fleet power + NAS store"));
+    expect(OVERVIEW_SRC.indexOf(">Nodes</h2>")).toBeLessThan(OVERVIEW_SRC.indexOf(">Power</h3>")); // nodes above power — anchor updated for the IR-285 shell
     // IR-109: the newest-last feed scrolls to the latest line.
     expect(OVERVIEW_SRC).toContain('ref="feedLog"');
     expect(OVERVIEW_SRC).toContain("feedLog.value.scrollTop = feedLog.value.scrollHeight");
@@ -403,6 +403,22 @@ describe("OverviewView source pins", () => {
     expect(capsIdx).toBeGreaterThan(nasIdx);
     expect(feedIdx).toBeGreaterThan(capsIdx);
     expect(updatesIdx).toBeGreaterThan(feedIdx); // updates stays full-width below the shell
+    // IR-285: hero → Nodes → Power inside the main column; Network card below the shell
+    const shellIdx = OVERVIEW_SRC.indexOf('<div class="ov-shell"');
+    const mainIdx = OVERVIEW_SRC.indexOf('<div class="maincol">');
+    const heroIdx = OVERVIEW_SRC.indexOf('class="hero-grid section-gap"');
+    const nodesH2Idx = OVERVIEW_SRC.indexOf('<h2 class="h2-gap">Nodes</h2>');
+    const nodesGridIdx = OVERVIEW_SRC.indexOf('class="nodes-grid"');
+    const powerIdx = OVERVIEW_SRC.indexOf(">Power</h3>");
+    const netIdx = OVERVIEW_SRC.indexOf("<NetworkCard");
+    expect(mainIdx).toBeGreaterThan(shellIdx);
+    expect(heroIdx).toBeGreaterThan(mainIdx);
+    expect(nodesH2Idx).toBeGreaterThan(heroIdx);
+    expect(nodesGridIdx).toBeGreaterThan(nodesH2Idx);
+    expect(powerIdx).toBeGreaterThan(nodesGridIdx);
+    const railEndIdx = OVERVIEW_SRC.indexOf("</aside>");
+    expect(netIdx).toBeGreaterThan(railEndIdx); // network card below the shell (gate call)
+    expect(updatesIdx).toBeGreaterThan(netIdx); // and before Updates
   });
 });
 

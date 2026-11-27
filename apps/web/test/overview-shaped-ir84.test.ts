@@ -87,6 +87,10 @@ describe("OverviewView shaped tier", () => {
     expect(text).toContain("0.00kWh"); // energy strip
     expect(text).toContain("unmanaged"); // engine card posture
     expect(text).toContain("port 8082"); // detected-but-unmanaged engine card
+    // IR-285: the real hero renders inside the main column, and two serving
+    // processes flatten the shell at mount level (not just by source pin).
+    expect(w.find(".maincol .hero-grid").exists()).toBe(true);
+    expect(w.find(".ov-shell--flat").exists()).toBe(true);
     liveMock.nodes.delete(UUID);
     liveMock.llm.delete(UUID);
     liveMock.snapshots.delete(UUID);
@@ -114,6 +118,9 @@ describe("OverviewView shaped tier", () => {
     const text = w.text();
     expect(text).toContain("Qwen3.8-Flash-Next"); // the starting setup is a hero card
     expect(text).toContain("starting"); // its state chip, not silent absence
+    // IR-285: a single hero keeps the shell unflattened, inside the main column.
+    expect(w.find(".maincol .hero-grid--single").exists()).toBe(true);
+    expect(w.find(".ov-shell--flat").exists()).toBe(false);
     liveMock.nodes.delete(UUID);
     liveMock.llm.delete(UUID);
     w.unmount();

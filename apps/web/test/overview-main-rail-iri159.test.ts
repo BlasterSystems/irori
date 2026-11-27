@@ -4,9 +4,10 @@ import { mount } from "@vue/test-utils";
 import { liveMock } from "./live-mock";
 
 /**
- * IRI-159: the Overview Main+Rail shell — power renders in the main column,
- * token stats / NAS / clock caps / telemetry render in the rail, node cards
- * render in a 2-col grid with constants carried in tooltips, and the thermal
+ * IRI-159: the Overview Main+Rail shell — the serving hero, node cards and
+ * power render in the main column (scope fixed by IR-285), token stats /
+ * NAS / clock caps / telemetry render in the rail, node cards render in a
+ * 2-col grid with constants carried in tooltips, and the thermal
  * alert row appears only when a spark node runs at/above the warn tier.
  */
 
@@ -69,6 +70,9 @@ describe("OverviewView Main+Rail (IRI-159)", () => {
     expect(main.exists()).toBe(true);
     expect(rail.exists()).toBe(true);
     expect(main.text()).toContain("Power");
+    // IR-285: the hero ghost and the node grid join the main column
+    expect(main.text()).toContain("nothing serving"); // hero ghost (no setups in this mock)
+    expect(main.find(".nodes-grid").exists()).toBe(true);
     const railText = rail.text();
     for (const surface of ["Token stats", "NAS store", "Fleet clock caps", "Telemetry"]) {
       expect(railText).toContain(surface);
@@ -109,6 +113,9 @@ describe("OverviewView Main+Rail (IRI-159)", () => {
     const memRow = grid.findAll(".barrow").find((r) => r.text().startsWith("MEM"))!;
     expect(memRow.find(".v-compact").text()).toBe("96.0 GB");
     expect(memRow.find(".v-total").text()).toBe("96.0 / 127.0 GB");
+    // IR-285: the network card renders below the shell, not inside it
+    expect(w.find('section[aria-label="Network"]').exists()).toBe(true); // 2 sparks → RoCE card
+    expect(w.find(".ov-shell").find('section[aria-label="Network"]').exists()).toBe(false);
     w.unmount();
   });
 
