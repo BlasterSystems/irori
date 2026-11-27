@@ -8,6 +8,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 - **Decision recorded.** ADR 0021 covers the snapshot extension, the derived topology, the leased live stream, the listener and installer job kinds, the new tables and fabric push addressing.
 - **Real evidence.** The fleet is a four-node ring, two 200 Gb/s lanes per cable, one /24 per lane. Every node's registry host is on the management LAN, so pushes have never used the fabric.
+- **Agents report link facts.** Every interface now carries its MAC, MTU, driver, classification (fabric, LAN or virtual), addresses with prefix, the bound RoCE port (device, state, rate), complete IPv4 neighbours on fabric links, and RDMA byte rates. RoCE traffic bypasses the kernel counters, so the RDMA rates are what show NCCL traffic.
 
 ## Business rules and constraints
 
@@ -15,11 +16,11 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Edge cases handled
 
-- None yet.
+- Interfaces without sysfs (macOS dev boxes), a docker bridge or tailscale with a MAC, an incomplete ARP entry, and an RDMA counter that goes backwards (reported as unknown, never as a negative rate).
 
 ## Integration impact
 
-- None yet.
+- Snapshot contract: new optional, defaulted fields (ADR-0006). Old hubs strip them; new hubs fill defaults for old agents.
 
 ## Out of scope and follow-ups
 
@@ -31,4 +32,5 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — S1 (IR-275 / IRI-161): agent link facts and RDMA rates in the snapshot.
 - 2026-11-27 — S0 (IR-274 / IRI-160): ADR 0021 accepted and indexed; real-fleet network fixture; epic task file.

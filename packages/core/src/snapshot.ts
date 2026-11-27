@@ -27,6 +27,36 @@ export const gpuSnapshotSchema = z.object({
 
 export type GpuSnapshot = z.infer<typeof gpuSnapshotSchema>;
 
+/** IRI-161 (ADR-0021): interface classification reported by the agent. */
+export const networkKindSchema = z.enum(["fabric", "lan", "virtual"]);
+export type NetworkKind = z.infer<typeof networkKindSchema>;
+
+/** IRI-161: RDMA port facts from /sys/class/infiniband/<dev>/ports/<n>. */
+export const rdmaPortSchema = z.object({
+  device: z.string(),
+  port: z.number().int().positive(),
+  /** "Ethernet" means RoCE; "InfiniBand" a native IB port. */
+  linkLayer: z.string().nullable(),
+  /** e.g. ACTIVE, DOWN, INIT (the "4: " prefix is stripped). */
+  state: z.string().nullable(),
+  rateGbps: z.number().nonnegative().nullable(),
+});
+export type RdmaPort = z.infer<typeof rdmaPortSchema>;
+
+/** IRI-165: one prober result (ping summary) for a fabric peer. */
+export const linkProbeSchema = z.object({
+  iface: z.string(),
+  peerIp: z.string(),
+  rttMinMs: z.number().nonnegative().nullable(),
+  rttAvgMs: z.number().nonnegative().nullable(),
+  rttMaxMs: z.number().nonnegative().nullable(),
+  mdevMs: z.number().nonnegative().nullable(),
+  lossPct: z.number().min(0).max(100),
+  /** Agent wall clock of the probe. */
+  at: z.number(),
+});
+export type LinkProbe = z.infer<typeof linkProbeSchema>;
+
 /**
  * Basic hardware snapshot (M1). Tolerant by design: every metric that a
  * collector cannot read is null rather than omitted, and unknown fields are
@@ -93,9 +123,31 @@ export const hardwareSnapshotSchema = z.object({
         operState: z.string().nullable().default(null),
         /** IRI-067: assigned addresses (v4 then v6), for the WOL/network panel. */
         addrs: z.array(z.string()).default([]),
+        /** IRI-161 (ADR-0021): link-layer address, lowercase colon form. */
+        mac: z.string().nullable().default(null),
+        /** IRI-161: /sys/class/net/<if>/mtu. */
+        mtu: z.number().int().positive().nullable().default(null),
+        /** IRI-161: kernel driver (basename of device/driver), e.g. mlx5_core. */
+        driver: z.string().nullable().default(null),
+        /** IRI-161: classification; null = old agent (the hub infers it). */
+        kind: networkKindSchema.nullable().default(null),
+        /** IRI-161: assigned addresses with prefix length (v4 then v6), e.g. 10.100.112.2/24. */
+        cidrs: z.array(z.string()).default([]),
+        /** IRI-161: RDMA device bound to this netdev (RoCE on the CX7), null when none. */
+        rdma: rdmaPortSchema.nullable().default(null),
+        /** IRI-161: complete IPv4 neighbour entries (fabric interfaces only). */
+        neighbors: z.array(z.object({ ip: z.string(), mac: z.string() })).max(64).default([]),
+        /** IRI-161: RDMA port byte rates over the sample window (RoCE bypasses /proc/net/dev). */
+        rdmaRxBps: z.number().nonnegative().nullable().default(null),
+        rdmaTxBps: z.number().nonnegative().nullable().default(null),
       }),
     )
     .default([]),
+  /**
+   * IRI-165 (ADR-0021): latest ping result per fabric peer, from the agent's
+   * prober (every netProbeIntervalS). Old agents omit it.
+   */
+  linkProbes: z.array(linkProbeSchema).max(64).optional(),
   gpus: z.array(gpuSnapshotSchema),
   /**
    * IRI-067: GB10 unified-memory bandwidth (nvidia-smi dmon -s B), sampled on
@@ -131,3 +183,5 @@ export const hardwareSnapshotSchema = z.object({
 });
 
 export type HardwareSnapshot = z.infer<typeof hardwareSnapshotSchema>;
+
+export type NetworkEntry = HardwareSnapshot["network"][number];
