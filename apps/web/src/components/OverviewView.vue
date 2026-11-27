@@ -640,63 +640,62 @@ function heroStateView(p: HeroProcess): HeroStateView {
     </div>
   </section>
 
-  <!-- Serving processes: one card per running setup, then detected engines -->
-  <section v-if="heroProcesses.length > 0" class="hero-grid section-gap" :class="{ 'hero-grid--single': heroProcesses.length === 1 }">
-    <article v-for="p in heroProcesses" :key="p.key" class="card" :class="{ 'card--stale': isProbeStale(p) }">
-      <div class="card__head">
-        <div class="row" style="min-width: 0;">
-          <h3 class="hero__title" :title="p.title">{{ p.title }}</h3>
-          <span class="hero__meta">{{ heroMeta(p) }}</span>
-          <span v-if="heroStateView(p) !== null" class="chip hero__state" :class="heroStateView(p)!.cls"><span class="dot" :class="heroStateView(p)!.dot" aria-hidden="true"></span> {{ heroStateView(p)!.label }}</span>
-        </div>
-      </div>
-      <div :class="heroSplitClass(p.hero)">
-        <div :class="heroGridClass(p.hero)">
-          <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">{{ fmtTps(p.hero.decodeTps) }}</span><span v-if="charts.get(p.key)?.peak != null" class="stat__sub">{{ peakSubLabel(charts.get(p.key)!.granularity, charts.get(p.key)!.peak!) }}</span></div>
-          <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">{{ fmtTps(p.hero.prefillTps) }}</span><span v-if="p.hero.cacheHitPct !== null" class="stat__sub">cache hit {{ Math.round(p.hero.cacheHitPct) }}%</span></div>
-          <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">{{ queueValue(p.hero) }}</span><span class="stat__sub">{{ queueSub(p.hero) }}</span></div>
-          <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">{{ num(p.hero.kvCachePct === null ? null : Math.round(p.hero.kvCachePct)) }}<template v-if="p.hero.kvCachePct !== null">%</template></span><div v-if="p.hero.kvCachePct !== null" class="bar" style="margin-top: 6px;"><div class="bar__fill" :style="{ width: p.hero.kvCachePct + '%' }"></div></div></div>
-          <div v-if="showTtft(p.hero)" class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">{{ ms(p.hero.ttftP95Ms) }}</span><span v-if="p.hero.e2eP95Ms !== null" class="stat__sub">E2E {{ Math.round(p.hero.e2eP95Ms) }} ms</span></div>
-          <div v-if="showItl(p.hero)" class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
-        </div>
-        <!-- IR-128: sparklines hidden ONLY on small — shown on medium and
-             full (owner final call). IR-220: v1.1 legend swatches. -->
-        <div v-if="tier !== 'small' && charts.get(p.key) !== undefined" class="hero-chart">
-          <LensChartVue :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" :aria-label="`decode and prefill, ${rangeLabel}`" />
-          <div class="bs-legend" aria-hidden="true" style="margin-top: 8px;">
-            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--thread)" stroke-width="1.5" fill="none"/></svg>decode</span>
-            <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--ink-2)" stroke-width="1.5" fill="none"/></svg>prefill</span>
-          </div>
-        </div>
-      </div>
-    </article>
-  </section>
-  <div v-else class="ghost-grid" style="min-height: 120px; margin-bottom: 12px; flex-direction: column; gap: 8px;">
-    <span>nothing serving</span>
-    <span style="letter-spacing: 0; text-transform: none;">start a setup on the Serve page — it appears here while it runs</span>
-  </div>
-
-  <h2 class="h2-gap">Nodes</h2>
-  <!-- IRI-159: 2-col node grid at any count — 1–3 nodes render without waste
-       (the odd last card spans both columns), 4 nodes fill it exactly. -->
-  <section v-if="sparkNodes.length > 0" class="nodes-grid">
-    <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" />
-  </section>
-  <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
-    <span>{{ totalCount === 0 ? "no nodes yet" : "no spark nodes" }}</span>
-    <span v-if="totalCount === 0" style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
-  </div>
-
-  <!-- IRI-163 (ADR-0021): RoCE fabric between Sparks (no NAS, no LAN). -->
-  <NetworkCard v-if="sparkNodes.length > 1" />
-
-  <!-- Fleet power + NAS store (IRI-159): power keeps the main column of the
-       Main+Rail shell; the rail holds token stats, the NAS store card, fleet
-       clock caps and the telemetry feed (all content-sized — no more
-       half-empty cards). Updates stays full-width below the shell. With more
-       than one serving hero the shell flattens to full-width rows. -->
+  <!-- Main + Rail shell (IRI-159, scope fixed by IR-285): the main column
+       holds the serving hero → Nodes (2-col grid) → Power; the rail holds
+       token stats, the NAS store card, fleet clock caps and the telemetry
+       feed (all content-sized — no more half-empty cards). Updates and the
+       Network card stay full-width below the shell (table ≥640px; the ring
+       diagram wants the width). With more than one serving hero the shell
+       flattens to full-width rows. -->
   <div class="ov-shell" :class="{ 'ov-shell--flat': heroProcesses.length > 1 }">
     <div class="maincol">
+      <!-- Serving processes: one card per running setup, then detected engines -->
+      <section v-if="heroProcesses.length > 0" class="hero-grid section-gap" :class="{ 'hero-grid--single': heroProcesses.length === 1 }">
+        <article v-for="p in heroProcesses" :key="p.key" class="card" :class="{ 'card--stale': isProbeStale(p) }">
+          <div class="card__head">
+            <div class="row" style="min-width: 0;">
+              <h3 class="hero__title" :title="p.title">{{ p.title }}</h3>
+              <span class="hero__meta">{{ heroMeta(p) }}</span>
+              <span v-if="heroStateView(p) !== null" class="chip hero__state" :class="heroStateView(p)!.cls"><span class="dot" :class="heroStateView(p)!.dot" aria-hidden="true"></span> {{ heroStateView(p)!.label }}</span>
+            </div>
+          </div>
+          <div :class="heroSplitClass(p.hero)">
+            <div :class="heroGridClass(p.hero)">
+              <div class="stat"><span class="stat__label">Decode</span><span class="stat__value">{{ fmtTps(p.hero.decodeTps) }}</span><span v-if="charts.get(p.key)?.peak != null" class="stat__sub">{{ peakSubLabel(charts.get(p.key)!.granularity, charts.get(p.key)!.peak!) }}</span></div>
+              <div class="stat"><span class="stat__label">Prefill</span><span class="stat__value">{{ fmtTps(p.hero.prefillTps) }}</span><span v-if="p.hero.cacheHitPct !== null" class="stat__sub">cache hit {{ Math.round(p.hero.cacheHitPct) }}%</span></div>
+              <div class="stat"><span class="stat__label">Queue</span><span class="stat__value">{{ queueValue(p.hero) }}</span><span class="stat__sub">{{ queueSub(p.hero) }}</span></div>
+              <div class="stat"><span class="stat__label">KV cache</span><span class="stat__value">{{ num(p.hero.kvCachePct === null ? null : Math.round(p.hero.kvCachePct)) }}<template v-if="p.hero.kvCachePct !== null">%</template></span><div v-if="p.hero.kvCachePct !== null" class="bar" style="margin-top: 6px;"><div class="bar__fill" :style="{ width: p.hero.kvCachePct + '%' }"></div></div></div>
+              <div v-if="showTtft(p.hero)" class="stat"><span class="stat__label">TTFT p95</span><span class="stat__value">{{ ms(p.hero.ttftP95Ms) }}</span><span v-if="p.hero.e2eP95Ms !== null" class="stat__sub">E2E {{ Math.round(p.hero.e2eP95Ms) }} ms</span></div>
+              <div v-if="showItl(p.hero)" class="stat"><span class="stat__label">ITL p95</span><span class="stat__value">{{ ms(p.hero.itlP95Ms) }}</span></div>
+            </div>
+            <!-- IR-128: sparklines hidden ONLY on small — shown on medium and
+                 full (owner final call). IR-220: v1.1 legend swatches. -->
+            <div v-if="tier !== 'small' && charts.get(p.key) !== undefined" class="hero-chart">
+              <LensChartVue :chart="charts.get(p.key)!.chart" unit="tok/s" :format="fmtTps" :aria-label="`decode and prefill, ${rangeLabel}`" />
+              <div class="bs-legend" aria-hidden="true" style="margin-top: 8px;">
+                <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--thread)" stroke-width="1.5" fill="none"/></svg>decode</span>
+                <span><svg width="14" height="8" viewBox="0 0 14 8"><path d="M0 6 L14 2" stroke="var(--ink-2)" stroke-width="1.5" fill="none"/></svg>prefill</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+      <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
+        <span>nothing serving</span>
+        <span style="letter-spacing: 0; text-transform: none;">start a setup on the Serve page — it appears here while it runs</span>
+      </div>
+
+      <h2 class="h2-gap">Nodes</h2>
+      <!-- IRI-159: 2-col node grid at any count — 1–3 nodes render without waste
+           (the odd last card spans both columns), 4 nodes fill it exactly. -->
+      <section v-if="sparkNodes.length > 0" class="nodes-grid">
+        <NodeCard v-for="node in sparkNodes" :key="node.id" :node="node" :snapshot="live.snapshots.get(node.id) ?? null" />
+      </section>
+      <div v-else class="ghost-grid" style="min-height: 120px; flex-direction: column; gap: 8px;">
+        <span>{{ totalCount === 0 ? "no nodes yet" : "no spark nodes" }}</span>
+        <span v-if="totalCount === 0" style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
+      </div>
+
       <article class="card section-gap">
         <div class="card__head"><h3>Power</h3><span class="chip">estimated</span></div>
       <div class="card__body" style="padding-top: 12px;">
@@ -844,6 +843,10 @@ function heroStateView(p: HeroProcess): HeroStateView {
     </aside>
   </div>
 
+  <!-- IRI-163 (ADR-0021): RoCE fabric between Sparks (no NAS, no LAN).
+       IR-285: below the shell, full-width — the ring diagram wants the width. -->
+  <NetworkCard v-if="sparkNodes.length > 1" />
+
   <!-- IRI-081: fleet update posture vs upstream baseline (informational only) -->
   <!-- IRI-159: the updates table keeps its full-width row (needs ≥640px; the
        card body scrolls horizontally on small screens). -->
@@ -966,8 +969,9 @@ html[data-tier="small"] .tempitem__name { flex: none; }
 .section-gap { margin: 20px 0 12px; }
 .h2-gap { margin: 20px 0 10px; }
 /* ── IRI-159: Main + Rail shell ────────────────────────────────────────
-   Main column (2fr): power. Rail (1fr): token stats · NAS store · fleet
-   clock caps · telemetry feed — all content-sized. The shell stacks at
+   Main column (2fr): serving hero · Nodes 2-col grid · power. Rail (1fr):
+   token stats · NAS store · fleet clock caps · telemetry feed — all
+   content-sized. The shell stacks at
    ≤1100 (the global statgrid breakpoint) and flattens to one column when
    more than one process is serving (ov-shell--flat). */
 .ov-shell {
@@ -980,14 +984,21 @@ html[data-tier="small"] .tempitem__name { flex: none; }
 .maincol,
 .rail {
   min-width: 0;
-}
-.rail {
   display: grid;
   gap: 16px;
   align-content: start;
 }
+/* IR-285: shell children are gap-spaced at every tier — the small-tier
+   rhythm rule (html[data-tier="small"] .section-gap) is more specific and
+   would otherwise re-add margins inside these grids. */
 .rail .section-gap,
-.maincol .section-gap {
+.maincol .section-gap,
+html[data-tier="small"] .rail .section-gap,
+html[data-tier="small"] .maincol .section-gap {
+  margin: 0;
+}
+.maincol .h2-gap,
+html[data-tier="small"] .maincol .h2-gap {
   margin: 0;
 }
 /* TTFT/ITL heroes keep the stacked body — their chart needs the 12px offset
