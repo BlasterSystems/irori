@@ -175,6 +175,43 @@ flowchart LR
   `NAS share <mount>`) carries no cleanup CTA — local cleanup cannot
   reclaim a remote mount (IR-242).
 
+### 4.1 Fleet network (IR-273, ADR-0021)
+
+Scope: the **RoCE fabric between Sparks**. The NAS and the management LAN are
+never drawn or measured.
+
+- **Link facts.** Each snapshot interface carries MAC, MTU, driver, a
+  `fabric | lan | virtual` kind, CIDRs, the bound RoCE port and complete
+  IPv4 neighbours (fabric ports only), plus RDMA port byte rates — RoCE
+  traffic bypasses `/proc/net/dev`. Static facts are read every 30 s.
+- **Topology** is derived from the latest snapshots, never stored: lanes
+  (netdev pairs) by neighbour MAC or shared point-to-point subnet, grouped
+  into links per node pair; a subnet shared by more than two nodes is a
+  switch. Warnings: MTU and speed mismatch, down lane, cluster worker without
+  a fabric path to its head, offline node, registry host not on the fabric.
+- **Overview Network card.** Diagram in cable order, per-link format and live
+  throughput (the larger of RDMA and kernel rates), latency from the agent
+  prober (5 pings per peer every 10 s), last test, warnings. Small tier: the
+  link table only.
+- **Live mode.** Opt-in 1 s / 500 ms / 250 ms rates over a shared 60 s lease
+  (10-minute cap), SSE only.
+- **Link tests** are on demand only: `net-tool-ensure` (apt `iperf3`, no
+  params) on both ends → `net-test-server` (one-shot iperf3 listener bound to
+  a verified fabric address, port 5201–5210, killed by its timeout) → client
+  forward and reverse (10 s, 4 streams each) and a 100-ping burst. One test at
+  a time; refused while an endpoint serves a setup or runs a transfer unless
+  overridden; results persisted (`network_tests`, newest 50 per link) and
+  labelled TCP. Kill switches: `testsEnabled`, `liveEnabled`,
+  `probeIntervalS` in `/api/v1/settings/network`.
+- **RDMA tests** (tool `rdma`): perftest `ib_write_bw` + `ib_send_lat` on the
+  lane's RoCE v2 GID — the number NCCL sees — next to the TCP default.
+- **Per-link history:** one row per link per minute (rates from 10 s
+  samples, prober RTT/loss), 7 days, shown as a 24 h sparkline per link.
+- **Pushes use the fabric** between directly cabled Sparks: the destination's
+  fabric address on each up lane replaces the registry (LAN) host, with a
+  one-shot LAN fallback when the fabric does not answer. Multi-hop paths are
+  never used.
+
 ## 5. Inference monitoring
 
 - Per-node LLM ports with backend auto-detection: vLLM, llama.cpp, SGLang, EXL3,
@@ -207,8 +244,21 @@ flowchart LR
     when the current version already satisfies the pin, so a stale env pin
     never downgrades a newer binary; after every succeeded models-inventory
     read the hub dispatches one install job per cache user whose reported
-    version is below the pin (silent skip when the pin is unset, the node is
-    busy, or the agent is offline).
+    version is below the pin (silent skip when the node is busy or the agent
+    is offline). **IR-272 setup convergence**: the inventory always reports
+    the node's model user — the configured cache user, else the agent user
+    (the NAS root modelctl) — even before it has an HF cache or a binary.
+    With no hub pin, a missing binary is still installed at the agent's
+    default pin (`IRORI_MODELCTL_PIN`, 0.24.0); below-pin upgrades wait for
+    a pin. The hub reads the inventory when an agent comes online and its
+    node is not set up (no report, the cache user not reported, a missing or
+    below-pin modelctl), when the cache user is set or changed (after the
+    config-update), and after every successful `modelctl-install`.
+    `modelctl-install` also creates the user's `~/.cache/huggingface/hub`.
+    Serving nodes (not the NAS) get the idempotent `ensure-rsync` once per
+    hub process (a failure retries after 6 h). A busy node keeps the step
+    pending and retries it when a job on that node settles or within
+    2 minutes; one auto-install per node and user per 30 minutes.
   - **Search/download** on the NAS: HF id/URL → manifest generation → staged
     resumable download → validate → atomic publish → activate. GGUF
     quantization selection; mmproj/MTP companions detected. Queue YAML built

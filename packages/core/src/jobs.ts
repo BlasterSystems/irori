@@ -57,6 +57,12 @@ export const JOB_KINDS = [
   // Curated-recipe install (IRI-082) — the hub stages start/stop scripts
   // (sha256-verified) onto the node; settlement creates the setup draft.
   "recipe-install",
+  // ADR-0021 (IRI-166): on-demand link tests — apt-install the test tools
+  // (no params), a one-shot listener bound to a fabric address, and the
+  // measuring client. The hub sequences them (network-tests.ts).
+  "net-tool-ensure",
+  "net-test-server",
+  "net-test-client",
 ] as const;
 
 export const recipeInstallParamsSchema = z.object({

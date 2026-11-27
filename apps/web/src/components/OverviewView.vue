@@ -6,6 +6,7 @@ import { live } from "../live";
 import { tier } from "../tiers";
 import HealthBanner from "./HealthBanner.vue";
 import NodeCard from "./NodeCard.vue";
+import NetworkCard from "./NetworkCard.vue";
 import Tip from "./Tip.vue";
 import LensChartVue from "./LensChart.vue";
 import { fetchAnalytics, fetchLlmHistory, fetchUpdates, setFleetClockCap, type FleetClockCapNode, type LlmHistoryPoint, type UpdatesResponse } from "../api";
@@ -685,6 +686,9 @@ function heroStateView(p: HeroProcess): HeroStateView {
     <span>{{ totalCount === 0 ? "no nodes yet" : "no spark nodes" }}</span>
     <span v-if="totalCount === 0" style="letter-spacing: 0; text-transform: none;">add your first node → register the nas → download a model → serve</span>
   </div>
+
+  <!-- IRI-163 (ADR-0021): RoCE fabric between Sparks (no NAS, no LAN). -->
+  <NetworkCard v-if="sparkNodes.length > 1" />
 
   <!-- Fleet power + NAS store (IRI-159): power keeps the main column of the
        Main+Rail shell; the rail holds token stats, the NAS store card, fleet

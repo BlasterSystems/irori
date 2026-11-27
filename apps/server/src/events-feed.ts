@@ -30,6 +30,9 @@ export const FEED_EXCLUDED: Readonly<Record<string, true>> = {
   "job-progress": true,
   "setup-log": true,
   "log-update": true,
+  // IRI-164 (ADR-0021): up to 4 frames/s per Spark while a live lease runs —
+  // high-rate telemetry that must never reach the ring or the journal.
+  "net-rates": true,
 };
 
 export function createEventFeed(

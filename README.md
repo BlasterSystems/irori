@@ -38,6 +38,7 @@ script, and a folder of scripts with a single, coherent system.
 | ![Node detail — live sensors, inference, clock state](docs/screenshots/node-detail.png) | ![Models — the NAS-backed store](docs/screenshots/models.png) |
 | ![Serve — clusters and the serving wizard](docs/screenshots/serve.png) | ![Benchmarks — decode, prefill, quality, tool eval](docs/screenshots/benchmarks.png) |
 | ![Analytics — from precomputed rollups](docs/screenshots/analytics.png) | ![Transfers — staged jobs, live-tracked](docs/screenshots/transfers.png) |
+| ![Network — the RoCE fabric between Sparks, live latency and link tests](docs/screenshots/network.png) | |
 
 ## Goals
 

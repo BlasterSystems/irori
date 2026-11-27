@@ -330,6 +330,17 @@ describe("buildCommand", () => {
     expect(() => buildCommand("modelctl-install", {}, { ...ctx, pin: "not-semver" })).toThrow(CommandBuildError);
   });
 
+  it("IR-272: creates the user's HF cache dir before the version gate", () => {
+    const own = buildCommand("modelctl-install", {}, ctx).argv[2]!;
+    expect(own).toContain('mkdir -p "/root/.cache/huggingface/hub"');
+    // A satisfied install exits at the gate — the dir must already exist.
+    expect(own.indexOf("mkdir -p")).toBeLessThan(own.indexOf("skipping install"));
+    const user = buildCommand("modelctl-install", { user: "operator" }, { ...ctx, resolveCacheHome: () => "/home/operator" });
+    // Runs inside runuser as the cache user, so the dir is theirs.
+    expect(user.argv!.slice(0, 3)).toEqual(["runuser", "-u", "operator"]);
+    expect(user.argv!.at(-1)).toContain('mkdir -p "/home/operator/.cache/huggingface/hub"');
+  });
+
   it("provisions a cache user's modelctl via runuser (IR-105)", () => {
     const built = buildCommand("modelctl-install", { user: "operator" }, { ...ctx, resolveCacheHome: () => "/home/operator" });
     expect(built.raw).toBe(true);

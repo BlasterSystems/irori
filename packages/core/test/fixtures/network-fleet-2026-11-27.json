@@ -1,0 +1,447 @@
+{
+ "capturedAt": "2026-11-27",
+ "source": "dev hub GET /api/v1/nodes, /api/v1/nodes/:id/snapshot, /api/v1/setups (agent 0.7.0; hostnames anonymised to *.lan)",
+ "nodes": [
+  {
+   "id": "7a575210-a47f-4877-9eb9-f384953a7baa",
+   "name": "DGX-1",
+   "kind": "spark",
+   "host": "dgx1.lan",
+   "online": true
+  },
+  {
+   "id": "9674a9fc-7dfd-44c7-bf93-c6365f4ac470",
+   "name": "DGX-2",
+   "kind": "spark",
+   "host": "dgx2.lan",
+   "online": true
+  },
+  {
+   "id": "359896b6-aaa9-475d-b5b8-f63085e8d1ea",
+   "name": "DGX-3",
+   "kind": "spark",
+   "host": "dgx3.lan",
+   "online": true
+  },
+  {
+   "id": "ce3a2638-1ae4-4882-8239-7bf17b8413fc",
+   "name": "DGX-4",
+   "kind": "spark",
+   "host": "10.0.10.7",
+   "online": true
+  },
+  {
+   "id": "63a12a25-296f-4b89-b1ce-982ed5992aaf",
+   "name": "NAS",
+   "kind": "nas",
+   "host": "10.0.10.26",
+   "online": true
+  }
+ ],
+ "snapshots": {
+  "7a575210-a47f-4877-9eb9-f384953a7baa": [
+   {
+    "iface": "enP7s7",
+    "rxBps": 129904,
+    "txBps": 100457,
+    "speedMbps": 1000,
+    "operState": "up",
+    "addrs": [
+     "10.0.10.4",
+     "fe80::93e:d88b:c9d6:667b"
+    ]
+   },
+   {
+    "iface": "enp1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.112.2",
+     "fe80::3aa7:46ff:fe5a:1b6f"
+    ]
+   },
+   {
+    "iface": "enp1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.118.1",
+     "fe80::3aa7:46ff:fe5a:1b70"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.113.2",
+     "fe80::3aa7:46ff:fe5a:1b73"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.119.1",
+     "fe80::3aa7:46ff:fe5a:1b74"
+    ]
+   },
+   {
+    "iface": "wlP9s9",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   },
+   {
+    "iface": "tailscale0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "unknown",
+    "addrs": [
+     "100.64.0.7"
+    ]
+   },
+   {
+    "iface": "br-326f112229eb",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   },
+   {
+    "iface": "docker0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   }
+  ],
+  "9674a9fc-7dfd-44c7-bf93-c6365f4ac470": [
+   {
+    "iface": "enP7s7",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 1000,
+    "operState": "up",
+    "addrs": [
+     "10.0.10.5",
+     "fe80::a8aa:6d9b:b973:b0b7"
+    ]
+   },
+   {
+    "iface": "enp1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.114.1",
+     "fe80::3aa7:46ff:fe5a:1a73"
+    ]
+   },
+   {
+    "iface": "enp1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.112.1",
+     "fe80::3aa7:46ff:fe5a:1a74"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.115.1",
+     "fe80::3aa7:46ff:fe5a:1a77"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.113.1",
+     "fe80::3aa7:46ff:fe5a:1a78"
+    ]
+   },
+   {
+    "iface": "wlP9s9",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   },
+   {
+    "iface": "tailscale0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "unknown",
+    "addrs": [
+     "100.64.0.7"
+    ]
+   },
+   {
+    "iface": "docker0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   }
+  ],
+  "359896b6-aaa9-475d-b5b8-f63085e8d1ea": [
+   {
+    "iface": "enP7s7",
+    "rxBps": 19044,
+    "txBps": 0,
+    "speedMbps": 1000,
+    "operState": "up",
+    "addrs": [
+     "10.0.10.6",
+     "fe80::ef2c:444d:88e3:e019"
+    ]
+   },
+   {
+    "iface": "enp1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.116.2",
+     "fe80::3aa7:46ff:fe98:a7c8"
+    ]
+   },
+   {
+    "iface": "enp1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.114.2",
+     "fe80::3aa7:46ff:fe98:a7c9"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.117.2",
+     "fe80::3aa7:46ff:fe98:a7cc"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.115.2",
+     "fe80::3aa7:46ff:fe98:a7cd"
+    ]
+   },
+   {
+    "iface": "wlP9s9",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   },
+   {
+    "iface": "tailscale0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "unknown",
+    "addrs": [
+     "100.64.0.7"
+    ]
+   },
+   {
+    "iface": "docker0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   }
+  ],
+  "ce3a2638-1ae4-4882-8239-7bf17b8413fc": [
+   {
+    "iface": "enP7s7",
+    "rxBps": 9524,
+    "txBps": 27910,
+    "speedMbps": 1000,
+    "operState": "up",
+    "addrs": [
+     "10.0.10.7",
+     "fe80::bed4:911d:6ed1:2697"
+    ]
+   },
+   {
+    "iface": "enp1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.118.4",
+     "fe80::7667:5fff:fe78:8c22"
+    ]
+   },
+   {
+    "iface": "enp1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.116.4",
+     "fe80::7667:5fff:fe78:8c23"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f0np0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.119.4",
+     "fe80::7667:5fff:fe78:8c26"
+    ]
+   },
+   {
+    "iface": "enP2p1s0f1np1",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": 200000,
+    "operState": "up",
+    "addrs": [
+     "10.100.117.4",
+     "fe80::7667:5fff:fe78:8c27"
+    ]
+   },
+   {
+    "iface": "wlP9s9",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   },
+   {
+    "iface": "docker0",
+    "rxBps": 0,
+    "txBps": 0,
+    "speedMbps": null,
+    "operState": "down",
+    "addrs": []
+   }
+  ]
+ },
+ "setups": [
+  {
+   "id": "bd56c19f-a911-45fd-b9cd-e786c4367054",
+   "name": "Qwen3.8-Flash-Next",
+   "kind": "single",
+   "headNodeId": "359896b6-aaa9-475d-b5b8-f63085e8d1ea",
+   "nodes": [],
+   "status": "stopped"
+  },
+  {
+   "id": "a10d0499-5a40-449a-8260-3ed4b8532591",
+   "name": "GLM-Flash-TP3-MIIA",
+   "kind": "cluster",
+   "headNodeId": "7a575210-a47f-4877-9eb9-f384953a7baa",
+   "nodes": [
+    {
+     "nodeId": "9674a9fc-7dfd-44c7-bf93-c6365f4ac470",
+     "role": "worker"
+    },
+    {
+     "nodeId": "359896b6-aaa9-475d-b5b8-f63085e8d1ea",
+     "role": "worker"
+    }
+   ],
+   "status": "stopped"
+  },
+  {
+   "id": "474c2800-a0d9-4c07-8d65-f52128f75d2a",
+   "name": "GLM-Flash-TP2-MIIA",
+   "kind": "cluster",
+   "headNodeId": "7a575210-a47f-4877-9eb9-f384953a7baa",
+   "nodes": [
+    {
+     "nodeId": "9674a9fc-7dfd-44c7-bf93-c6365f4ac470",
+     "role": "worker"
+    }
+   ],
+   "status": "stopped"
+  },
+  {
+   "id": "abe7adc3-cc3c-4c88-9100-351a0a68dcaa",
+   "name": "GLM-Flash-TP2-1104-MIIA",
+   "kind": "cluster",
+   "headNodeId": "7a575210-a47f-4877-9eb9-f384953a7baa",
+   "nodes": [
+    {
+     "nodeId": "9674a9fc-7dfd-44c7-bf93-c6365f4ac470",
+     "role": "worker"
+    }
+   ],
+   "status": "stopped"
+  },
+  {
+   "id": "07a8f4e4-e08b-46b3-baea-ea08dfd5dfc5",
+   "name": "GLM-5.3-Flash-EXL3-TP4",
+   "kind": "cluster",
+   "headNodeId": "7a575210-a47f-4877-9eb9-f384953a7baa",
+   "nodes": [
+    {
+     "nodeId": "9674a9fc-7dfd-44c7-bf93-c6365f4ac470",
+     "role": "worker"
+    },
+    {
+     "nodeId": "359896b6-aaa9-475d-b5b8-f63085e8d1ea",
+     "role": "worker"
+    },
+    {
+     "nodeId": "ce3a2638-1ae4-4882-8239-7bf17b8413fc",
+     "role": "worker"
+    }
+   ],
+   "status": "running"
+  }
+ ]
+}

@@ -8,6 +8,18 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Added
 
+- **New nodes and new model cache users are set up automatically** (IR-272 /
+  IRI-158). The inventory always reports the node's model user (the
+  configured cache user, else the agent user, i.e. the NAS root modelctl),
+  even before it has an HF cache or a modelctl binary. The hub reads the
+  inventory when an agent comes online and its node isn't set up, and when
+  the cache user is set or changed. The existing auto-install then provisions
+  `uv` and modelctl. `modelctl-install` also creates the user's
+  `~/.cache/huggingface/hub`, and serving nodes get `ensure-rsync` up front.
+  A busy node is retried when its job settles or within 2 minutes. With no
+  hub pin, missing binaries are installed at the agent default, which rises
+  from 0.23.0 to **0.24.0**.
+
 - **Installed draft and mmproj companions on the Models page** (IR-269 /
   IRI-155, follow-up to IR-264). The agent reads each active model's
   `.modelctl.json` when it reports the store catalog (store-confined,
@@ -61,6 +73,13 @@ All notable changes to Irori are recorded here. Format follows
   stays visible in the runtime filter chips and the drawer's header chip.
 
 ### Fixed
+
+- **The hub serves the agent installer from any install path** (IRI-157):
+  `/install-agent.sh`, `/irori-agent.service` and `/agent/irori-agent.mjs`
+  failed (404) when the hub's files lived under a hidden directory (for
+  example a checkout under `~/.herdr/`), because Express's `sendFile`
+  rejects absolute paths with a dot segment. Client-side deep links (the SPA
+  fallback) failed the same way. Both now send relative to their own directory.
 
 - **Clock-cap drift no longer warns on GPUs that cannot report application
   clocks** (IR-259): on DGX Spark (GB10) the driver rejects

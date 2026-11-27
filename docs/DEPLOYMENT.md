@@ -74,7 +74,7 @@ advisory-locked (ADR-0002).
 The agent is configured via env (no config file): `IRORI_SERVER_URL`,
 `IRORI_NODE_TOKEN`, `IRORI_CADENCE_MS`, `IRORI_LLM_TARGETS`,
 `IRORI_LLM_DETECT_ONLY`, `IRORI_MODELCTL_PIN` (minimum modelctl version the
-install job enforces; default `0.23.0`), `IRORI_MODELCTL_PATH`,
+install job enforces; default `0.24.0`, used when the hub pin is unset), `IRORI_MODELCTL_PATH`,
 `IRORI_HF_TOKEN` (optional HF token passed to modelctl as `HF_TOKEN` for
 gated/private repos; bootstrap fallback — a hub-set global token defined in
 the UI wins and is pushed via config-update, IRI-019), and
@@ -123,7 +123,13 @@ preinstalled: it uses the host's node when it is 24+, otherwise it provisions
 a pinned Node 24 into `/opt/irori/node` (sha256-verified from nodejs.org,
 override with `IRORI_NODE_VERSION`) and pins the unit's `ExecStart` and `PATH`
 to it. Preferred since IRI-011: everything comes from the hub itself — no
-GitHub reachability needed on the node. The Add-node modal shows this block
+GitHub reachability needed on the node. The installer itself sets up only
+Node, the bundle and the unit; the hub then provisions the rest within
+moments of the first hello (IR-272): `uv`, modelctl at or above the hub pin
+(the agent default `0.24.0` when no pin is set) for the node's model cache
+user (or root on the NAS), that user's `~/.cache/huggingface/hub`, and
+`rsync` on serving nodes. Setting or changing the model cache user later
+does the same for the new user. The Add-node modal shows this block
 ready to copy:
 
 ```sh

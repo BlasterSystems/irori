@@ -378,9 +378,9 @@ describe("network counters", () => {
 
     const rates = networkRates(net0, net1, 1000);
     expect(rates).toEqual([
-      { iface: "eth0", rxBps: 1000, txBps: 500, speedMbps: null, operState: null, addrs: [] },
-      { iface: "eth1", rxBps: 0, txBps: 0, speedMbps: null, operState: null, addrs: [] },
-      { iface: "eth2", rxBps: null, txBps: null, speedMbps: null, operState: null, addrs: [] },
+      { iface: "eth0", rxBps: 1000, txBps: 500, speedMbps: null, operState: null, addrs: [], mac: null, mtu: null, driver: null, kind: null, cidrs: [], rdma: null, neighbors: [], rdmaRxBps: null, rdmaTxBps: null },
+      { iface: "eth1", rxBps: 0, txBps: 0, speedMbps: null, operState: null, addrs: [], mac: null, mtu: null, driver: null, kind: null, cidrs: [], rdma: null, neighbors: [], rdmaRxBps: null, rdmaTxBps: null },
+      { iface: "eth2", rxBps: null, txBps: null, speedMbps: null, operState: null, addrs: [], mac: null, mtu: null, driver: null, kind: null, cidrs: [], rdma: null, neighbors: [], rdmaRxBps: null, rdmaTxBps: null },
     ]);
     expect(networkRates(net0, net1, 0)).toEqual([]);
     expect(networkRates(net0, null, 1000)).toEqual([]);

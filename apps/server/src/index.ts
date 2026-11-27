@@ -43,6 +43,7 @@ import { createBenchService, type BenchService } from "./bench-service.js";
 import { createAnalyticsService, type AnalyticsService } from "./analytics.js";
 import { createCleanupService, weeklySafePassParams, type CleanupService } from "./cleanup-service.js";
 import { createInventoryService, inventoryStale, type InventoryService } from "./inventory-service.js";
+import { createProvisioner, type Provisioner } from "./provisioning.js";
 import { createTokenLedgerEngine, pruneTokenLedger } from "./ledger.js";
 import { type CleanupEntry } from "./cleanup-service.js";
 import { createEnergyEngine } from "./energy.js";
@@ -51,6 +52,12 @@ import { createPushRemediation } from "./push-remediation.js";
 import { initOtel, shutdownOtel } from "./otel.js";
 import { log } from "./logger.js";
 import { installProcessGuards } from "./process-guards.js";
+import { createNetPeersSync, createNetworkService, nodeIdForHost, rewritePushHosts, type NetPeersSync, type NetworkService } from "./network-service.js";
+import { createNetworkSettingsService, type NetworkSettingsService } from "./network-settings.js";
+import { createNetLive, type NetLiveService } from "./network-live.js";
+import { createNetworkTests, createNetworkTestStore, type NetworkTestsService } from "./network-tests.js";
+import { createLinkHistory, createLinkHistoryStore, SAMPLE_MS as LINK_HISTORY_SAMPLE_MS, type LinkHistory } from "./network-history.js";
+import { isFabricEntry } from "@irori/core";
 
 const here = dirname(fileURLToPath(import.meta.url));
 /** Monorepo default: apps/web/dist next to the server. Containers override via IRORI_STATIC_DIR. */
@@ -105,6 +112,8 @@ const state: {
   cleanup: CleanupService | null;
   /** IRI-028: cached per-node model inventory reads. */
   inventory: InventoryService | null;
+  /** IR-272: node setup convergence (install, cache-user change). */
+  provisioner: Provisioner | null;
   usage: UsageStore | null;
   usageClients: UsageClients | null;
   usageChats: UsageChats | null;
@@ -120,6 +129,18 @@ const state: {
   eventJournal: EventJournalService | null;
   /** IRI-078: durable structured logs (agent ships + hub-scope lines). */
   logs: LogStore | null;
+  /** IRI-162 (ADR-0021): derived RoCE topology (needs the hub and setups). */
+  network: NetworkService | null;
+  /** ADR-0021: network kill switches + prober interval (settings row). */
+  networkSettings: NetworkSettingsService | null;
+  /** IRI-165: expected fabric peers per agent (config-update). */
+  netPeers: NetPeersSync | null;
+  /** IRI-164: leased live fabric rates (SSE only). */
+  netLive: NetLiveService | null;
+  /** IRI-166: on-demand link tests. */
+  networkTests: NetworkTestsService | null;
+  /** IRI-168: per-link minute history. */
+  linkHistory: LinkHistory | null;
 } = {
   dbHealthy: async () => false,
   hub: null,
@@ -140,6 +161,7 @@ const state: {
   analytics: null,
   cleanup: null,
   inventory: null,
+  provisioner: null,
   usage: null,
   usageClients: null,
   usageChats: null,
@@ -148,6 +170,12 @@ const state: {
   audit: null,
   eventJournal: null,
   logs: null,
+  network: null,
+  networkSettings: null,
+  netPeers: null,
+  netLive: null,
+  networkTests: null,
+  linkHistory: null,
 };
 let dbHandle: DbHandle | null = null;
 
@@ -176,6 +204,7 @@ const app = createApp({
   getAnalytics: () => state.analytics,
   getCleanup: () => state.cleanup,
   getInventory: () => state.inventory,
+  onCacheUserChanged: (nodeId) => void state.provisioner?.onCacheUserChanged(nodeId).catch(() => {}),
   getUsage: () => state.usage,
   getUsageClients: () => state.usageClients,
   getUsageChats: () => state.usageChats,
@@ -201,6 +230,17 @@ const app = createApp({
   },
   getHfToken: () => state.hfToken,
   getCadence: () => state.cadence,
+  getNetwork: () => state.network,
+  getNetworkSettings: () => state.networkSettings,
+  getNetLive: () => state.netLive,
+  getNetworkTests: () => state.networkTests,
+  getLinkHistory: () => state.linkHistory,
+  onNetworkSettingsChanged: () => {
+    if (state.networkSettings?.cached().liveEnabled === false) state.netLive?.stopAll();
+    // A new probe interval reaches every online agent with its config-update.
+    state.netPeers?.reset();
+    for (const nodeId of state.hub?.online() ?? []) void state.hub?.refreshConfig(nodeId).catch(() => false);
+  },
   getCost: () => state.cost,
   getModelctlPin: () => state.modelctlPin,
   getAudit: () => state.audit,
@@ -283,6 +323,11 @@ async function boot(): Promise<void> {
   // IRI-025: energy/token cost settings (Overview cost previews).
   state.cost = createCostService(dbHandle.db);
 
+  // ADR-0021: network kill switches + prober interval; read once so the
+  // first config-update already carries the stored interval.
+  state.networkSettings = createNetworkSettingsService(dbHandle.db);
+  await state.networkSettings.get().catch(() => null);
+
   // IR-105: hub-pinned modelctl version (config-update + auto-provisioning).
   state.modelctlPin = createModelctlPinService(dbHandle.db);
 
@@ -355,16 +400,46 @@ async function boot(): Promise<void> {
   const jobsService = createJobsService(dbHandle.db, (nodeId, msg) => hub === null ? false : hub.sendToNode(nodeId, msg), (e) => {
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: e.status, params: e.params, exitCode: e.exitCode, durationMs: e.durationMs });
     queueSettle?.(e);
+    void state.provisioner?.onJobSettled(e).catch(() => {});
   }, (e) => {
     // IRI-028: a job starts from many places (download queue, setups, web
     // pages) — the Activity drawer must learn about all of them.
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", params: e.params, exitCode: null, durationMs: null });
-  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e));
+  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e), (sourceId, params) =>
+    state.network === null ? Promise.resolve(params) : rewritePushHosts({ listNodes: () => store.list(), network: state.network }, sourceId, params));
+
+  // IR-272: setup script paths for models-inventory params (stale-recipe
+  // chip) — shared by the daily sweep and the provisioner.
+  const inventoryScriptPaths = async (): Promise<string[]> => {
+    if (state.setups === null) return [];
+    try {
+      const paths: string[] = [];
+      for (const s of await state.setups.list()) {
+        if (typeof s.scriptStart === "string") paths.push(s.scriptStart);
+        if (typeof s.scriptStop === "string") paths.push(s.scriptStop);
+      }
+      return [...new Set(paths)].slice(0, 50);
+    } catch {
+      return [];
+    }
+  };
+
+  state.provisioner = createProvisioner({
+    jobs: jobsService,
+    getNode: (id) => store.get(id),
+    getInventory: async (id) => (await state.inventory?.get(id).catch(() => null))?.report ?? null,
+    getPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()),
+    scriptPaths: inventoryScriptPaths,
+    log: (message) => log.info(message),
+  });
+  const provisionRetry = setInterval(() => void state.provisioner?.retryPending().catch(() => {}), 120_000);
+  provisionRetry.unref();
 
   pushRemediation = createPushRemediation({
     jobs: jobsService,
     getNode: (id) => store.get(id),
     getNodes: () => store.list(),
+    resolveNodeId: (host) => (state.network === null ? Promise.resolve(null) : nodeIdForHost({ listNodes: () => store.list(), network: state.network }, host)),
     log: (message) => log.info(message),
   });
 
@@ -466,7 +541,7 @@ async function boot(): Promise<void> {
   // every snapshot-driven rule (disk_pct, gpu_temp_c, kernel_xid, …) was dead
   // while sweep-driven rules worked. The wrap passes get/markSeen/verifyToken
   // through and only overrides insertSnapshot.
-  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), jobEvents, onNodeOnline: (nodeId) => { void clockCaps.reassert(nodeId); }, setupEvents: {
+  const hub = createAgentHub({ store: wrappedStore, llmStore, rings, sse, getCadenceMs: () => activeCadenceMs, serverVersion: version, getHfToken: () => (state.hfToken === null ? Promise.resolve(undefined) : state.hfToken.get()), getModelctlPin: () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), getNetConfig: (nodeId) => (state.netPeers === null ? Promise.reject(new Error("network not ready")) : state.netPeers.configFor(nodeId)), onNetRates: (nodeId, msg) => state.netLive?.onRates(nodeId, msg), jobEvents, onNodeOnline: (nodeId) => { state.netLive?.onNodeOnline(nodeId); void clockCaps.reassert(nodeId); void state.provisioner?.onAgentOnline(nodeId).catch(() => {}); }, setupEvents: {
     onAck: (msg, senderNodeId) => setupsService.onDriverAck(msg, senderNodeId),
     onEvent: (msg, senderNodeId) => setupsService.onDriverEvent(msg, senderNodeId).catch(() => {}),
     onLog: (msg, senderNodeId) => setupsService.onDriverLog(msg, senderNodeId).catch(() => {}),
@@ -502,6 +577,54 @@ async function boot(): Promise<void> {
   state.downloads = downloadQueue;
   state.setups = setupsService;
   state.bench = benchService;
+  state.network = createNetworkService({
+    listNodes: () => store.list(),
+    online: () => hub.online(),
+    latest: (nodeId) => rings.latest(nodeId),
+    listSetups: () => setupsService.list(),
+  });
+  state.netPeers = createNetPeersSync({
+    network: state.network,
+    probeIntervalS: () => state.networkSettings?.cached().probeIntervalS ?? 10,
+    online: () => hub.online(),
+    refreshConfig: (nodeId) => hub.refreshConfig(nodeId),
+  });
+  const netPeersTimer = setInterval(() => void state.netPeers?.tick().catch(() => {}), 60_000);
+  netPeersTimer.unref();
+  // IRI-164: the audience is every online Spark whose latest snapshot has a fabric port.
+  state.netLive = createNetLive({
+    enabled: () => state.networkSettings?.cached().liveEnabled ?? true,
+    fabricNodes: () => [...hub.online()].filter((id) => (rings.latest(id)?.network ?? []).some(isFabricEntry)),
+    sendToNode: (nodeId, msg) => hub.sendToNode(nodeId, msg),
+    sse,
+  });
+  const netLiveTimer = setInterval(() => state.netLive?.tick(), 5_000);
+  netLiveTimer.unref();
+  // IRI-166: link tests. A row left running by a hub restart has lost its
+  // orchestrator: settle it failed (its jobs are reaped by the job layer).
+  const networkTestStore = createNetworkTestStore(dbHandle.db);
+  void networkTestStore.failRunning("the hub restarted during the test").catch(() => 0);
+  state.networkTests = createNetworkTests({
+    store: networkTestStore,
+    jobs: jobsService,
+    topology: () => state.network!.topology(),
+    listSetups: () => setupsService.list(),
+    enabled: () => state.networkSettings?.cached().testsEnabled ?? true,
+    sse,
+    log: (message) => log.info(message),
+  });
+  // IRI-168: per-link history — 10 s samples folded into minute rows, 7 days kept.
+  const linkHistory = createLinkHistory({
+    store: createLinkHistoryStore(dbHandle.db),
+    topology: () => state.network!.topology(),
+    latest: (nodeId) => rings.latest(nodeId),
+    log: (message) => log.warn(message),
+  });
+  state.linkHistory = linkHistory;
+  const linkHistoryTimer = setInterval(() => void linkHistory.sample().catch(() => {}), LINK_HISTORY_SAMPLE_MS);
+  linkHistoryTimer.unref();
+  const linkHistoryPrune = setInterval(() => void linkHistory.prune().catch(() => 0), 3_600_000);
+  linkHistoryPrune.unref();
 
   // Staged transfers that were running at restart resume from the first
   // pending stage; the health watcher polls driver truth + probes every 5 s.
@@ -603,17 +726,7 @@ async function boot(): Promise<void> {
     void dbHandle?.isHealthy().then(async (healthy) => {
       if (!healthy || state.jobs === null || state.setups === null) return;
       try {
-        let scriptPaths: string[] = [];
-        try {
-          const setups = await state.setups.list();
-          for (const s of setups) {
-            if (typeof s.scriptStart === "string") scriptPaths.push(s.scriptStart);
-            if (typeof s.scriptStop === "string") scriptPaths.push(s.scriptStop);
-          }
-          scriptPaths = [...new Set(scriptPaths)].slice(0, 50);
-        } catch {
-          scriptPaths = [];
-        }
+        const scriptPaths = await inventoryScriptPaths();
         for (const nodeId of hub?.online() ?? []) {
           const inv = (await state.inventory?.get(nodeId).catch(() => null)) ?? null;
           if (!inventoryStale(inv, Date.now(), INVENTORY_DAY_MS)) continue;

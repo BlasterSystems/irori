@@ -477,6 +477,10 @@ export function feedLines(
           text: `transfer · ${event.label} ${event.status}${event.progress?.percent != null ? pct(event.progress.percent) : ""}`,
         });
         break;
+      case "network-test":
+        // IRI-166: the hub's summary already names both nodes.
+        lines.push({ t: event.serverTimeMs, text: event.summary });
+        break;
       default:
         break; // snapshot/llm/heartbeat never render
     }

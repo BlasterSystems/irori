@@ -33,6 +33,7 @@ This document is the current high-level map of **irori**. Keep it concise. Detai
 - The NAS store is **external state owned by modelctl** (ADR-0004); Irori reads `catalog.json` and mutates only through modelctl commands.
 - Secrets table: SSH credentials + agent tokens encrypted AES-256-GCM under `ENCRYPTION_KEY`.
 - **Clock control (IRI-068/IRI-124):** desired GPU (`nvidia-smi -lgc`/`-rgc`) and CPU (cpufreq `scaling_max_freq` ceiling — `min(cap, cpuinfo_max_freq)` per policy, so a cap above a cluster's maximum leaves it untouched) caps are stored on the node row and applied by the root agent. Boot-time re-apply is a per-cap systemd oneshot (`irori-gpu-clock-cap.service`; `irori-cpu-clock-cap.service` → `/etc/irori/cpu-clock-cap.sh`), installed on apply and removed on clear — re-apply on node online transitions is not implemented (SPEC §10 records the gap).
+- **Fleet network (IR-273, ADR-0021):** the RoCE topology is derived on request from the latest snapshot per node (`deriveTopology`, `packages/core`) and never stored. Persisted: `network_tests` (on-demand iperf3/perftest results, newest 50 per link) and `network_link_minutes` (per-link minute rows from 10 s samples, 7 d). Live high-rate rates ride a leased `net-live`/`net-rates` WS stream that the hub forwards as SSE `net-rates` only — excluded from the feed ring, the journal, rings and rollups. Kill switches live in the `network` settings row.
 
 ## Integrations
 

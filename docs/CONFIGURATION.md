@@ -38,7 +38,7 @@ variables are optional unless noted:
 | `IRORI_CADENCE_MS` | `2000` | Snapshot cadence (server may override) |
 | `IRORI_LLM_TARGETS` | none | `host:port,...` probe targets extending/overriding server-assigned ports |
 | `IRORI_LLM_DETECT_ONLY` | off | Force detection-only LLM probes (no rates) |
-| `IRORI_MODELCTL_PIN` | `0.23.0` | Fallback minimum modelctl version for the `modelctl-install` job; the hub's `modelctl_pin` setting (IR-105) overrides it via config-update and drives per-user auto-provisioning |
+| `IRORI_MODELCTL_PIN` | `0.24.0` | Fallback minimum modelctl version for the `modelctl-install` job; the hub's `modelctl_pin` setting (IR-105) overrides it via config-update and drives per-user auto-provisioning. With no hub pin, users with no modelctl at all are still provisioned at this version (IR-272) |
 | `IRORI_MODELCTL_PATH` | `/root/.local/bin/modelctl` | Explicit modelctl binary |
 | `IRORI_STATE_DIR` | `~/.local/state/irori-agent` | Persistent state: setup drivers, run logs, usage buffer |
 | `IRORI_MIN_STORE_FREE_BYTES` | `1649267441664` (1.5 TiB) | Download floor (IR-213, IR-207): the job-start gate fails `download`/`download-queue` jobs when the store volume's free space (agent telemetry, snapshot-fresh) is below this, and the same value rides `--min-free-bytes` into modelctl so the per-file check covers the whole expected download; `0` disables both. The per-file check belongs to modelctl's download path — the gate protects the job boundary |
@@ -99,6 +99,23 @@ is always optional; when unset, modelctl runs without `HF_TOKEN` and the
 quants listing sends no Authorization header. The modal's fields (HF token,
 snapshot cadence, energy cost, token cost) are unchanged by the v1.1
 restyle — only the surface (underline fields, ink actions) moved.
+
+### Network settings (runtime, ADR-0021)
+
+`GET`/`PUT /api/v1/settings/network` (a `network` row in the `settings`
+table; no environment variable). Any subset may be sent; unknown keys and
+out-of-range values are rejected, and an invalid stored value reads as the
+defaults.
+
+| Key | Default | Effect |
+|---|---|---|
+| `testsEnabled` | `true` | On-demand link tests (iperf3 / RDMA). `false` refuses new tests with `409`. |
+| `liveEnabled` | `true` | Opt-in live rates. `false` ends every lease and stops the agents' streams. |
+| `probeIntervalS` | `10` | Agent fabric ping prober interval, 0–3600 s; `0` turns it off. Pushed to online agents via `config-update`; agents on an older hub keep 10 s. |
+
+A `PUT` re-sends `config-update` to every online agent. Link tests also
+install `iperf3` and `perftest` on demand (apt, no parameters); there is no
+setting for the listener ports (iperf3 5201–5210, perftest 18515–18524).
 
 ### Alarm webhooks (runtime, IR-241)
 

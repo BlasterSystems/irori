@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { SCHEMA_VERSION } from "@irori/core";
 import type { GpuSnapshot, HardwareSnapshot } from "@irori/core";
 import { AGENT_VERSION } from "./version.js";
+import { counterRate, createLinkFactsCache, sampleRdmaCounters, type LinkFacts, type RdmaCounters } from "./link-facts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,6 +38,27 @@ export interface LinkDetail {
   speedMbps: number | null;
   operState: string | null;
   addrs: string[];
+  /** IRI-161: addresses with prefix length (os.networkInterfaces cidr). */
+  cidrs?: string[];
+}
+
+/** IRI-161: one link-facts cache per (sysRoot, procRoot) — tests use many roots. */
+const linkFactsCaches = new Map<string, ReturnType<typeof createLinkFactsCache>>();
+export function linkFactsCacheFor(sysRoot: string, procRoot: string): ReturnType<typeof createLinkFactsCache> {
+  const key = `${sysRoot}\0${procRoot}`;
+  let cache = linkFactsCaches.get(key);
+  if (cache === undefined) {
+    cache = createLinkFactsCache();
+    linkFactsCaches.set(key, cache);
+  }
+  return cache;
+}
+
+/** IRI-161: interface → RDMA port for the interfaces that have one. */
+export function rdmaPortsOf(facts: ReadonlyMap<string, LinkFacts>): Map<string, { device: string; port: number }> {
+  const ports = new Map<string, { device: string; port: number }>();
+  for (const [iface, f] of facts) if (f.rdma !== null) ports.set(iface, { device: f.rdma.device, port: f.rdma.port });
+  return ports;
 }
 
 export interface Meminfo {
@@ -59,6 +81,9 @@ interface SampleWindow {
   net1: NetCounters | null;
   block0: BlockCounters | null;
   block1: BlockCounters | null;
+  /** IRI-161: RDMA port byte counters at both ends of the window. */
+  rdma0: RdmaCounters;
+  rdma1: RdmaCounters;
   dtMs: number;
   packagePowerW: number | null;
 }
@@ -96,7 +121,12 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
   const sysRoot = opts.sysRoot ?? DEFAULT_SYS_ROOT;
 
   const gpusPromise = queryGpus();
-  const window = await sampleWindow(procRoot, sysRoot);
+  // IRI-161: link detail and the cached facts come first so the window can
+  // sample the RDMA counters of the interfaces that have a RoCE port.
+  const linkDetail = await readLinkDetail(sysRoot);
+  const speeds = new Map([...linkDetail].map(([iface, d]) => [iface, d.speedMbps] as const));
+  const facts = await linkFactsCacheFor(sysRoot, procRoot).get(sysRoot, procRoot, speeds);
+  const window = await sampleWindow(procRoot, sysRoot, rdmaPortsOf(facts));
   const gpus = await gpusPromise;
 
   const cpus = os.cpus();
@@ -146,8 +176,10 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
     memoryBandwidth: memoryBandwidthReading(),
     kernel: kernelCountersReading(),
     storage: await readStorage(procRoot, blockRatesOf(window)),
-    network: networkRates(window.net0, window.net1, window.dtMs, await readLinkDetail(sysRoot)),
+    network: networkRates(window.net0, window.net1, window.dtMs, linkDetail, facts, window),
     gpus,
+    // IRI-165: the prober's latest results are attached by the agent loop.
+    linkProbes: [],
     load1,
     uptimeS: Math.floor(os.uptime()),
   };
@@ -157,25 +189,31 @@ export async function collect(opts: CollectorOptions = {}): Promise<HardwareSnap
 // Sampling window (CPU usage, network rates, package power)
 // ---------------------------------------------------------------------------
 
-async function sampleWindow(procRoot: string, sysRoot: string): Promise<SampleWindow> {
+async function sampleWindow(
+  procRoot: string,
+  sysRoot: string,
+  rdmaPorts: ReadonlyMap<string, { device: string; port: number }> = new Map(),
+): Promise<SampleWindow> {
   const started = performance.now();
-  const [cpu0, net0, block0, energy0] = await Promise.all([
+  const [cpu0, net0, block0, energy0, rdma0] = await Promise.all([
     Promise.resolve(os.cpus()),
     sampleNetCounters(procRoot),
     sampleBlockCounters(sysRoot),
     readRaplEnergyUj(sysRoot),
+    sampleRdmaCounters(sysRoot, rdmaPorts),
   ]);
   const { promise: windowDelay, resolve: windowDelayDone } = Promise.withResolvers<void>();
   setTimeout(windowDelayDone, CPU_SAMPLE_DELAY_MS);
   await windowDelay;
-  const [cpu1, net1, block1, energy1] = await Promise.all([
+  const [cpu1, net1, block1, energy1, rdma1] = await Promise.all([
     Promise.resolve(os.cpus()),
     sampleNetCounters(procRoot),
     sampleBlockCounters(sysRoot),
     readRaplEnergyUj(sysRoot),
+    sampleRdmaCounters(sysRoot, rdmaPorts),
   ]);
   const dtMs = performance.now() - started;
-  return { cpu0, cpu1, net0, net1, block0, block1, dtMs, packagePowerW: raplPowerW(energy0, energy1, dtMs) };
+  return { cpu0, cpu1, net0, net1, block0, block1, rdma0, rdma1, dtMs, packagePowerW: raplPowerW(energy0, energy1, dtMs) };
 }
 
 /** CPU busy percentage from two os.cpus() samples (M1 algorithm, injected). */
@@ -796,6 +834,8 @@ export function networkRates(
   net1: NetCounters | null,
   dtMs: number,
   link?: Map<string, LinkDetail>,
+  facts?: ReadonlyMap<string, LinkFacts>,
+  rdma?: { rdma0: RdmaCounters; rdma1: RdmaCounters },
 ): HardwareSnapshot["network"] {
   if (net0 === null || net1 === null || !(dtMs > 0)) return [];
   const rates: HardwareSnapshot["network"] = [];
@@ -803,6 +843,9 @@ export function networkRates(
     if (iface === "lo") continue;
     const c0 = net0.get(iface);
     const detail = link?.get(iface);
+    const f = facts?.get(iface);
+    const r0 = rdma?.rdma0.get(iface);
+    const r1 = rdma?.rdma1.get(iface);
     rates.push({
       iface,
       rxBps: c0 ? Math.max(0, Math.round((c1.rx - c0.rx) / (dtMs / 1000))) : null,
@@ -810,6 +853,16 @@ export function networkRates(
       speedMbps: detail?.speedMbps ?? null,
       operState: detail?.operState ?? null,
       addrs: detail?.addrs ?? [],
+      // IRI-161 (ADR-0021): link facts; defaults when sysfs is unavailable.
+      mac: f?.mac ?? null,
+      mtu: f?.mtu ?? null,
+      driver: f?.driver ?? null,
+      kind: f?.kind ?? null,
+      cidrs: detail?.cidrs ?? [],
+      rdma: f?.rdma ?? null,
+      neighbors: f?.neighbors ?? [],
+      rdmaRxBps: counterRate(r0?.rx, r1?.rx, dtMs),
+      rdmaTxBps: counterRate(r0?.tx, r1?.tx, dtMs),
     });
   }
   return rates;
@@ -887,18 +940,20 @@ export function blockRatesOf(window: Pick<SampleWindow, "block0" | "block1" | "d
 export async function readLinkDetail(sysRoot: string): Promise<Map<string, LinkDetail>> {
   const detail = new Map<string, LinkDetail>();
   const addrsByIface = new Map<string, string[]>();
+  const cidrsByIface = new Map<string, string[]>();
   for (const [iface, infos] of Object.entries(os.networkInterfaces())) {
     const list = infos ?? [];
-    const v4 = list.filter((i) => i.family === "IPv4").map((i) => i.address);
-    const v6 = list.filter((i) => i.family === "IPv6").map((i) => i.address);
-    addrsByIface.set(iface, [...v4, ...v6]);
+    const v4 = list.filter((i) => i.family === "IPv4");
+    const v6 = list.filter((i) => i.family === "IPv6");
+    addrsByIface.set(iface, [...v4, ...v6].map((i) => i.address));
+    cidrsByIface.set(iface, [...v4, ...v6].map((i) => i.cidr).filter((c): c is string => typeof c === "string"));
   }
   let ifaces: string[];
   try {
     ifaces = await fs.readdir(path.join(sysRoot, "class", "net"));
   } catch {
     // No sysfs (macOS): address detail only; speed/operstate stay null.
-    for (const [iface, addrs] of addrsByIface) detail.set(iface, { speedMbps: null, operState: null, addrs });
+    for (const [iface, addrs] of addrsByIface) detail.set(iface, { speedMbps: null, operState: null, addrs, cidrs: cidrsByIface.get(iface) ?? [] });
     return detail;
   }
   await Promise.all(
@@ -918,7 +973,7 @@ export async function readLinkDetail(sysRoot: string): Promise<Map<string, LinkD
       } catch {
         // operstate is optional in old kernels.
       }
-      detail.set(iface, { speedMbps, operState, addrs: addrsByIface.get(iface) ?? [] });
+      detail.set(iface, { speedMbps, operState, addrs: addrsByIface.get(iface) ?? [], cidrs: cidrsByIface.get(iface) ?? [] });
     }),
   );
   return detail;

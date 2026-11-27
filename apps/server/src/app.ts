@@ -1,5 +1,11 @@
+import { registerNetworkRoutes } from "./network-routes.js";
+import type { NetworkService } from "./network-service.js";
+import type { NetworkSettingsService } from "./network-settings.js";
+import type { NetLiveService } from "./network-live.js";
+import type { NetworkTestsService } from "./network-tests.js";
+import type { LinkHistory } from "./network-history.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { otelRequestMiddleware } from "./otel.js";
@@ -228,6 +234,18 @@ export interface AppDeps {
    * exposed on the version payload; setCadenceMs keeps it in sync on PUT.
    */
   getCadence?: () => CadenceService | null;
+  /** IRI-162 (ADR-0021): fleet network topology; absent or null = 503. */
+  getNetwork?: () => NetworkService | null;
+  /** ADR-0021: network kill switches + prober interval; absent or null = 503. */
+  getNetworkSettings?: () => NetworkSettingsService | null;
+  /** IRI-168: per-link minute history; absent or null = 503. */
+  getLinkHistory?: () => LinkHistory | null;
+  /** IRI-166: on-demand link tests; absent or null = 503. */
+  getNetworkTests?: () => NetworkTestsService | null;
+  /** IRI-164: the leased live-rate stream; absent or null = 503. */
+  getNetLive?: () => NetLiveService | null;
+  /** Called after a successful PUT /api/v1/settings/network. */
+  onNetworkSettingsChanged?: () => void;
   /** IRI-025: energy/token cost settings. Optional — when absent or null
    *  (degraded), the cost settings routes answer 503 like the cadence routes. */
   getCost?: () => CostService | null;
@@ -235,6 +253,9 @@ export interface AppDeps {
    *  (degraded), the setting routes answer 503 and no auto-provisioning is
    *  dispatched (agents keep their env pin). */
   getModelctlPin?: () => ModelctlPinService | null;
+  /** IR-272: a node's model cache user was set or changed, and the agent
+   *  has been sent the new config — converge that user's setup. */
+  onCacheUserChanged?: (nodeId: string) => void;
   /**
    * IRI-077: durable audit log. Optional — absent/null (degraded) routes
    * behave exactly as unmanaged; mutating routes never fail because of it.
@@ -331,7 +352,9 @@ export function createApp(deps: AppDeps): Express {
       res.setHeader("Content-Type", type);
       res.setHeader("Content-Disposition", `attachment; filename="${name}"`);
       res.setHeader("Cache-Control", "no-store");
-      res.sendFile(path);
+      // root + basename: send rejects any dot-segment in an absolute path,
+      // which 404'd these routes when the hub sat under a hidden dir (~/.x/).
+      res.sendFile(basename(path), { root: dirname(path) });
     };
   app.get("/install-agent.sh", serveArtifact("installer", "text/x-shellscript", "install-agent.sh"));
   app.get("/irori-agent.service", serveArtifact("unit", "text/plain", "irori-agent.service"));
@@ -656,14 +679,30 @@ export function createApp(deps: AppDeps): Express {
     // absent from the request — apply only the keys the client sent.
     const requested = typeof req.body === "object" && req.body !== null ? Object.keys(req.body) : [];
     const patch = Object.fromEntries(Object.entries(body.data).filter(([k]) => requested.includes(k)));
-    if ((await store.get(id)) === null) return res.status(404).json({ error: "node not found" });
+    const before = await store.get(id);
+    if (before === null) return res.status(404).json({ error: "node not found" });
+    // IR-272: a new (non-empty) cache user needs its own modelctl and HF
+    // cache. Read the old value before patching (a store may hand back the
+    // row it then mutates).
+    const previousCacheUser = (before.cacheUser ?? "").trim();
+    const nextCacheUser = typeof patch.cacheUser === "string" ? patch.cacheUser.trim() : "";
+    const cacheUserChanged = "cacheUser" in patch && nextCacheUser !== "" && nextCacheUser !== previousCacheUser;
     await store.patch(id, patch);
     // IRI-034: agent-consumed fields changed → push a fresh config-update
     // now; without this the agent keeps its old probe set (ghosting removed
     // ports) until the next WS reconnect.
     if (Object.keys(patch).some((k) => AGENT_CONFIG_KEYS.has(k))) {
       const hub = deps.getHub();
-      if (hub !== null) void hub.refreshConfig(id).catch(() => {});
+      if (hub !== null) {
+        // The inventory must run under the new cache user: dispatch only
+        // after the config-update has gone out (it can overtake otherwise).
+        void hub
+          .refreshConfig(id)
+          .then((sent) => {
+            if (sent && cacheUserChanged) deps.onCacheUserChanged?.(id);
+          })
+          .catch(() => {});
+      }
     }
     const row = await store.get(id);
     if (row === null) return res.status(404).json({ error: "node not found" });
@@ -773,6 +812,16 @@ export function createApp(deps: AppDeps): Express {
       if (err instanceof JobDispatchError) return res.status(409).json({ error: err.message });
       throw err;
     }
+  });
+
+  registerNetworkRoutes(app, {
+    getNetwork: () => deps.getNetwork?.() ?? null,
+    getSettings: () => deps.getNetworkSettings?.() ?? null,
+    onSettingsChanged: () => deps.onNetworkSettingsChanged?.(),
+    getAudit,
+    getLive: () => deps.getNetLive?.() ?? null,
+    getTests: () => deps.getNetworkTests?.() ?? null,
+    getHistory: () => deps.getLinkHistory?.() ?? null,
   });
 
   app.get("/api/v1/nodes/:id/snapshot", async (req, res) => {
@@ -1744,6 +1793,12 @@ export function createApp(deps: AppDeps): Express {
         error: "agent-update must use POST /api/v1/nodes/:id/agent-update",
       });
     }
+    // IRI-166 (ADR-0021): link-test jobs only through /api/v1/network/tests,
+    // which applies the kill switch, the busy-endpoint guard, the one-test
+    // limit and persistence; a direct dispatch would bypass all four.
+    if (body.kind === "net-tool-ensure" || body.kind === "net-test-server" || body.kind === "net-test-client") {
+      return res.status(400).json({ error: `${body.kind} must be started through POST /api/v1/network/tests` });
+    }
     const jobs = deps.getJobs();
     if (jobs === null) return res.status(503).json({ error: "database unavailable" });
     const store = requireStore(res);
@@ -2325,7 +2380,8 @@ export function createApp(deps: AppDeps): Express {
     app.use((req, res, next) => {
       if (req.method !== "GET" && req.method !== "HEAD") return next();
       if (req.path.startsWith("/api/") || req.path === "/agent-ws") return next();
-      res.sendFile(join(staticDir, "index.html"), (err) => {
+      // root: see serveArtifact — a rootless absolute path 404s under a dot-dir.
+      res.sendFile("index.html", { root: staticDir }, (err) => {
         if (err) next();
       });
     });
