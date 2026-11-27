@@ -51,7 +51,8 @@ After the mockup review, they also asked that the card never overflow and adapt 
 - Live on while an agent sends no live frames (an old agent or a lapsed lease), or a single late frame: judged from snapshots, with no false "stale".
 - Rings of 3 or 5 nodes: badges and labels clear both lanes on diagonal edges.
 - A fabric of switched subnets only: node tiles still render.
-- Links whose topology "a" end runs counter-clockwise: rates are swapped into ring direction.
+- Links whose topology "a" end runs counter-clockwise: rates are swapped into ring direction. Direction comes from the drawn geometry, so nodes without fabric links cannot flip a lane.
+- Mixed link formats: each row names its own format.
 - Light and dark themes.
 
 ## Integration impact
@@ -84,4 +85,11 @@ Web bundle only. The live store records snapshot receipt times, an additive clie
 
 ## Changelog
 
+- 2026-11-27: PR review fixes:
+  - lane direction is decided from the drawn geometry, so a node without fabric links can no longer flip the ring's closing edge;
+  - each lane ends in an arrowhead, so direction never depends on colour, even on phones where rate labels are hidden;
+  - one 2.5× freshness rule for live rates and the stale verdict;
+  - per-link format shown in rows when formats differ;
+  - first-frame time step clamped;
+  - the tooltip's loss text fixed.
 - 2026-11-27: Network card shows directional traffic motion, has no text on edges, adds a summary and lays out by its own width; ADR-0022 flow colour; snapshot receipt times in the live store (IR-286 / IRI-171).

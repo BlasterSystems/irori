@@ -193,7 +193,9 @@ never drawn or measured.
   (the larger of RDMA and kernel rates), latency from the agent prober
   (5 pings per peer every 10 s), last test and warnings (IR-286):
   - Each cable is two lanes, coloured by ring direction (clockwise
-    `--flow-cw`, counter-clockwise `--flow-ccw`, ADR-0022).
+    `--flow-cw`, counter-clockwise `--flow-ccw`, ADR-0022). Each lane ends in
+    an arrowhead, so direction never depends on colour. Direction is decided
+    from the drawn geometry.
   - Particles move at a log scale of each direction's rate, from 1 Mb/s to
     400 Gb/s. Idle, stale (more than 2.5 × the hub's snapshot cadence or the
     Live interval), offline and down links never move.

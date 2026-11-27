@@ -47,10 +47,29 @@ const emit = defineEmits<{ hover: [target: HoverTarget] }>();
 /** Lanes sit ±this many units from the edge's centre line (laneGeometry default). */
 const LANE_OFFSET = 5;
 
+/** A small chevron-tipped triangle at a lane's end, pointing along travel. */
+function arrowHead([p, q]: [{ x: number; y: number }, { x: number; y: number }]): string {
+  const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+  const ux = (q.x - p.x) / len;
+  const uy = (q.y - p.y) / len;
+  const tip = { x: q.x - ux * 3, y: q.y - uy * 3 };
+  const back = { x: tip.x - ux * 7, y: tip.y - uy * 7 };
+  const w = 3.2;
+  return [
+    [tip.x, tip.y],
+    [back.x - uy * w, back.y + ux * w],
+    [back.x + uy * w, back.y - ux * w],
+  ]
+    .map(([x, y]) => `${x!.toFixed(1)},${y!.toFixed(1)}`)
+    .join(" ");
+}
+
 const centre = computed(() => ({ x: props.layout.width / 2, y: props.layout.height / 2 }));
 
 interface Geo {
   edge: DiagramEdge;
+  /** Arrowhead polygons at the travel end of each lane (direction without colour or text). */
+  heads: { cw: string; ccw: string };
   cw: [{ x: number; y: number }, { x: number; y: number }];
   ccw: [{ x: number; y: number }, { x: number; y: number }];
   pill: { x: number; y: number; anchor: "start" | "middle" | "end"; cwArrow: string; ccwArrow: string };
@@ -79,7 +98,7 @@ const geos = computed<Geo[]>(() =>
     const bw = edge.badge === null ? 0 : edge.badge.text.length * 6.6 + 14;
     const badgeD = LANE_OFFSET + (bw / 2) * nx + 9 * ny + 4;
     const badge = edge.badge === null ? null : { x: g.mid.x + g.outer.x * badgeD, y: g.mid.y + g.outer.y * badgeD, w: bw };
-    return [{ edge, cw: g.cw, ccw: g.ccw, pill: { ...pill, cwArrow: arrowFor(a, b), ccwArrow: arrowFor(b, a) }, badge }];
+    return [{ edge, cw: g.cw, ccw: g.ccw, heads: { cw: arrowHead(g.cw), ccw: arrowHead(g.ccw) }, pill: { ...pill, cwArrow: arrowFor(a, b), ccwArrow: arrowFor(b, a) }, badge }];
   }),
 );
 
@@ -128,7 +147,8 @@ const hasWork = (): boolean =>
   [...targets.value.values()].some((v) => v >= IDLE_BPS) || [...laneState.values()].some((st) => st.bps >= IDLE_BPS);
 
 function frame(now: number): void {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  // rAF's frame time can precede the performance.now() that seeded `last`.
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   for (const [key, el] of flowEls) {
     const st = laneState.get(key) ?? { bps: 0, offset: 0 };
@@ -257,6 +277,8 @@ const ariaLabel = computed(() => {
           :x2="g.ccw[1].x"
           :y2="g.ccw[1].y"
         />
+        <polygon class="nethead netlane--cw" :points="g.heads.cw" />
+        <polygon class="nethead netlane--ccw" :points="g.heads.ccw" />
         <line
           class="nethit"
           :x1="(g.cw[0].x + g.ccw[1].x) / 2"
@@ -321,6 +343,10 @@ const ariaLabel = computed(() => {
 .netlane { stroke-width: 2; stroke-linecap: round; opacity: 0.2; }
 .netlane--cw, .netflow--cw { stroke: var(--flow-cw); }
 .netlane--ccw, .netflow--ccw { stroke: var(--flow-ccw); }
+.nethead { stroke: none; opacity: 0.75; }
+.nethead.netlane--cw { fill: var(--flow-cw); }
+.nethead.netlane--ccw { fill: var(--flow-ccw); }
+.netedge--stale .nethead, .netedge--offline .nethead, .netedge--down .nethead { display: none; }
 .netflow { stroke-width: 2.2; stroke-linecap: round; opacity: 0; }
 .netedge--stale .netlane, .netedge--offline .netlane { stroke: var(--ink-3); opacity: 0.8; stroke-dasharray: 3 5; }
 .netedge--down .netlane { stroke: var(--thread); opacity: 0.8; stroke-dasharray: 5 5; }

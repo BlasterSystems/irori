@@ -49,7 +49,7 @@ Adopt Option 2:
   - dark (both the OS-dark media query and `data-theme="dark"`): `oklch(0.72 0.12 250)`
 - `--flow-ccw` is used only to encode the counter-clockwise or reverse direction of traffic.
 - It must never be used for status, actions, links or decoration.
-- Direction is always encoded redundantly, by lane position (clockwise outer, counter-clockwise inner) and by arrows in the rate labels.
+- Direction is always encoded redundantly, never by colour alone. At every card width, lane position (clockwise outer, counter-clockwise inner) and an arrowhead at the end of each lane show it. Where they are shown, arrows in the rate labels repeat it; labels are hidden on phone-width cards.
 
 All other ADR-0018 rules stand unchanged:
 - one filled button per surface;

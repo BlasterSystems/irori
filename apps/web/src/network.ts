@@ -186,7 +186,7 @@ export async function releaseLiveLease(leaseId: string): Promise<void> {
 
 /**
  * Snapshot entries with a fresh live frame's rates laid over them (fresh =
- * received within three intervals plus a second). A stale frame, or none,
+ * received within STALE_INTERVALS of its interval). A stale frame, or none,
  * leaves the 2 s snapshot rates in place: the fallback for old agents.
  */
 export function withLiveRates(
@@ -332,24 +332,30 @@ export function flowParams(t: number): { speed: number; gap: number; opacity: nu
 }
 
 /**
- * Whether a link's a → b direction runs clockwise around the drawn ring
- * (b follows a in `order`, wrapping). Rings of fewer than three nodes have no
- * meaningful rotation: a → b counts as clockwise.
+ * Whether travel a → b runs clockwise around the drawing's centre, decided
+ * from the DRAWN positions (screen coordinates, y down: a positive cross
+ * product of the two centre-relative vectors is clockwise). Geometry, not list
+ * order, so isolated nodes in the layout or chords cannot flip a lane. An edge
+ * through the centre (two nodes, or a missing position) counts a → b as
+ * clockwise.
  */
-export function isClockwise(link: Pick<TopologyLink, "a" | "b">, order: string[]): boolean {
-  const n = order.length;
-  if (n < 3) return true;
-  const ia = order.indexOf(link.a);
-  const ib = order.indexOf(link.b);
-  if (ia < 0 || ib < 0) return true;
-  if ((ia + 1) % n === ib) return true;
-  if ((ib + 1) % n === ia) return false;
-  return true; // a chord, not a ring edge: keep a → b
+export function isClockwise(
+  a: { x: number; y: number } | undefined,
+  b: { x: number; y: number } | undefined,
+  centre: { x: number; y: number },
+): boolean {
+  if (a === undefined || b === undefined) return true;
+  const cross = (a.x - centre.x) * (b.y - centre.y) - (a.y - centre.y) * (b.x - centre.x);
+  return Math.abs(cross) < 1e-6 ? true : cross > 0;
 }
 
-/** Whether a live frame still overrides the snapshot rates (three intervals plus a second). */
+/**
+ * Whether a live frame still overrides the snapshot rates. The same rule as
+ * staleness (STALE_INTERVALS × the frame's interval), so the rates shown and
+ * the freshness verdict always come from the same sample.
+ */
 export function liveFrameFresh(frame: { receivedAtMs: number; intervalMs: number }, nowMs: number): boolean {
-  return nowMs - frame.receivedAtMs <= frame.intervalMs * 3 + 1000;
+  return nowMs - frame.receivedAtMs <= frame.intervalMs * STALE_INTERVALS;
 }
 
 /**
@@ -365,11 +371,10 @@ export function sampleSource(input: {
   snapshotIntervalMs: number;
   nowMs: number;
 }): { lastSampleMs: number | null; intervalMs: number } {
-  // A frame is the freshness source only while it is itself fresh by the stale
-  // rule; a late frame (still within withLiveRates' wider window) hands over to
-  // the snapshot instead of flagging a link stale whose snapshot is current.
+  // A late frame hands over to the snapshot (rates and verdict together, via
+  // the shared liveFrameFresh rule) instead of flagging a fresh link stale.
   const f = input.frame;
-  if (input.liveOn && f !== undefined && input.nowMs - f.receivedAtMs <= f.intervalMs * STALE_INTERVALS) {
+  if (input.liveOn && f !== undefined && liveFrameFresh(f, input.nowMs)) {
     return { lastSampleMs: f.receivedAtMs, intervalMs: f.intervalMs };
   }
   return { lastSampleMs: input.snapshotAtMs ?? null, intervalMs: input.snapshotIntervalMs };

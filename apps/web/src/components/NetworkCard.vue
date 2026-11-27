@@ -272,7 +272,9 @@ const rows = computed<LinkRow[]>(() => {
     const entries = liveOn.value ? withLiveRates(live.snapshots.get(link.a)?.network, live.netRates?.get(link.a), clock.value) : live.snapshots.get(link.a)?.network;
     const rates = linkRates(link, entries);
     const lat = linkLatency(link, { a: live.snapshots.get(link.a)?.linkProbes, b: live.snapshots.get(link.b)?.linkProbes });
-    const cw = isClockwise(link, order.value);
+    const lay = layout.value;
+    const centre = { x: (lay?.width ?? 0) / 2, y: (lay?.height ?? 0) / 2 };
+    const cw = isClockwise(lay?.pos.get(link.a), lay?.pos.get(link.b), centre);
     const [fromId, toId] = cw ? [link.a, link.b] : [link.b, link.a];
     const cwBps = cw ? rates.txBps : rates.rxBps;
     const ccwBps = cw ? rates.rxBps : rates.txBps;
@@ -349,7 +351,7 @@ const diagramEdges = computed<DiagramEdge[]>(() =>
       r.format,
       `${r.from} → ${r.to}  ${fmtBits(r.cwBps)}`,
       `${r.to} → ${r.from}  ${fmtBits(r.ccwBps)}`,
-      `RTT ${fmtRtt(r.rttMs)} · loss ${r.lossPct ?? "—"} %`,
+      `RTT ${fmtRtt(r.rttMs)} · loss ${r.lossPct === null ? "—" : `${r.lossPct} %`}`,
       `lanes ${r.link.lanesUp}/${r.link.lanes.length} · ${testSummary(latestTests.value.get(r.id), clock.value)}`,
     ],
   })),
@@ -526,6 +528,7 @@ const highlight = computed(() => {
                     ><span v-else-if="r.link.lanesUp < r.link.lanes.length" class="netwarn-text"> · degraded</span>
                   </div>
                   <div v-if="r.mtuMismatch" class="mono netwarn-text netrow__sub">{{ r.format }}</div>
+                  <div v-else-if="commonFormat === null" class="mono muted netrow__sub">{{ r.format }}</div>
                 </td>
                 <td class="netc-dir mono">
                   <div class="netdir"><i class="netdir__cw" aria-hidden="true"></i>{{ r.from }} → {{ r.to }} <span class="netdir__v">{{ fmtBits(r.cwBps) }}</span></div>

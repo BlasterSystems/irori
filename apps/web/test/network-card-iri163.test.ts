@@ -136,6 +136,8 @@ describe("live mode (IRI-164)", () => {
     const frame = { receivedAtMs: 1000, intervalMs: 250, ifaces: [{ iface: "p0", rxBps: 5, txBps: 6, rdmaRxBps: 7, rdmaTxBps: 8 }] };
     expect(withLiveRates(entries, frame, 1500)![0]).toMatchObject({ rxBps: 5, txBps: 6, rdmaRxBps: 7, rdmaTxBps: 8 });
     expect(withLiveRates(entries, frame, 3000)![0]).toMatchObject({ rxBps: 1, txBps: 1 });
+    // IR-286: one freshness rule — past 2.5 × the interval the snapshot rates return.
+    expect(withLiveRates(entries, frame, 1000 + 626)![0]).toMatchObject({ rxBps: 1, txBps: 1 });
     expect(withLiveRates(entries, undefined, 0)).toBe(entries);
   });
 

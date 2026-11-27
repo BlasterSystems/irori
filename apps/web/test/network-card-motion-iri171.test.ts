@@ -107,17 +107,33 @@ describe("motion helpers", () => {
     expect(half.opacity).toBeCloseTo(0.675);
   });
 
-  it("orients links by the drawn ring, clockwise when b follows a", () => {
+  it("orients links by the drawn geometry: clockwise around the centre on screen", () => {
     const t = realTopology();
-    const order = ringOrder(t.nodes, t.links);
-    const [d1, d2, d4] = [idOf("DGX-1"), idOf("DGX-2"), idOf("DGX-4")];
-    expect(isClockwise({ a: d1, b: d2 }, order)).toBe(true);
-    expect(isClockwise({ a: d2, b: d1 }, order)).toBe(false);
-    expect(isClockwise({ a: d4, b: d1 }, order)).toBe(true); // wraps
-    expect(isClockwise({ a: d1, b: d4 }, order)).toBe(false);
-    expect(isClockwise({ a: "x", b: "y" }, ["x", "y"])).toBe(true); // two nodes: a → b
-    // Every real link is exactly one ring step in one direction.
-    for (const l of t.links) expect(isClockwise(l, order) !== isClockwise({ a: l.b, b: l.a }, order)).toBe(true);
+    const lay = diagramLayout(ringOrder(t.nodes, t.links));
+    const c = { x: lay.width / 2, y: lay.height / 2 };
+    const at = (name: string) => lay.pos.get(idOf(name));
+    expect(isClockwise(at("DGX-1"), at("DGX-2"), c)).toBe(true); // top-left → top-right
+    expect(isClockwise(at("DGX-2"), at("DGX-1"), c)).toBe(false);
+    expect(isClockwise(at("DGX-4"), at("DGX-1"), c)).toBe(true); // bottom-left → top-left (closing edge)
+    expect(isClockwise(at("DGX-1"), at("DGX-4"), c)).toBe(false);
+    for (const l of t.links) expect(isClockwise(lay.pos.get(l.a), lay.pos.get(l.b), c) !== isClockwise(lay.pos.get(l.b), lay.pos.get(l.a), c)).toBe(true);
+    // Two nodes (edge through the centre) or a missing position: a → b.
+    expect(isClockwise({ x: 0, y: 190 }, { x: 520, y: 190 }, { x: 260, y: 190 })).toBe(true);
+    expect(isClockwise(undefined, { x: 1, y: 1 }, c)).toBe(true);
+  });
+
+  it("keeps the closing edge clockwise when an isolated node joins the layout", () => {
+    // Ring A-B-C-D plus E with no links: ringOrder puts E last, so list order no longer wraps D → A.
+    const t = realTopology();
+    const iso = { ...t.nodes[0]!, id: "zzzz-isolated", name: "ZZ-5" };
+    const order = ringOrder([...t.nodes, iso], t.links);
+    expect(order.at(-1)).toBe(iso.id);
+    const lay = diagramLayout(order);
+    const c = { x: lay.width / 2, y: lay.height / 2 };
+    const p = (id: string) => lay.pos.get(id)!;
+    // Each ring step in order is clockwise on screen, including D → A.
+    const ring = order.slice(0, 4);
+    for (let i = 0; i < 4; i++) expect(isClockwise(p(ring[i]!), p(ring[(i + 1) % 4]!), c)).toBe(true);
   });
 
   it("derives link state with down > offline > stale > idle > ok", () => {
@@ -213,6 +229,8 @@ describe("NetworkCard (IR-286)", () => {
     const w = await mountCard(realTopology());
     const edges = w.findAll(".netedge");
     expect(edges).toHaveLength(4);
+    // Direction never depends on colour or text alone: every lane ends in an arrowhead.
+    expect(w.findAll(".nethead")).toHaveLength(8);
     for (const e of edges) {
       // The only text inside an edge group is a deviation badge (none here).
       expect(e.findAll("text").filter((t) => t.element.closest(".netbadge") === null)).toHaveLength(0);
@@ -321,6 +339,9 @@ describe("NetworkCard (IR-286)", () => {
     expect(badges).toContain("1/2 lanes");
     expect(badges).toContain("MTU ≠");
     expect(w.find(".netsub").text()).toContain("mixed formats");
+    // Every row names its own format once formats differ (MTU-mismatch rows already flag theirs).
+    const rows = w.findAll("tr.netrow");
+    expect(rows.every((r) => r.text().includes("200G"))).toBe(true);
     expect(w.find(".netstat").text()).toContain("2 warnings");
     expect(w.text()).toContain("MTU 9000 ≠ 1500");
     w.unmount();
