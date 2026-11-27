@@ -85,6 +85,7 @@ Web bundle only. The live store records snapshot receipt times, an additive clie
 
 ## Changelog
 
+- 2026-11-27: AGENTS.md now allows a narrow amending ADR (owner decision at the PR #158 review), so ADR-0022 lands as an amendment of ADR-0018.
 - 2026-11-27: PR review fixes:
   - lane direction is decided from the drawn geometry, so a node without fabric links can no longer flip the ring's closing edge;
   - each lane ends in an arrowhead, so direction never depends on colour, even on phones where rate labels are hidden;
