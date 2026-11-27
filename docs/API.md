@@ -847,3 +847,11 @@ RoCE fabric between Sparks only; the NAS and the management LAN never appear.
   SSE `network-test {testId, linkId, status, stage, summary}` frame, which
   the event journal keeps. A row a hub restart left running is settled
   `failed` at boot.
+- **Fabric pushes (IRI-167).** When the topology has a direct link between a
+  push job's source and its destination node, the hub rewrites the job's
+  `hosts` to the destination's fabric address on every up lane (modelctl
+  `--host` fan-out; `user@` is kept) and keeps the originals in `_lanHosts`.
+  Pushes between Sparks that are not directly cabled keep the registry host.
+  Remediation (ADR-0014) resolves a fabric address to its node and pins the
+  host key per address; a fabric destination whose preflight reports
+  `unreachable` is re-pushed once over `_lanHosts` (`_fabricFallback: true`).

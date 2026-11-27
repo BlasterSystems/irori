@@ -52,7 +52,7 @@ import { createPushRemediation } from "./push-remediation.js";
 import { initOtel, shutdownOtel } from "./otel.js";
 import { log } from "./logger.js";
 import { installProcessGuards } from "./process-guards.js";
-import { createNetPeersSync, createNetworkService, type NetPeersSync, type NetworkService } from "./network-service.js";
+import { createNetPeersSync, createNetworkService, nodeIdForHost, rewritePushHosts, type NetPeersSync, type NetworkService } from "./network-service.js";
 import { createNetworkSettingsService, type NetworkSettingsService } from "./network-settings.js";
 import { createNetLive, type NetLiveService } from "./network-live.js";
 import { createNetworkTests, createNetworkTestStore, type NetworkTestsService } from "./network-tests.js";
@@ -400,7 +400,8 @@ async function boot(): Promise<void> {
     // IRI-028: a job starts from many places (download queue, setups, web
     // pages) — the Activity drawer must learn about all of them.
     sse.send({ type: "job", serverTimeMs: Date.now(), nodeId: e.nodeId, jobId: e.jobId, kind: e.kind, status: "running", params: e.params, exitCode: null, durationMs: null });
-  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e));
+  }, () => (state.modelctlPin === null ? Promise.resolve(null) : state.modelctlPin.get()), (e) => pushRemediation?.(e), (sourceId, params) =>
+    state.network === null ? Promise.resolve(params) : rewritePushHosts({ listNodes: () => store.list(), network: state.network }, sourceId, params));
 
   // IR-272: setup script paths for models-inventory params (stale-recipe
   // chip) — shared by the daily sweep and the provisioner.
@@ -433,6 +434,7 @@ async function boot(): Promise<void> {
     jobs: jobsService,
     getNode: (id) => store.get(id),
     getNodes: () => store.list(),
+    resolveNodeId: (host) => (state.network === null ? Promise.resolve(null) : nodeIdForHost({ listNodes: () => store.list(), network: state.network }, host)),
     log: (message) => log.info(message),
   });
 

@@ -499,3 +499,27 @@ export function expectedPeersOf(topology: Pick<Topology, "links">, nodeId: strin
   }
   return out.slice(0, 32);
 }
+
+/**
+ * IRI-167: the destination's fabric address on every up lane of a DIRECT
+ * link between `sourceId` and `destId` (lane order), or [] when the two are
+ * not directly cabled. Multi-hop paths are never used for pushes.
+ */
+export function fabricHostsFor(topology: Pick<Topology, "links">, sourceId: string, destId: string): string[] {
+  const link = topology.links.find((l) => (l.a === sourceId && l.b === destId) || (l.a === destId && l.b === sourceId));
+  if (link === undefined) return [];
+  const out: string[] = [];
+  for (const lane of link.lanes) {
+    if (!lane.up) continue;
+    const dest = lane.a.nodeId === destId ? lane.a : lane.b;
+    if (dest.ip !== null && IPV4_RE.test(dest.ip)) out.push(dest.ip);
+  }
+  return out;
+}
+
+/** IRI-167: the node that owns a fabric address in the topology, if any. */
+export function nodeForFabricIp(topology: Pick<Topology, "links" | "switches">, ip: string): string | null {
+  for (const link of topology.links) for (const lane of link.lanes) for (const ep of [lane.a, lane.b]) if (ep.ip === ip) return ep.nodeId;
+  for (const sw of topology.switches) for (const m of sw.members) if (m.ip === ip) return m.nodeId;
+  return null;
+}

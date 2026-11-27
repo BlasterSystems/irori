@@ -4,6 +4,8 @@ import { eq, inArray } from "drizzle-orm";
 import { createDbHandle, networkTests, nodes, settings, type Db, type DbHandle } from "@irori/db";
 import { createNetworkSettingsService, NETWORK_SETTINGS_KEY } from "../src/network-settings.js";
 import { createNetworkTestStore, KEEP_PER_LINK } from "../src/network-tests.js";
+import { createJobsService } from "../src/jobs-service.js";
+import { jobs } from "@irori/db";
 
 /**
  * ADR-0021 against a REAL Postgres (IRORI_TEST_DATABASE_URL): migration 0030
@@ -89,6 +91,19 @@ d("network tables (db integration)", () => {
     const t = await store.insert({ ...row(), bNodeId: c, linkId: [a, c].sort().join("|") });
     await db.delete(nodes).where(eq(nodes.id, c));
     expect(await db.select().from(networkTests).where(eq(networkTests.id, t.id))).toEqual([]);
+  });
+
+  it("IRI-167: a push job is created with the rewritten fabric hosts", async () => {
+    const sent: unknown[] = [];
+    const svc = createJobsService(db, (_n, msg) => (sent.push(msg), true), undefined, undefined, undefined, undefined, async (_src, params) => ({
+      ...params,
+      hosts: ["10.100.112.1", "10.100.113.1"],
+      _lanHosts: params.hosts,
+    }));
+    const row = await svc.create(a, "push", { name: "m", hosts: ["dgx2.lan"], jobs: 4 });
+    expect(row.params).toMatchObject({ hosts: ["10.100.112.1", "10.100.113.1"], _lanHosts: ["dgx2.lan"] });
+    expect(sent[0]).toMatchObject({ type: "job", kind: "push", params: { hosts: ["10.100.112.1", "10.100.113.1"] } });
+    await db.delete(jobs).where(eq(jobs.id, row.id));
   });
 
   it("round-trips the network settings row and ignores invalid stored values", async () => {

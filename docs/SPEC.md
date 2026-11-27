@@ -203,6 +203,10 @@ never drawn or measured.
   overridden; results persisted (`network_tests`, newest 50 per link) and
   labelled TCP. Kill switches: `testsEnabled`, `liveEnabled`,
   `probeIntervalS` in `/api/v1/settings/network`.
+- **Pushes use the fabric** between directly cabled Sparks: the destination's
+  fabric address on each up lane replaces the registry (LAN) host, with a
+  one-shot LAN fallback when the fabric does not answer. Multi-hop paths are
+  never used.
 
 ## 5. Inference monitoring
 

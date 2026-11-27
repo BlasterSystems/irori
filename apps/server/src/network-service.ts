@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { deriveTopology, expectedPeersOf, type HardwareSnapshot, type LinkProbe, type NetworkEntry, type SetupInfo, type Topology } from "@irori/core";
+import { deriveTopology, expectedPeersOf, fabricHostsFor, nodeForFabricIp, type HardwareSnapshot, type LinkProbe, type NetworkEntry, type SetupInfo, type Topology } from "@irori/core";
 
 /**
  * IRI-162 (ADR-0021): the hub's view of the RoCE fabric. The topology is
@@ -125,4 +125,54 @@ export function createNetPeersSync(deps: {
       sent.clear();
     },
   };
+}
+
+/**
+ * IRI-167 (ADR-0021): pushes between directly cabled Sparks dial the
+ * destination's fabric address on every up lane (modelctl `--host` fan-out)
+ * instead of the registry host, which is on the management LAN. The original
+ * hosts ride along as `_lanHosts` so push remediation can fall back once if
+ * the fabric is unreachable. Anything unexpected leaves the params untouched.
+ */
+export async function rewritePushHosts(
+  deps: { listNodes: () => Promise<NetworkNodeRecord[]>; network: Pick<NetworkService, "topology"> },
+  sourceId: string,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  // A remediation re-push or a LAN fallback keeps what it was given.
+  if (params._lanHosts !== undefined || params._fabricFallback === true) return params;
+  const hosts = Array.isArray(params.hosts) ? params.hosts.filter((h): h is string => typeof h === "string" && h.length > 0) : [];
+  if (hosts.length === 0 || hosts.length !== (params.hosts as unknown[]).length) return params;
+  try {
+    const [nodes, topology] = await Promise.all([deps.listNodes(), deps.network.topology()]);
+    const out: string[] = [];
+    for (const target of hosts) {
+      const at = target.indexOf("@");
+      const user = at >= 0 ? target.slice(0, at) : null;
+      const host = at >= 0 ? target.slice(at + 1) : target;
+      const dest = nodes.find((n) => n.host === host);
+      const ips = dest === undefined ? [] : fabricHostsFor(topology, sourceId, dest.id);
+      if (ips.length === 0) out.push(target);
+      else out.push(...ips.map((ip) => (user === null ? ip : `${user}@${ip}`)));
+    }
+    if (out.length === hosts.length && out.every((h, i) => h === hosts[i])) return params;
+    return { ...params, hosts: out, _lanHosts: hosts };
+  } catch {
+    return params; // topology unavailable: the registry host still works
+  }
+}
+
+/** IRI-167: resolve a push target host (registry host or fabric address) to its node id. */
+export async function nodeIdForHost(
+  deps: { listNodes: () => Promise<NetworkNodeRecord[]>; network: Pick<NetworkService, "topology"> },
+  host: string,
+): Promise<string | null> {
+  const nodes = await deps.listNodes();
+  const byRegistry = nodes.find((n) => n.host === host);
+  if (byRegistry !== undefined) return byRegistry.id;
+  try {
+    return nodeForFabricIp(await deps.network.topology(), host);
+  } catch {
+    return null;
+  }
 }

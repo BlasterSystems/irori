@@ -14,6 +14,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - **Live latency per link.** Agents ping every fabric peer (their ARP neighbours plus the far end of each lane, which the hub pushes) every 10 s and report RTT and loss in the snapshot; the card shows the worst up lane per link. The interval is a hub setting (`/api/v1/settings/network`, 0 turns it off), next to the kill switches for tests and live mode.
 - **Opt-in live mode.** A Live toggle on the card streams fabric rates at 1 s, 500 ms or 250 ms. The browser holds a 60 s lease it renews while visible; every viewer shares one stream at the fastest requested rate. Rates travel agent → hub → browser over the existing WebSocket and SSE and are never stored.
 - **Link tests on demand.** Each link has a Test button and the card has Test all fabric links. A test installs iperf3 where missing, opens a one-shot listener on the far end's fabric address, measures both directions (10 s, 4 streams) and a 100-ping burst, and keeps the result with its age (labelled TCP). The newest 50 results per link are kept.
+- **Pushes take the fabric.** A model push between two directly cabled Sparks now dials the destination's fabric address on both lanes instead of its 1 GbE management address. Pushes between Sparks that are not cabled to each other keep the LAN.
 
 ## Business rules and constraints
 
@@ -30,6 +31,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 - An unreachable peer, or a ping that cannot start, reports 100 % loss instead of failing; peers that vanish from the topology drop out of the results; a config-update never carries an invalid peer, so an old or strict agent never rejects the whole frame.
 - A hidden tab lets its lease lapse and silently takes a new one when it comes back; an old agent ignores `net-live` and the card falls back to snapshot rates; a frame that stops arriving goes stale on screen after three intervals.
 - A listener that never comes up fails the test and frees both job slots; one failed direction is reported next to the working one; a hub restart mid-test settles the row as failed at boot; a node deleted later takes its test rows with it.
+- A fabric destination that does not answer gets one automatic retry over the LAN address; the first fabric push to a node pins that node's host key per fabric address through the existing self-healing path.
 
 ## Integration impact
 
@@ -46,6 +48,7 @@ The Sparks talk to each other over ConnectX-7 RoCE cables: that fabric carries N
 
 ## Changelog
 
+- 2026-11-27 — S6 (IR-280 / IRI-167): pushes between directly cabled Sparks use the fabric.
 - 2026-11-27 — S5 (IR-279 / IRI-166): on-demand iperf3 link tests with guards and history.
 - 2026-11-27 — S3b (IR-283 / IRI-164): leased live RoCE rates over SSE.
 - 2026-11-27 — S4 (IR-278 / IRI-165): fabric latency prober, network settings.
