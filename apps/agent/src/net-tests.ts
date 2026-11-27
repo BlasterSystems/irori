@@ -124,7 +124,10 @@ export const defaultRunner: ProcRunner = (cmd, args, opts) =>
     let stderr = "";
     let buf = "";
     let settled = false;
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    // Own process group: a wrapper (stdbuf) may fork the tool instead of
+    // exec'ing it (uutils coreutils), so a kill must reach the whole group,
+    // or the tool would outlive its job and keep listening.
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
     const finish = (code: number | null): void => {
       if (settled) return;
       settled = true;
@@ -135,9 +138,14 @@ export const defaultRunner: ProcRunner = (cmd, args, opts) =>
     };
     const kill = (): void => {
       try {
-        child.kill("SIGKILL");
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
       } catch {
-        // already gone
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // already gone
+        }
       }
     };
     const onAbort = (): void => kill();

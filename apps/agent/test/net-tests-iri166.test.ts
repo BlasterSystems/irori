@@ -173,3 +173,36 @@ describe("parsers and fabric addresses", () => {
     expect(fabricAddrsOf(detail, facts)).toEqual([{ iface: "enp1s0f0np0", ip: "10.100.112.2", subnet: "10.100.112.0/24", rdma: null }]);
   });
 });
+
+describe("defaultRunner kills the whole process group (re-review N1)", () => {
+  it("leaves no child of a wrapper running after an abort", async () => {
+    const { defaultRunner } = await import("../src/net-tests.js");
+    const { execFileSync } = await import("node:child_process");
+    // A wrapper that FORKS its child (like uutils stdbuf), not exec: sh runs sleep as a child.
+    const marker = `${30 + Math.floor(Math.random() * 1000) / 1000}`;
+    const ctrl = new AbortController();
+    const started = Date.now();
+    const done = defaultRunner("sh", ["-c", `sleep ${marker}; echo after`], { signal: ctrl.signal, timeoutMs: 60_000 });
+    await new Promise((r) => setTimeout(r, 200));
+    const alive = () => {
+      try {
+        return execFileSync("pgrep", ["-f", `sleep ${marker}`]).toString().trim().length > 0;
+      } catch {
+        return false;
+      }
+    };
+    expect(alive()).toBe(true);
+    ctrl.abort();
+    const res = await done; // settles only once every pipe holder is gone
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(res.stdout).not.toContain("after");
+    expect(alive()).toBe(false);
+  });
+
+  it("the timeout kills the group too", async () => {
+    const { defaultRunner } = await import("../src/net-tests.js");
+    const res = await defaultRunner("sh", ["-c", "sleep 30; echo after"], { signal: new AbortController().signal, timeoutMs: 300 });
+    expect(res.code).toBeNull();
+    expect(res.stdout).not.toContain("after");
+  });
+});
