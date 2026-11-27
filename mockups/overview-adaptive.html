@@ -55,10 +55,6 @@
   .gap { margin-top:16px; }
   .mx { margin-left:20px; margin-right:20px; }
 
-  /* thermal alert row — degraded-only (IR-103) */
-  .thermal { display:flex; align-items:center; gap:8px; border:1px solid var(--accent); border-radius:8px;
-    padding:7px 12px; margin:14px 20px 0; font:12px var(--mono); color:var(--accent); flex-wrap:wrap; }
-
   /* temps strip — small tier only (IR-129, unchanged) */
   .tempsstrip { display:none; align-items:baseline; gap:14px; flex-wrap:wrap; border:1px solid var(--border); border-radius:8px;
     padding:8px 12px; margin:14px 20px 0; font:11px var(--mono); color:var(--muted); }
@@ -143,10 +139,8 @@
     <div class="viewport">
       <div class="pagehead">
         <h1>Overview</h1>
-        <p>5 nodes · 5 online · 1 serving · hottest <span class="hot">71.8 °C DGX-2</span></p>
+        <p>5 nodes · 5 online · 1 serving · hottest <span class="hot">DGX-2 GPU 71.8°C</span></p>
       </div>
-
-      <div class="thermal">⚠ thermal · 71.8 °C DGX-2 · 70.1 °C DGX-1 GPU — above 70 °C warn tier <span class="sub" style="margin-left:auto;">hidden on a healthy fleet (IR-103)</span></div>
 
       <div class="tempsstrip">fleet temps <span>DGX-1 gpu <b class="hotv">70.1 °C</b> cpu <b>58 °C</b></span><span>DGX-2 gpu <b class="hotv">71.8 °C</b> cpu <b>61 °C</b></span><span>DGX-3 gpu <b>64 °C</b> cpu <b>57 °C</b></span><span>DGX-4 gpu <b>61 °C</b> cpu <b>55 °C</b></span></div>
 

@@ -13,6 +13,7 @@ import {
   fleetEnergyKwh,
   fleetPowerSeries,
   fleetTemps,
+  hottestSourceLabel,
   fmtEnergy,
   heroDataForPort,
   heroSpark,
@@ -388,7 +389,7 @@ describe("OverviewView source pins", () => {
     expect(OVERVIEW_SRC).toContain("ov-shell--flat"); // >1 serving hero flattens the shell
     expect(OVERVIEW_SRC).toContain('class="nodes-grid"');
     expect(OVERVIEW_SRC).toContain(".nodes-grid > :last-child:nth-child(odd)"); // 1–3 nodes waste nothing
-    expect(OVERVIEW_SRC).toContain('class="thermal-alert"'); // degraded-only alert row
+    expect(OVERVIEW_SRC).not.toContain("thermal-alert"); // IR-287: alert row removed
     expect(OVERVIEW_SRC).toContain("hero-split"); // hero body splits stats | chart
     // rail composition order: token stats → NAS store → clock caps → feed
     const railIdx = OVERVIEW_SRC.indexOf('<aside class="rail">');
@@ -459,7 +460,27 @@ describe("fleet temperatures (IR-129)", () => {
       node("c", "DGX-3", true, snap([58, 88], 57)), // hottest GPU wins the item max
     ]);
     expect(r.items.map((i) => i.name)).toEqual(["DGX-3", "DGX-1", "DGX-2"]);
-    expect(r.hottest).toEqual({ name: "DGX-3", tempC: 88 });
+    expect(r.hottest).toEqual({ name: "DGX-3", tempC: 88, source: "gpu" });
+  });
+
+  it("names the CPU when the hottest reading is a CPU package (IR-287)", () => {
+    const r = fleetTemps([
+      node("a", "DGX-1", true, snap([66], 75.8)),
+      node("b", "DGX-3", true, snap([70], 52)),
+    ]);
+    expect(r.hottest).toEqual({ name: "DGX-1", tempC: 75.8, source: "cpu" });
+  });
+
+  it("names both sensors on a GPU = CPU tie, and the sole axis when one is missing (IR-287)", () => {
+    expect(fleetTemps([node("a", "DGX-1", true, snap([71], 71))]).hottest).toEqual({ name: "DGX-1", tempC: 71, source: "both" });
+    expect(fleetTemps([node("a", "DGX-1", true, snap([], 64))]).hottest).toEqual({ name: "DGX-1", tempC: 64, source: "cpu" });
+    expect(fleetTemps([node("a", "DGX-1", true, snap([64], null))]).hottest).toEqual({ name: "DGX-1", tempC: 64, source: "gpu" });
+  });
+
+  it("labels the sensor for the page head (IR-287)", () => {
+    expect(hottestSourceLabel("gpu")).toBe("GPU");
+    expect(hottestSourceLabel("cpu")).toBe("CPU");
+    expect(hottestSourceLabel("both")).toBe("GPU/CPU");
   });
 
   it("sinks offline nodes and marks sensor-less axes with null", () => {

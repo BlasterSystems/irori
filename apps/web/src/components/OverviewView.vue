@@ -28,6 +28,7 @@ import {
   granularityMs,
   heroDataForPort,
   heroSpark,
+  hottestSourceLabel,
   OVERVIEW_RANGES,
   peakDecode,
   peakSubLabel,
@@ -59,18 +60,6 @@ const fleetTempData = computed(() =>
   fleetTemps(
     sparkNodes.value.map((n) => ({ id: n.id, name: n.name, online: n.online, snapshot: live.snapshots.get(n.id) })),
   ),
-);
-
-// ─── IRI-159: degraded-only thermal alert row — the desktop answer to "what
-// is hot" now that node cards stay the per-node home for temps (the
-// temps-strip promotion was rejected: it would duplicate them). A healthy
-// fleet renders nothing (IR-103: chrome only for exceptions). Filtered from
-// the hottest-first fleetTemps order; gpu-only per the approved spec.
-const thermalAlertNodes = computed(() =>
-  fleetTempData.value.items.filter((i) => i.online && i.gpu !== null && i.gpu >= TEMP_WARN_C),
-);
-const thermalAlertText = computed(() =>
-  thermalAlertNodes.value.map((i) => `${i.gpu}°C ${i.name}`).join(" · "),
 );
 
 // ─── IR-189: fleet-wide clock caps — one action, per-node results ────────────
@@ -595,7 +584,7 @@ function heroStateView(p: HeroProcess): HeroStateView {
     <div>
       <h1>Overview</h1>
       <p>
-        <span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online · {{ heroProcesses.length }} serving<template v-if="fleetTempData.hottest !== null"> · hottest <span :class="{ hot: fleetTempData.hottest.tempC >= TEMP_WARN_C }">{{ fleetTempData.hottest.tempC }}°C {{ fleetTempData.hottest.name }}</span></template></span>
+        <span class="mono faint">{{ totalCount }} nodes · {{ onlineCount }} online · {{ heroProcesses.length }} serving<template v-if="fleetTempData.hottest !== null"> · hottest <span :class="{ hot: fleetTempData.hottest.tempC >= TEMP_WARN_C }">{{ fleetTempData.hottest.name }} {{ hottestSourceLabel(fleetTempData.hottest.source) }} {{ fleetTempData.hottest.tempC }}°C</span></template></span>
       </p>
     </div>
     <!-- IR-224 S4/S6: the range control and the Add node CTA live in the shell
@@ -607,14 +596,6 @@ function heroStateView(p: HeroProcess): HeroStateView {
        (database unavailable, hub disk) plus IR-204's node-disk rows with the
        clean-up-disk CTA, above everything else. -->
   <HealthBanner :findings="live.findings.value" :nodes="sortedNodes" />
-
-  <!-- IRI-159: degraded-only thermal alert — spark nodes at/above the warn
-       tier (70 °C), hottest first; hidden on a healthy fleet. -->
-  <div v-if="thermalAlertNodes.length > 0" class="thermal-alert" role="status">
-    <span class="thermal-alert__head">thermal</span>
-    <span class="mono">{{ thermalAlertText }}</span>
-    <span class="faint">≥ {{ TEMP_WARN_C }} °C warn tier</span>
-  </div>
 
   <!-- ── Fleet temperatures (IR-129): small tier only, ordered above the
        heroes — on phones the node cards are below the fold. Spark nodes only;
@@ -1021,29 +1002,6 @@ html[data-tier="small"] .maincol .h2-gap {
 }
 .nodes-grid > :last-child:nth-child(odd) {
   grid-column: 1 / -1;
-}
-/* IRI-159: degraded-only thermal alert — spark nodes at/above the warn
-   tier; a healthy fleet renders nothing (IR-103). */
-.thermal-alert {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-  border: 1px solid var(--thread);
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  margin: 12px 0 0;
-  font-size: 12.5px;
-  color: var(--thread-ink);
-}
-.thermal-alert__head {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.thermal-alert .faint {
-  margin-left: auto;
 }
 /* Rail clock caps: selects stack above the actions — a 428px rail fits two
    165px selects, not five controls on one line. */
