@@ -95,8 +95,7 @@ All notable changes to Irori are recorded here. Format follows
   `sync-local` check to let it through; the node page keeps the warning.
   An unknown or older version keeps the IR-289 behaviour. Raise the hub's
   modelctl pin to 0.25.1 to roll it out. The agent's fallback pin default
-  is unchanged in this release: raise it only after modelctl 0.25.1 is
-  published.
+  (`IRORI_MODELCTL_PIN`) rises from 0.24.0 to **0.25.1**.
 
 - **Store writes can no longer fall back to a node that cannot see the store
   properly** (IR-290 / IRI-174, ADR-0023, amends ADR-0009). Downloads,

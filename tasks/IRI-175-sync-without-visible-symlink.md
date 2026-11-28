@@ -22,7 +22,7 @@ modelctl can do that.
 
 - [x] modelctl tests: symlink present (unchanged path); directory entry with a valid journal (sync from the canonical object); journal written under another mount path; missing journal (actionable error); directory that differs from the journaled object (refused); journal object outside `models/` (refused).
 - [ ] On the dev fleet, a Spark still mounted over SMB syncs a store model successfully. (Needs the modelctl release and a deploy.)
-- [ ] Irori pin bump merged. (Deferred: the agent's fallback default cannot be raised until the tag exists on GitHub.)
+- [x] Irori pin bump: the agent's fallback default is `0.25.1` (done once the `v0.25.1` tag was published on 2026-11-28).
 - [x] S1 gating updated and tested for both pin sides.
 
 ## Scope

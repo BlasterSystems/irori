@@ -1,8 +1,9 @@
 # ADR-0023: Store writes run on the NAS node, or on a mounted node only with a write-safe store view
 
-- **Status:** Proposed
+- **Status:** Accepted
+- **Accepted:** 2026-11-28 — owner approval after the IRI-174 review loops (strict rule chosen by the owner; guard coverage and re-check recorded in `tasks/IRI-174-store-write-safety.md`)
 - **Date:** 2026-11-28
-- **Decision owners:** operator
+- **Decision owners:** Bruno Pires
 - **Scope:** Model store writers: store-node selection for store-mutating jobs, the hub's job dispatch guard, the download queue
 - **Tags:** modelctl, nas, downloads, jobs, storage, safety
 - **Supersedes:** None

@@ -66,6 +66,7 @@ This branch carries the epic's Irori stories, one commit per ticket.
 
 ## Changelog
 
+- chore(agent): raise the fallback modelctl pin default to 0.25.1; ADR-0023 accepted (IR-291 / IRI-175, IR-290).
 - feat(agent,server,core): a hidden store link no longer blocks NAS sync on nodes that report modelctl 0.25.1+ (IR-291 / IRI-175).
 - docs: store-side push spike findings (IR-292 / IRI-176).
 - fix(server,web,core): store writes need a write-safe store view; no blind fallback to a mounted Spark (IR-290 / IRI-174, ADR-0023).

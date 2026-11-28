@@ -267,7 +267,7 @@ never drawn or measured.
     the node's model user — the configured cache user, else the agent user
     (the NAS root modelctl) — even before it has an HF cache or a binary.
     With no hub pin, a missing binary is still installed at the agent's
-    default pin (`IRORI_MODELCTL_PIN`, 0.24.0); below-pin upgrades wait for
+    default pin (`IRORI_MODELCTL_PIN`, 0.25.1); below-pin upgrades wait for
     a pin. The hub reads the inventory when an agent comes online and its
     node is not set up (no report, the cache user not reported, a missing or
     below-pin modelctl), when the cache user is set or changed (after the

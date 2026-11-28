@@ -22,7 +22,7 @@ why.
 
 - [x] Core policy tests: NAS offline + Spark with an unsafe view → no store node for writes; NAS offline + Spark with a safe view → fallback works; NAS online → unchanged.
 - [x] Download-queue test: entries stay pending with the reason and dispatch when the NAS node returns.
-- [ ] ADR accepted and indexed in `docs/adr/README.md`. (Indexed as Proposed; acceptance is the owner's.)
+- [x] ADR accepted and indexed in `docs/adr/README.md`. (Accepted by the owner on 2026-11-28.)
 - [x] Added after review: setup transfers plan no HF download onto a node that sees the store's links as directories.
 - [x] `docs/API.md` and `docs/SPEC.md` describe the rule.
 - [x] Depends on S1 (the store-view signal).
@@ -88,7 +88,7 @@ why.
 
 - **ADR required:** Yes.
 - **Relevant ADRs:** ADR-0009 (amended), ADR-0004, ADR-0003.
-- **Proposed ADR:** ADR-0023, status Proposed.
+- **Proposed ADR:** ADR-0023, Accepted 2026-11-28.
 
 ## Deployment
 

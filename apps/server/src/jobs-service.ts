@@ -104,7 +104,7 @@ export async function reconcilePresenceFromInventory(db: Db, nodeId: string, rep
  * (version null) is converged too — skipping it left the user permanently
  * stuck ("unknown local cache user" on every per-user job). IR-272: with no
  * hub pin a missing binary is still installed — at the agent's own default
- * pin (0.24.0) — while below-pin upgrades wait for a pin. Silent skips (busy
+ * pin (0.25.1) — while below-pin upgrades wait for a pin. Silent skips (busy
  * node, offline agent) wait for the next inventory read; the install job
  * itself skips without a transfer when the version satisfies the gate, so a
  * stale env pin can never downgrade a newer binary.
