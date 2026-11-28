@@ -231,8 +231,16 @@ export function storeLinkNote(
   if (!syncNeedsVisibleLink(version)) {
     return { tone: "note", text: `this mount shows ${links} (SMB). Syncing from the store works here: modelctl ${version} reads the store's update journal instead.` };
   }
+  if (version === null) {
+    // Unknown is not "old": the pin may already be right. Send the reader to
+    // the cache row that failed to report, not to the pin.
+    return {
+      tone: "warn",
+      text: `this mount shows ${links} (SMB), and this node's modelctl version could not be read, so syncing from the store is held back. Refresh the inventory, and check the model cache user's row below for an error.`,
+    };
+  }
   return {
     tone: "warn",
-    text: `this mount shows ${links} (SMB), so syncing from the store will not work here. Raise the hub's modelctl pin to ${MODELCTL_SYNC_WITHOUT_SYMLINK} or newer and refresh, or mount the store over NFS.`,
+    text: `this mount shows ${links} (SMB), so syncing from the store will not work here with modelctl ${version}. Raise the hub's modelctl pin to ${MODELCTL_SYNC_WITHOUT_SYMLINK} or newer and refresh, or mount the store over NFS.`,
   };
 }

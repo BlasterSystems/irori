@@ -24,14 +24,19 @@ After modelctl 0.25.1 was rolled out on 2026-11-28, every Spark's node page stil
 
 Web and agent bundle. No API or schema change; the hub's behaviour is unchanged (the shared helper replaces identical inline logic).
 
+- An unknown version is not treated as an old one: the warning then points at the inventory and the cache user's row, not at the pin.
+- The agent's text keeps the hint for the store host ("run a repair check"), where a directory in `active/` is a real fault rather than a mount effect.
+
 ## Out of scope and follow-ups
 
 - The NAS node's Store card still shows the agent's warning text as it is.
+- The note judges the node's cache user. A resume for a different user's cache follows that user's modelctl on the hub; the page does not show that case separately.
 
 ## Verification
 
 - `pnpm test`: all workspaces green, with new cases for the note (web), the shared rule (core) and the agent's wording.
 - `pnpm typecheck`: exit 0.
+- Independent adversarial review: pass with findings; both fix-before-merge findings (the remedy for an unknown version, tests for the new agent wording) and the store-host hint are resolved.
 
 ## Changelog
 

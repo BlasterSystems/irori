@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { NodeInventory } from "@irori/core";
 import { storeLinkNote } from "../src/inventory";
 
+/** The wording agents send from this change on (apps/agent/src/inventory.ts). */
+const NEW_LINK_WARNING = "84 active entries are not visible as symlinks on this mount (an SMB mount hides the store's symlinks; on the store host itself, run a repair check); syncing them from the store needs modelctl 0.25.1 or newer on this node";
+/** The wording agents on the previous bundle still send. */
 const LINK_WARNING = "84 active entries are not visible as symlinks on this mount; sync from the store will not work for them (an SMB mount hides the store's symlinks; on the store host itself, run a repair check)";
 
 function inv(opts: { unlinked?: string[]; warning?: string | null; versions?: Record<string, string | null> }): Pick<NodeInventory, "store" | "local"> {
@@ -38,12 +41,31 @@ describe("storeLinkNote (IRI-175)", () => {
     expect(note?.text).not.toContain("will not work");
   });
 
-  it("stays a warning, with the fix, when that modelctl is older or unknown", () => {
-    for (const versions of [{ piresbruno: "0.25.0" }, { piresbruno: null }, {}] as Array<Record<string, string | null>>) {
+  it("recognises the link warning in the old and the new agent wording, and with no warning text at all", () => {
+    for (const warning of [LINK_WARNING, NEW_LINK_WARNING, null]) {
+      const ok = storeLinkNote(inv({ unlinked: hidden, warning, versions: { piresbruno: "0.25.1" } }), "piresbruno");
+      expect(ok?.tone, String(warning)).toBe("note");
+      const old = storeLinkNote(inv({ unlinked: hidden, warning, versions: { piresbruno: "0.25.0" } }), "piresbruno");
+      expect(old?.tone, String(warning)).toBe("warn");
+      // The page's own sentence, never the agent's raw text.
+      expect(old?.text).not.toContain("active entries are not visible");
+    }
+  });
+
+  it("stays a warning with the pin remedy when that modelctl is older", () => {
+    const note = storeLinkNote(inv({ unlinked: hidden, warning: LINK_WARNING, versions: { piresbruno: "0.25.0" } }), "piresbruno");
+    expect(note?.tone).toBe("warn");
+    expect(note?.text).toContain("will not work here with modelctl 0.25.0");
+    expect(note?.text).toContain("modelctl pin to 0.25.1");
+  });
+
+  it("does not send the reader to the pin when the version is unknown", () => {
+    for (const versions of [{ piresbruno: null }, {}] as Array<Record<string, string | null>>) {
       const note = storeLinkNote(inv({ unlinked: hidden, warning: LINK_WARNING, versions }), "piresbruno");
       expect(note?.tone).toBe("warn");
-      expect(note?.text).toContain("will not work here");
-      expect(note?.text).toContain("modelctl pin to 0.25.1");
+      expect(note?.text).toContain("modelctl version could not be read");
+      expect(note?.text).toContain("Refresh the inventory");
+      expect(note?.text).not.toContain("pin");
     }
   });
 

@@ -56,6 +56,7 @@ describe("inventory store link report (IRI-173)", () => {
     expect(report.store?.warning).toContain("2 active entries are not visible as symlinks");
     // True on every modelctl version: it names the requirement, not a verdict.
     expect(report.store?.warning).toContain("needs modelctl 0.25.1 or newer");
+    expect(report.store?.warning).toContain("on the store host itself, run a repair check");
     expect(report.store?.warning).not.toContain("will not work");
   });
 
