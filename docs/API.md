@@ -250,6 +250,22 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   `report.local[]` is one entry per user HF cache (`user`, `home`, `cacheDir`,
   `modelctlVersion`, `error`, `models[]`). Modelctl local state is per user,
   so a root agent lists each cache owner through `runuser`.
+- IRI-173: `report.store.unlinkedActive?: string[]` lists the `active/` names
+  this node sees as directories instead of symlinks (an SMB mount shows the
+  store's server-side symlinks that way, and modelctl `sync-local` refuses
+  them). `[]` = every link is visible; **absent = unknown** (an older agent,
+  or `active/` could not be listed). When it is non-empty and the store read
+  had no warning of its own, `store.warning` says so.
+- `GET /api/v1/placement?model=` uses that view (IRI-173): a node that mounts
+  the store but sees the model's link as a directory gets no `sync`. With no
+  holder to push from it is `unavailable` with the reason "store link not
+  visible on this node's mount — check the NAS share settings"; a reachable
+  holder still gives `push`. Unknown keeps `sync`, and the agent's
+  `sync-local` pre-check then fails the job with a plain message before
+  modelctl starts. A model-mutating job settle drops the node's report; the
+  hub keeps that report's store view in memory until the next report, so the
+  gate survives the settle (a hub restart reads as unknown). After fixing a
+  mount, refresh the node's inventory to clear a remembered hidden link.
 - `POST /api/v1/nodes/:id/models/refresh` → `202 {job}` dispatches the
   read-only `models-inventory` job (409 while the node has any active job;
   agents older than 0.4.0 fail it with "unknown job kind"). The hub persists

@@ -147,6 +147,28 @@ and on timeout prints the agent's last `connection error` / `server error`
 lines. The restart interrupts jobs running on that node (downloads,
 transfers), so re-run on an idle node.
 
+#### Store mount on Sparks (IRI-173)
+
+A Spark that syncs from the NAS store must see the store's `active/` entries
+as **symlinks**. modelctl on the NAS node writes ordinary symlinks on the
+QNAP volume, and `sync-local` refuses anything else. Check on the Spark:
+
+```sh
+stat -c %F /mnt/nas/active/<model-name>   # must print: symbolic link
+```
+
+- **SMB/CIFS** (the `mfsymlinks` mount from the M4 runbook) shows those
+  server-side symlinks as directories, so every sync from the store fails
+  there. `mfsymlinks` only covers links created through a client mount.
+- **NFS** passes symlinks through unchanged and is the expected fix: export
+  the QNAP `LLMs` share read-only to the Sparks and mount it at the node's
+  NAS root. Not verified on the fleet yet (2026-11-28: the QNAP exported
+  only `/Proxmox`); replace this note with the fstab line once it is.
+
+Irori reports what each node sees (node page warning, `store.unlinkedActive`
+in the inventory), does not offer a NAS sync to a node that cannot see the
+link, and fails `sync-local` with a plain message before modelctl starts.
+
 #### Behind a TLS reverse proxy (IRI-156)
 
 The dev hub is also published as `https://irori.as267.com` through Nginx Proxy

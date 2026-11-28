@@ -74,6 +74,18 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **Sync from the NAS no longer fails with "no active NAS reference" without
+  explanation** (IR-289 / IRI-173). An SMB mount shows the store's `active/`
+  symlinks as directories, and modelctl `sync-local` only accepts a symlink.
+  The node's inventory now lists the entries it cannot see as links
+  (`store.unlinkedActive`) with a warning on the node page. Placement and
+  setup transfers no longer offer a NAS sync to such a node: the Models page
+  shows the reason, and transfers fall through to a push or an HF download.
+  The agent also checks the store link before starting `sync-local` and
+  fails at once with a plain message (unmounted share, missing entry, hidden
+  link, dead mount). Nodes without a fresh inventory keep today's behaviour
+  and rely on that check. No schema change.
+
 - **The hub serves the agent installer from any install path** (IRI-157):
   `/install-agent.sh`, `/irori-agent.service` and `/agent/irori-agent.mjs`
   failed (404) when the hub's files lived under a hidden directory (for

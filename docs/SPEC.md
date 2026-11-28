@@ -292,6 +292,11 @@ never drawn or measured.
     the CX7 fabric beats the SMB store hop (IR-100); sync-local is the
     fallback when no holder is reachable, and staged transfers apply the same
     preference (the store node's own sync stays — local disk copy).
+    IRI-173: a node must see the store's `active/` entries as **symlinks**
+    to sync; an SMB mount shows them as directories. The inventory reports
+    what each node sees, placement and staged transfers skip the NAS sync
+    for a node that cannot see the link, and the agent checks the link
+    before `sync-local` starts.
     Transfers run as the node's **cache user** when one is set on the node
     (IR-101 / ADR-0011: `runuser`, the user's modelctl, scrubbed env), so
     models and registration state land in that user's HF cache instead of the

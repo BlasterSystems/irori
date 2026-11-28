@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type InventoryStore, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -246,6 +246,9 @@ export interface JobsService {
   findModel(name: string): Promise<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date } | null>;
   /** Node ids where a succeeded transfer (sync/download/push source) left the model. */
   presentNodesFor(name: string): Promise<string[]>;
+  /** IRI-173: the store view of the node's last report, kept after a
+   *  model-mutating settle dropped that report (null = none remembered). */
+  lastStoreView(nodeId: string): InventoryStore | null;
   /** Fails every running/queued job whose node is not in `onlineNodes`; returns affected job ids. */
   reapOffline(onlineNodes: ReadonlySet<string>): Promise<string[]>;
   /**
@@ -357,7 +360,12 @@ export function createJobsService(
 ): JobsService {
   /** IR-272: last auto-dispatched modelctl-install per node and user. */
   const autoInstallAttempts = new Map<string, number>();
+  /** IRI-173: each node's store view from the report a job settle dropped;
+   *  cleared by the next report. In memory only: a hub restart reads as
+   *  unknown, and the agent's sync-local pre-check covers that. */
+  const lastStoreViews = new Map<string, InventoryStore>();
   const service: JobsService = {
+    lastStoreView: (nodeId) => lastStoreViews.get(nodeId) ?? null,
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
       if (kind === "push" && rewritePushParams !== undefined) params = await rewritePushParams(nodeId, params);
@@ -589,6 +597,8 @@ export function createJobsService(
         if (status === "succeeded") {
           const report = await settleInventory(db, nodeId, jobId);
           if (report !== null) {
+            lastStoreViews.delete(nodeId); // IRI-173: a fresh report wins
+
             // IR-140: the listing is ground truth for presence — placement and
             // start staging read node_models, which transfer settles alone
             // never fed for out-of-band models.
@@ -661,6 +671,12 @@ export function createJobsService(
       // delete leaves leftovers. Drop the cached inventory so the next node
       // detail read (or the UI's post-settle refresh) rebuilds it.
       if (INVENTORY_MUTATING_KINDS.has(row.kind)) {
+        // IRI-173: how the node sees the store's links is a property of its
+        // mount, not of what it holds. Remember it across the reset so the
+        // sync gate does not forget a hidden link the moment a job settles.
+        const [prev] = await db.select({ report: nodeInventory.report }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
+        const prevStore = prev === undefined ? null : (nodeInventorySchema.safeParse(prev.report).data?.store ?? null);
+        if (prevStore?.unlinkedActive !== undefined) lastStoreViews.set(nodeId, prevStore);
         await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
       }
       // Store contents may have changed: ask the node to re-report its catalog

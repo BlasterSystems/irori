@@ -11,7 +11,7 @@ import { thresholds } from "../thresholds";
 import { COMPANIONS_UNREADABLE_LABEL, companionChips, companionRows, companionsUnreadable } from "../model-companions";
 import { draftKindLabel, draftSpecTypeToSend, effectiveDraftSpecType, hintProvenance, mmprojNote, preselectDraft, safeHref } from "../draft-choice";
 import CleanupDrawer from "./CleanupDrawer.vue";
-import { DOWNLOAD_BATCH_MAX_ENTRIES, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
+import { DOWNLOAD_BATCH_MAX_ENTRIES, STORE_LINK_HIDDEN_REASON, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
 import {
   bulkDeleteTotalBytes,
   cancelJob,
@@ -1494,8 +1494,8 @@ onBeforeUnmount(() => {
                        so name it instead of letting the click 409. -->
                   <span v-if="dispatchBlocker(row)" class="mono faint" style="display: block;">{{ dispatchBlockerLabel(row) }}</span>
                   <span v-if="row.action === 'unavailable' && row.reason" class="stat__sub capacityline">
-                    {{ row.reason }} ·
-                    <button class="bs-link" @click="openCleanup(row.node.id)">clean up disk — run audit</button>
+                    {{ row.reason }}<!-- IRI-173: a hidden store link is not a disk problem — no cleanup CTA. --><template v-if="row.reason !== STORE_LINK_HIDDEN_REASON"> ·
+                    <button class="bs-link" @click="openCleanup(row.node.id)">clean up disk — run audit</button></template>
                   </span>
                 </td>
                 <td>

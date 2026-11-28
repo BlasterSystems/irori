@@ -45,7 +45,7 @@ import {
 import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
 import { HfQuantsError, type HfQuantsService } from "./hf-quants.js";
 import type { HfTokenService } from "./hf-token.js";
-import { planPlacement, storeCompanionsStateSchema, type StoreCompanionsState } from "@irori/core";
+import { planPlacement, storeCompanionsStateSchema, storeLinkVisible, type StoreCompanionsState } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import { EVENT_FEED_CAP } from "./events-feed.js";
@@ -1997,15 +1997,21 @@ export function createApp(deps: AppDeps): Express {
       ...presentNodeIds.map((nodeId) => ({ nodeId, bytes: entry.bytes, online: online.has(nodeId) })),
     ];
     const placements = [];
+    const inventory = deps.getInventory?.() ?? null;
     for (const row of rows) {
       const snapshot = deps.rings.latest(row.id);
       const diskFreeBytes = maxDiskFree(snapshot);
+      // IRI-173: the node's own view of the store link (undefined = unknown).
+      // A job settle drops the report; the remembered view bridges the gap.
+      const report = row.nasRoot === null ? null : ((await inventory?.get(row.id).catch(() => null))?.report ?? null);
+      const linkVisible = row.nasRoot === null ? undefined : storeLinkVisible(report?.store ?? jobs.lastStoreView(row.id), entry.name);
       const target = {
         id: row.id,
         name: row.name,
         kind: row.kind,
         role: row.role,
         hasNasRoot: row.nasRoot !== null,
+        ...(linkVisible === undefined ? {} : { storeLinkVisible: linkVisible }),
         pushCapable: online.has(row.id) && row.enabled,
         diskFreeBytes,
       };

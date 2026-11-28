@@ -1167,6 +1167,12 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- IRI-173: a Spark has no Store card, so its store warning (e.g. links
+           hidden by the SMB mount) shows here. -->
+      <p v-if="inventory.store?.warning && node?.kind !== 'nas'" class="banner banner--warn" style="margin-bottom: 12px;">
+        NAS store at <span class="mono">{{ inventory.store.root }}</span>: {{ inventory.store.warning }}
+      </p>
+
       <article v-if="inventory.store && node?.kind === 'nas'" class="card" style="margin-bottom: 12px;">
         <div class="card__head">
           <h3>Store</h3>

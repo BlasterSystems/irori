@@ -22,6 +22,8 @@ import {
   type SetupValidateResultMsg,
   type SseEvent,
   type TransferStage,
+  storeLinkVisible,
+  type InventoryStore,
 } from "@irori/core";
 import { nodes, setupRuns, setups, setupTransfers, type Db, type NodeRecord } from "@irori/db";
 import type { Rings } from "./rings.js";
@@ -82,6 +84,8 @@ export interface SetupsServiceDeps {
   sendToNode: (nodeId: string, msg: unknown) => boolean;
   refreshNodeConfig: (nodeId: string) => Promise<boolean>;
   jobs: Pick<JobsService, "create" | "cancel" | "findModel" | "presentNodesFor">;
+  /** IRI-173: the node's latest inventory store view (null = no report). */
+  getStoreView?: (nodeId: string) => Promise<InventoryStore | null>;
   log?: (message: string) => void;
 }
 
@@ -996,10 +1000,18 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       // NAS-mounting target defers to pass 2 when a reachable node already
       // holds the model locally — the CX7 push beats the SMB store hop
       // (IR-100, same policy as planPlacement).
+      // IRI-173: a target that sees the store link as a directory cannot
+      // sync-local — it falls through to pass 2 (push, else HF download).
+      const linkHidden = new Set<string>();
+      for (const targetId of targetNodeIds) {
+        if (byId.get(targetId)?.nasRoot == null) continue;
+        const view = (await deps.getStoreView?.(targetId).catch(() => null)) ?? null;
+        if (storeLinkVisible(view, modelEntry?.name ?? shortName(row.model)) === false) linkHidden.add(targetId);
+      }
       const nasTargets: string[] = [];
       for (const targetId of targetNodeIds) {
         const target = byId.get(targetId);
-        if (target && !holderIds.has(targetId) && modelEntry !== null && target.nasRoot !== null) {
+        if (target && !holderIds.has(targetId) && modelEntry !== null && target.nasRoot !== null && !linkHidden.has(targetId)) {
           const holderReachable =
             targetId !== nasNode?.id &&
             allNodes.some((n) => holderIds.has(n.id) && n.id !== targetId && n.enabled && online.has(n.id));
@@ -1043,7 +1055,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
               downloads: [{ source: row.model, name: shortName(row.model) }],
               jobs: 4,
             });
-            if (target.nasRoot !== null) {
+            if (target.nasRoot !== null && !linkHidden.has(targetId)) {
               pushStage(`NAS → ${target.name} (sync)`, targetId, targetId, "sync-local", { name: shortName(row.model) });
               continue;
             }

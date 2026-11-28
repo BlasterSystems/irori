@@ -36,7 +36,8 @@ describe("active-job persistence (IR-131)", () => {
 
   function manager(): JobManager {
     return new JobManager(
-      () => ({ nasRoot: "/mnt/nas", pin: "0.23.0", serverUrl: "ws://hub/agent-ws", stateDir }),
+      // IRI-173: sync-local spawns after its (async) store pre-check passes.
+      () => ({ nasRoot: "/mnt/nas", pin: "0.23.0", serverUrl: "ws://hub/agent-ws", stateDir, syncPreflight: async () => null }),
       {
         onOutput: () => {},
         onDone: (jobId, status, exitCode) => dones.push({ jobId, status, exitCode }),
@@ -48,6 +49,7 @@ describe("active-job persistence (IR-131)", () => {
     const mgr = manager();
     mgr.start(ID, "sync-local", { name: "glm" });
     const file = join(stateDir, ACTIVE_JOBS_FILE);
+    await vi.waitFor(() => expect(existsSync(file)).toBe(true));
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual([{ jobId: ID, pgid: -4242, kind: "sync-local", startedAt: expect.any(Number) }]);
     resolveRun({ exitCode: 0, canceled: false });
     await vi.waitFor(() => expect(existsSync(file)).toBe(false));

@@ -43,6 +43,24 @@ d("job settle events (db integration)", () => {
     await handle.close();
   });
 
+  it("remembers the node's store view across the inventory reset, until a fresh report (IRI-173)", async () => {
+    const svc = createJobsService(db, () => true);
+    const store = { root: "/mnt/nas", source: "catalog" as const, warning: null, models: [], leftovers: [], unlinkedActive: ["hidden-model"] };
+    await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 1, store, local: [] } });
+    expect(svc.lastStoreView(nodeId)).toBeNull();
+    // A settled transfer drops the report, but the mount has not changed.
+    const sync = await svc.create(nodeId, "sync-local", { name: "hidden-model" });
+    await svc.onDone(nodeId, sync.id, "failed", 1);
+    expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
+    expect(svc.lastStoreView(nodeId)?.unlinkedActive).toEqual(["hidden-model"]);
+    // The next report replaces the memory (here: the mount was fixed).
+    const inv = await svc.create(nodeId, "models-inventory", {});
+    await svc.onOutput(nodeId, inv.id, 0, JSON.stringify({ generatedAtMs: 2, store: { ...store, unlinkedActive: [] }, local: [] }));
+    await svc.onDone(nodeId, inv.id, "succeeded", 0);
+    expect(svc.lastStoreView(nodeId)).toBeNull();
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+  });
+
   it("names the blocking job when the node slot is taken (IR-134)", async () => {
     // Own service instance: this test's settle events must not pollute the
     // shared collector the event-shape tests assert on.

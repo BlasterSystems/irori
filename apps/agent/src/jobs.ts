@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { buildCommand, runStreaming, type ModelctlCtx, type RunOutcome } from "./modelctl.js";
+import { syncLocalPreflight } from "./sync-preflight.js";
 
 /** Job context: modelctl config + the hub URL the update script dials. */
 export interface JobCtx extends ModelctlCtx {
@@ -15,6 +16,8 @@ export interface JobCtx extends ModelctlCtx {
   /** ADR-0017: setups the agent supervises without a scope unit (they die
    *  with the agent unit on restart). Absent = unknown (no driver wired). */
   unscoopedRunningSetups?: () => string[];
+  /** IRI-173 test seam: the sync-local store pre-check (default: the real one). */
+  syncPreflight?: (root: string, target: string) => Promise<string | null>;
 }
 
 /**
@@ -257,7 +260,39 @@ export class JobManager {
         this.events.onDone(jobId, "failed", null);
         return true;
       }
+      // IRI-173: check the store link before modelctl starts. The check is
+      // async (bounded stats on a network mount), so the job holds the active
+      // slot while it runs and spawns only when it passes.
+      const syncRoot = typeof params.root === "string" && params.root.length > 0 ? params.root : this.ctx().nasRoot;
+      const syncTarget = typeof params.name === "string" && params.name.length > 0 ? params.name : params.repository;
+      if (kind === "sync-local" && typeof syncRoot === "string" && typeof syncTarget === "string") {
+        let canceled = false;
+        this.active = { jobId, kind, cancel: () => { canceled = true; } };
+        const preflight = this.ctx().syncPreflight ?? syncLocalPreflight;
+        void Promise.resolve()
+          .then(() => preflight(syncRoot, syncTarget))
+          .catch((err: unknown) => `store pre-check failed: ${err instanceof Error ? err.message : String(err)}`)
+          .then((problem) => {
+            if (this.active?.jobId !== jobId) return;
+            this.active = null;
+            if (canceled) {
+              this.events.onDone(jobId, "canceled", null);
+            } else if (problem !== null) {
+              this.events.onOutput(jobId, 0, `error: ${problem}`);
+              this.events.onDone(jobId, "failed", 1);
+            } else {
+              this.spawn(jobId, kind, argv, extraEnv);
+            }
+          });
+        return true;
+      }
     }
+    this.spawn(jobId, kind, argv, extraEnv);
+    return true;
+  }
+
+  /** Spawns the job's process and wires output, registry and completion. */
+  private spawn(jobId: string, kind: string, argv: string[], extraEnv: Record<string, string>): void {
     let seq = 0;
     // IRI-017: hand the optional HF token to modelctl as HF_TOKEN (gated and
     // private repos). Agent config wins over any caller-supplied extraEnv;
@@ -290,7 +325,6 @@ export class JobManager {
       const status = outcome.canceled ? "canceled" : outcome.exitCode === 0 ? "succeeded" : "failed";
       this.events.onDone(jobId, status, outcome.exitCode);
     });
-    return true;
   }
 
   private persistActiveJobs(records: ActiveJobRecord[]): void {

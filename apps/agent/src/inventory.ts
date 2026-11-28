@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { InventoryLeftover, InventoryLocalCache, InventoryModel, InventoryOrphanState, NodeInventory, OrphanState } from "@irori/core";
-import { dirBytes, readStore, boundedOrNull, type StoreRead } from "./catalog-read.js";
+import { dirBytes, listUnlinkedActive, readStore, boundedOrNull, type StoreRead } from "./catalog-read.js";
 import { collectUpdateState } from "./updates.js";
 import { runuserWrap } from "./cache-user.js";
 
@@ -66,6 +66,10 @@ export interface InventoryCtx {
   storeDeadlineMs?: number;
   /** IR-206 test seam: the store read itself (default: the real readStore). */
   readStoreImpl?: (root: string) => Promise<StoreRead>;
+  /** IRI-173: budget in ms for the active/ link listing (default 5 s). */
+  linkListingMs?: number;
+  /** IRI-173 test seam: the active/ link listing (default: listUnlinkedActive). */
+  unlinkedActiveImpl?: (root: string) => Promise<string[] | null>;
   exec?: (file: string, args: string[], opts: { timeout: number }) => Promise<{ stdout: string; stderr: string }>;
   now?: () => number;
 }
@@ -76,6 +80,27 @@ export interface InventoryCtx {
  * name/repo/runtime/bytes only, so it skips the companion metadata reads that
  * would otherwise spend its STORE_DEADLINE_MS on a degraded mount.
  */
+const LINK_LISTING_MS = 5000;
+
+/** Resolves null when `work` takes longer than `ms`, or rejects. */
+async function withBudget<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  const { promise: timerP, resolve } = Promise.withResolvers<null>();
+  const timer = setTimeout(() => resolve(null), ms);
+  timer.unref?.();
+  try {
+    return await Promise.race([work.catch(() => null), timerP]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** IRI-173: the store warning for entries `sync-local` cannot use (null = none). */
+export function unlinkedActiveWarning(unlinked: string[] | null): string | null {
+  if (unlinked === null || unlinked.length === 0) return null;
+  const n = unlinked.length;
+  return `${n} active ${n === 1 ? "entry is" : "entries are"} not visible as symlinks on this mount; sync from the store will not work for ${n === 1 ? "it" : "them"} (an SMB mount hides the store's symlinks; on the store host itself, run a repair check)`;
+}
+
 export function inventoryStoreRead(root: string): Promise<StoreRead> {
   return readStore(root, { companions: false });
 }
@@ -445,10 +470,15 @@ export async function buildInventory(ctx: InventoryCtx): Promise<NodeInventory> 
         (async (): Promise<NodeInventory["store"]> => {
           try {
             const read = await readImpl(nasRoot);
+            // IRI-173: how this node sees the store's active/ links.
+            // Its own budget: a slow listing costs only this optional field,
+            // never the store view that was just read.
+            const unlinked = await withBudget((ctx.unlinkedActiveImpl ?? listUnlinkedActive)(nasRoot), ctx.linkListingMs ?? LINK_LISTING_MS);
             return {
               root: nasRoot,
               source: read.source,
-              warning: read.warning ?? null,
+              warning: read.warning ?? unlinkedActiveWarning(unlinked),
+              ...(unlinked === null ? {} : { unlinkedActive: unlinked }),
               models: read.entries.map((entry) => ({
                 name: entry.name,
                 repository: entry.repository,

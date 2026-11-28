@@ -4,6 +4,8 @@ import {
   jobKindSchema,
   nodeInventorySchema,
   sseEventSchema,
+  storeLinkVisible,
+  type InventoryStore,
 } from "../src/index.ts";
 
 const MODEL = { name: "glm-4", repository: "org/glm-4", runtime: "vllm", bytes: 1024 };
@@ -121,5 +123,45 @@ describe("models-inventory job + activity events", () => {
         line: "x",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("storeLinkVisible (IRI-173)", () => {
+  const store = (unlinkedActive?: string[], names: string[] = ["a", "b"]): InventoryStore => ({
+    root: "/mnt/nas",
+    source: "catalog",
+    warning: null,
+    models: names.map((name) => ({ ...MODEL, name })),
+    leftovers: [],
+    ...(unlinkedActive === undefined ? {} : { unlinkedActive }),
+  });
+
+  it("is unknown without a report or from an agent that does not list links", () => {
+    expect(storeLinkVisible(null, "a")).toBeUndefined();
+    expect(storeLinkVisible(undefined, "a")).toBeUndefined();
+    expect(storeLinkVisible(store(), "a")).toBeUndefined();
+  });
+
+  it("is false for an entry the node sees as a directory, true for a listed link", () => {
+    expect(storeLinkVisible(store(["a"]), "a")).toBe(false);
+    expect(storeLinkVisible(store(["a"]), "b")).toBe(true);
+    expect(storeLinkVisible(store([]), "a")).toBe(true);
+  });
+
+  it("judges a model the node does not list yet by the rest of the view", () => {
+    // every listed entry is hidden (SMB): the next download will be too
+    expect(storeLinkVisible(store(["a", "b"]), "new")).toBe(false);
+    // one stray directory copy says nothing about a new model
+    expect(storeLinkVisible(store(["a"]), "new")).toBeUndefined();
+    expect(storeLinkVisible(store([]), "new")).toBeUndefined();
+    // stray directories that are not models never decide it
+    expect(storeLinkVisible(store(["stray1", "stray2"]), "new")).toBeUndefined();
+    expect(storeLinkVisible(store(["stray"], []), "new")).toBeUndefined();
+  });
+
+  it("round-trips the optional field through the report schema", () => {
+    const parsed = nodeInventorySchema.parse({ generatedAtMs: 1, store: store(["a"]), local: [] });
+    expect(parsed.store?.unlinkedActive).toEqual(["a"]);
+    expect(nodeInventorySchema.parse({ generatedAtMs: 1, store: store(), local: [] }).store?.unlinkedActive).toBeUndefined();
   });
 });
