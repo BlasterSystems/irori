@@ -23,6 +23,12 @@ This branch carries the epic's Irori stories, one commit per ticket.
 - The Models page asks the hub who may write (`GET /api/v1/store-writer`), shows the reason when nobody can, and keeps read-only checks available.
 - Setup transfers no longer plan a Hugging Face download onto a node that cannot see the store's links: that download would write the store through its mount. With nothing to push from, that target fails with the reason.
 
+### IR-291 / IRI-175: syncing works on SMB once modelctl is 0.25.1
+
+- modelctl 0.25.1 (separate repository) finds the model from the store's update journal when the mount hides the symlink. The directory the mount shows is never used as the source.
+- For a node whose inventory reports modelctl 0.25.1 or newer, Irori offers the NAS sync again even when the node sees the link as a directory, and the hub tells the agent's check to let it through. The node page keeps the warning.
+- A node with an older or unknown modelctl keeps the IRI-173 behaviour. The hub pin is how 0.25.1 is rolled out, but the decision is made per node from what it reports.
+
 ## Business rules and constraints
 
 - For store changes, unknown means no. For reads (the sync gate), unknown keeps today's behaviour.
@@ -43,22 +49,24 @@ This branch carries the epic's Irori stories, one commit per ticket.
 ## Integration impact
 
 - Agent and hub ship together; the new report field is optional, so older agents and hubs interoperate. No schema change.
-- No modelctl change in this story.
+- IRI-175 depends on modelctl 0.25.1 being published before the hub pin is raised; nothing in this branch requires it to run.
 
 ## Out of scope and follow-ups
 
-- IR-291 / IRI-175: modelctl resolves the model without a visible symlink.
+- Publishing modelctl 0.25.1 and raising the hub pin (and later the agent's fallback pin default) are release steps outside this branch.
 - IR-292 / IRI-176: spike on the NAS pushing models straight to Sparks.
 - The NFS export of the QNAP share is an operations step, not code.
 
 ## Verification
 
-- `pnpm test` with a throwaway Postgres 17: core 150, proxy 24, db 16, web 610, agent 412, server 560, all passing.
+- `pnpm test` with a throwaway Postgres 17: core 152, proxy 24, db 16, web 610, agent 412, server 561, all passing.
 - `pnpm typecheck`: exit 0.
-- Independent adversarial reviews: IRI-173 pass with findings; IRI-174 blocked first, then passed a re-check after fixes. All fix-before-merge findings are resolved (see the two task files).
+- Independent adversarial reviews: IRI-173 pass with findings; IRI-174 blocked first, then passed a re-check after fixes; IRI-175 (Irori and modelctl) pass with findings. All fix-before-merge findings are resolved (see the two task files).
 - Not yet checked on the dev hub; that needs a deploy.
 
 ## Changelog
 
+- feat(agent,server,core): a hidden store link no longer blocks NAS sync on nodes that report modelctl 0.25.1+ (IR-291 / IRI-175).
+- docs: store-side push spike findings (IR-292 / IRI-176).
 - fix(server,web,core): store writes need a write-safe store view; no blind fallback to a mounted Spark (IR-290 / IRI-174, ADR-0023).
 - fix(agent,server,web): detect store links a node cannot see; gate NAS sync and pre-check sync-local (IR-289 / IRI-173).

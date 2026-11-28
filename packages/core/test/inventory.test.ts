@@ -5,6 +5,8 @@ import {
   nodeInventorySchema,
   sseEventSchema,
   storeLinkVisible,
+  syncNeedsVisibleLink,
+  MODELCTL_SYNC_WITHOUT_SYMLINK,
   type InventoryStore,
 } from "../src/index.ts";
 
@@ -163,5 +165,21 @@ describe("storeLinkVisible (IRI-173)", () => {
     const parsed = nodeInventorySchema.parse({ generatedAtMs: 1, store: store(["a"]), local: [] });
     expect(parsed.store?.unlinkedActive).toEqual(["a"]);
     expect(nodeInventorySchema.parse({ generatedAtMs: 1, store: store(), local: [] }).store?.unlinkedActive).toBeUndefined();
+  });
+});
+
+describe("syncNeedsVisibleLink (IRI-175)", () => {
+  it("needs the link unless the node's reported modelctl reads the journal", () => {
+    expect(syncNeedsVisibleLink(null)).toBe(true);
+    expect(syncNeedsVisibleLink("0.25.0")).toBe(true);
+    expect(syncNeedsVisibleLink(MODELCTL_SYNC_WITHOUT_SYMLINK)).toBe(false);
+    expect(syncNeedsVisibleLink("0.26.0")).toBe(false);
+    expect(syncNeedsVisibleLink("1.0.0")).toBe(false);
+  });
+
+  it("treats anything that is not a plain version as unknown", () => {
+    for (const odd of ["", "latest", "v0.25.1", "0.25.1-rc1", "modelctl 0.25.1"]) {
+      expect(syncNeedsVisibleLink(odd), odd).toBe(true);
+    }
   });
 });

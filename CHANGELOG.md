@@ -86,6 +86,18 @@ All notable changes to Irori are recorded here. Format follows
   link, dead mount). Nodes without a fresh inventory keep today's behaviour
   and rely on that check. No schema change.
 
+- **Sync from the NAS works over SMB again on nodes running modelctl 0.25.1**
+  (IR-291 / IRI-175). modelctl 0.25.1 finds the model from the store's
+  update journal when the mount hides the `active/` symlink. For a node
+  whose inventory reports modelctl 0.25.1 or newer for the user the sync
+  runs as, placement and setup transfers offer the NAS sync again even when
+  the node sees the link as a directory, and the hub tells the agent's
+  `sync-local` check to let it through; the node page keeps the warning.
+  An unknown or older version keeps the IR-289 behaviour. Raise the hub's
+  modelctl pin to 0.25.1 to roll it out. The agent's fallback pin default
+  is unchanged in this release: raise it only after modelctl 0.25.1 is
+  published.
+
 - **Store writes can no longer fall back to a node that cannot see the store
   properly** (IR-290 / IRI-174, ADR-0023, amends ADR-0009). Downloads,
   store deletes, repair and store cleanup run on the NAS node. A node that

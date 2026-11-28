@@ -112,6 +112,38 @@ d("job settle events (db integration)", () => {
     }
   });
 
+  it("tells the agent a hidden link is fine only for a node that reports modelctl 0.25.1+ (IRI-175)", async () => {
+    const svc = createJobsService(db, () => true);
+    const report = (version: string | null) => ({
+      generatedAtMs: 1,
+      store: null,
+      local: [{ user: "operator", home: "/home/operator", cacheDir: "/home/operator/.cache/huggingface/hub", modelctlVersion: version, error: null, models: [] }],
+    });
+    const paramsOf = async (params: Record<string, unknown>): Promise<unknown> => {
+      const job = await svc.create(nodeId, "sync-local", params);
+      await svc.onDone(nodeId, job.id, "failed", 1);
+      return job.params;
+    };
+    await db.update(nodes).set({ cacheUser: "operator" }).where(eq(nodes.id, nodeId));
+    try {
+      // Unknown version: no flag, and a caller cannot smuggle one in.
+      expect(await paramsOf({ name: "m", linkOptional: true })).toEqual({ name: "m" });
+      await db.insert(nodeInventory).values({ nodeId, report: report("0.25.0") });
+      expect(await paramsOf({ name: "m" })).toEqual({ name: "m" });
+      await db.insert(nodeInventory).values({ nodeId, report: report("0.25.1") });
+      expect(await svc.syncModelctlVersion(nodeId, "operator")).toBe("0.25.1");
+      expect(await paramsOf({ name: "m" })).toEqual({ name: "m", linkOptional: true });
+      // The settle dropped the report; the remembered version still counts.
+      expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
+      expect(await paramsOf({ name: "m" })).toEqual({ name: "m", linkOptional: true });
+      // Another user's modelctl says nothing about this one.
+      expect(await svc.syncModelctlVersion(nodeId, "someone-else")).toBeNull();
+    } finally {
+      await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+      await db.update(nodes).set({ cacheUser: null }).where(eq(nodes.id, nodeId));
+    }
+  });
+
   it("names the blocking job when the node slot is taken (IR-134)", async () => {
     // Own service instance: this test's settle events must not pollute the
     // shared collector the event-shape tests assert on.

@@ -17,7 +17,7 @@ export interface JobCtx extends ModelctlCtx {
    *  with the agent unit on restart). Absent = unknown (no driver wired). */
   unscoopedRunningSetups?: () => string[];
   /** IRI-173 test seam: the sync-local store pre-check (default: the real one). */
-  syncPreflight?: (root: string, target: string) => Promise<string | null>;
+  syncPreflight?: (root: string, target: string, opts?: { linkOptional?: boolean }) => Promise<string | null>;
 }
 
 /**
@@ -270,7 +270,9 @@ export class JobManager {
         this.active = { jobId, kind, cancel: () => { canceled = true; } };
         const preflight = this.ctx().syncPreflight ?? syncLocalPreflight;
         void Promise.resolve()
-          .then(() => preflight(syncRoot, syncTarget))
+          // IRI-175: the hub sets linkOptional when this node's reported
+          // modelctl (0.25.1+) syncs through a hidden link.
+          .then(() => preflight(syncRoot, syncTarget, { linkOptional: params.linkOptional === true }))
           .catch((err: unknown) => `store pre-check failed: ${err instanceof Error ? err.message : String(err)}`)
           .then((problem) => {
             if (this.active?.jobId !== jobId) return;

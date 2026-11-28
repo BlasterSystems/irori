@@ -169,6 +169,16 @@ Irori reports what each node sees (node page warning, `store.unlinkedActive`
 in the inventory), does not offer a NAS sync to a node that cannot see the
 link, and fails `sync-local` with a plain message before modelctl starts.
 
+- **modelctl 0.25.1 or newer** (IRI-175) also works on such a mount:
+  `sync-local` takes the model from the store's update journal when the
+  symlink is hidden. Set the hub's modelctl pin to `0.25.1` once that
+  release is published. Each node is upgraded by the usual auto-install,
+  and once its inventory reports `0.25.1` Irori offers the sync again on
+  its SMB mount and keeps the warning. A model whose update journal has no
+  successful activation still needs a visible symlink (or one
+  `modelctl update NAME` on the store host). Store *writes* through such a mount stay refused
+  (ADR-0023).
+
 #### Behind a TLS reverse proxy (IRI-156)
 
 The dev hub is also published as `https://irori.as267.com` through Nginx Proxy

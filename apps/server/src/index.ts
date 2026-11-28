@@ -481,6 +481,7 @@ async function boot(): Promise<void> {
     jobs: jobsService,
     getStoreView: async (nodeId) =>
       (await state.inventory?.get(nodeId).catch(() => null))?.report?.store ?? jobsService.lastStoreView(nodeId),
+    getSyncModelctlVersion: (nodeId, cacheUser) => jobsService.syncModelctlVersion(nodeId, cacheUser),
     log: (message) => log.info(message),
   });
 

@@ -23,6 +23,7 @@ import {
   type SseEvent,
   type TransferStage,
   storeLinkVisible,
+  syncNeedsVisibleLink,
   STORE_LINK_HIDDEN_REASON,
   type InventoryStore,
 } from "@irori/core";
@@ -87,6 +88,9 @@ export interface SetupsServiceDeps {
   jobs: Pick<JobsService, "create" | "cancel" | "findModel" | "presentNodesFor">;
   /** IRI-173: the node's latest inventory store view (null = no report). */
   getStoreView?: (nodeId: string) => Promise<InventoryStore | null>;
+  /** IRI-175: the node's reported modelctl version for the user a sync
+   *  runs as (null = unknown). */
+  getSyncModelctlVersion?: (nodeId: string, cacheUser: string | null) => Promise<string | null>;
   log?: (message: string) => void;
 }
 
@@ -1005,7 +1009,12 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       // sync-local — it falls through to pass 2 (push, else HF download).
       const linkHidden = new Set<string>();
       for (const targetId of targetNodeIds) {
-        if (byId.get(targetId)?.nasRoot == null) continue;
+        const node = byId.get(targetId);
+        if (node === undefined || node.nasRoot === null) continue;
+        // IRI-175: a node whose reported modelctl is 0.25.1+ reads the update
+        // journal, so a hidden link is no reason to avoid the sync there.
+        const version = (await deps.getSyncModelctlVersion?.(targetId, node.cacheUser ?? null).catch(() => null)) ?? null;
+        if (!syncNeedsVisibleLink(version)) continue;
         const view = (await deps.getStoreView?.(targetId).catch(() => null)) ?? null;
         if (storeLinkVisible(view, modelEntry?.name ?? shortName(row.model)) === false) linkHidden.add(targetId);
       }

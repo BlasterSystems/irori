@@ -38,6 +38,9 @@ async function probe(path: string, lstatFn: LstatFn, timeoutMs: number): Promise
 }
 
 export interface SyncPreflightOpts {
+  /** IRI-175: the node's modelctl resolves the object from the update
+   *  journal (>= 0.25.1), so a directory entry is no longer a failure. */
+  linkOptional?: boolean;
   /** Test seams. */
   lstatFn?: LstatFn;
   timeoutMs?: number;
@@ -69,6 +72,7 @@ export async function syncLocalPreflight(root: string, target: string, opts: Syn
   if (entry.kind === "timeout") return dead;
   if (entry.kind === "missing") return `${node}: '${target}' is not active in the store at ${root}. Refresh the catalog and try again.`;
   if (entry.kind === "error" || entry.stats.isSymbolicLink()) return null;
+  if (entry.stats.isDirectory() && opts.linkOptional === true) return null;
   if (!entry.stats.isDirectory()) return `${node}: '${target}' in the store at ${root} is not a symlink. Run a repair check on the store node.`;
   return `${node}: '${target}' is not visible as a symlink on this node's mount of ${root}, so modelctl cannot sync it. SMB shows the store's links as directories: mount the store over NFS, or enable symlink support on the share.`;
 }

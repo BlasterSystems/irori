@@ -121,6 +121,12 @@ describe("syncLocalPreflight (IRI-173)", () => {
     expect(await syncLocalPreflight("/mnt/nas", "linked", { ...opts, lstatFn: () => Promise.reject(denied) })).toBeNull();
   });
 
+  it("accepts a directory entry once modelctl resolves it from the journal (IRI-175)", async () => {
+    expect(await syncLocalPreflight(store(), "copied", { ...opts, linkOptional: true })).toBeNull();
+    // Still not a pass for a missing entry or an unmounted share.
+    expect(await syncLocalPreflight(store(), "absent", { ...opts, linkOptional: true })).toContain("is not active in the store");
+  });
+
   it("explains a missing entry", async () => {
     expect(await syncLocalPreflight(store(), "absent", opts)).toContain("'absent' is not active in the store");
   });
@@ -152,14 +158,14 @@ describe("sync-local job pre-check (IRI-173)", () => {
     return { path, log };
   }
 
-  function run(root: string, target: string, modelctlPath: string, syncPreflight?: (root: string, target: string) => Promise<string | null>) {
+  function run(root: string, target: string, modelctlPath: string, syncPreflight?: (root: string, target: string) => Promise<string | null>, extraParams: Record<string, unknown> = {}) {
     const lines: string[] = [];
     const { promise, resolve } = Promise.withResolvers<{ status: string; exitCode: number | null }>();
     const mgr = new JobManager(
-      () => ({ serverUrl: "", pin: "0.25.0", nasRoot: root, modelctlPath, ...(syncPreflight === undefined ? {} : { syncPreflight }) }),
+      () => ({ serverUrl: "", pin: "0.25.1", nasRoot: root, modelctlPath, ...(syncPreflight === undefined ? {} : { syncPreflight }) }),
       { onOutput: (_id, _seq, line) => lines.push(line), onDone: (_id, status, exitCode) => resolve({ status, exitCode }) },
     );
-    expect(mgr.start("j1", "sync-local", { name: target })).toBe(true);
+    expect(mgr.start("j1", "sync-local", { name: target, ...extraParams })).toBe(true);
     return { lines, done: promise, mgr };
   }
 
@@ -209,6 +215,18 @@ describe("sync-local job pre-check (IRI-173)", () => {
     expect(lines[0]).toContain("store pre-check failed: boom");
     expect(existsSync(log)).toBe(false);
     expect(mgr.activeJobId).toBeNull();
+  });
+
+  it("spawns modelctl for a hidden link only when the hub says this node's modelctl can sync it (IRI-175)", async () => {
+    const { path, log } = fakeModelctl();
+    // The agent's own pin (0.25.1 here) is a target, not what is installed:
+    // without the hub's word the plain sentence stays.
+    const unsure = run(store(), "copied", path);
+    expect((await unsure.done).status).toBe("failed");
+    expect(existsSync(log)).toBe(false);
+    const { done } = run(store(), "copied", path, undefined, { linkOptional: true });
+    expect((await done).status).toBe("succeeded");
+    expect(readFileSync(log, "utf8")).toContain("sync-local copied");
   });
 
   it("spawns modelctl when the link is visible", async () => {

@@ -41,6 +41,8 @@ interface Harness {
   catalog: Map<string, { name: string; repository: string; runtime: string; bytes: number }>;
   /** IRI-173: per-node inventory store views (absent = no report). */
   storeViews: Map<string, InventoryStore>;
+  /** IRI-175: the modelctl version every node reports for its sync user. */
+  pin: { value: string | null };
 }
 
 function makeHarness(db: DbHandle["db"], rings: Rings, sse: Pick<SseHub, "send">, store: NodeStore, owned: () => string[]): Harness {
@@ -51,6 +53,7 @@ function makeHarness(db: DbHandle["db"], rings: Rings, sse: Pick<SseHub, "send">
   const holders = new Map<string, Set<string>>();
   const catalog = new Map<string, { name: string; repository: string; runtime: string; bytes: number }>();
   const storeViews = new Map<string, InventoryStore>();
+  const pin: { value: string | null } = { value: null };
 
   // The disposable DB may carry rows from other runs/suites — only our own
   // nodes are visible to the service.
@@ -88,9 +91,10 @@ function makeHarness(db: DbHandle["db"], rings: Rings, sse: Pick<SseHub, "send">
       presentNodesFor: async (name) => [...(holders.get(name) ?? [])],
     },
     getStoreView: async (nodeId) => storeViews.get(nodeId) ?? null,
+    getSyncModelctlVersion: async () => pin.value,
     log: () => {},
   };
-  return { service: createSetupsService(deps), sent, refreshed, online, created, holders, catalog, storeViews };
+  return { service: createSetupsService(deps), sent, refreshed, online, created, holders, catalog, storeViews, pin };
 }
 
 interface Ids {
@@ -885,8 +889,16 @@ d("setups service", () => {
     expect(alone.stages.map((s) => [s.kind, s.status, s.error])).toEqual([["noop", "failed", STORE_LINK_HIDDEN_REASON]]);
     // Nothing moved, so the transfer must not read as succeeded.
     await waitFor(async () => (await ctx.service.transfers(setup.id)).find((t) => t.id === alone.id)?.status === "failed");
+    // IRI-175: a node that reports modelctl 0.25.1+ reads the update
+    // journal, so the same node syncs from the store again.
+    ctx.pin.value = "0.25.1";
+    const pinned = await ctx.service.createTransfer(setup.id, [smb]);
+    expect(pinned.stages.map((s) => [s.kind, s.targetId])).toEqual([["sync-local", smb]]);
+    ctx.pin.value = "0.25.0";
+    expect((await ctx.service.createTransfer(setup.id, [smb])).stages[0]!.kind).toBe("noop");
     } finally {
       ctx.online.delete(nfs);
+      ctx.pin.value = null;
     }
   });
 

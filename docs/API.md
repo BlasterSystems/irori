@@ -281,6 +281,14 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   hub keeps that report's store view in memory until the next report, so the
   gate survives the settle (a hub restart reads as unknown). After fixing a
   mount, refresh the node's inventory to clear a remembered hidden link.
+  IRI-175: the gate applies per node, while that node's reported modelctl
+  version (inventory `local[].modelctlVersion` for the user the sync runs
+  as) is unknown or below `0.25.1`. From `0.25.1`, modelctl `sync-local`
+  reads the store's update journal instead of the symlink, so a hidden link
+  gives `sync` again. The hub then adds `linkOptional: true` to the
+  `sync-local` job params at dispatch (a caller-supplied value is dropped),
+  and the agent's pre-check accepts a directory entry. The reported version
+  is remembered across the inventory reset, like the store view.
 - `POST /api/v1/nodes/:id/models/refresh` → `202 {job}` dispatches the
   read-only `models-inventory` job (409 while the node has any active job;
   agents older than 0.4.0 fail it with "unknown job kind"). The hub persists
