@@ -54,6 +54,9 @@ describe("inventory store link report (IRI-173)", () => {
     const report = await buildInventory({ ...base, readStoreImpl: read, unlinkedActiveImpl: async () => ["a", "b"] });
     expect(report.store?.unlinkedActive).toEqual(["a", "b"]);
     expect(report.store?.warning).toContain("2 active entries are not visible as symlinks");
+    // True on every modelctl version: it names the requirement, not a verdict.
+    expect(report.store?.warning).toContain("needs modelctl 0.25.1 or newer");
+    expect(report.store?.warning).not.toContain("will not work");
   });
 
   it("reports an empty list with no warning when every link is visible", async () => {

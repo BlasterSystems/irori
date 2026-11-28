@@ -98,7 +98,7 @@ async function withBudget<T>(work: Promise<T>, ms: number): Promise<T | null> {
 export function unlinkedActiveWarning(unlinked: string[] | null): string | null {
   if (unlinked === null || unlinked.length === 0) return null;
   const n = unlinked.length;
-  return `${n} active ${n === 1 ? "entry is" : "entries are"} not visible as symlinks on this mount; sync from the store will not work for ${n === 1 ? "it" : "them"} (an SMB mount hides the store's symlinks; on the store host itself, run a repair check)`;
+  return `${n} active ${n === 1 ? "entry is" : "entries are"} not visible as symlinks on this mount (an SMB mount hides the store's symlinks); syncing ${n === 1 ? "it" : "them"} from the store needs modelctl 0.25.1 or newer on this node`;
 }
 
 export function inventoryStoreRead(root: string): Promise<StoreRead> {

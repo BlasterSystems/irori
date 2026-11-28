@@ -1,6 +1,9 @@
 import {
   jobInfoSchema,
   nodeInventorySchema,
+  pickSyncModelctlVersion,
+  syncNeedsVisibleLink,
+  MODELCTL_SYNC_WITHOUT_SYMLINK,
   type InventoryLeftover,
   type InventoryLocalCache,
   type InventoryModel,
@@ -206,4 +209,30 @@ export function inventorySummary(models: InventoryModel[]): string {
 
 export function leftoverLabel(leftover: InventoryLeftover): string {
   return leftover.name ?? leftover.object.split("/").filter((part) => part.length > 0).pop() ?? leftover.object;
+}
+
+/**
+ * IRI-175: what to say about a Spark's view of the NAS store. A mount that
+ * hides the store's symlinks (SMB) is only a problem when the modelctl that
+ * runs the sync is older than 0.25.1; on a newer one it is a quiet note,
+ * not a warning. Any other store warning is shown as it is.
+ */
+export function storeLinkNote(
+  inventory: Pick<NodeInventory, "store" | "local">,
+  cacheUser: string | null,
+): { tone: "warn" | "note"; text: string } | null {
+  const store = inventory.store;
+  if (store === null) return null;
+  const hidden = store.unlinkedActive?.length ?? 0;
+  const aboutLinks = store.warning === null || /not visible as symlinks/.test(store.warning);
+  if (hidden === 0 || !aboutLinks) return store.warning === null ? null : { tone: "warn", text: store.warning };
+  const version = pickSyncModelctlVersion(inventory.local.map((l) => ({ user: l.user, version: l.modelctlVersion })), cacheUser);
+  const links = hidden === 1 ? "1 of the store's links as a directory" : `${hidden} of the store's links as directories`;
+  if (!syncNeedsVisibleLink(version)) {
+    return { tone: "note", text: `this mount shows ${links} (SMB). Syncing from the store works here: modelctl ${version} reads the store's update journal instead.` };
+  }
+  return {
+    tone: "warn",
+    text: `this mount shows ${links} (SMB), so syncing from the store will not work here. Raise the hub's modelctl pin to ${MODELCTL_SYNC_WITHOUT_SYMLINK} or newer and refresh, or mount the store over NFS.`,
+  };
 }
