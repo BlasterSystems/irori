@@ -41,3 +41,14 @@ export const MODELCTL_SYNC_WITHOUT_SYMLINK = "0.25.1";
 export function syncNeedsVisibleLink(version: string | null): boolean {
   return version === null || !MODELCTL_PIN_RE.test(version) || compareVersions(version, MODELCTL_SYNC_WITHOUT_SYMLINK) < 0;
 }
+
+/**
+ * IRI-175: the reported modelctl version of the user a NAS sync runs as.
+ * That is the node's cache user; with none set it is the agent user, whose
+ * name the hub does not know, so it is accepted only when the report leaves
+ * no doubt (root, or a single user). Null = unknown.
+ */
+export function pickSyncModelctlVersion(users: ReadonlyArray<{ user: string; version: string | null }>, cacheUser: string | null): string | null {
+  const entry = cacheUser !== null ? users.find((u) => u.user === cacheUser) : (users.find((u) => u.user === "root") ?? (users.length === 1 ? users[0] : undefined));
+  return entry?.version ?? null;
+}

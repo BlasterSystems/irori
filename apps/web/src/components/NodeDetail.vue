@@ -53,6 +53,7 @@ import {
   resumeCopy,
   resumeRequestFor,
   storeMountLabel,
+  storeLinkNote,
   type DeleteTarget,
 } from "../inventory";
 import type { NodeInventory } from "@irori/core";
@@ -512,6 +513,7 @@ const statusChipClass = computed(() =>
 
 const inventory = ref<NodeInventory | null>(null);
 const inventoryUpdatedAt = ref<string | null>(null);
+const storeNote = computed(() => (inventory.value === null ? null : storeLinkNote(inventory.value, node.value?.cacheUser ?? null)));
 const inventoryState = ref<"loading" | "ready" | "error">("loading");
 const inventoryError = ref<string | null>(null);
 const inventoryBusy = ref(false);
@@ -1169,8 +1171,14 @@ onUnmounted(() => {
 
       <!-- IRI-173: a Spark has no Store card, so its store warning (e.g. links
            hidden by the SMB mount) shows here. -->
-      <p v-if="inventory.store?.warning && node?.kind !== 'nas'" class="banner banner--warn" style="margin-bottom: 12px;">
-        NAS store at <span class="mono">{{ inventory.store.root }}</span>: {{ inventory.store.warning }}
+      <!-- IRI-175: hidden links are a warning only when this node's modelctl
+           cannot sync through them; otherwise a quiet note. -->
+      <p
+        v-if="storeNote && inventory.store && node?.kind !== 'nas'"
+        :class="storeNote.tone === 'warn' ? 'banner banner--warn' : 'stat__sub faint'"
+        style="margin-bottom: 12px;"
+      >
+        NAS store at <span class="mono">{{ inventory.store.root }}</span>: {{ storeNote.text }}
       </p>
 
       <article v-if="inventory.store && node?.kind === 'nas'" class="card" style="margin-bottom: 12px;">

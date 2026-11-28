@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, nodes, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, pickStoreNode, storeViewSafeForWrites, syncNeedsVisibleLink, isStoreWrite, STORE_WRITER_UNAVAILABLE_REASON, type InventoryStore, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, pickStoreNode, storeViewSafeForWrites, syncNeedsVisibleLink, pickSyncModelctlVersion, isStoreWrite, STORE_WRITER_UNAVAILABLE_REASON, type InventoryStore, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -396,11 +396,7 @@ export function createJobsService(
       const [row] = await db.select({ report: nodeInventory.report }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
       const parsed = row === undefined ? undefined : nodeInventorySchema.safeParse(row.report).data;
       const users = parsed !== undefined ? modelctlOf(parsed) : (lastStoreViews.get(nodeId)?.modelctl ?? []);
-      // The sync runs as the cache user; with none set it runs as the agent
-      // user, whose name the hub does not know — accept it only when the
-      // report leaves no doubt (a single user, or root).
-      const entry = user !== null ? users.find((u) => u.user === user) : (users.find((u) => u.user === "root") ?? (users.length === 1 ? users[0] : undefined));
-      return entry?.version ?? null;
+      return pickSyncModelctlVersion(users, user);
     },
     async pickStoreWriter(online) {
       const rows = await db.select().from(nodes);

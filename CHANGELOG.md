@@ -86,6 +86,14 @@ All notable changes to Irori are recorded here. Format follows
   link, dead mount). Nodes without a fresh inventory keep today's behaviour
   and rely on that check. No schema change.
 
+- **The node page no longer warns that syncing "will not work" on a node
+  where it does** (IR-291 / IRI-175 follow-up). A mount that shows the
+  store's links as directories is a red warning only when the modelctl that
+  runs the sync is older than 0.25.1 or unknown, and then it says how to
+  fix it. On 0.25.1 or newer it is a quiet note that syncing works there.
+  The agent's own store warning now states the requirement ("needs modelctl
+  0.25.1 or newer") instead of a verdict.
+
 - **Sync from the NAS works over SMB again on nodes running modelctl 0.25.1**
   (IR-291 / IRI-175). modelctl 0.25.1 finds the model from the store's
   update journal when the mount hides the `active/` symlink. For a node

@@ -6,6 +6,7 @@ import {
   sseEventSchema,
   storeLinkVisible,
   syncNeedsVisibleLink,
+  pickSyncModelctlVersion,
   MODELCTL_SYNC_WITHOUT_SYMLINK,
   type InventoryStore,
 } from "../src/index.ts";
@@ -181,5 +182,22 @@ describe("syncNeedsVisibleLink (IRI-175)", () => {
     for (const odd of ["", "latest", "v0.25.1", "0.25.1-rc1", "modelctl 0.25.1"]) {
       expect(syncNeedsVisibleLink(odd), odd).toBe(true);
     }
+  });
+});
+
+describe("pickSyncModelctlVersion (IRI-175)", () => {
+  const users = [
+    { user: "root", version: "0.25.1" },
+    { user: "operator", version: "0.25.0" },
+  ];
+  it("takes the cache user's version when one is set", () => {
+    expect(pickSyncModelctlVersion(users, "operator")).toBe("0.25.0");
+    expect(pickSyncModelctlVersion(users, "nobody")).toBeNull();
+  });
+  it("without a cache user takes root, or the only user, else unknown", () => {
+    expect(pickSyncModelctlVersion(users, null)).toBe("0.25.1");
+    expect(pickSyncModelctlVersion([{ user: "agent", version: "0.25.1" }], null)).toBe("0.25.1");
+    expect(pickSyncModelctlVersion([{ user: "a", version: "0.25.1" }, { user: "b", version: "0.25.1" }], null)).toBeNull();
+    expect(pickSyncModelctlVersion([], null)).toBeNull();
   });
 });
