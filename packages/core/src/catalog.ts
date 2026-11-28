@@ -124,6 +124,10 @@ export function catalogToEntries(catalog: Catalog): StoreModelEntry[] {
   return catalog.models.map((m) => ({ ...m, source: "catalog" as const }));
 }
 
+/** IRI-173: placement reason when a node mounts the store but sees the
+ *  model's `active/` link as a directory (SMB hides server-side symlinks). */
+export const STORE_LINK_HIDDEN_REASON = "store link not visible on this node's mount — check the NAS share settings";
+
 /** Placement decision for one (model, node) pair. */
 export type PlacementAction = "present" | "sync" | "push" | "unavailable";
 
@@ -134,6 +138,9 @@ export interface PlacementNode {
   role: "head" | "worker" | "standalone";
   /** Node is a model-ops node with the NAS store mounted at nasRoot. */
   hasNasRoot: boolean;
+  /** IRI-173: `false` = the node sees the model's store link as a directory,
+   *  so `sync-local` cannot work there. Absent = unknown (treated as fine). */
+  storeLinkVisible?: boolean;
   /** Node is a valid push destination (agent online + modelctl-capable). */
   pushCapable: boolean;
   diskFreeBytes: number | null;
@@ -197,11 +204,13 @@ export function planPlacement(input: PlacementInput): PlacementResult {
   if (viaNodeIds.some((id) => onlineIds.has(id))) return { action: "push", bytes: needs, viaNodeIds };
 
   // No reachable holder, but the node mounts the store and the model is on
-  // it: a plain sync-local.
-  if (input.target.hasNasRoot && onNas) return { action: "sync", bytes: needs };
+  // it: a plain sync-local — unless the node cannot see the store link
+  // (IRI-173), in which case the sync would fail inside modelctl.
+  const linkHidden = input.target.hasNasRoot && onNas !== undefined && input.target.storeLinkVisible === false;
+  if (input.target.hasNasRoot && onNas && !linkHidden) return { action: "sync", bytes: needs };
 
   if (viaNodeIds.length === 0) {
-    return cannotServe("model is on the NAS but no node holds it locally to push from");
+    return cannotServe(linkHidden ? STORE_LINK_HIDDEN_REASON : "model is on the NAS but no node holds it locally to push from");
   }
   return { action: "push", bytes: needs, viaNodeIds };
 }

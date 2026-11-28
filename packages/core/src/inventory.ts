@@ -40,9 +40,32 @@ export const inventoryStoreSchema = z.object({
   warning: z.string().nullable(),
   models: z.array(inventoryModelSchema),
   leftovers: z.array(inventoryLeftoverSchema),
+  /**
+   * IRI-173: names under `active/` that this node sees as directories, not
+   * symlinks. modelctl `sync-local` only accepts a symlink there, and an SMB
+   * mount shows server-side symlinks as directories. Absent = unknown (an
+   * older agent, or `active/` could not be listed).
+   */
+  unlinkedActive: z.array(z.string()).optional(),
 });
 
 export type InventoryStore = z.infer<typeof inventoryStoreSchema>;
+
+/**
+ * IRI-173: can this node's store view serve `sync-local` for `name`?
+ * `false` = the node sees the entry as a directory; `undefined` = unknown
+ * (no report, an older agent) — callers keep today's behaviour for unknown.
+ * A model the node does not list yet (still downloading) is judged by the
+ * rest of the view: a mount that shows no link at all won't show the next.
+ */
+export function storeLinkVisible(store: InventoryStore | null | undefined, name: string): boolean | undefined {
+  const unlinked = store?.unlinkedActive;
+  if (store === null || store === undefined || unlinked === undefined) return undefined;
+  if (unlinked.includes(name)) return false;
+  if (store.models.some((m) => m.name === name)) return true;
+  // Only listed models count: a stray directory under active/ is not one.
+  return store.models.length > 0 && store.models.every((m) => unlinked.includes(m.name)) ? false : undefined;
+}
 
 /** IR-133: adoption state of an unregistered cache dir, classified agent-side
  *  from the on-disk layout (no NAS round-trip). `adoptable` = a snapshot farm

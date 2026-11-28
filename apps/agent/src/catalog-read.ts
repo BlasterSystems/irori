@@ -117,6 +117,34 @@ async function readManifestBounded(
   return yaml === null ? null : parseManifestFields(yaml);
 }
 
+/**
+ * IRI-173: names under active/ that this node sees as directories instead of
+ * symlinks. modelctl `sync-local` refuses those, and an SMB mount shows every
+ * server-side symlink this way. Null = active/ could not be listed (unknown).
+ * One bounded lstat per entry; hidden entries (`.DS_Store`) are skipped.
+ */
+export async function listUnlinkedActive(root: string): Promise<string[] | null> {
+  const activeDir = join(root, "active");
+  // One call yields the entry kinds; a per-entry lstat is needed only when
+  // the filesystem does not report a kind.
+  const entries = await boundedOrNull(() => readdir(activeDir, { withFileTypes: true }));
+  if (entries === null) return null;
+  const unlinked: string[] = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".")) continue;
+    if (entry.isSymbolicLink() || entry.isFile()) continue;
+    if (entry.isDirectory()) {
+      unlinked.push(entry.name);
+      continue;
+    }
+    const st = await boundedOrNull(() => lstat(join(activeDir, entry.name)));
+    // A wedged mount mid-listing: report unknown rather than a partial list.
+    if (st === null) return null;
+    if (st.isDirectory()) unlinked.push(entry.name);
+  }
+  return unlinked.sort();
+}
+
 /** Live scan of active/ — name → manifest parse → object dir size. */
 export async function scanStore(root: string): Promise<ScannedModel[]> {
   const activeDir = join(root, "active");

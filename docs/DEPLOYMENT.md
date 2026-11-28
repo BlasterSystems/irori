@@ -74,7 +74,7 @@ advisory-locked (ADR-0002).
 The agent is configured via env (no config file): `IRORI_SERVER_URL`,
 `IRORI_NODE_TOKEN`, `IRORI_CADENCE_MS`, `IRORI_LLM_TARGETS`,
 `IRORI_LLM_DETECT_ONLY`, `IRORI_MODELCTL_PIN` (minimum modelctl version the
-install job enforces; default `0.24.0`, used when the hub pin is unset), `IRORI_MODELCTL_PATH`,
+install job enforces; default `0.25.1`, used when the hub pin is unset), `IRORI_MODELCTL_PATH`,
 `IRORI_HF_TOKEN` (optional HF token passed to modelctl as `HF_TOKEN` for
 gated/private repos; bootstrap fallback — a hub-set global token defined in
 the UI wins and is pushed via config-update, IRI-019), and
@@ -126,7 +126,7 @@ to it. Preferred since IRI-011: everything comes from the hub itself — no
 GitHub reachability needed on the node. The installer itself sets up only
 Node, the bundle and the unit; the hub then provisions the rest within
 moments of the first hello (IR-272): `uv`, modelctl at or above the hub pin
-(the agent default `0.24.0` when no pin is set) for the node's model cache
+(the agent default `0.25.1` when no pin is set) for the node's model cache
 user (or root on the NAS), that user's `~/.cache/huggingface/hub`, and
 `rsync` on serving nodes. Setting or changing the model cache user later
 does the same for the new user. The Add-node modal shows this block
@@ -146,6 +146,38 @@ warn-only WebSocket preflight against `--server` first, only counts a
 and on timeout prints the agent's last `connection error` / `server error`
 lines. The restart interrupts jobs running on that node (downloads,
 transfers), so re-run on an idle node.
+
+#### Store mount on Sparks (IRI-173)
+
+A Spark that syncs from the NAS store must see the store's `active/` entries
+as **symlinks**. modelctl on the NAS node writes ordinary symlinks on the
+QNAP volume, and `sync-local` refuses anything else. Check on the Spark:
+
+```sh
+stat -c %F /mnt/nas/active/<model-name>   # must print: symbolic link
+```
+
+- **SMB/CIFS** (the `mfsymlinks` mount from the M4 runbook) shows those
+  server-side symlinks as directories, so every sync from the store fails
+  there. `mfsymlinks` only covers links created through a client mount.
+- **NFS** passes symlinks through unchanged and is the expected fix: export
+  the QNAP `LLMs` share read-only to the Sparks and mount it at the node's
+  NAS root. Not verified on the fleet yet (2026-11-28: the QNAP exported
+  only `/Proxmox`); replace this note with the fstab line once it is.
+
+Irori reports what each node sees (node page warning, `store.unlinkedActive`
+in the inventory), does not offer a NAS sync to a node that cannot see the
+link, and fails `sync-local` with a plain message before modelctl starts.
+
+- **modelctl 0.25.1 or newer** (IRI-175) also works on such a mount:
+  `sync-local` takes the model from the store's update journal when the
+  symlink is hidden. Set the hub's modelctl pin to `0.25.1` once that
+  release is published. Each node is upgraded by the usual auto-install,
+  and once its inventory reports `0.25.1` Irori offers the sync again on
+  its SMB mount and keeps the warning. A model whose update journal has no
+  successful activation still needs a visible symlink (or one
+  `modelctl update NAME` on the store host). Store *writes* through such a mount stay refused
+  (ADR-0023).
 
 #### Behind a TLS reverse proxy (IRI-156)
 

@@ -1,11 +1,10 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
-import { downloadQueue, jobs as jobsTable, nodes } from "@irori/db";
+import { downloadQueue, jobs as jobsTable } from "@irori/db";
 import type { Db } from "@irori/db";
 import {
   deriveDownloadName,
   downloadBatchCreateSchema,
   downloadCreateSchema,
-  pickStoreNode,
   type DownloadQueueEntry,
   type DownloadQueueStatus,
 } from "@irori/core";
@@ -13,8 +12,8 @@ import type { JobAgentSend, JobSettledEvent, JobsService } from "./jobs-service.
 
 /**
  * Server-side download queue (IRI-014). Adding a download always forms a
- * pending row; pending rows dispatch to the store node (NAS-preferred,
- * `pickStoreNode`) as ONE `download-queue` batch whenever the node is idle.
+ * pending row; pending rows dispatch to the store writer (NAS-preferred,
+ * `jobs.pickStoreWriter`, ADR-0023) as ONE `download-queue` batch whenever the node is idle.
  * modelctl's queue is an invocation-scoped YAML (ADR-0004) — the durable
  * queue is this table, drained through the existing one-active-per-node job
  * model (ADR-0003). Batch outcomes reconcile back onto the rows:
@@ -187,9 +186,11 @@ export function createDownloadQueueService(deps: DownloadQueueDeps): DownloadQue
       // onJobOutput maps progress entry indexes against THIS exact order.
       .orderBy(downloadQueue.createdAt, downloadQueue.id);
     if (pending.length === 0) return;
-    const nodeRows = await db.select().from(nodes);
-    const node = pickStoreNode(nodeRows, online());
-    if (node === null) return; // no online store node: entries stay pending
+    // IRI-174 (ADR-0023): downloads write the store — the NAS node, or a
+    // mounted node whose store view is write-safe. Otherwise entries wait.
+    const writer = await jobs.pickStoreWriter(online());
+    if (writer.nodeId === null) return; // no node may write: entries stay pending
+    const node = { id: writer.nodeId };
     const [active] = await db
       .select({ id: jobsTable.id })
       .from(jobsTable)

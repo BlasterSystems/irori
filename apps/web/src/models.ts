@@ -7,6 +7,8 @@ import {
   modelsPageSchema,
   parseTransferProgress,
   placementResponseSchema,
+  storeWriterResponseSchema,
+  type StoreWriterResponse,
   quarantinePruneSummarySchema,
   pruneCleanupQuarantineSummarySchema,
   stagingTreeReportSchema,
@@ -65,6 +67,23 @@ export async function fetchAllModelsNamed(q: string, signal?: AbortSignal): Prom
     if (res.models.length === 0 || out.length >= res.total) break;
   }
   return out.sort(modelNameCompare);
+}
+
+/** IRI-174: the hub's answer to "which node may change the store right now". */
+export async function fetchStoreWriter(signal?: AbortSignal): Promise<StoreWriterResponse> {
+  const parsed = storeWriterResponseSchema.safeParse(await getJson("/api/v1/store-writer", signal));
+  if (!parsed.success) throw new Error("malformed store-writer response");
+  return parsed.data;
+}
+
+/**
+ * IRI-174: the node the Models page sends store actions to. The hub's answer
+ * wins once it has arrived, including "nobody" (null); until then, or when
+ * the request failed, the local NAS-first pick stands and the hub's own
+ * guard still refuses an unsafe write.
+ */
+export function resolveStoreWriter(localPick: string | null, hub: StoreWriterResponse | null): { nodeId: string | null; reason: string | null } {
+  return hub === null ? { nodeId: localPick, reason: null } : { nodeId: hub.nodeId, reason: hub.reason };
 }
 
 export async function fetchPlacement(model: string, signal?: AbortSignal): Promise<PlacementResponse> {

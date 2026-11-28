@@ -479,6 +479,9 @@ async function boot(): Promise<void> {
     sendToNode: (nodeId, msg) => (hub === null ? false : hub.sendToNode(nodeId, msg)),
     refreshNodeConfig: async (nodeId) => (hub === null ? false : hub.refreshConfig(nodeId)),
     jobs: jobsService,
+    getStoreView: async (nodeId) =>
+      (await state.inventory?.get(nodeId).catch(() => null))?.report?.store ?? jobsService.lastStoreView(nodeId),
+    getSyncModelctlVersion: (nodeId, cacheUser) => jobsService.syncModelctlVersion(nodeId, cacheUser),
     log: (message) => log.info(message),
   });
 

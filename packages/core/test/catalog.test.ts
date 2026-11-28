@@ -5,6 +5,7 @@ import {
   catalogToEntries,
   parseCatalog,
   planPlacement,
+  STORE_LINK_HIDDEN_REASON,
   storeCompanionsSchema,
   storeCompanionsStateSchema,
   isCompanionsUnreadable,
@@ -58,6 +59,35 @@ describe("planPlacement", () => {
       .toEqual({ action: "sync", bytes: 300 });
     expect(planPlacement({ availableOn: [{ nodeId: "nas", bytes: 300 }], target: { ...head, hasNasRoot: true, diskFreeBytes: 320 }, reserveBytes: 50 }))
       .toEqual({ action: "unavailable", reason: expect.stringContaining("needs 300") });
+  });
+
+  it("gates the NAS sync on the node's own view of the store link (IRI-173)", () => {
+    const availableOn = [{ nodeId: "nas", bytes: 300 }];
+    const mounted = { ...head, hasNasRoot: true };
+    // visible and unknown (no report / older agent) keep the sync
+    expect(planPlacement({ availableOn, target: { ...mounted, storeLinkVisible: true }, reserveBytes: 0 })).toEqual({ action: "sync", bytes: 300 });
+    expect(planPlacement({ availableOn, target: mounted, reserveBytes: 0 })).toEqual({ action: "sync", bytes: 300 });
+    // hidden: no sync, and the reason names the mount rather than a missing holder
+    expect(planPlacement({ availableOn, target: { ...mounted, storeLinkVisible: false }, reserveBytes: 0 })).toEqual({
+      action: "unavailable",
+      reason: STORE_LINK_HIDDEN_REASON,
+    });
+    // hidden, but an offline holder exists: the last-resort push still applies
+    expect(
+      planPlacement({
+        availableOn: [...availableOn, { nodeId: "worker", bytes: 300, online: false }],
+        target: { ...mounted, storeLinkVisible: false },
+        reserveBytes: 0,
+      }),
+    ).toEqual({ action: "push", bytes: 300, viaNodeIds: ["worker"] });
+    // a reachable holder wins regardless of the link (IR-100)
+    expect(
+      planPlacement({
+        availableOn: [...availableOn, { nodeId: "worker", bytes: 300, online: true }],
+        target: { ...mounted, storeLinkVisible: false },
+        reserveBytes: 0,
+      }),
+    ).toEqual({ action: "push", bytes: 300, viaNodeIds: ["worker"] });
   });
 
   it("prefers the CX7 push from an online holder over the NAS sync hop (IR-100)", () => {

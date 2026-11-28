@@ -298,6 +298,18 @@ describe("node model inventory + activity routes (IRI-028)", () => {
     expect((await request(app).get(`/api/v1/nodes/${id}/models`)).status).toBe(503);
   });
 
+  it("reports the store writer, or why nobody may write (IRI-174)", async () => {
+    expect((await request(makeApp().app).get("/api/v1/store-writer")).status).toBe(503);
+    const seen: Array<ReadonlySet<string>> = [];
+    const answer = { nodeId: null, reason: "no node can safely write the store right now (the NAS node is offline or not set up)" };
+    const { app } = makeApp({ jobs: { pickStoreWriter: async (online: ReadonlySet<string>) => (seen.push(online), answer) } });
+    const res = await request(app).get("/api/v1/store-writer");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(answer);
+    // The hub's online set is what decides who qualifies.
+    expect(seen).toHaveLength(1);
+  });
+
   it("dispatches models-inventory on refresh and maps busy to 409", async () => {
     const created: Array<{ nodeId: string; kind: string }> = [];
     const jobs = {

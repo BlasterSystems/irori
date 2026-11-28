@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { compareVersions } from "./version.js";
 
 /**
  * Modelctl pin (IR-105): the hub-pinned modelctl version agents converge to.
@@ -20,3 +21,23 @@ export const modelctlPinResponseSchema = z.object({
   pin: z.string().regex(MODELCTL_PIN_RE).nullable(),
 });
 export type ModelctlPinResponse = z.infer<typeof modelctlPinResponseSchema>;
+
+/**
+ * IRI-175: the first modelctl whose `sync-local` works when the node sees
+ * the store's `active/` links as directories (an SMB mount). It resolves the
+ * object from the update journal instead of the symlink. A node known to
+ * run this version or newer may sync through a hidden link.
+ */
+export const MODELCTL_SYNC_WITHOUT_SYMLINK = "0.25.1";
+
+/**
+ * IRI-175: does a NAS sync on this node still need the store link to be a
+ * visible symlink? Not when the modelctl that will run it is known to be
+ * 0.25.1 or newer. `version` is the node's REPORTED modelctl for the user
+ * the sync runs as; null = unknown, and unknown still needs the link. The
+ * hub pin is deliberately not used: a node can stay below the pin (failed
+ * install, offline during the bump).
+ */
+export function syncNeedsVisibleLink(version: string | null): boolean {
+  return version === null || !MODELCTL_PIN_RE.test(version) || compareVersions(version, MODELCTL_SYNC_WITHOUT_SYMLINK) < 0;
+}

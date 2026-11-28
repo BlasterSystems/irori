@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
-import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
+import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, nodes, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, pickStoreNode, storeViewSafeForWrites, syncNeedsVisibleLink, isStoreWrite, STORE_WRITER_UNAVAILABLE_REASON, type InventoryStore, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -104,7 +104,7 @@ export async function reconcilePresenceFromInventory(db: Db, nodeId: string, rep
  * (version null) is converged too — skipping it left the user permanently
  * stuck ("unknown local cache user" on every per-user job). IR-272: with no
  * hub pin a missing binary is still installed — at the agent's own default
- * pin (0.24.0) — while below-pin upgrades wait for a pin. Silent skips (busy
+ * pin (0.25.1) — while below-pin upgrades wait for a pin. Silent skips (busy
  * node, offline agent) wait for the next inventory read; the install job
  * itself skips without a transfer when the version satisfies the gate, so a
  * stale env pin can never downgrade a newer binary.
@@ -246,6 +246,19 @@ export interface JobsService {
   findModel(name: string): Promise<{ name: string; repository: string; runtime: string; bytes: number; firstSeenAt: Date; updatedAt: Date } | null>;
   /** Node ids where a succeeded transfer (sync/download/push source) left the model. */
   presentNodesFor(name: string): Promise<string[]>;
+  /** IRI-173: the store view of the node's last report, kept after a
+   *  model-mutating settle dropped that report (null = none remembered). */
+  lastStoreView(nodeId: string): InventoryStore | null;
+  /** IRI-175: the node's reported modelctl version for the user a sync runs
+   *  as (`user` null = no cache user). Null = unknown. Survives the
+   *  inventory reset like `lastStoreView`. */
+  syncModelctlVersion(nodeId: string, user: string | null): Promise<string | null>;
+  /**
+   * IRI-174 (ADR-0023): the node store-mutating jobs go to right now. The
+   * NAS-kind node first; a node that only mounts the store qualifies only
+   * with a write-safe store view. `reason` is set when no node may write.
+   */
+  pickStoreWriter(online: ReadonlySet<string>): Promise<{ nodeId: string | null; reason: string | null }>;
   /** Fails every running/queued job whose node is not in `onlineNodes`; returns affected job ids. */
   reapOffline(onlineNodes: ReadonlySet<string>): Promise<string[]>;
   /**
@@ -258,6 +271,10 @@ export interface JobsService {
    */
   settleAgentUpdate(nodeId: string, agentVersion: string): Promise<"succeeded" | "pending" | "none">;
 }
+
+/** IRI-174: a store view older than this is not evidence for a store write.
+ *  The inventory sweep re-reads reports older than 24 h on an hourly tick. */
+const STORE_VIEW_MAX_AGE_MS = 26 * 3_600_000;
 
 export class JobBusyError extends Error {}
 export class JobDispatchError extends Error {}
@@ -357,7 +374,43 @@ export function createJobsService(
 ): JobsService {
   /** IR-272: last auto-dispatched modelctl-install per node and user. */
   const autoInstallAttempts = new Map<string, number>();
+  /** IRI-173: each node's store view from the report a job settle dropped;
+   *  cleared by the next report. In memory only: a hub restart reads as
+   *  unknown, and the agent's sync-local pre-check covers that. */
+  const lastStoreViews = new Map<string, { store: InventoryStore | null; updatedAt: Date; modelctl: Array<{ user: string; version: string | null }> }>();
+  const modelctlOf = (report: NodeInventory): Array<{ user: string; version: string | null }> =>
+    report.local.map((l) => ({ user: l.user, version: l.modelctlVersion ?? null }));
+  /** IRI-174: the node's current store view — its report, else the one a
+   *  job settle dropped — judged by the shared write-safety rule. A view
+   *  older than the daily inventory sweep allows is not evidence. */
+  const storeWriteSafe = async (nodeId: string): Promise<boolean> => {
+    const [row] = await db.select({ report: nodeInventory.report, updatedAt: nodeInventory.updatedAt }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
+    const reported = row === undefined ? null : (nodeInventorySchema.safeParse(row.report).data?.store ?? null);
+    const view = reported !== null && row !== undefined ? { store: reported, updatedAt: row.updatedAt } : (lastStoreViews.get(nodeId) ?? null);
+    if (view === null || view.store === null || Date.now() - view.updatedAt.getTime() > STORE_VIEW_MAX_AGE_MS) return false;
+    return storeViewSafeForWrites(view.store);
+  };
   const service: JobsService = {
+    lastStoreView: (nodeId) => lastStoreViews.get(nodeId)?.store ?? null,
+    async syncModelctlVersion(nodeId, user) {
+      const [row] = await db.select({ report: nodeInventory.report }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
+      const parsed = row === undefined ? undefined : nodeInventorySchema.safeParse(row.report).data;
+      const users = parsed !== undefined ? modelctlOf(parsed) : (lastStoreViews.get(nodeId)?.modelctl ?? []);
+      // The sync runs as the cache user; with none set it runs as the agent
+      // user, whose name the hub does not know — accept it only when the
+      // report leaves no doubt (a single user, or root).
+      const entry = user !== null ? users.find((u) => u.user === user) : (users.find((u) => u.user === "root") ?? (users.length === 1 ? users[0] : undefined));
+      return entry?.version ?? null;
+    },
+    async pickStoreWriter(online) {
+      const rows = await db.select().from(nodes);
+      const safe = new Set<string>();
+      for (const row of rows) {
+        if (row.kind !== "nas" && row.nasRoot !== null && (await storeWriteSafe(row.id))) safe.add(row.id);
+      }
+      const node = pickStoreNode(rows, online, (n) => safe.has(n.id));
+      return node === null ? { nodeId: null, reason: STORE_WRITER_UNAVAILABLE_REASON } : { nodeId: node.id, reason: null };
+    },
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
       if (kind === "push" && rewritePushParams !== undefined) params = await rewritePushParams(nodeId, params);
@@ -367,6 +420,24 @@ export function createJobsService(
         .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])))
         .limit(1);
       if (active) throw new JobBusyError(`node already has an active job${activeJobLabel(active)}`);
+      // IRI-174 (ADR-0023): a node that only mounts the store may change it
+      // only with a write-safe view. Every dispatch path ends here, so this
+      // is the one place the rule cannot be bypassed.
+      const [target] = await db.select({ kind: nodes.kind, name: nodes.name, nasRoot: nodes.nasRoot, cacheUser: nodes.cacheUser }).from(nodes).where(eq(nodes.id, nodeId)).limit(1);
+      // IRI-175: tell the agent's pre-check when this node's modelctl is
+      // known to sync without a visible symlink. Decided here, at the one
+      // dispatch point, from the node's own report; never from the caller.
+      if (kind === "sync-local") {
+        const { linkOptional: _ignored, ...rest } = params;
+        void _ignored;
+        const user = typeof rest.user === "string" && rest.user.length > 0 ? rest.user : (target?.cacheUser ?? null);
+        params = syncNeedsVisibleLink(await service.syncModelctlVersion(nodeId, user)) ? rest : { ...rest, linkOptional: true };
+      }
+      if (target !== undefined && target.kind !== "nas" && isStoreWrite(kind, params, target) && !(await storeWriteSafe(nodeId))) {
+        throw new JobDispatchError(
+          `${target.name} only mounts the store and its view of it is not safe to write through (${kind} refused). Run this on the NAS node, or refresh ${target.name}'s inventory once its mount shows the store's links.`,
+        );
+      }
       let inserted: Array<typeof jobs.$inferSelect>;
       try {
         inserted = await db
@@ -589,6 +660,8 @@ export function createJobsService(
         if (status === "succeeded") {
           const report = await settleInventory(db, nodeId, jobId);
           if (report !== null) {
+            lastStoreViews.delete(nodeId); // IRI-173: a fresh report wins
+
             // IR-140: the listing is ground truth for presence — placement and
             // start staging read node_models, which transfer settles alone
             // never fed for out-of-band models.
@@ -661,6 +734,14 @@ export function createJobsService(
       // delete leaves leftovers. Drop the cached inventory so the next node
       // detail read (or the UI's post-settle refresh) rebuilds it.
       if (INVENTORY_MUTATING_KINDS.has(row.kind)) {
+        // IRI-173: how the node sees the store's links is a property of its
+        // mount, not of what it holds. Remember it across the reset so the
+        // sync gate does not forget a hidden link the moment a job settles.
+        const [prev] = await db.select({ report: nodeInventory.report, updatedAt: nodeInventory.updatedAt }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
+        const prevReport = prev === undefined ? undefined : nodeInventorySchema.safeParse(prev.report).data;
+        if (prev !== undefined && prevReport !== undefined) {
+          lastStoreViews.set(nodeId, { store: prevReport.store, updatedAt: prev.updatedAt, modelctl: modelctlOf(prevReport) });
+        }
         await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
       }
       // Store contents may have changed: ask the node to re-report its catalog

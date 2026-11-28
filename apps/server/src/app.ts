@@ -45,7 +45,7 @@ import {
 import { BenchBusyError, BenchNotFoundError, BenchOfflineError, type BenchRunRow, type BenchService } from "./bench-service.js";
 import { HfQuantsError, type HfQuantsService } from "./hf-quants.js";
 import type { HfTokenService } from "./hf-token.js";
-import { planPlacement, storeCompanionsStateSchema, type StoreCompanionsState } from "@irori/core";
+import { planPlacement, storeCompanionsStateSchema, storeLinkVisible, syncNeedsVisibleLink, type StoreCompanionsState } from "@irori/core";
 import type { Rings } from "./rings.js";
 import type { SseHub } from "./sse.js";
 import { EVENT_FEED_CAP } from "./events-feed.js";
@@ -1976,6 +1976,14 @@ export function createApp(deps: AppDeps): Express {
     res.status(202).json({ requested: sent });
   });
 
+  // IRI-174 (ADR-0023): the node store-mutating jobs go to right now, or why
+  // none may write. The Models page reads this instead of guessing.
+  app.get("/api/v1/store-writer", async (_req, res) => {
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await jobs.pickStoreWriter(deps.getHub()?.online() ?? NO_NODES_ONLINE));
+  });
+
   // Placement: model × every node → present|sync|push|unavailable.
   app.get("/api/v1/placement", async (req, res) => {
     const jobs = deps.getJobs();
@@ -1997,15 +2005,24 @@ export function createApp(deps: AppDeps): Express {
       ...presentNodeIds.map((nodeId) => ({ nodeId, bytes: entry.bytes, online: online.has(nodeId) })),
     ];
     const placements = [];
+    const inventory = deps.getInventory?.() ?? null;
+
     for (const row of rows) {
       const snapshot = deps.rings.latest(row.id);
       const diskFreeBytes = maxDiskFree(snapshot);
+      // IRI-173: the node's own view of the store link (undefined = unknown).
+      // A job settle drops the report; the remembered view bridges the gap.
+      const report = row.nasRoot === null ? null : ((await inventory?.get(row.id).catch(() => null))?.report ?? null);
+      // IRI-175: a node whose reported modelctl is 0.25.1+ syncs through a hidden link.
+      const needsLink = row.nasRoot !== null && syncNeedsVisibleLink(await jobs.syncModelctlVersion(row.id, row.cacheUser ?? null));
+      const linkVisible = needsLink ? storeLinkVisible(report?.store ?? jobs.lastStoreView(row.id), entry.name) : undefined;
       const target = {
         id: row.id,
         name: row.name,
         kind: row.kind,
         role: row.role,
         hasNasRoot: row.nasRoot !== null,
+        ...(linkVisible === undefined ? {} : { storeLinkVisible: linkVisible }),
         pushCapable: online.has(row.id) && row.enabled,
         diskFreeBytes,
       };

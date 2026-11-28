@@ -74,6 +74,44 @@ All notable changes to Irori are recorded here. Format follows
 
 ### Fixed
 
+- **Sync from the NAS no longer fails with "no active NAS reference" without
+  explanation** (IR-289 / IRI-173). An SMB mount shows the store's `active/`
+  symlinks as directories, and modelctl `sync-local` only accepts a symlink.
+  The node's inventory now lists the entries it cannot see as links
+  (`store.unlinkedActive`) with a warning on the node page. Placement and
+  setup transfers no longer offer a NAS sync to such a node: the Models page
+  shows the reason, and transfers fall through to a push or an HF download.
+  The agent also checks the store link before starting `sync-local` and
+  fails at once with a plain message (unmounted share, missing entry, hidden
+  link, dead mount). Nodes without a fresh inventory keep today's behaviour
+  and rely on that check. No schema change.
+
+- **Sync from the NAS works over SMB again on nodes running modelctl 0.25.1**
+  (IR-291 / IRI-175). modelctl 0.25.1 finds the model from the store's
+  update journal when the mount hides the `active/` symlink. For a node
+  whose inventory reports modelctl 0.25.1 or newer for the user the sync
+  runs as, placement and setup transfers offer the NAS sync again even when
+  the node sees the link as a directory, and the hub tells the agent's
+  `sync-local` check to let it through; the node page keeps the warning.
+  An unknown or older version keeps the IR-289 behaviour. Raise the hub's
+  modelctl pin to 0.25.1 to roll it out. The agent's fallback pin default
+  (`IRORI_MODELCTL_PIN`) rises from 0.24.0 to **0.25.1**.
+
+- **Store writes can no longer fall back to a node that cannot see the store
+  properly** (IR-290 / IRI-174, ADR-0023, amends ADR-0009). Downloads,
+  store deletes, repair and store cleanup run on the NAS node. A node that
+  only mounts the store may run them only when its latest inventory proves a
+  clean, recent view: read from the catalog, no warning, at least one
+  model listed and no `active/` entry seen as a directory. No report counts
+  as unsafe. The hub refuses such a job on any path with a message naming
+  the node. That covers the store cleanup and quarantine jobs, card sync,
+  and an HF `download` on a node that mounts the store. The download queue
+  waits and drains when a writer is back, setup transfers no longer plan
+  an HF download onto a node that sees the links as directories, and
+  `GET /api/v1/store-writer` tells the Models page who may write or why
+  nobody can; read-only checks still run on any node with the store. With the NAS agent down and
+  Sparks on SMB, store writes now wait instead of running through SMB.
+
 - **The hub serves the agent installer from any install path** (IRI-157):
   `/install-agent.sh`, `/irori-agent.service` and `/agent/irori-agent.mjs`
   failed (404) when the hub's files lived under a hidden directory (for

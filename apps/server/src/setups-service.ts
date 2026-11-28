@@ -22,6 +22,10 @@ import {
   type SetupValidateResultMsg,
   type SseEvent,
   type TransferStage,
+  storeLinkVisible,
+  syncNeedsVisibleLink,
+  STORE_LINK_HIDDEN_REASON,
+  type InventoryStore,
 } from "@irori/core";
 import { nodes, setupRuns, setups, setupTransfers, type Db, type NodeRecord } from "@irori/db";
 import type { Rings } from "./rings.js";
@@ -82,6 +86,11 @@ export interface SetupsServiceDeps {
   sendToNode: (nodeId: string, msg: unknown) => boolean;
   refreshNodeConfig: (nodeId: string) => Promise<boolean>;
   jobs: Pick<JobsService, "create" | "cancel" | "findModel" | "presentNodesFor">;
+  /** IRI-173: the node's latest inventory store view (null = no report). */
+  getStoreView?: (nodeId: string) => Promise<InventoryStore | null>;
+  /** IRI-175: the node's reported modelctl version for the user a sync
+   *  runs as (null = unknown). */
+  getSyncModelctlVersion?: (nodeId: string, cacheUser: string | null) => Promise<string | null>;
   log?: (message: string) => void;
 }
 
@@ -996,10 +1005,23 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
       // NAS-mounting target defers to pass 2 when a reachable node already
       // holds the model locally — the CX7 push beats the SMB store hop
       // (IR-100, same policy as planPlacement).
+      // IRI-173: a target that sees the store link as a directory cannot
+      // sync-local — it falls through to pass 2 (push, else HF download).
+      const linkHidden = new Set<string>();
+      for (const targetId of targetNodeIds) {
+        const node = byId.get(targetId);
+        if (node === undefined || node.nasRoot === null) continue;
+        // IRI-175: a node whose reported modelctl is 0.25.1+ reads the update
+        // journal, so a hidden link is no reason to avoid the sync there.
+        const version = (await deps.getSyncModelctlVersion?.(targetId, node.cacheUser ?? null).catch(() => null)) ?? null;
+        if (!syncNeedsVisibleLink(version)) continue;
+        const view = (await deps.getStoreView?.(targetId).catch(() => null)) ?? null;
+        if (storeLinkVisible(view, modelEntry?.name ?? shortName(row.model)) === false) linkHidden.add(targetId);
+      }
       const nasTargets: string[] = [];
       for (const targetId of targetNodeIds) {
         const target = byId.get(targetId);
-        if (target && !holderIds.has(targetId) && modelEntry !== null && target.nasRoot !== null) {
+        if (target && !holderIds.has(targetId) && modelEntry !== null && target.nasRoot !== null && !linkHidden.has(targetId)) {
           const holderReachable =
             targetId !== nasNode?.id &&
             allNodes.some((n) => holderIds.has(n.id) && n.id !== targetId && n.enabled && online.has(n.id));
@@ -1033,6 +1055,18 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
             hosts: [target.cacheUser ? `${target.cacheUser}@${target.host}` : target.host],
             jobs: 4,
           });
+          continue;
+        }
+        if (linkHidden.has(targetId)) {
+          // IRI-173/IRI-174: nothing to push from, the node cannot sync, and
+          // an HF download here would write the store through its mount
+          // (ADR-0023). Say so instead of planning a job the hub refuses.
+          // Failed, not skipped: nothing reached this target, and the
+          // transfer must not read as succeeded.
+          pushStage(`${target.name} (no route)`, targetId, targetId, "noop", {});
+          const last = stages[stages.length - 1]!;
+          last.status = "failed";
+          last.error = STORE_LINK_HIDDEN_REASON;
           continue;
         }
         if (modelEntry === null) {

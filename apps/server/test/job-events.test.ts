@@ -27,7 +27,9 @@ d("job settle events (db integration)", () => {
     await db.insert(nodes).values({
       id: nodeId,
       name: `jobevt-${nodeId.slice(0, 8)}`,
-      kind: "spark",
+      // The store node: these tests settle store-mutating jobs, which only
+      // the NAS-kind node may run unconditionally (IRI-174).
+      kind: "nas",
       role: "standalone",
       host: "localhost",
       agentTokenHash: "x",
@@ -41,6 +43,105 @@ d("job settle events (db integration)", () => {
     await db.delete(jobs).where(eq(jobs.nodeId, nodeId));
     await db.delete(nodes).where(eq(nodes.id, nodeId));
     await handle.close();
+  });
+
+  it("remembers the node's store view across the inventory reset, until a fresh report (IRI-173)", async () => {
+    const svc = createJobsService(db, () => true);
+    const store = { root: "/mnt/nas", source: "catalog" as const, warning: null, models: [], leftovers: [], unlinkedActive: ["hidden-model"] };
+    await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 1, store, local: [] } });
+    expect(svc.lastStoreView(nodeId)).toBeNull();
+    // A settled transfer drops the report, but the mount has not changed.
+    const sync = await svc.create(nodeId, "sync-local", { name: "hidden-model" });
+    await svc.onDone(nodeId, sync.id, "failed", 1);
+    expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
+    expect(svc.lastStoreView(nodeId)?.unlinkedActive).toEqual(["hidden-model"]);
+    // The next report replaces the memory (here: the mount was fixed).
+    const inv = await svc.create(nodeId, "models-inventory", {});
+    await svc.onOutput(nodeId, inv.id, 0, JSON.stringify({ generatedAtMs: 2, store: { ...store, unlinkedActive: [] }, local: [] }));
+    await svc.onDone(nodeId, inv.id, "succeeded", 0);
+    expect(svc.lastStoreView(nodeId)).toBeNull();
+    await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+  });
+
+  it("refuses store writes on a node that only mounts the store unless its view is write-safe (IRI-174)", async () => {
+    const svc = createJobsService(db, () => true);
+    await db.update(nodes).set({ kind: "spark", nasRoot: "/mnt/nas" }).where(eq(nodes.id, nodeId));
+    const view = (unlinkedActive: string[]) => ({
+      root: "/mnt/nas",
+      source: "catalog" as const,
+      warning: null,
+      models: [{ name: "m", repository: "org/m", runtime: "vllm", bytes: 1 }],
+      leftovers: [],
+      unlinkedActive,
+    });
+    try {
+      // No report: unknown is not safe for writes.
+      await expect(svc.create(nodeId, "download-queue", { downloads: [] })).rejects.toThrow(/only mounts the store.*download-queue refused/);
+      // The mount hides the store's links.
+      await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 1, store: view(["m"]), local: [] } });
+      await expect(svc.create(nodeId, "nas-delete-apply", { name: "m" })).rejects.toThrow(/not safe to write through/);
+      expect((await svc.pickStoreWriter(new Set([nodeId]))).nodeId).not.toBe(nodeId);
+      // Every armed store mutation is covered, whatever its kind.
+      for (const [kind, params] of [
+        ["quarantine-prune", { names: ["m"], confirm: "prune" }],
+        ["prune-cleanup-quarantine", { confirm: "prune" }],
+        ["sync-cards", {}],
+        ["hygiene-clean", { categories: ["modelctl-staging"], dryRun: false }],
+        ["download", { name: "org/m" }],
+      ] as Array<[string, Record<string, unknown>]>) {
+        await expect(svc.create(nodeId, kind, params), kind).rejects.toThrow(/refused/);
+      }
+      // A hygiene clean that stays off the store still runs.
+      const clean = await svc.create(nodeId, "hygiene-clean", { categories: ["docker-build-cache"], dryRun: true });
+      await svc.onDone(nodeId, clean.id, "failed", 1);
+      // Reads and cache-side jobs are untouched.
+      const sync = await svc.create(nodeId, "sync-local", { name: "m" });
+      await svc.onDone(nodeId, sync.id, "failed", 1);
+      // The settle dropped the report; the remembered view still says no.
+      await expect(svc.create(nodeId, "gc-objects", { targets: ["a/b/c--d"] })).rejects.toThrow(/refused/);
+      // A clean view that is too old to be evidence still says no.
+      await db.insert(nodeInventory).values({ nodeId, report: { generatedAtMs: 2, store: view([]), local: [] }, updatedAt: new Date(Date.now() - 27 * 3_600_000) });
+      await expect(svc.create(nodeId, "catalog-refresh", {})).rejects.toThrow(/refused/);
+      // A fresh clean view makes the node an acceptable fallback writer.
+      await db.update(nodeInventory).set({ updatedAt: new Date() }).where(eq(nodeInventory.nodeId, nodeId));
+      const ok = await svc.create(nodeId, "catalog-refresh", {});
+      await svc.onDone(nodeId, ok.id, "succeeded", 0);
+    } finally {
+      await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+      await db.update(nodes).set({ kind: "nas", nasRoot: null }).where(eq(nodes.id, nodeId));
+    }
+  });
+
+  it("tells the agent a hidden link is fine only for a node that reports modelctl 0.25.1+ (IRI-175)", async () => {
+    const svc = createJobsService(db, () => true);
+    const report = (version: string | null) => ({
+      generatedAtMs: 1,
+      store: null,
+      local: [{ user: "operator", home: "/home/operator", cacheDir: "/home/operator/.cache/huggingface/hub", modelctlVersion: version, error: null, models: [] }],
+    });
+    const paramsOf = async (params: Record<string, unknown>): Promise<unknown> => {
+      const job = await svc.create(nodeId, "sync-local", params);
+      await svc.onDone(nodeId, job.id, "failed", 1);
+      return job.params;
+    };
+    await db.update(nodes).set({ cacheUser: "operator" }).where(eq(nodes.id, nodeId));
+    try {
+      // Unknown version: no flag, and a caller cannot smuggle one in.
+      expect(await paramsOf({ name: "m", linkOptional: true })).toEqual({ name: "m" });
+      await db.insert(nodeInventory).values({ nodeId, report: report("0.25.0") });
+      expect(await paramsOf({ name: "m" })).toEqual({ name: "m" });
+      await db.insert(nodeInventory).values({ nodeId, report: report("0.25.1") });
+      expect(await svc.syncModelctlVersion(nodeId, "operator")).toBe("0.25.1");
+      expect(await paramsOf({ name: "m" })).toEqual({ name: "m", linkOptional: true });
+      // The settle dropped the report; the remembered version still counts.
+      expect(await db.select().from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId))).toHaveLength(0);
+      expect(await paramsOf({ name: "m" })).toEqual({ name: "m", linkOptional: true });
+      // Another user's modelctl says nothing about this one.
+      expect(await svc.syncModelctlVersion(nodeId, "someone-else")).toBeNull();
+    } finally {
+      await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
+      await db.update(nodes).set({ cacheUser: null }).where(eq(nodes.id, nodeId));
+    }
   });
 
   it("names the blocking job when the node slot is taken (IR-134)", async () => {
