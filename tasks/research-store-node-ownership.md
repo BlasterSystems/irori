@@ -240,3 +240,93 @@ Ordered by rollout safety. Ticket keys are in the table at the top
 - modelctl `plans/central-cluster-model-management.md` overlaps with Irori's
   role and is not implemented; `plans/active-reference-integrity.md` is
   implemented and is the precedent for phase 3's invariant.
+
+## Spike IRI-176 (IR-292): store node pushes straight to Sparks
+
+Status on 2026-11-28: desk analysis done; fleet measurements still open.
+
+### Question
+
+Should the store node send a store model directly into a Spark's Hugging
+Face cache over SSH, so Sparks need no store mount?
+
+### Findings from the modelctl source (0.25.0)
+
+- **`push` is transport plus a source adapter.** `push_model` resolves
+  `(name, metadata, files, commit, overlay)` through `_cache_source`, then
+  probes the remote, rsyncs a file list into the remote staging directory,
+  and asks the remote `receive-cache` to validate and publish
+  (`src/modelctl/remote.py:310-421`). Only `_cache_source` knows where the
+  bytes come from (`remote.py:138-196`).
+- **The overlay imitates a store object.** `_cache_source` builds a
+  temporary directory with `.modelctl.json` and
+  `.cache/huggingface/download/*.metadata`, "so the remote `receive-cache`
+  path validates and publishes the transfer unchanged" (`remote.py:141-147`).
+  A real store object already has that layout: `sync-local` reads the same
+  ETag files from it (`hf_cache.py:_store_file_etags`).
+- **So a store-sourced push needs no overlay.** A `_store_source(root, name)`
+  that returns the active object, its metadata and its ETags (all three
+  already computed by `sync_cache`) can feed the unchanged transport and
+  remote commit. modelctl's README records that `push` read from the NAS
+  store before 0.12.0 (`README.md`, Versioning), so this restores an older
+  source rather than inventing one.
+- **Estimated size `[INFERENCE: not prototyped]`:** one new source function,
+  a `--from-store ROOT` option on `push`, and tests with the existing fake
+  SSH runner. No change to `receive-cache`, so Sparks on 0.25.x can receive.
+
+### What it would change in Irori
+
+- **Placement:** a new route "push from the store node" for a Spark that
+  has no reachable local holder. It would replace `sync` for Sparks without
+  a store mount. `planPlacement` already models push sources as
+  `viaNodeIds`; the NAS pseudo-entry would become a real push source.
+- **Jobs:** the push runs on the NAS node and holds its one job slot. A
+  510 GB push at 1 GbE takes about 80 minutes, during which downloads and
+  store deletes on the NAS node wait. Today the same sync holds the
+  *Spark's* slot instead. This is the main cost.
+- **Keys:** the NAS node needs a transfer key the Sparks accept. ADR-0014
+  already has the hub install node-local transfer keys for pushes; the NAS
+  node would join that set.
+- **Users:** modelctl on the NAS node runs as root and dials
+  `cacheUser@host`, as Spark-to-Spark pushes do (ADR-0011).
+- **ADRs touched:** ADR-0009 (the NAS node becomes a transfer source, not
+  only the download target) and ADR-0014 (keys on the NAS node).
+
+### Throughput
+
+- The NAS-to-Spark link is 1 Gb Ethernet (owner, 2026-11-28). The SMB sync
+  and an rsync-over-SSH push share it, so neither can exceed roughly
+  110 MB/s. A store-side push is not faster than today's sync.
+- Not measured: the actual rate of each on the fleet. SSH encryption on the
+  QNAP VM's CPU could make the push slower than SMB. `push` already
+  disables SSH compression (`remote.py:44-51`). This needs one timed
+  transfer of the same model each way.
+- Once any Spark holds a model, the CX7 push between Sparks stays the fast
+  route (IR-100), so the 1 GbE hop is paid once per model either way.
+
+### Recommendation
+
+Conditionally yes, as a follow-up and not urgently.
+
+- **Why yes:** it removes the only reason Sparks mount the store, and with
+  it the whole class of mount problems behind this epic (SMB symlinks,
+  wedged mounts, cache-user permissions on the share).
+- **Why not urgent:** after IRI-175 (modelctl 0.25.1) the SMB sync works
+  again, and an NFS mount also fixes it without code.
+- **Condition:** the timed comparison shows the push is not materially
+  slower than the SMB sync, and holding the NAS node's job slot for the
+  length of a transfer is acceptable.
+
+### Proposed follow-up stories (not created)
+
+1. modelctl: `push --from-store ROOT`, release.
+2. Irori: transfer key for the NAS node (ADR-0014 path) and a
+   "push from store" placement and setup-transfer stage; ADR amending
+   ADR-0009 and ADR-0014.
+3. Irori: make the store mount optional on Sparks (`nasRoot` null) and
+   retire `sync-local` from placement once 2 is proven.
+
+### Still open before closing the spike
+
+- The timed SMB-sync versus SSH-push comparison on the dev fleet.
+- The owner's view on the NAS job-slot cost.
