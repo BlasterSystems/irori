@@ -1976,6 +1976,14 @@ export function createApp(deps: AppDeps): Express {
     res.status(202).json({ requested: sent });
   });
 
+  // IRI-174 (ADR-0023): the node store-mutating jobs go to right now, or why
+  // none may write. The Models page reads this instead of guessing.
+  app.get("/api/v1/store-writer", async (_req, res) => {
+    const jobs = deps.getJobs();
+    if (jobs === null) return res.status(503).json({ error: "database unavailable" });
+    res.json(await jobs.pickStoreWriter(deps.getHub()?.online() ?? NO_NODES_ONLINE));
+  });
+
   // Placement: model × every node → present|sync|push|unavailable.
   app.get("/api/v1/placement", async (req, res) => {
     const jobs = deps.getJobs();

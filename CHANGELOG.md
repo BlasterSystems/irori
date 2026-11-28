@@ -86,6 +86,21 @@ All notable changes to Irori are recorded here. Format follows
   link, dead mount). Nodes without a fresh inventory keep today's behaviour
   and rely on that check. No schema change.
 
+- **Store writes can no longer fall back to a node that cannot see the store
+  properly** (IR-290 / IRI-174, ADR-0023, amends ADR-0009). Downloads,
+  store deletes, repair and store cleanup run on the NAS node. A node that
+  only mounts the store may run them only when its latest inventory proves a
+  clean, recent view: read from the catalog, no warning, at least one
+  model listed and no `active/` entry seen as a directory. No report counts
+  as unsafe. The hub refuses such a job on any path with a message naming
+  the node. That covers the store cleanup and quarantine jobs, card sync,
+  and an HF `download` on a node that mounts the store. The download queue
+  waits and drains when a writer is back, setup transfers no longer plan
+  an HF download onto a node that sees the links as directories, and
+  `GET /api/v1/store-writer` tells the Models page who may write or why
+  nobody can; read-only checks still run on any node with the store. With the NAS agent down and
+  Sparks on SMB, store writes now wait instead of running through SMB.
+
 - **The hub serves the agent installer from any install path** (IRI-157):
   `/install-agent.sh`, `/irori-agent.service` and `/agent/irori-agent.mjs`
   failed (404) when the hub's files lived under a hidden directory (for

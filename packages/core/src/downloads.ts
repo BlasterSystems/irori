@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { InventoryStore } from "./inventory.js";
 
 /** modelctl's draft spec-type grammar (drafts.py `_SPEC_TYPE_RE`). */
 export const DRAFT_SPEC_TYPE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -105,18 +106,92 @@ interface StoreNodeCandidate {
 }
 
 /**
+ * IRI-174 (ADR-0023): may a node that only MOUNTS the store run store-mutating
+ * jobs (downloads, deletes, repair, hygiene)? The NAS-kind node never asks —
+ * the store is its local filesystem. A mounted Spark is the fallback writer
+ * when the NAS node is offline, and it writes through a network mount.
+ *
+ * `store` is that node's latest inventory store view; null/undefined = no
+ * report. `unlinkedActive` lists the active entries the node sees as
+ * directories (absent = an older agent that does not report it).
+ */
+export function storeViewSafeForWrites(store: InventoryStore | null | undefined): boolean {
+  // Strict (owner decision, 2026-11-28): the node must have reported a clean
+  // catalog view that lists at least one model, with no active entry seen as
+  // a directory. An empty view proves nothing about the mount, and one stray
+  // directory would have modelctl's update path repair it through the mount.
+  if (store === null || store === undefined) return false;
+  if (store.unlinkedActive === undefined || store.unlinkedActive.length > 0) return false;
+  return store.source === "catalog" && store.warning === null && store.models.length > 0;
+}
+
+/**
  * Store-node selection policy (IRI-014): the NAS-kind node wins — the store
  * is local there, so HF bytes never cross a network mount. Falls back to any
  * other node with the NAS root mounted (the CIFS route) when no NAS-kind
  * node qualifies. When `online` is given, only nodes in the set qualify.
  * Mirrors the setups-service NAS preference (IRI-005) as one shared policy.
+ *
+ * IRI-174 (ADR-0023): pass `writeSafe` when the pick will run a
+ * store-mutating job. The fallback node must then satisfy it; the NAS-kind
+ * node is exempt. Without it the pick is for reading or display only.
  */
-export function pickStoreNode<T extends StoreNodeCandidate>(nodes: T[], online?: ReadonlySet<string>): T | null {
+export function pickStoreNode<T extends StoreNodeCandidate>(
+  nodes: T[],
+  online?: ReadonlySet<string>,
+  writeSafe?: (node: T) => boolean,
+): T | null {
   const qualifies = (n: T): boolean =>
     n.enabled && n.nasRoot !== null && (online === undefined ? n.online !== false : online.has(n.id));
   return (
     nodes.find((n) => n.kind === "nas" && qualifies(n)) ??
-    nodes.find((n) => n.kind !== "nas" && qualifies(n)) ??
+    nodes.find((n) => n.kind !== "nas" && qualifies(n) && (writeSafe === undefined || writeSafe(n))) ??
     null
   );
 }
+
+/** IRI-174: why store writes are waiting when no node may run them. */
+export const STORE_WRITER_UNAVAILABLE_REASON = "no node can safely write the store right now (the NAS node is offline or not set up)";
+
+/**
+ * IRI-174 (ADR-0023): job kinds that always change the modelctl store. See
+ * `isStoreWrite` for the two that depend on their params or the node.
+ */
+export const STORE_WRITE_KINDS: ReadonlySet<string> = new Set([
+  "download-queue",
+  "nas-delete",
+  "nas-delete-apply",
+  "nas-delete-batch",
+  "catalog-refresh",
+  "repair-active-apply",
+  "gc-objects",
+  "cleanup-staging",
+  "sync-cards",
+  "quarantine-prune",
+  "prune-cleanup-quarantine",
+]);
+
+/**
+ * IRI-174 (ADR-0023): does this job change the modelctl store? The hub
+ * refuses such a job on a node that only mounts the store unless that node's
+ * view is write-safe.
+ *
+ * - `hygiene-clean` writes the store only for its `modelctl-staging` category.
+ * - `download` writes to modelctl's configured root. On a node that mounts
+ *   the store that is the store; a node without a store root keeps its own.
+ */
+export function isStoreWrite(kind: string, params: Record<string, unknown>, node: { nasRoot: string | null }): boolean {
+  if (STORE_WRITE_KINDS.has(kind)) return true;
+  if (kind === "hygiene-clean") return Array.isArray(params.categories) && params.categories.includes("modelctl-staging");
+  if (kind === "download" || kind === "install") return node.nasRoot !== null;
+  return false;
+}
+
+/** Wire payload for GET /api/v1/store-writer (IRI-174). */
+export const storeWriterResponseSchema = z.object({
+  /** The node store-mutating jobs go to right now; null = none may write. */
+  nodeId: z.string().nullable(),
+  /** Why no node may write (null when one can). */
+  reason: z.string().nullable(),
+});
+export type StoreWriterResponse = z.infer<typeof storeWriterResponseSchema>;

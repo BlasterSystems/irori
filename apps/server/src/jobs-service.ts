@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
-import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, settings } from "@irori/db";
+import { cleanupRuns, jobOutput, jobs, modelMeta, nodeInventory, nodeModels, nodes, settings } from "@irori/db";
 import type { Db } from "@irori/db";
-import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, type InventoryStore, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
+import { hygieneResultSchemaFor, jobKindSchema, compareVersions, nodeInventorySchema, parseTransferProgress, pickStoreNode, storeViewSafeForWrites, isStoreWrite, STORE_WRITER_UNAVAILABLE_REASON, type InventoryStore, type NodeInventory, type ScannedModel, type TransferProgress } from "@irori/core";
 import { isUniqueViolation } from "./pg.js";
 
 /**
@@ -249,6 +249,12 @@ export interface JobsService {
   /** IRI-173: the store view of the node's last report, kept after a
    *  model-mutating settle dropped that report (null = none remembered). */
   lastStoreView(nodeId: string): InventoryStore | null;
+  /**
+   * IRI-174 (ADR-0023): the node store-mutating jobs go to right now. The
+   * NAS-kind node first; a node that only mounts the store qualifies only
+   * with a write-safe store view. `reason` is set when no node may write.
+   */
+  pickStoreWriter(online: ReadonlySet<string>): Promise<{ nodeId: string | null; reason: string | null }>;
   /** Fails every running/queued job whose node is not in `onlineNodes`; returns affected job ids. */
   reapOffline(onlineNodes: ReadonlySet<string>): Promise<string[]>;
   /**
@@ -261,6 +267,10 @@ export interface JobsService {
    */
   settleAgentUpdate(nodeId: string, agentVersion: string): Promise<"succeeded" | "pending" | "none">;
 }
+
+/** IRI-174: a store view older than this is not evidence for a store write.
+ *  The inventory sweep re-reads reports older than 24 h on an hourly tick. */
+const STORE_VIEW_MAX_AGE_MS = 26 * 3_600_000;
 
 export class JobBusyError extends Error {}
 export class JobDispatchError extends Error {}
@@ -363,9 +373,28 @@ export function createJobsService(
   /** IRI-173: each node's store view from the report a job settle dropped;
    *  cleared by the next report. In memory only: a hub restart reads as
    *  unknown, and the agent's sync-local pre-check covers that. */
-  const lastStoreViews = new Map<string, InventoryStore>();
+  const lastStoreViews = new Map<string, { store: InventoryStore; updatedAt: Date }>();
+  /** IRI-174: the node's current store view — its report, else the one a
+   *  job settle dropped — judged by the shared write-safety rule. A view
+   *  older than the daily inventory sweep allows is not evidence. */
+  const storeWriteSafe = async (nodeId: string): Promise<boolean> => {
+    const [row] = await db.select({ report: nodeInventory.report, updatedAt: nodeInventory.updatedAt }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
+    const reported = row === undefined ? null : (nodeInventorySchema.safeParse(row.report).data?.store ?? null);
+    const view = reported !== null && row !== undefined ? { store: reported, updatedAt: row.updatedAt } : (lastStoreViews.get(nodeId) ?? null);
+    if (view === null || Date.now() - view.updatedAt.getTime() > STORE_VIEW_MAX_AGE_MS) return false;
+    return storeViewSafeForWrites(view.store);
+  };
   const service: JobsService = {
-    lastStoreView: (nodeId) => lastStoreViews.get(nodeId) ?? null,
+    lastStoreView: (nodeId) => lastStoreViews.get(nodeId)?.store ?? null,
+    async pickStoreWriter(online) {
+      const rows = await db.select().from(nodes);
+      const safe = new Set<string>();
+      for (const row of rows) {
+        if (row.kind !== "nas" && row.nasRoot !== null && (await storeWriteSafe(row.id))) safe.add(row.id);
+      }
+      const node = pickStoreNode(rows, online, (n) => safe.has(n.id));
+      return node === null ? { nodeId: null, reason: STORE_WRITER_UNAVAILABLE_REASON } : { nodeId: node.id, reason: null };
+    },
     async create(nodeId, kind, params) {
       jobKindSchema.parse(kind);
       if (kind === "push" && rewritePushParams !== undefined) params = await rewritePushParams(nodeId, params);
@@ -375,6 +404,15 @@ export function createJobsService(
         .where(and(eq(jobs.nodeId, nodeId), inArray(jobs.status, [...ACTIVE])))
         .limit(1);
       if (active) throw new JobBusyError(`node already has an active job${activeJobLabel(active)}`);
+      // IRI-174 (ADR-0023): a node that only mounts the store may change it
+      // only with a write-safe view. Every dispatch path ends here, so this
+      // is the one place the rule cannot be bypassed.
+      const [target] = await db.select({ kind: nodes.kind, name: nodes.name, nasRoot: nodes.nasRoot }).from(nodes).where(eq(nodes.id, nodeId)).limit(1);
+      if (target !== undefined && target.kind !== "nas" && isStoreWrite(kind, params, target) && !(await storeWriteSafe(nodeId))) {
+        throw new JobDispatchError(
+          `${target.name} only mounts the store and its view of it is not safe to write through (${kind} refused). Run this on the NAS node, or refresh ${target.name}'s inventory once its mount shows the store's links.`,
+        );
+      }
       let inserted: Array<typeof jobs.$inferSelect>;
       try {
         inserted = await db
@@ -674,9 +712,9 @@ export function createJobsService(
         // IRI-173: how the node sees the store's links is a property of its
         // mount, not of what it holds. Remember it across the reset so the
         // sync gate does not forget a hidden link the moment a job settles.
-        const [prev] = await db.select({ report: nodeInventory.report }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
+        const [prev] = await db.select({ report: nodeInventory.report, updatedAt: nodeInventory.updatedAt }).from(nodeInventory).where(eq(nodeInventory.nodeId, nodeId)).limit(1);
         const prevStore = prev === undefined ? null : (nodeInventorySchema.safeParse(prev.report).data?.store ?? null);
-        if (prevStore?.unlinkedActive !== undefined) lastStoreViews.set(nodeId, prevStore);
+        if (prev !== undefined && prevStore?.unlinkedActive !== undefined) lastStoreViews.set(nodeId, { store: prevStore, updatedAt: prev.updatedAt });
         await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, nodeId));
       }
       // Store contents may have changed: ask the node to re-report its catalog

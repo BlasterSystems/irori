@@ -23,6 +23,7 @@ import {
   type SseEvent,
   type TransferStage,
   storeLinkVisible,
+  STORE_LINK_HIDDEN_REASON,
   type InventoryStore,
 } from "@irori/core";
 import { nodes, setupRuns, setups, setupTransfers, type Db, type NodeRecord } from "@irori/db";
@@ -1047,6 +1048,18 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
           });
           continue;
         }
+        if (linkHidden.has(targetId)) {
+          // IRI-173/IRI-174: nothing to push from, the node cannot sync, and
+          // an HF download here would write the store through its mount
+          // (ADR-0023). Say so instead of planning a job the hub refuses.
+          // Failed, not skipped: nothing reached this target, and the
+          // transfer must not read as succeeded.
+          pushStage(`${target.name} (no route)`, targetId, targetId, "noop", {});
+          const last = stages[stages.length - 1]!;
+          last.status = "failed";
+          last.error = STORE_LINK_HIDDEN_REASON;
+          continue;
+        }
         if (modelEntry === null) {
           // Not in the store: chain the HF download (wizard's "chained HF
           // download when the NAS lacks it").
@@ -1055,7 +1068,7 @@ export function createSetupsService(deps: SetupsServiceDeps): SetupsService {
               downloads: [{ source: row.model, name: shortName(row.model) }],
               jobs: 4,
             });
-            if (target.nasRoot !== null && !linkHidden.has(targetId)) {
+            if (target.nasRoot !== null) {
               pushStage(`NAS → ${target.name} (sync)`, targetId, targetId, "sync-local", { name: shortName(row.model) });
               continue;
             }

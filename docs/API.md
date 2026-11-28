@@ -68,8 +68,23 @@ guarantees callers rely on, kept current when behavior changes. Last updated
   jobs?}` → `202 {entries}` (same per-row states). Atomic: any invalid entry
   rejects the whole submission with `400` and nothing lands. Single-row bulk
   submissions are equivalent to the single shape.
+- IRI-174 (ADR-0023): `GET /api/v1/store-writer` → `{nodeId, reason}` — the
+  node store-mutating jobs go to right now (`nodeId: null` with a `reason`
+  when none may write; `503` while the database is unavailable). The
+  NAS-kind node always qualifies. A node that only mounts the store
+  qualifies only with a write-safe store view: catalog-sourced, no warning,
+  at least one model listed, `unlinkedActive: []`, and a report no older
+  than 26 h. The same rule guards dispatch: `POST /api/v1/nodes/:id/jobs`
+  returns `409` with a message naming the node, on a node that is not
+  NAS-kind and not write-safe, for `download-queue`, `nas-delete`,
+  `nas-delete-apply`, `nas-delete-batch`, `catalog-refresh`,
+  `repair-active-apply`, `gc-objects`, `cleanup-staging`, `sync-cards`,
+  `quarantine-prune`, `prune-cleanup-quarantine`, `hygiene-clean` with the
+  `modelctl-staging` category, and `download` when the node mounts the
+  store. Queued downloads stay `pending` until a writer exists.
 - The server picks the store node (`pickStoreNode`: `nas`-kind node with
-  `nasRoot` first, then any online node with the store mounted). Pending
+  `nasRoot` first, then an online node with the store mounted whose store
+  view is write-safe, ADR-0023). Pending
   entries drain as **one `download-queue` batch** on the idle node — drained
   on enqueue, on any job settle, on the 60 s reaper tick, and at boot.
 - `GET /api/v1/downloads` → `{entries}` (newest first, last 50);

@@ -12,11 +12,22 @@ This branch carries the epic's Irori stories, one commit per ticket.
 
 - A node's inventory now lists the store entries it cannot see as links (`store.unlinkedActive`), with a warning on the node page.
 - The Models page no longer offers **Sync** to a node that cannot see the model's link. It shows the reason, without the disk-cleanup link, or offers a push when another node holds the model.
-- Setup transfers skip the NAS sync for such a node and fall through to a push or a Hugging Face download.
+- Setup transfers skip the NAS sync for such a node and use a push from a node that holds the model.
 - Before `sync-local` starts, the agent checks the store link and fails at once with a plain message: share not mounted, model not active, link hidden by the mount, or a mount that does not answer. modelctl is not started.
+
+### IR-290 / IRI-174: store changes only where they are safe (ADR-0023)
+
+- Jobs that change the store (downloads, deletes, repair, store cleanup, card sync) run on the NAS node. A node that only mounts the store may run them only when its latest inventory proves a clean, recent view of it.
+- The hub refuses such a job on any other node, on every path, with a message naming the node.
+- Queued downloads wait when no node may write and start when one can.
+- The Models page asks the hub who may write (`GET /api/v1/store-writer`), shows the reason when nobody can, and keeps read-only checks available.
+- Setup transfers no longer plan a Hugging Face download onto a node that cannot see the store's links: that download would write the store through its mount. With nothing to push from, that target fails with the reason.
 
 ## Business rules and constraints
 
+- For store changes, unknown means no. For reads (the sync gate), unknown keeps today's behaviour.
+- A write-safe view is: read from the catalog, no warning, at least one model listed, no entry seen as a directory, and no older than 26 hours.
+- A NAS-kind node is required to start a store.
 - A node must see `active/<model>` as a symlink to sync from the store.
 - Unknown is not a verdict: a node without a report, or with an older agent, keeps today's behaviour, and the agent's check is the backstop.
 - The agent's check blocks only on proof. Any other read error is left to modelctl, which runs as the cache user.
@@ -36,18 +47,18 @@ This branch carries the epic's Irori stories, one commit per ticket.
 
 ## Out of scope and follow-ups
 
-- IR-290 / IRI-174: store writes need a safe store view (ADR).
 - IR-291 / IRI-175: modelctl resolves the model without a visible symlink.
 - IR-292 / IRI-176: spike on the NAS pushing models straight to Sparks.
 - The NFS export of the QNAP share is an operations step, not code.
 
 ## Verification
 
-- `pnpm test` with a throwaway Postgres 17: core 143, proxy 24, db 16, web 606, agent 410, server 556, all passing.
+- `pnpm test` with a throwaway Postgres 17: core 150, proxy 24, db 16, web 610, agent 412, server 560, all passing.
 - `pnpm typecheck`: exit 0.
-- Independent adversarial review: pass with findings; all fix-before-merge findings resolved (see `tasks/IRI-173-store-link-visibility.md`).
+- Independent adversarial reviews: IRI-173 pass with findings; IRI-174 blocked first, then passed a re-check after fixes. All fix-before-merge findings are resolved (see the two task files).
 - Not yet checked on the dev hub; that needs a deploy.
 
 ## Changelog
 
+- fix(server,web,core): store writes need a write-safe store view; no blind fallback to a mounted Spark (IR-290 / IRI-174, ADR-0023).
 - fix(agent,server,web): detect store links a node cannot see; gate NAS sync and pre-check sync-local (IR-289 / IRI-173).

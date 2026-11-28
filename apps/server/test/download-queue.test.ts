@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { inArray, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDbHandle, downloadQueue as downloadQueueTable, jobOutput, jobs, nodes, type Db, type DbHandle } from "@irori/db";
+import { createDbHandle, downloadQueue as downloadQueueTable, jobOutput, jobs, nodeInventory, nodes, type Db, type DbHandle } from "@irori/db";
 import {
   createDownloadQueueService,
   DownloadBusyError,
@@ -11,6 +11,7 @@ import {
   type DownloadQueueService,
 } from "../src/download-queue-service.js";
 import { createJobsService, type JobSettledEvent, type JobsService } from "../src/jobs-service.js";
+import { STORE_WRITER_UNAVAILABLE_REASON } from "@irori/core";
 
 /**
  * IRI-014 integration: enqueue → batch dispatch to the NAS-preferred store
@@ -81,7 +82,7 @@ d("download queue (db integration)", () => {
       inArray(downloadQueueTable.source, [
         "org/alpha", "org/beta", "org/gamma", "org/delta", "org/epsilon",
         "org/zeta", "org/eta", "org/theta", "org/iota", "org/juliet", "org/kappa", "org/lambda", "org/mike",
-        "org/november", "org/oscar", "org/papa", "org/quebec", "org/romeo",
+        "org/november", "org/oscar", "org/whiskey", "org/xray", "org/papa", "org/quebec", "org/romeo",
         "org/rho", "org/sierra", "org/tango", "org/uniform",
       ]),
     );
@@ -152,6 +153,42 @@ d("download queue (db integration)", () => {
     expect(after?.status).toBe("running");
     expect(after?.jobId).not.toBeNull();
     await settle(after!, "succeeded");
+  });
+
+  it("waits when the NAS node is offline and the mounted Spark cannot safely write, then drains on its return (IRI-174)", async () => {
+    online = new Set([HEAD_ID, WORKER_ID]);
+    const entry = await queue.enqueue({ source: "org/whiskey", jobs: 4 });
+    // HEAD mounts the store but has no write-safe view: nothing dispatches.
+    expect((await rowFor(entry.id))?.status).toBe("pending");
+    expect(await jobsService.pickStoreWriter(online)).toEqual({ nodeId: null, reason: STORE_WRITER_UNAVAILABLE_REASON });
+    online = new Set([NAS_ID, HEAD_ID, WORKER_ID]);
+    await queue.dispatchIfIdle();
+    const after = await rowFor(entry.id);
+    expect(after?.status).toBe("running");
+    const [job] = await db.select().from(jobs).where(eq(jobs.id, after!.jobId!));
+    expect(job?.nodeId).toBe(NAS_ID);
+    await settle(after!, "succeeded");
+  });
+
+  it("falls back to a mounted Spark whose store view is write-safe (IRI-174)", async () => {
+    await db.insert(nodeInventory).values({
+      nodeId: HEAD_ID,
+      report: { generatedAtMs: 1, store: { root: "/mnt/nas", source: "catalog", warning: null, models: [{ name: "m", repository: "org/m", runtime: "vllm", bytes: 1 }], leftovers: [], unlinkedActive: [] }, local: [] },
+    });
+    try {
+      online = new Set([HEAD_ID, WORKER_ID]);
+      expect((await jobsService.pickStoreWriter(online)).nodeId).toBe(HEAD_ID);
+      const entry = await queue.enqueue({ source: "org/xray", jobs: 4 });
+      const after = await rowFor(entry.id);
+      expect(after?.status).toBe("running");
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, after!.jobId!));
+      expect(job?.nodeId).toBe(HEAD_ID);
+      await jobsService.onDone(HEAD_ID, after!.jobId!, "succeeded", 0);
+      await queue.onJobSettled({ nodeId: HEAD_ID, jobId: after!.jobId!, kind: "download-queue", status: "succeeded", exitCode: 0, durationMs: null });
+    } finally {
+      online = new Set([NAS_ID, HEAD_ID, WORKER_ID]);
+      await db.delete(nodeInventory).where(eq(nodeInventory.nodeId, HEAD_ID));
+    }
   });
 
   it("reconciles a failed batch from the modelctl complete/failed output lines", async () => {

@@ -11,7 +11,7 @@ import { thresholds } from "../thresholds";
 import { COMPANIONS_UNREADABLE_LABEL, companionChips, companionRows, companionsUnreadable } from "../model-companions";
 import { draftKindLabel, draftSpecTypeToSend, effectiveDraftSpecType, hintProvenance, mmprojNote, preselectDraft, safeHref } from "../draft-choice";
 import CleanupDrawer from "./CleanupDrawer.vue";
-import { DOWNLOAD_BATCH_MAX_ENTRIES, STORE_LINK_HIDDEN_REASON, compareVersions, pickStoreNode, type NodeInfo, type PlacementRow } from "@irori/core";
+import { DOWNLOAD_BATCH_MAX_ENTRIES, STORE_LINK_HIDDEN_REASON, compareVersions, pickStoreNode, isStoreWrite, type NodeInfo, type PlacementRow, type StoreWriterResponse } from "@irori/core";
 import {
   bulkDeleteTotalBytes,
   cancelJob,
@@ -49,6 +49,8 @@ import {
   type ModelEntry,
   type ModelsPage,
   type PlacementResponse,
+  fetchStoreWriter,
+  resolveStoreWriter,
 } from "../models";
 
 const search = ref("");
@@ -103,7 +105,7 @@ const bulkBytes = computed(() => bulkDeleteTotalBytes(modelsPage.value?.models ?
  *  (0.7.0+); an older agent fails the job with "unknown job kind", so the
  *  action is hidden instead of dispatching into a guaranteed failure. */
 const bulkSupported = computed(() => {
-  const node = pickStoreNode(nodes.value);
+  const node = storeWriteNodeInfo.value;
   if (node === null) return false;
   return compareVersions(node.agentVersion ?? "0", "0.7.0") >= 0;
 });
@@ -184,7 +186,32 @@ function onSortChange(ev: Event): void {
 /** Store node for hygiene verbs and the modal banner (NAS-preferred, IRI-014). */
 const nodes = ref<NodeInfo[]>([]);
 const storeNodeInfo = computed(() => pickStoreNode(nodes.value));
+/** Reads (doctor, audits, repair check) run on any node with the store. */
 const storeNode = computed(() => storeNodeInfo.value?.id ?? null);
+/** IRI-174 (ADR-0023): store CHANGES go only to the node the hub says may
+ *  write the store. The local pick stands until the hub answers; the hub's
+ *  own guard refuses an unsafe write either way. */
+const hubStoreWriter = ref<StoreWriterResponse | null>(null);
+const storeWriter = computed(() => resolveStoreWriter(storeNodeInfo.value?.id ?? null, hubStoreWriter.value));
+const storeWriteNode = computed(() => storeWriter.value.nodeId);
+const storeWriteNodeInfo = computed(() => nodes.value.find((n) => n.id === storeWriteNode.value) ?? null);
+const writerSeq = { n: 0 };
+function refreshStoreWriter(): void {
+  const seq = ++writerSeq.n;
+  void fetchStoreWriter()
+    .then((w) => {
+      if (seq === writerSeq.n) hubStoreWriter.value = w; // a newer request won
+    })
+    .catch(() => {
+      /* keep the last answer; the hub's own guard still refuses an unsafe write */
+    });
+}
+/** The node a store verb runs on: the writer for changes, any store node for reads. */
+function verbNode(kind: string): string | null {
+  return isStoreWrite(kind, {}, { nasRoot: "store" }) ? storeWriteNode.value : storeNode.value;
+}
+/** Who may write changes as agents come and go; no live event carries it. */
+let writerTimer: ReturnType<typeof setInterval> | null = null;
 
 /** IR-222 store strip: disk from the store node's live snapshot, catalog
  *  counts from the same fetch as the page — never a hardcoded total. */
@@ -259,6 +286,8 @@ onMounted(() => {
   void live.refreshJobs(); // IR-222: re-seed the jobs rows from the hub
   void load();
   void refreshQueue();
+  refreshStoreWriter();
+  writerTimer = setInterval(refreshStoreWriter, 15_000);
 });
 
 /** Maintenance verbs for the hygiene popover: kind → label; destructive ones ghosted. */
@@ -273,7 +302,7 @@ const HYGIENE_VERBS: Array<{ kind: string; label: string; destructive: boolean; 
 ];
 
 function runHygiene(kind: string, perModel: boolean): void {
-  const nodeId = storeNode.value;
+  const nodeId = verbNode(kind);
   if (nodeId === null) return;
   void runJob(nodeId, kind, perModel ? { name: selected.value ?? undefined } : {});
 }
@@ -513,6 +542,7 @@ function scheduleSucceededClear(entries: DownloadQueueEntry[]): void {
 
 async function refreshQueue(): Promise<void> {
   const seq = ++queueSeq.n;
+  refreshStoreWriter(); // IRI-174: who may write the store changes with the fleet
   try {
     const entries = await fetchDownloadQueue();
     if (seq !== queueSeq.n) return; // a newer refresh won
@@ -661,7 +691,7 @@ function runRowMenu(act: string): void {
   if (m === null) return;
   if (m.kind === "catalog") {
     if (act === "details") void openModel(m.name);
-    else if (act === "delete" && storeNode.value !== null) startNasDelete(storeNode.value, m.name);
+    else if (act === "delete" && storeWriteNode.value !== null) startNasDelete(storeWriteNode.value, m.name);
     return;
   }
   const e = downloadQueueEntries.value.find((x) => x.id === m.id);
@@ -779,7 +809,7 @@ const jobSummaryText = computed(() => (jobBatchEntries.value.length > 0 ? downlo
  * banner repeats it post-dispatch, per the single-delete convention.
  */
 async function confirmBulkDelete(): Promise<void> {
-  const nodeId = storeNode.value;
+  const nodeId = storeWriteNode.value;
   const names = [...bulkSelected.value];
   if (nodeId === null || names.length === 0) return;
   const serving = await fetchSetups()
@@ -1189,6 +1219,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", onDocKeydown);
   clearTimeout(debounce);
   clearTimeout(deleteReloadTimer);
+  if (writerTimer !== null) clearInterval(writerTimer);
   clearTimeout(clearTimer); // IR-96: no prune after unmount
   clearInterval(jobPoll);
   clearInterval(queuePoll);
@@ -1200,6 +1231,10 @@ onBeforeUnmount(() => {
     <header class="pagehead">
       <h1>Models</h1>
       <p><span class="mono">nas → {{ storeNodeInfo?.nasRoot ?? "NAS store" }}</span> · no store writes outside modelctl</p>
+      <!-- IRI-174: one visible reason for every paused store action. -->
+      <p v-if="storeWriter.reason" class="banner banner--warn" role="status">
+        Store changes are paused: {{ storeWriter.reason }}. Queued downloads wait; read-only checks still run.
+      </p>
     </header>
 
     <!-- IR-131 IRI-044 parity: the last transfer opened here stays reachable
@@ -1251,7 +1286,8 @@ onBeforeUnmount(() => {
                   v-for="v in STORE_VERBS"
                   :key="v.kind"
                   class="btn btn--secondary btn--sm"
-                  :disabled="storeNode === null"
+                  :disabled="verbNode(v.kind) === null"
+                  :title="verbNode(v.kind) === null ? (storeWriter.reason ?? undefined) : undefined"
                   @click="runHygiene(v.kind, false)"
                 >{{ v.label }}</button>
               </div>
@@ -1325,13 +1361,13 @@ onBeforeUnmount(() => {
           <button class="bs-link" @click="clearBulk">Clear</button>
           <button
             class="bs-link bs-link--thread"
-            :disabled="storeNode === null || !bulkSupported"
-            :title="bulkSupported ? undefined : 'the store node agent predates the batch kind (0.7.0) — update the agent first'"
+            :disabled="storeWriteNode === null || !bulkSupported"
+            :title="storeWriteNode === null ? (storeWriter.reason ?? undefined) : bulkSupported ? undefined : 'the store node agent predates the batch kind (0.7.0) — update the agent first'"
             @click="confirmBulkDelete"
           >Delete selected…</button>
         </span>
       </div>
-      <p v-if="bulkSelected.size > 0 && !bulkSupported && storeNode !== null" class="stat__sub faint bulkwarn">
+      <p v-if="bulkSelected.size > 0 && !bulkSupported && storeWriteNode !== null" class="stat__sub faint bulkwarn">
         the store node agent predates the batch-delete kind — run an agent update on that node first.
       </p>
 
@@ -1535,11 +1571,15 @@ onBeforeUnmount(() => {
                 <button
                   v-if="storeNode !== null && v.destructive"
                   class="bs-link bs-link--thread"
+                  :disabled="verbNode(v.kind) === null"
+                  :title="verbNode(v.kind) === null ? (storeWriter.reason ?? undefined) : undefined"
                   @click="runHygiene(v.kind, v.perModel)"
                 >{{ v.label }}</button>
                 <button
                   v-else-if="storeNode !== null"
                   class="btn btn--secondary btn--sm"
+                  :disabled="verbNode(v.kind) === null"
+                  :title="verbNode(v.kind) === null ? (storeWriter.reason ?? undefined) : undefined"
                   @click="runHygiene(v.kind, v.perModel)"
                 >{{ v.label }}</button>
               </template>
@@ -1618,8 +1658,9 @@ onBeforeUnmount(() => {
           <h3>Download from HF to NAS</h3>
           <button class="iconbtn" aria-label="Close download modal" @click="downloadOpen = false">✕</button>
         </div>
-        <p v-if="storeNode === null" class="banner banner--warn">
-          No online model-ops node (node with the NAS root mounted) — adds queue until one is online.
+        <p v-if="storeWriteNode === null" class="banner banner--warn">
+          <template v-if="storeWriter.reason">{{ storeWriter.reason }} — adds queue until one can.</template>
+          <template v-else>No online model-ops node (node with the NAS root mounted) — adds queue until one is online.</template>
         </p>
         <div class="field">
           <label for="dl-paste">Hugging Face repos — one owner/model per line (# comments ignored)</label>
@@ -1741,7 +1782,7 @@ onBeforeUnmount(() => {
         <p v-if="downloadRows.length > 0" class="banner dl-preflight">
           <span class="stat__sub">
             preflight: {{ downloadRows.length }} entr{{ downloadRows.length === 1 ? "y" : "ies" }} · ONE download-queue batch ·
-            dispatched to {{ storeNodeInfo?.name ?? "the store node" }} when idle · resumable staging · companion files included
+            dispatched to {{ storeWriteNodeInfo?.name ?? "the store node" }} when idle · resumable staging · companion files included
           </span>
         </p>
         <div class="row row--between">

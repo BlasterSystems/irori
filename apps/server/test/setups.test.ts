@@ -14,7 +14,7 @@ import {
   type SetupsServiceDeps,
 } from "../src/setups-service.js";
 import { makeLlmPort } from "./helpers.js";
-import type { InventoryStore } from "@irori/core";
+import { STORE_LINK_HIDDEN_REASON, type InventoryStore } from "@irori/core";
 
 /**
  * Requires a REAL Postgres (ADR-0002 — no :memory: exists for postgres.js).
@@ -879,9 +879,12 @@ d("setups service", () => {
       ["sync-local", nfs],
       ["push", smb],
     ]);
-    // Alone, with nothing to push from, it falls through to the HF download.
+    // Alone, with nothing to push from, there is no safe route: an HF
+    // download on that node would write the store through its mount.
     const alone = await ctx.service.createTransfer(setup.id, [smb]);
-    expect(alone.stages.map((s) => s.kind)).toEqual(["download"]);
+    expect(alone.stages.map((s) => [s.kind, s.status, s.error])).toEqual([["noop", "failed", STORE_LINK_HIDDEN_REASON]]);
+    // Nothing moved, so the transfer must not read as succeeded.
+    await waitFor(async () => (await ctx.service.transfers(setup.id)).find((t) => t.id === alone.id)?.status === "failed");
     } finally {
       ctx.online.delete(nfs);
     }

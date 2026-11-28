@@ -284,7 +284,9 @@ never drawn or measured.
     **always queues** (IRI-014, ADR-0009): the server inserts a pending
     `download_queue` row and drains all pending entries as one `download-queue`
     batch on the **NAS-preferred store node** (`pickStoreNode`: NAS kind first,
-    fallback to a node with the store mounted) whenever it is idle; batch
+    fallback to a node with the store mounted **only when its store view is
+    write-safe**, ADR-0023) whenever it is idle; with no such node the
+    entries wait; batch
     outcomes reconcile per entry, with retry reusing published objects.
   - **Delete**: dry-run plan → armed `--apply --yes`.
   - **sync-local** NAS → node HF cache (resumable rsync, ETag validation).

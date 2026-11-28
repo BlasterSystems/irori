@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { deriveDownloadName, downloadBatchCreateSchema, downloadCreateSchema, downloadQueueEntrySchema, pickStoreNode } from "../src/downloads.js";
+import { deriveDownloadName, downloadBatchCreateSchema, downloadCreateSchema, downloadQueueEntrySchema, pickStoreNode, storeViewSafeForWrites, isStoreWrite } from "../src/downloads.js";
+import type { InventoryStore } from "../src/inventory.js";
+import { JOB_KINDS, type JobKind } from "../src/jobs.js";
+
+const WRITE_SIDE = new Set<string>([
+  "download-queue", "nas-delete", "nas-delete-apply", "nas-delete-batch", "catalog-refresh", "repair-active-apply",
+  "gc-objects", "cleanup-staging", "sync-cards", "quarantine-prune", "prune-cleanup-quarantine", "hygiene-clean", "download",
+]);
+/** Kinds decided to be reads or cache/host-side work. A new kind must be added here or above. */
+const READ_SIDE = [
+  "modelctl-install", "sync-local", "push", "ensure-rsync", "transfer-key-ensure", "transfer-key-authorize", "transfer-hostkey-pin",
+  "delete-local", "register-local", "doctor", "repair-active", "staging-audit", "staging-tree-audit", "objects-audit",
+  "hygiene-audit", "hygiene-prevent", "models-inventory", "agent-update", "recipe-install", "net-tool-ensure", "net-test-server", "net-test-client",
+];
 
 /** IRI-014 contracts: store-node policy, name fallback, payload validation. */
 
@@ -144,5 +157,89 @@ describe("download create contract", () => {
     const bare = downloadQueueEntrySchema.parse(base);
     expect(bare.force).toBeUndefined();
     expect(bare.bytesDone).toBeUndefined();
+  });
+});
+
+describe("store writes need a safe store view (IRI-174)", () => {
+  const nas = { id: "nas-1", kind: "nas", enabled: true, nasRoot: "/mnt/llms" };
+  const spark = { id: "head-1", kind: "spark", enabled: true, nasRoot: "/mnt/nas" };
+
+  it("never asks the NAS-kind node: the store is its local filesystem", () => {
+    expect(pickStoreNode([spark, nas], new Set(["nas-1", "head-1"]), () => false)?.id).toBe("nas-1");
+  });
+
+  it("falls back to a mounted node only when it is write-safe", () => {
+    const online = new Set(["head-1"]);
+    expect(pickStoreNode([nas, spark], online, () => true)?.id).toBe("head-1");
+    expect(pickStoreNode([nas, spark], online, () => false)).toBeNull();
+    // Without the predicate the pick is for reading/display: unchanged.
+    expect(pickStoreNode([nas, spark], online)?.id).toBe("head-1");
+  });
+
+  const view = (unlinkedActive: string[] | undefined, names: string[]): InventoryStore => ({
+    root: "/mnt/nas",
+    source: "catalog",
+    warning: null,
+    models: names.map((name) => ({ name, repository: `org/${name}`, runtime: "vllm", bytes: 1 })),
+    leftovers: [],
+    ...(unlinkedActive === undefined ? {} : { unlinkedActive }),
+  });
+
+  it("is unsafe without a report, from an agent that does not report links, or when every link is hidden", () => {
+    expect(storeViewSafeForWrites(null)).toBe(false);
+    expect(storeViewSafeForWrites(undefined)).toBe(false);
+    expect(storeViewSafeForWrites(view(undefined, ["a", "b"]))).toBe(false);
+    expect(storeViewSafeForWrites(view(["a", "b"], ["a", "b"]))).toBe(false);
+  });
+
+  it("is safe for a clean catalog view where every link is visible", () => {
+    expect(storeViewSafeForWrites(view([], ["a", "b"]))).toBe(true);
+  });
+
+  it("needs positive evidence: an empty view proves nothing about the mount", () => {
+    expect(storeViewSafeForWrites(view([], []))).toBe(false);
+  });
+
+  it("classifies every job kind as a store write or not", () => {
+    const mounted = { nasRoot: "/mnt/nas" };
+    const bare = { nasRoot: null };
+    // always | never | params (hygiene-clean) | node (download)
+    const expected: Record<JobKind, "always" | "never" | "params" | "node"> = {
+      "download-queue": "always",
+      "nas-delete": "always",
+      "nas-delete-apply": "always",
+      "nas-delete-batch": "always",
+      "catalog-refresh": "always",
+      "repair-active-apply": "always",
+      "gc-objects": "always",
+      "cleanup-staging": "always",
+      "sync-cards": "always",
+      "quarantine-prune": "always",
+      "prune-cleanup-quarantine": "always",
+      "hygiene-clean": "params",
+      download: "node",
+      ...Object.fromEntries(JOB_KINDS.filter((k) => !WRITE_SIDE.has(k)).map((k) => [k, "never" as const])),
+    } as Record<JobKind, "always" | "never" | "params" | "node">;
+    // A new job kind lands in "never" above only if it is absent from
+    // WRITE_SIDE; this pins the read-side list so adding a kind fails here
+    // until someone decides which side it is on.
+    expect(JOB_KINDS.filter((k) => expected[k] === "never").sort()).toEqual([...READ_SIDE].sort());
+    for (const kind of JOB_KINDS) {
+      const want = expected[kind];
+      if (want === "always") expect(isStoreWrite(kind, {}, bare), kind).toBe(true);
+      if (want === "never") expect(isStoreWrite(kind, { categories: ["modelctl-staging"] }, mounted), kind).toBe(false);
+    }
+    // hygiene-clean only for the store's staging category
+    expect(isStoreWrite("hygiene-clean", { categories: ["docker-build-cache", "modelctl-staging"] }, mounted)).toBe(true);
+    expect(isStoreWrite("hygiene-clean", { categories: ["docker-build-cache"] }, mounted)).toBe(false);
+    // download writes modelctl's root: the store on a node that mounts it
+    expect(isStoreWrite("download", { name: "m" }, mounted)).toBe(true);
+    expect(isStoreWrite("download", { name: "m" }, bare)).toBe(false);
+  });
+
+  it("is strict: one hidden entry, a warning, or a scanned view blocks the fallback", () => {
+    expect(storeViewSafeForWrites(view(["a"], ["a", "b", "c"]))).toBe(false);
+    expect(storeViewSafeForWrites({ ...view([], ["a"]), warning: "catalog unreadable; scanned active/" })).toBe(false);
+    expect(storeViewSafeForWrites({ ...view([], ["a"]), source: "scan" })).toBe(false);
   });
 });
